@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { centsToKes, formatKes, kesToCents } from '@invest254/shared/money';
 import { normalizeMsisdn, MIN_DEPOSIT_CENTS } from '@invest254/shared/payments';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { api } from '@/lib/api/endpoints';
 import { useDeposit, useWallet } from '@/lib/wallet/hooks';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useAuthUi } from '@/lib/auth/ui';
@@ -40,6 +42,35 @@ export function DepositForm() {
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [txId, setTxId] = useState<string | null>(null);
+  const balanceAtSubmitRef = useRef<number>(0);
+
+  // While the STK callback settles, poll THIS deposit's status so the sheet can react the
+  // instant M-Pesa confirms (success) or rejects/expires (failed) — no manual "Done" tap.
+  const { data: depositTx } = useQuery({
+    queryKey: ['deposit-status', txId],
+    enabled: done && !!txId && !!token,
+    refetchInterval: (q) => {
+      const s = (q.state.data as { status?: string } | null | undefined)?.status;
+      return s === 'success' || s === 'failed' ? false : 3000;
+    },
+    queryFn: async () => {
+      const page = await api.transactions(token as string, { kind: 'deposit' });
+      return page.items.find((t) => t.id === txId) ?? null;
+    },
+  });
+
+  const balanceNow = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
+  // Success = the tx flipped to success OR the polled balance rose above the pre-deposit total.
+  const settled = done && (depositTx?.status === 'success' || balanceNow > balanceAtSubmitRef.current);
+  const failed = done && !settled && depositTx?.status === 'failed';
+
+  // Auto-dismiss shortly after a confirmed deposit (long enough to show the success tick).
+  useEffect(() => {
+    if (!settled) return;
+    const t = setTimeout(() => close(), 1800);
+    return () => clearTimeout(t);
+  }, [settled, close]);
 
   const intentLabel = pending ? (pending.direction === 'buy' ? 'BUY' : 'SELL') : null;
   const effectivePhone = editingPhone || !accountPhone ? phone : accountPhone;
@@ -67,11 +98,42 @@ export function DepositForm() {
       return;
     }
     try {
-      await deposit.mutateAsync({ amount: kesToCents(kes), phone: effectivePhone });
+      balanceAtSubmitRef.current = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
+      const res = await deposit.mutateAsync({ amount: kesToCents(kes), phone: effectivePhone });
+      setTxId(res.transactionId);
       setDone(true);
     } catch (err) {
       setServerError(authErrorMessage(err));
     }
+  }
+
+  if (settled) {
+    return (
+      <div className="flex flex-col items-center gap-3 p-6 text-center">
+        <SuccessTick />
+        <h3 className="text-base font-semibold text-fg">Deposit received</h3>
+        <p className="text-sm text-muted">
+          {formatKes(kesToCents(Number(amount)))} has been added to your wallet.
+        </p>
+        <p className="text-xs text-muted">
+          {intentLabel ? `Your ${intentLabel} trade is ready.` : 'Closing…'}
+        </p>
+        <Button fullWidth onClick={close}>Done</Button>
+      </div>
+    );
+  }
+
+  if (failed) {
+    return (
+      <div className="flex flex-col items-center gap-3 p-6 text-center">
+        <FailX />
+        <h3 className="text-base font-semibold text-fg">Payment not completed</h3>
+        <p className="text-sm text-muted">
+          The M-Pesa prompt wasn’t approved in time or was cancelled. No money was deducted.
+        </p>
+        <Button fullWidth onClick={() => { setDone(false); setTxId(null); }}>Try again</Button>
+      </div>
+    );
   }
 
   if (done) {
@@ -85,10 +147,10 @@ export function DepositForm() {
         </p>
         <p className="text-xs text-muted">
           {intentLabel
-            ? `Your balance updates automatically — your ${intentLabel} trade will be ready the moment it lands.`
+            ? `This updates automatically — your ${intentLabel} trade will be ready the moment the deposit lands.`
             : 'This screen updates automatically once M-Pesa confirms — no need to refresh.'}
         </p>
-        <Button fullWidth onClick={close}>Done</Button>
+        <Button variant="ghost" fullWidth onClick={close}>Cancel</Button>
       </div>
     );
   }
@@ -191,6 +253,24 @@ function Spinner() {
     <svg className="h-10 w-10 animate-spin text-accent" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
       <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SuccessTick() {
+  return (
+    <svg className="h-10 w-10 text-accent" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.35" />
+      <path d="M7 12.5l3.2 3.2L17 9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function FailX() {
+  return (
+    <svg className="h-10 w-10 text-danger" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.35" />
+      <path d="M8.5 8.5l7 7M15.5 8.5l-7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   );
 }
