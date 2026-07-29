@@ -45,7 +45,7 @@ export interface ApiDeps {
   // ── E2: player + payments + admin ──
   /** Deposit/withdrawal orchestration over the atomic 0014 RPCs + Daraja. */
   payments: Pick<PaymentService,
-    "initiateDeposit" | "requestWithdrawal" | "handleStkCallback" | "handleB2cResult" | "approveWithdrawal" | "rejectWithdrawal">;
+    "initiateDeposit" | "requestWithdrawal" | "handleStkCallback" | "handleB2cResult" | "approveWithdrawal" | "rejectWithdrawal" | "reconcileDeposits">;
   /** Server-authoritative chat. */
   chat: { recent(): Promise<ChatRow[]>; post(userId: string, username: string, raw: string): Promise<ChatPostResult> };
   /** Resolve a player's display handle (falls back to a guest handle). */

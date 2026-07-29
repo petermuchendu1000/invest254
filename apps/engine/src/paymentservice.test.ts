@@ -135,3 +135,46 @@ test("PaymentService: verification can be disabled (legacy direct-credit) via op
   assert.equal(res.status, "success");
   assert.equal(await repo.getBalance("u"), 150_000);
 });
+
+test("PaymentService: reconcile settles a stranded deposit from Safaricom's authoritative status", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 100_000);
+  const svc = new PaymentService(repo, new FakeDaraja({ resultCode: 0, processing: false }));
+  await svc.initiateDeposit("u", 50_000, "0712345678"); // callback never arrives
+  assert.equal(await repo.getBalance("u"), 100_000);
+  const r = await svc.reconcileDeposits({ olderThanMs: 0 });
+  assert.deepEqual(r, { scanned: 1, settled: 1, stillPending: 0, errors: 0 });
+  assert.equal(await repo.getBalance("u"), 150_000); // paid deposit is no longer stranded
+});
+
+test("PaymentService: reconcile leaves still-processing deposits for the next sweep", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 100_000);
+  const svc = new PaymentService(repo, new FakeDaraja({ resultCode: null, processing: true }));
+  await svc.initiateDeposit("u", 50_000, "0712345678");
+  const r = await svc.reconcileDeposits({ olderThanMs: 0 });
+  assert.equal(r.stillPending, 1);
+  assert.equal(r.settled, 0);
+  assert.equal(await repo.getBalance("u"), 100_000);
+});
+
+test("PaymentService: reconcile marks an unpaid deposit failed without crediting", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 100_000);
+  const svc = new PaymentService(repo, new FakeDaraja({ resultCode: 1037, processing: false }));
+  await svc.initiateDeposit("u", 50_000, "0712345678");
+  const r = await svc.reconcileDeposits({ olderThanMs: 0 });
+  assert.equal(r.settled, 1);
+  assert.equal(await repo.getBalance("u"), 100_000);
+});
+
+test("PaymentService: reconcile survives provider errors and reports them", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 100_000);
+  const svc = new PaymentService(repo, new FakeDaraja(new Error("DARAJA_STKQUERY_500")));
+  await svc.initiateDeposit("u", 50_000, "0712345678");
+  const r = await svc.reconcileDeposits({ olderThanMs: 0 });
+  assert.equal(r.errors, 1);
+  assert.equal(r.settled, 0);
+  assert.equal(await repo.getBalance("u"), 100_000);
+});

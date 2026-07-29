@@ -117,3 +117,18 @@ const server = createApp(deps);
 server.listen(PORT, () => {
   console.log(`[api] listening on http://localhost:${PORT}  auth=${deps.verifier ? "jwt" : "dev"}`);
 });
+
+// Deposit reconciliation sweep: settles deposits whose STK callback never arrived (or whose
+// verification was inconclusive) using Safaricom's authoritative STKPushQuery status, so no paid
+// deposit is left stranded and no unpaid one is credited. Set to 0 to disable.
+const RECONCILE_MS = Number(process.env.DEPOSIT_RECONCILE_INTERVAL_MS ?? 300_000);
+if (Number.isFinite(RECONCILE_MS) && RECONCILE_MS > 0) {
+  const timer = setInterval(() => {
+    void deps.payments
+      .reconcileDeposits()
+      .then((r) => { if (r.settled || r.errors) console.log("[payments] reconcile", r); })
+      .catch((err: unknown) => console.error("[payments] reconcile sweep failed:", (err as Error).message));
+  }, RECONCILE_MS);
+  timer.unref();
+  console.log(`[api] deposit reconciliation every ${Math.round(RECONCILE_MS / 1000)}s`);
+}

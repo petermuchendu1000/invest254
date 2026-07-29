@@ -24,6 +24,9 @@ export interface TxListQuery extends PageQuery { kind?: "deposit" | "withdrawal"
 /** A transaction as the admin back office sees it (J2). */
 export interface AdminTxSnapshot { txId: string; userId: string; kind: "deposit" | "withdrawal"; amountCents: Cents; status: string; phone: string; mpesaReceipt: string | null; checkoutRequestId: string | null; createdAtMs: number; }
 
+/** A deposit still awaiting a terminal outcome — the reconciliation sweep's unit of work. */
+export interface UnsettledDeposit { txId: string; checkoutRequestId: string; }
+
 export interface PaymentRepository {
   getBalance(userId: string): Promise<Cents>;
   createDeposit(userId: string, amountCents: Cents, phone: string): Promise<string>;
@@ -36,6 +39,8 @@ export interface PaymentRepository {
   getTransaction(txId: string): Promise<TxRow | null>;
   /** A player's transaction history (optional kind/status filter), newest-first, cursor-paginated. */
   listTransactions(userId: string, q: TxListQuery): Promise<Page<TransactionRecord>>;
+  /** Deposits still non-terminal after `olderThanMs` (oldest first) — input to the reconcile sweep. */
+  listUnsettledDeposits(olderThanMs: number, limit: number): Promise<UnsettledDeposit[]>;
 }
 
 interface MemTx { id: string; userId: string; kind: "deposit" | "withdrawal"; amount: Cents; status: string; phone: string; checkoutId?: string; seq: number; createdAtMs: number; receipt: string | null; }
@@ -79,6 +84,15 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     }
     tx.status = "failed";
     return { applied: true, status: "failed", newBalance: await this.getBalance(tx.userId) };
+  }
+
+  async listUnsettledDeposits(olderThanMs: number, limit: number): Promise<UnsettledDeposit[]> {
+    const cutoff = this.now() - olderThanMs;
+    return [...this.txns.values()]
+      .filter((t) => t.kind === "deposit" && (t.status === "pending" || t.status === "processing") && !!t.checkoutId && t.createdAtMs <= cutoff)
+      .sort((a, b) => a.createdAtMs - b.createdAtMs || a.seq - b.seq)
+      .slice(0, limit)
+      .map((t) => ({ txId: t.id, checkoutRequestId: t.checkoutId! }));
   }
 
   async createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents): Promise<CreateWithdrawalResult> {
@@ -195,11 +209,22 @@ export class PgPaymentRepository implements PaymentRepository {
     const r = await this.q.query("select applied, status, new_balance from fn_complete_deposit($1,$2,$3,$4,$5)", [checkoutRequestId, resultCode, resultDesc, receipt, JSON.stringify(raw ?? {})]);
     return { applied: Boolean(r.rows[0].applied), status: String(r.rows[0].status), newBalance: toCents(r.rows[0].new_balance) };
   }
+  async listUnsettledDeposits(olderThanMs: number, limit: number): Promise<UnsettledDeposit[]> {
+    const r = await this.q.query(
+      `select id, checkout_request_id from transactions
+        where kind = 'deposit' and status in ('pending','processing')
+          and checkout_request_id is not null
+          and created_at <= now() - ($1::double precision * interval '1 millisecond')
+        order by created_at asc
+        limit $2`,
+      [olderThanMs, limit],
+    );
+    return r.rows.map((x: any) => ({ txId: String(x.id), checkoutRequestId: String(x.checkout_request_id) }));
+  }
   async createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents): Promise<CreateWithdrawalResult> {
     const r = await this.q.query("select tx_id, new_balance from fn_create_withdrawal($1,$2,$3,$4)", [userId, amountCents, phone, minCents]);
     return { txId: String(r.rows[0].tx_id), newBalance: toCents(r.rows[0].new_balance) };
-  }
-  async approveWithdrawal(txId: string, adminId: string): Promise<ApproveResult> {
+  }  async approveWithdrawal(txId: string, adminId: string): Promise<ApproveResult> {
     const ok = await this.q.query("select fn_approve_withdrawal($1,$2) as ok", [txId, adminId]);
     if (!ok.rows[0]?.ok) return { approved: false, amountCents: null, phone: null };
     const t = await this.q.query("select amount, phone from transactions where id = $1", [txId]);

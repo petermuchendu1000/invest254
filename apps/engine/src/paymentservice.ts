@@ -61,6 +61,32 @@ export class PaymentService {
     return this.repo.completeDeposit(checkoutRequestId, code, desc, receipt, raw);
   }
 
+  /**
+   * Reconciliation sweep for deposits that never reached a terminal state — e.g. a callback that
+   * was never delivered, or one whose verification was inconclusive at the time. For each stale
+   * deposit we ask Safaricom for the authoritative outcome (STKPushQuery) and settle accordingly:
+   * paid => credit (idempotent via the RPC), definitively failed => mark failed, still processing
+   * => leave for the next sweep. Safe to run repeatedly; the RPCs guard terminal states.
+   */
+  async reconcileDeposits(opts: { olderThanMs?: number; limit?: number } = {}): Promise<{ scanned: number; settled: number; stillPending: number; errors: number }> {
+    const olderThanMs = opts.olderThanMs ?? 120_000; // give the live callback a chance first
+    const limit = opts.limit ?? 25;
+    const rows = await this.repo.listUnsettledDeposits(olderThanMs, limit);
+    let settled = 0, stillPending = 0, errors = 0;
+    for (const d of rows) {
+      try {
+        const q = await this.daraja.stkPushQuery(d.checkoutRequestId);
+        if (q.processing || q.resultCode == null) { stillPending += 1; continue; }
+        const res = await this.repo.completeDeposit(d.checkoutRequestId, q.resultCode, `reconciled:${q.resultCode}`, null, { reconciled: true, at: new Date().toISOString() });
+        if (res.applied) settled += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(`[payments] reconcile failed for ${d.checkoutRequestId}: ${(err as Error).message}`);
+      }
+    }
+    return { scanned: rows.length, settled, stillPending, errors };
+  }
+
   // ── Withdrawal (B2C) ──
   /** Player requests a withdrawal: validates and HOLDS funds atomically (status pending). */
   async requestWithdrawal(userId: string, amountCents: number, phoneRaw: string): Promise<CreateWithdrawalResult> {
