@@ -1,7 +1,8 @@
 import { randomBytes, scrypt as _scrypt, timingSafeEqual, type ScryptOptions } from "node:crypto";
 import { SignJWT } from "jose";
-import { validatePassword, validateUsername, validateReferralCode, normalizeMsisdn } from "@invest254/shared";
-import type { IdentityRepository } from "./identity.js";
+import { validatePassword, validateUsername, validateReferralCode, normalizeMsisdn,
+  generateTotpSecret, verifyTotp, otpauthUrl, generateRecoveryCodes, normalizeRecoveryCode } from "@invest254/shared";
+import type { IdentityRepository, MfaRecord } from "./identity.js";
 
 /**
  * AuthService — self-managed phone + password authentication (no OTP, no Supabase Auth).
@@ -52,7 +53,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 /** A successful authentication: a signed token plus the verified identity. */
-export interface AuthSession { token: string; userId: string; role: string; }
+export interface AuthSession { token: string; userId: string; role: string; mfaEnrolmentRequired?: boolean; }
 
 /** Profile view returned by `/me`. */
 export interface Profile {
@@ -67,6 +68,10 @@ export interface AuthServiceOptions {
   /** Optional issuer/audience; set them to match the engine's verifier options. */
   issuer?: string;
   audience?: string;
+  /** Roles that must use TOTP MFA (default: admin + superadmin). */
+  mfaRequiredRoles?: readonly string[];
+  /** Issuer label shown in the operator's authenticator app. */
+  mfaIssuer?: string;
 }
 
 const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -80,6 +85,8 @@ export class AuthService {
   private readonly ttl: number;
   private readonly issuer: string | undefined;
   private readonly audience: string | undefined;
+  private readonly mfaRoles: ReadonlySet<string>;
+  private readonly mfaIssuer: string;
 
   constructor(private readonly repo: IdentityRepository, opts: AuthServiceOptions) {
     if (!opts.jwtSecret) throw new Error("JWT_SECRET_REQUIRED");
@@ -87,6 +94,8 @@ export class AuthService {
     this.ttl = opts.jwtTtlSeconds ?? DEFAULT_TTL_SECONDS;
     this.issuer = opts.issuer;
     this.audience = opts.audience;
+    this.mfaRoles = new Set(opts.mfaRequiredRoles ?? ["admin", "superadmin"]);
+    this.mfaIssuer = opts.mfaIssuer ?? "Invest254";
   }
 
   /** Sign an HS256 JWT compatible with makeVerifier (sub = userId, `role` claim). */
@@ -122,16 +131,94 @@ export class AuthService {
     return { token, userId, role };
   }
 
-  /** Log in: normalize -> constant-time verify -> active-status gate -> issue token. */
-  async login(input: { phone: string; password: string }): Promise<AuthSession> {
+  /**
+   * Log in: normalize -> constant-time verify -> active-status gate -> second factor -> token.
+   * Once an account has MFA enabled a valid `totp` (or a single-use `recoveryCode`) is mandatory.
+   * Privileged roles that have not enrolled yet are still admitted but flagged with
+   * `mfaEnrolmentRequired` so enabling MFA can never lock an operator out of their own back office.
+   */
+  async login(input: { phone: string; password: string; totp?: string; recoveryCode?: string }): Promise<AuthSession> {
     let phone: string;
     try { phone = normalizeMsisdn(input.phone); } catch { throw new Error("INVALID_CREDENTIALS"); }
     const rec = await this.repo.findByPhone(phone);
     const ok = await verifyPassword(input.password, rec?.passwordHash ?? (await DUMMY_HASH));
     if (!rec || !ok) throw new Error("INVALID_CREDENTIALS");
     if (rec.status !== "active") throw new Error(`ACCOUNT_${rec.status.toUpperCase()}`); // SUSPENDED / BANNED
+    const mfa = await this.repo.getMfa(rec.userId);
+    if (mfa?.enabled) await this.assertSecondFactor(rec.userId, mfa, input.totp, input.recoveryCode);
     const token = await this.issueToken(rec.userId, rec.role);
-    return { token, userId: rec.userId, role: rec.role };
+    const needsEnrolment = this.mfaRoles.has(rec.role) && !mfa?.enabled;
+    return needsEnrolment
+      ? { token, userId: rec.userId, role: rec.role, mfaEnrolmentRequired: true }
+      : { token, userId: rec.userId, role: rec.role };
+  }
+
+  /**
+   * Verify the second factor: a live TOTP code, or burn one single-use recovery code. Throws
+   * MFA_REQUIRED when nothing was supplied and MFA_INVALID when it doesn't check out (the same
+   * error for a bad code and a spent one, so neither reveals which).
+   */
+  private async assertSecondFactor(userId: string, mfa: MfaRecord, totp?: string, recoveryCode?: string): Promise<void> {
+    if (totp) {
+      if (!verifyTotp(mfa.secret, totp)) throw new Error("MFA_INVALID");
+      return;
+    }
+    if (recoveryCode) {
+      const supplied = normalizeRecoveryCode(recoveryCode);
+      for (const hash of mfa.recoveryCodeHashes) {
+        if (await verifyPassword(supplied, hash)) {
+          if (await this.repo.consumeRecoveryCode(userId, hash)) return; // single use
+          break; // already spent concurrently
+        }
+      }
+      throw new Error("MFA_INVALID");
+    }
+    throw new Error("MFA_REQUIRED");
+  }
+
+  /**
+   * Begin (or restart) TOTP enrolment. Returns the base32 secret, the `otpauth://` URI to render
+   * as a QR code, and freshly minted recovery codes. The recovery codes are shown EXACTLY once —
+   * only scrypt hashes are stored — and MFA stays disabled until `confirmMfa` proves the operator
+   * can generate a live code, so a mis-scanned secret can't lock them out.
+   */
+  async beginMfaEnrolment(userId: string): Promise<{ secret: string; otpauthUrl: string; recoveryCodes: string[] }> {
+    const profile = await this.repo.getProfile(userId);
+    if (!profile) throw new Error("NOT_FOUND");
+    const secret = generateTotpSecret();
+    const recoveryCodes = generateRecoveryCodes();
+    const hashes = await Promise.all(recoveryCodes.map((c) => hashPassword(normalizeRecoveryCode(c))));
+    await this.repo.putMfaSecret(userId, secret, hashes);
+    return { secret, otpauthUrl: otpauthUrl({ secret, account: profile.phone, issuer: this.mfaIssuer }), recoveryCodes };
+  }
+
+  /** Confirm enrolment with a live code -> MFA enforced from the next login. Throws MFA_INVALID. */
+  async confirmMfa(userId: string, code: string): Promise<{ enabled: boolean }> {
+    const mfa = await this.repo.getMfa(userId);
+    if (!mfa) throw new Error("MFA_NOT_ENROLLING");
+    if (!verifyTotp(mfa.secret, code)) throw new Error("MFA_INVALID");
+    await this.repo.enableMfa(userId);
+    return { enabled: true };
+  }
+
+  /** Disable MFA — requires a current TOTP or recovery code to prove device possession. */
+  async disableMfa(userId: string, code: string): Promise<{ enabled: boolean }> {
+    const mfa = await this.repo.getMfa(userId);
+    if (!mfa?.enabled) { await this.repo.disableMfa(userId); return { enabled: false }; }
+    const looksTotp = /^\d{6}$/.test(String(code ?? "").trim());
+    await this.assertSecondFactor(userId, mfa, looksTotp ? code : undefined, looksTotp ? undefined : code);
+    await this.repo.disableMfa(userId);
+    return { enabled: false };
+  }
+
+  /** MFA state for the caller: enabled, remaining recovery codes, and whether their role requires it. */
+  async mfaStatus(userId: string): Promise<{ enabled: boolean; recoveryCodesLeft: number; required: boolean }> {
+    const [mfa, profile] = await Promise.all([this.repo.getMfa(userId), this.repo.getProfile(userId)]);
+    return {
+      enabled: Boolean(mfa?.enabled),
+      recoveryCodesLeft: mfa?.recoveryCodeHashes.length ?? 0,
+      required: Boolean(profile && this.mfaRoles.has(profile.role)),
+    };
   }
 
   /** Read the caller's profile. Throws NOT_FOUND if no such identity. */

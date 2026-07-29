@@ -65,6 +65,9 @@ export interface AdminCommissionSnapshot { commissionCents: number; status: stri
 /** A payout request as the admin approve/reject queue sees it (J6). */
 export interface AdminPayoutSnapshot { payoutId: string; affiliateId: string; username: string; phone: string; amountCents: number; status: string; approvedBy: string | null; createdAtMs: number; }
 
+/** Stored MFA state for an account. Secret + recovery hashes never leave the service layer. */
+export interface MfaRecord { userId: string; secret: string; enabled: boolean; recoveryCodeHashes: string[]; }
+
 export interface IdentityRepository {
   /**
    * Atomically create profile + wallet + credentials. An optional referral code (already
@@ -77,6 +80,16 @@ export interface IdentityRepository {
   findByPhone(phone: string): Promise<CredentialRecord | null>;
   /** Load the profile by user id, or null if not found. */
   getProfile(userId: string): Promise<ProfileRow | null>;
+  /** Load MFA state for an account, or null when enrolment was never begun. */
+  getMfa(userId: string): Promise<MfaRecord | null>;
+  /** Store (or replace) a pending TOTP secret + recovery-code hashes; leaves MFA disabled. */
+  putMfaSecret(userId: string, secret: string, recoveryCodeHashes: string[]): Promise<void>;
+  /** Mark MFA confirmed/enabled once a live code has proven device possession. */
+  enableMfa(userId: string): Promise<void>;
+  /** Remove a used recovery-code hash (single-use). False when it was already spent. */
+  consumeRecoveryCode(userId: string, codeHash: string): Promise<boolean>;
+  /** Turn MFA off and forget the secret + recovery codes. */
+  disableMfa(userId: string): Promise<void>;
 }
 
 /**
@@ -263,6 +276,37 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
     const x = r.rows[0];
     return { userId: String(x.id), role: String(x.role), status: String(x.status), passwordHash: String(x.password_hash) };
   }
+  async getMfa(userId: string): Promise<MfaRecord | null> {
+    const r = await this.q.query("select user_id, secret, enabled, recovery_codes from user_mfa where user_id = $1", [userId]);
+    if (!r.rows.length) return null;
+    const x = r.rows[0];
+    return {
+      userId: String(x.user_id), secret: String(x.secret), enabled: Boolean(x.enabled),
+      recoveryCodeHashes: (x.recovery_codes ?? []) as string[],
+    };
+  }
+  async putMfaSecret(userId: string, secret: string, recoveryCodeHashes: string[]): Promise<void> {
+    await this.q.query(
+      `insert into user_mfa (user_id, secret, enabled, confirmed_at, recovery_codes)
+         values ($1, $2, false, null, $3)
+       on conflict (user_id) do update
+         set secret = excluded.secret, enabled = false, confirmed_at = null,
+             recovery_codes = excluded.recovery_codes`,
+      [userId, secret, recoveryCodeHashes]);
+  }
+  async enableMfa(userId: string): Promise<void> {
+    await this.q.query("update user_mfa set enabled = true, confirmed_at = now() where user_id = $1", [userId]);
+  }
+  async consumeRecoveryCode(userId: string, codeHash: string): Promise<boolean> {
+    const r = await this.q.query(
+      `update user_mfa set recovery_codes = array_remove(recovery_codes, $2)
+        where user_id = $1 and $2 = any(recovery_codes) returning user_id`,
+      [userId, codeHash]);
+    return r.rows.length > 0;
+  }
+  async disableMfa(userId: string): Promise<void> {
+    await this.q.query("delete from user_mfa where user_id = $1", [userId]);
+  }
   async getProfile(userId: string): Promise<ProfileRow | null> {
     const r = await this.q.query(
       "select id, username, phone, role, status from profiles where id = $1", [userId]);
@@ -298,6 +342,7 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   private readonly plays: MemPlay[] = [];
   private readonly commissions: MemCommission[] = [];
   private readonly payouts = new Map<string, MemPayout>();              // payoutId -> payout
+  private readonly mfa = new Map<string, { secret: string; enabled: boolean; recoveryCodeHashes: string[] }>();
   private seq = 0;
   async register(phone: string, username: string, passwordHash: string, referralCode?: string): Promise<RegisteredUser> {
     if (phone.length < 8) throw new Error("INVALID_PHONE");
@@ -324,6 +369,28 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   async findByPhone(phone: string): Promise<CredentialRecord | null> {
     const u = this.byPhone.get(phone);
     return u ? { userId: u.userId, role: u.role, status: u.status, passwordHash: u.passwordHash } : null;
+  }
+  async getMfa(userId: string): Promise<MfaRecord | null> {
+    const m = this.mfa.get(userId);
+    return m ? { userId, secret: m.secret, enabled: m.enabled, recoveryCodeHashes: [...m.recoveryCodeHashes] } : null;
+  }
+  async putMfaSecret(userId: string, secret: string, recoveryCodeHashes: string[]): Promise<void> {
+    this.mfa.set(userId, { secret, enabled: false, recoveryCodeHashes: [...recoveryCodeHashes] });
+  }
+  async enableMfa(userId: string): Promise<void> {
+    const m = this.mfa.get(userId);
+    if (m) m.enabled = true;
+  }
+  async consumeRecoveryCode(userId: string, codeHash: string): Promise<boolean> {
+    const m = this.mfa.get(userId);
+    if (!m) return false;
+    const i = m.recoveryCodeHashes.indexOf(codeHash);
+    if (i === -1) return false;
+    m.recoveryCodeHashes.splice(i, 1);
+    return true;
+  }
+  async disableMfa(userId: string): Promise<void> {
+    this.mfa.delete(userId);
   }
   async getProfile(userId: string): Promise<ProfileRow | null> {
     const u = this.byId.get(userId);

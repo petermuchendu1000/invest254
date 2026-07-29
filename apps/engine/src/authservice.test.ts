@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AuthService, hashPassword, verifyPassword } from "./authservice.js";
+import { totpCode } from "@invest254/shared";
 import { InMemoryIdentityRepository, type IdentityRepository } from "./identity.js";
 import { verifierFromKey } from "./auth.js";
 
@@ -94,4 +95,76 @@ test("me reflects the registered profile", async () => {
 test("me throws NOT_FOUND for an unknown user", async () => {
   const { auth } = svc();
   await assert.rejects(() => auth.me("no-such-user"), /NOT_FOUND/);
+});
+
+// ── admin MFA (TOTP) ─────────────────────────────────────────────────────────────────────────
+const PHONE = "0712345678";
+const PASS = "Sup3rSecret!";
+/** A code that is guaranteed NOT to be the live one (avoids a 1-in-a-million flake). */
+const notThe = (valid: string): string => (valid === "000000" ? "111111" : "000000");
+
+/** Register an operator and complete TOTP enrolment; returns the enrolment payload. */
+async function enrolledOperator(mfaRequiredRoles?: readonly string[]) {
+  const repo = new InMemoryIdentityRepository();
+  const auth = new AuthService(repo, {
+    jwtSecret: SECRET, jwtTtlSeconds: 3600,
+    ...(mfaRequiredRoles ? { mfaRequiredRoles } : {}),
+  });
+  const s = await auth.register({ phone: PHONE, username: "operator", password: PASS });
+  const enrol = await auth.beginMfaEnrolment(s.userId);
+  await auth.confirmMfa(s.userId, totpCode(enrol.secret));
+  return { repo, auth, userId: s.userId, enrol };
+}
+
+test("MFA: once enabled, login demands a valid TOTP code", async () => {
+  const { auth, enrol } = await enrolledOperator();
+  await assert.rejects(() => auth.login({ phone: PHONE, password: PASS }), /MFA_REQUIRED/);
+  await assert.rejects(
+    () => auth.login({ phone: PHONE, password: PASS, totp: notThe(totpCode(enrol.secret)) }),
+    /MFA_INVALID/);
+  const ok = await auth.login({ phone: PHONE, password: PASS, totp: totpCode(enrol.secret) });
+  assert.ok(ok.token);
+  assert.equal(ok.mfaEnrolmentRequired, undefined);
+});
+
+test("MFA: enrolment stays inactive until a live code confirms the device", async () => {
+  const repo = new InMemoryIdentityRepository();
+  const auth = new AuthService(repo, { jwtSecret: SECRET, jwtTtlSeconds: 3600 });
+  const s = await auth.register({ phone: PHONE, username: "operator", password: PASS });
+  const enrol = await auth.beginMfaEnrolment(s.userId);
+  assert.match(enrol.otpauthUrl, /^otpauth:\/\/totp\//);
+  assert.equal(enrol.recoveryCodes.length, 8);
+  await assert.rejects(() => auth.confirmMfa(s.userId, notThe(totpCode(enrol.secret))), /MFA_INVALID/);
+  assert.equal((await auth.mfaStatus(s.userId)).enabled, false);
+  // MFA was never enabled, so the password alone still logs in (no lockout from a bad scan).
+  assert.ok((await auth.login({ phone: PHONE, password: PASS })).token);
+});
+
+test("MFA: a recovery code works exactly once", async () => {
+  const { auth, userId, enrol } = await enrolledOperator();
+  const code = enrol.recoveryCodes[0]!;
+  assert.equal((await auth.mfaStatus(userId)).recoveryCodesLeft, 8);
+  assert.ok((await auth.login({ phone: PHONE, password: PASS, recoveryCode: code })).token);
+  assert.equal((await auth.mfaStatus(userId)).recoveryCodesLeft, 7); // burned
+  await assert.rejects(() => auth.login({ phone: PHONE, password: PASS, recoveryCode: code }), /MFA_INVALID/);
+});
+
+test("MFA: a privileged role that hasn't enrolled is admitted but flagged (grace period)", async () => {
+  const repo = new InMemoryIdentityRepository();
+  // Treat 'player' as privileged here so the flag can be exercised without mutating roles.
+  const auth = new AuthService(repo, { jwtSecret: SECRET, jwtTtlSeconds: 3600, mfaRequiredRoles: ["player"] });
+  await auth.register({ phone: PHONE, username: "operator", password: PASS });
+  const s = await auth.login({ phone: PHONE, password: PASS });
+  assert.equal(s.mfaEnrolmentRequired, true);
+  assert.ok(s.token); // never locked out of their own back office
+  assert.equal((await auth.mfaStatus(s.userId)).required, true);
+});
+
+test("MFA: disabling requires a valid factor and restores password-only login", async () => {
+  const { auth, userId, enrol } = await enrolledOperator();
+  await assert.rejects(() => auth.disableMfa(userId, notThe(totpCode(enrol.secret))), /MFA_INVALID/);
+  assert.equal((await auth.mfaStatus(userId)).enabled, true);
+  await auth.disableMfa(userId, totpCode(enrol.secret));
+  assert.equal((await auth.mfaStatus(userId)).enabled, false);
+  assert.ok((await auth.login({ phone: PHONE, password: PASS })).token);
 });

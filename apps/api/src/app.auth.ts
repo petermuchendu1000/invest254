@@ -22,6 +22,9 @@ const AUTH_STATUS: Readonly<Record<string, number>> = {
   ACCOUNT_SUSPENDED: 403,
   ACCOUNT_BANNED: 403,
   INVALID_REFERRAL_CODE: 400,
+  MFA_REQUIRED: 401,
+  MFA_INVALID: 401,
+  MFA_NOT_ENROLLING: 400,
   USER_NOT_FOUND: 404,
   NOT_FOUND: 404,
 };
@@ -86,8 +89,42 @@ export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
     const body = asObject(ctx.body);
     const phone = requireString(body, "phone");
     const password = requireString(body, "password");
-    const s = await domain(() => deps.auth.login({ phone, password }));
-    return { token: s.token, userId: s.userId, role: s.role };
+    // Second factor is optional in the payload: only accounts with MFA enabled require it, and
+    // the service decides — so an unenrolled player's login is unchanged.
+    const totp = optionalString(body, "totp");
+    const recoveryCode = optionalString(body, "recovery_code");
+    const s = await domain(() => deps.auth.login({
+      phone,
+      password,
+      ...(totp !== undefined ? { totp } : {}),
+      ...(recoveryCode !== undefined ? { recoveryCode } : {}),
+    }));
+    return {
+      token: s.token,
+      userId: s.userId,
+      role: s.role,
+      ...(s.mfaEnrolmentRequired ? { mfaEnrolmentRequired: true } : {}),
+    };
+  });
+
+  // ── MFA (TOTP) — privileged accounts. Enrolment is self-service; enforcement is in AuthService.
+  const mfaLimit = rateLimit({ name: "mfa", by: "user", limit: Number(process.env.RATE_LIMIT_MFA_PER_MIN) || 10, windowMs: 60_000 });
+
+  router.get(`${BASE}/auth/mfa`, auth, async (ctx: Ctx) =>
+    domain(() => deps.auth.mfaStatus(ctx.claims!.userId)));
+
+  /** Returns the secret, otpauth:// QR URI and recovery codes ONCE. MFA is inactive until confirm. */
+  router.post(`${BASE}/auth/mfa/enroll`, auth, mfaLimit, async (ctx: Ctx) =>
+    domain(() => deps.auth.beginMfaEnrolment(ctx.claims!.userId)));
+
+  router.post(`${BASE}/auth/mfa/confirm`, auth, mfaLimit, async (ctx: Ctx) => {
+    const code = requireString(asObject(ctx.body), "code");
+    return domain(() => deps.auth.confirmMfa(ctx.claims!.userId, code));
+  });
+
+  router.post(`${BASE}/auth/mfa/disable`, auth, mfaLimit, async (ctx: Ctx) => {
+    const code = requireString(asObject(ctx.body), "code");
+    return domain(() => deps.auth.disableMfa(ctx.claims!.userId, code));
   });
 
   router.get(`${BASE}/auth/me`, auth, async (ctx: Ctx) => {
