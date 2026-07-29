@@ -80,6 +80,86 @@ function applyCors(req: IncomingMessage, res: ServerResponse): void {
   res.setHeader("Access-Control-Max-Age", "86400");
 }
 
+/**
+ * Baseline security response headers (defence-in-depth). This is a JSON API, so the CSP is
+ * maximally strict (`default-src 'none'`). HSTS is safe because the API is HTTPS-only on Fly.
+ */
+function applySecurityHeaders(res: ServerResponse): void {
+  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+}
+
+/** Best-effort client IP behind Fly's proxy: prefer Fly-Client-IP, then XFF, then the socket. */
+export function clientIp(req: IncomingMessage): string {
+  const fly = req.headers["fly-client-ip"];
+  if (typeof fly === "string" && fly.trim()) return fly.trim();
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.trim()) return xff.split(",")[0]!.trim();
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+/**
+ * Fixed-window rate limiter (in-process; per API instance). Keyed by user id when a caller is
+ * authenticated (place after requireAuth) else by client IP. Returns 429 with Retry-After when
+ * the window is exceeded. Cross-instance limiting would need a shared store; this is a solid
+ * first layer given the API runs a small, mostly-single warm machine.
+ */
+interface RlBucket { count: number; resetAt: number; }
+export function rateLimit(opts: { name: string; limit: number; windowMs: number; by?: "ip" | "user" }): Middleware {
+  const buckets = new Map<string, RlBucket>();
+  return (ctx) => {
+    const now = Date.now();
+    if (buckets.size > 20_000) for (const [k, b] of buckets) if (now >= b.resetAt) buckets.delete(k);
+    const key = opts.by === "user" && ctx.claims?.userId ? `u:${ctx.claims.userId}` : `ip:${clientIp(ctx.req)}`;
+    const b = buckets.get(key);
+    if (!b || now >= b.resetAt) { buckets.set(key, { count: 1, resetAt: now + opts.windowMs }); return; }
+    if (b.count >= opts.limit) {
+      ctx.res.setHeader("Retry-After", String(Math.ceil((b.resetAt - now) / 1000)));
+      throw new ApiError("RATE_LIMITED", `too many ${opts.name} requests, slow down`, 429);
+    }
+    b.count += 1;
+  };
+}
+
+// ── IPv4 CIDR allowlist (for Daraja callback source restriction) ───────────────────────────
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.trim().split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) { const o = Number(p); if (!Number.isInteger(o) || o < 0 || o > 255) return null; n = ((n << 8) | o) >>> 0; }
+  return n >>> 0;
+}
+function parseCidr(c: string): { base: number; mask: number } | null {
+  const [ip, bitsRaw] = c.split("/");
+  const ipInt = ipv4ToInt(ip ?? "");
+  if (ipInt == null) return null;
+  const bits = bitsRaw == null ? 32 : Number(bitsRaw);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return null;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return { base: (ipInt & mask) >>> 0, mask };
+}
+/**
+ * Restrict a route to source IPs in the CIDRs named by `envVar` (comma-separated). When the env
+ * var is unset the guard is DISABLED (fail-open) so it never breaks callbacks by accident; set
+ * it to Safaricom's published ranges to lock the Daraja callback endpoints down (defence-in-depth
+ * on top of STKPushQuery verification). IPv4 only; a non-IPv4 caller is rejected when enabled.
+ */
+export function restrictToCidrs(envVar: string): Middleware {
+  const nets = (process.env[envVar] ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+    .map(parseCidr).filter((x): x is { base: number; mask: number } => x !== null);
+  return (ctx) => {
+    if (nets.length === 0) return; // disabled unless configured
+    const ipInt = ipv4ToInt(clientIp(ctx.req));
+    if (ipInt == null || !nets.some((n) => ((ipInt & n.mask) >>> 0) === n.base)) {
+      throw new ApiError("FORBIDDEN", "source IP not allowlisted", 403);
+    }
+  };
+}
+
 function compile(path: string): { regex: RegExp; keys: string[] } {
   const keys: string[] = [];
   const pattern = path
@@ -117,6 +197,7 @@ export class Router {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
     applyCors(req, res);
+    applySecurityHeaders(res);
     // Answer the CORS preflight before any routing/auth so browser write calls succeed.
     if (method === "OPTIONS") {
       res.writeHead(204);

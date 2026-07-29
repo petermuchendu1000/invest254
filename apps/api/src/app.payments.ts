@@ -1,6 +1,6 @@
 import type { Cents } from "@invest254/shared";
 import type { ChatRow } from "@invest254/engine";
-import { Router, ApiError, requireAuth, requireRole, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, rateLimit, restrictToCidrs, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
 
 /**
@@ -109,6 +109,13 @@ export function parseB2cResult(body: unknown): B2cResult {
 /** Register player-authenticated, public-callback, and admin routes (E2). */
 export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
   const auth = requireAuth(deps.verifier);
+  // Per-user throttle so a client can't spam real STK pushes / withdrawal requests. Tunable via env.
+  const payLimit = Number(process.env.RATE_LIMIT_PAYMENTS_PER_MIN) || 20;
+  const depositLimit = rateLimit({ name: "deposit", by: "user", limit: payLimit, windowMs: 60_000 });
+  const withdrawLimit = rateLimit({ name: "withdrawal", by: "user", limit: payLimit, windowMs: 60_000 });
+  // Lock the public Daraja callbacks to Safaricom's source IPs when MPESA_CALLBACK_ALLOWED_CIDRS
+  // is set (defence-in-depth atop STKPushQuery verification). Unset = disabled (fail-open).
+  const darajaOnly = restrictToCidrs("MPESA_CALLBACK_ALLOWED_CIDRS");
 
   // ── Player: wallet & chat ──
   router.get(`${BASE}/wallet`, auth, async (ctx: Ctx) => {
@@ -135,7 +142,7 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
   });
 
   // ── Player: payments ──
-  router.post(`${BASE}/deposits`, auth, async (ctx: Ctx) => {
+  router.post(`${BASE}/deposits`, auth, depositLimit, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const amount = requireIntAmount(body);
     const phone = requirePhone(body);
@@ -143,7 +150,7 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     return { status: 202, body: { transactionId: out.txId, checkoutRequestId: out.checkoutRequestId } };
   });
 
-  router.post(`${BASE}/withdrawals`, auth, async (ctx: Ctx) => {
+  router.post(`${BASE}/withdrawals`, auth, withdrawLimit, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const amount = requireIntAmount(body);
     const phone = requirePhone(body);
@@ -152,13 +159,13 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
   });
 
   // ── Public: Daraja callbacks (network-allowlisted at the edge, not in-app) ──
-  router.post(`${BASE}/deposits/mpesa/callback`, async (ctx: Ctx) => {
+  router.post(`${BASE}/deposits/mpesa/callback`, darajaOnly, async (ctx: Ctx) => {
     const cb = parseStkCallback(ctx.body);
     await domain(() => deps.payments.handleStkCallback(cb.checkoutRequestId, cb.resultCode, cb.resultDesc, cb.receipt, ctx.body));
     return DARAJA_ACK;
   });
 
-  router.post(`${BASE}/withdrawals/mpesa/result/:txId`, async (ctx: Ctx) => {
+  router.post(`${BASE}/withdrawals/mpesa/result/:txId`, darajaOnly, async (ctx: Ctx) => {
     const r = parseB2cResult(ctx.body);
     await domain(() => deps.payments.handleB2cResult(ctx.params.txId!, r.resultCode, r.conversationId, r.receipt, ctx.body));
     return DARAJA_ACK;

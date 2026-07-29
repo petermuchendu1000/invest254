@@ -13,16 +13,21 @@ export interface PaymentEvents {
   /** Fired once when a withdrawal is confirmed paid (for the real activity feed). */
   onWithdrawalSuccess?(e: { userId: string; amountCents: Cents }): void;
 }
-export interface PaymentServiceOptions { minDepositCents?: Cents; minWithdrawalCents?: Cents; events?: PaymentEvents; }
+export interface PaymentServiceOptions { minDepositCents?: Cents; minWithdrawalCents?: Cents; events?: PaymentEvents; verifyStkCallbacks?: boolean; }
 
 export class PaymentService {
   private readonly minDeposit: Cents;
   private readonly minWithdrawal: Cents;
   private readonly events: PaymentEvents;
+  private readonly verifyStk: boolean;
   constructor(private readonly repo: PaymentRepository, private readonly daraja: DarajaClient, opts: PaymentServiceOptions = {}) {
     this.minDeposit = opts.minDepositCents ?? MIN_DEPOSIT_CENTS;
     this.minWithdrawal = opts.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
     this.events = opts.events ?? {};
+    // Secure by default: a client can POST to the public STK callback URL, so a raw
+    // resultCode=0 is NOT trusted — we re-check with Safaricom before crediting. Opt out only
+    // for environments where the callback source is otherwise authenticated (e.g. IP allowlist).
+    this.verifyStk = opts.verifyStkCallbacks ?? true;
   }
 
   // ── Deposit (STK Push) ──
@@ -35,9 +40,25 @@ export class PaymentService {
     await this.repo.attachStk(txId, stk.merchantRequestId, stk.checkoutRequestId);
     return { txId, checkoutRequestId: stk.checkoutRequestId };
   }
-  /** Daraja STK callback handler (idempotent). resultCode 0 => credit. */
-  handleStkCallback(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult> {
-    return this.repo.completeDeposit(checkoutRequestId, resultCode, resultDesc, receipt, raw);
+  /**
+   * Daraja STK callback handler (idempotent). A success (resultCode 0) is verified against
+   * Safaricom via STKPushQuery before crediting so forged callbacks can't mint balance; while
+   * the prompt is still processing (or the query is transiently unavailable) we throw so the
+   * caller returns non-200 and Safaricom retries — the deposit is never credited unverified.
+   */
+  async handleStkCallback(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult> {
+    let code = resultCode;
+    let desc = resultDesc;
+    if (resultCode === 0 && this.verifyStk) {
+      const q = await this.daraja.stkPushQuery(checkoutRequestId);
+      if (q.processing || q.resultCode == null) {
+        console.warn(`[payments] STK verify inconclusive for ${checkoutRequestId} (processing=${q.processing}); leaving pending for retry`);
+        throw new Error("STK_VERIFY_PENDING");
+      }
+      code = q.resultCode;
+      if (code !== 0) desc = `verified:${resultDesc}`;
+    }
+    return this.repo.completeDeposit(checkoutRequestId, code, desc, receipt, raw);
   }
 
   // ── Withdrawal (B2C) ──

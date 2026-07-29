@@ -44,6 +44,9 @@ async function buildDeps(): Promise<ApiDeps> {
   // M-Pesa config is admin-managed in the DB (table 0024); fall back to env per field.
   const daraja = makeDarajaClientFromConfig(await loadDarajaConfigFromDb(q));
   const payments = new PaymentService(payRepo, daraja, {
+    // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
+    // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
+    verifyStkCallbacks: process.env.MPESA_VERIFY_CALLBACKS !== "false",
     events: {
       onWithdrawalSuccess: ({ userId, amountCents }) => {
         void resolveHandle(userId)

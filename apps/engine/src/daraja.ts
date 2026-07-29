@@ -11,9 +11,17 @@ export interface StkPushArgs { amountCents: Cents; msisdn: string; accountRef: s
 export interface StkPushResult { merchantRequestId: string; checkoutRequestId: string; }
 export interface B2cArgs { amountCents: Cents; msisdn: string; remarks: string; resultId?: string; }
 export interface B2cResult { conversationId: string; }
+/**
+ * Result of an STKPushQuery. `resultCode` is Safaricom's finalized code (0 = paid) once the
+ * prompt has resolved; `processing` is true while the prompt is still outstanding (Daraja
+ * returns errorCode 500.001.1001), in which case the caller should retry rather than settle.
+ */
+export interface StkQueryResult { resultCode: number | null; processing: boolean; }
 
 export interface DarajaClient {
   stkPush(a: StkPushArgs): Promise<StkPushResult>;
+  /** Authoritative server-to-server status check for a checkout — used to verify callbacks. */
+  stkPushQuery(checkoutRequestId: string): Promise<StkQueryResult>;
   b2cPayment(a: B2cArgs): Promise<B2cResult>;
 }
 
@@ -25,6 +33,9 @@ export class StubDarajaClient implements DarajaClient {
   async stkPush(_a: StkPushArgs): Promise<StkPushResult> {
     const i = ++this.n;
     return { merchantRequestId: `stub-mr-${i}`, checkoutRequestId: `stub-co-${i}` };
+  }
+  async stkPushQuery(_checkoutRequestId: string): Promise<StkQueryResult> {
+    return { resultCode: 0, processing: false };
   }
   async b2cPayment(_a: B2cArgs): Promise<B2cResult> {
     const i = ++this.n;
@@ -83,6 +94,25 @@ export class HttpDarajaClient implements DarajaClient {
       CallBackURL: this.cfg.stkCallbackUrl, AccountReference: a.accountRef, TransactionDesc: a.desc,
     });
     return { merchantRequestId: String(j.MerchantRequestID), checkoutRequestId: String(j.CheckoutRequestID) };
+  }
+  /**
+   * STKPushQuery — the authoritative status of a checkout, straight from Safaricom. Used to
+   * verify STK callbacks: a client can forge a POST to the public callback URL, but it cannot
+   * make this query return success for a prompt that was never paid. While the prompt is still
+   * outstanding Daraja replies with errorCode 500.001.1001 (often HTTP 500) -> `processing`.
+   */
+  async stkPushQuery(checkoutRequestId: string): Promise<StkQueryResult> {
+    const t = ts();
+    const password = Buffer.from(`${this.cfg.shortcode}${this.cfg.passkey}${t}`).toString("base64");
+    const token = await this.accessToken();
+    const res = await this.fetchImpl(`${this.base()}/mpesa/stkpushquery/v1/query`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ BusinessShortCode: this.cfg.shortcode, Password: password, Timestamp: t, CheckoutRequestID: checkoutRequestId }),
+    });
+    const j = (await res.json().catch(() => ({}))) as any;
+    if (j && j.ResultCode != null) return { resultCode: Number(j.ResultCode), processing: false };
+    if (j && String(j.errorCode ?? "") === "500.001.1001") return { resultCode: null, processing: true };
+    throw new Error(`DARAJA_STKQUERY_${res.status}:${JSON.stringify(j)}`);
   }
   async b2cPayment(a: B2cArgs): Promise<B2cResult> {
     // The B2C result route is keyed by transaction id (`/withdrawals/mpesa/result/:txId`), so when a

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { InMemoryPaymentRepository } from "./payments.js";
-import { StubDarajaClient, makeDarajaClient, HttpDarajaClient, type DarajaClient, type StkPushArgs, type B2cArgs } from "./daraja.js";
+import { StubDarajaClient, makeDarajaClient, HttpDarajaClient, type DarajaClient, type StkPushArgs, type StkPushResult, type StkQueryResult, type B2cArgs, type B2cResult } from "./daraja.js";
 import { PaymentService } from "./paymentservice.js";
 
 function rig(events?: any) {
@@ -96,4 +96,42 @@ test("HttpDarajaClient: builds STK Push + B2C requests with token, KES amounts, 
   assert.equal(b2cReq.body.CommandID, "BusinessPayment");
   // The result URL must carry the txId so Safaricom hits `/withdrawals/mpesa/result/:txId`.
   assert.equal(b2cReq.body.ResultURL, "https://r/TX-9");
+});
+
+/** Daraja double whose STKPushQuery result is scripted, to exercise callback verification. */
+class FakeDaraja implements DarajaClient {
+  constructor(private readonly q: StkQueryResult | Error) {}
+  async stkPush(_a: StkPushArgs): Promise<StkPushResult> { return { merchantRequestId: "m", checkoutRequestId: "co-x" }; }
+  async stkPushQuery(_c: string): Promise<StkQueryResult> { if (this.q instanceof Error) throw this.q; return this.q; }
+  async b2cPayment(_a: B2cArgs): Promise<B2cResult> { return { conversationId: "c" }; }
+}
+
+test("PaymentService: forged STK success is NOT credited when STKPushQuery says failed", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 100_000);
+  const svc = new PaymentService(repo, new FakeDaraja({ resultCode: 1032, processing: false }));
+  const { checkoutRequestId } = await svc.initiateDeposit("u", 50_000, "0712345678");
+  const res = await svc.handleStkCallback(checkoutRequestId, 0, "forged success", "RCPT", {});
+  assert.equal(res.status, "failed");
+  assert.equal(await repo.getBalance("u"), 100_000); // no phantom credit
+});
+
+test("PaymentService: unverifiable STK success is left pending (throws for retry, no credit)", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 100_000);
+  const svc = new PaymentService(repo, new FakeDaraja({ resultCode: null, processing: true }));
+  const { checkoutRequestId } = await svc.initiateDeposit("u", 50_000, "0712345678");
+  await assert.rejects(() => svc.handleStkCallback(checkoutRequestId, 0, "OK", "RCPT", {}), /STK_VERIFY_PENDING/);
+  assert.equal(await repo.getBalance("u"), 100_000); // not credited on unverified callback
+});
+
+test("PaymentService: verification can be disabled (legacy direct-credit) via option", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 100_000);
+  // Even a 'failing' query is ignored when verification is off — the raw callback is trusted.
+  const svc = new PaymentService(repo, new FakeDaraja({ resultCode: 1032, processing: false }), { verifyStkCallbacks: false });
+  const { checkoutRequestId } = await svc.initiateDeposit("u", 50_000, "0712345678");
+  const res = await svc.handleStkCallback(checkoutRequestId, 0, "OK", "RCPT", {});
+  assert.equal(res.status, "success");
+  assert.equal(await repo.getBalance("u"), 150_000);
 });

@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, rateLimit, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
 
 /**
@@ -68,8 +68,11 @@ function optionalString(body: Record<string, unknown>, key: string): string | un
 /** Register the auth routes (register/login are public; /me requires a bearer token). */
 export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
   const auth = requireAuth(deps.verifier);
+  // Throttle credential endpoints per source IP to blunt brute-force / credential stuffing
+  // (scrypt already makes each guess costly; this caps the rate). Tunable via env.
+  const authLimit = rateLimit({ name: "auth", by: "ip", limit: Number(process.env.RATE_LIMIT_AUTH_PER_MIN) || 40, windowMs: 60_000 });
 
-  router.post(`${BASE}/auth/register`, async (ctx: Ctx) => {
+  router.post(`${BASE}/auth/register`, authLimit, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const phone = requireString(body, "phone");
     const username = requireString(body, "username");
@@ -79,7 +82,7 @@ export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
     return { status: 201, body: { token: s.token, userId: s.userId, role: s.role } };
   });
 
-  router.post(`${BASE}/auth/login`, async (ctx: Ctx) => {
+  router.post(`${BASE}/auth/login`, authLimit, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const phone = requireString(body, "phone");
     const password = requireString(body, "password");
