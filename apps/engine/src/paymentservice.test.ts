@@ -89,9 +89,11 @@ test("HttpDarajaClient: builds STK Push + B2C requests with token, KES amounts, 
   assert.equal(stkReq.body.Amount, 50); // 5000 cents -> KES 50
   assert.equal(stkReq.body.TransactionType, "CustomerPayBillOnline");
   assert.equal(stkReq.body.PhoneNumber, "254712345678");
-  const b2c = await c.b2cPayment({ amountCents: 20_000, msisdn: "254712345678", remarks: "Withdrawal" });
+  const b2c = await c.b2cPayment({ amountCents: 20_000, msisdn: "254712345678", remarks: "Withdrawal", resultId: "TX-9" });
   assert.equal(b2c.conversationId, "CONV1");
   const b2cReq = reqs.find((r) => r.url.includes("b2c"))!;
   assert.equal(b2cReq.body.Amount, 200);
   assert.equal(b2cReq.body.CommandID, "BusinessPayment");
+  // The result URL must carry the txId so Safaricom hits `/withdrawals/mpesa/result/:txId`.
+  assert.equal(b2cReq.body.ResultURL, "https://r/TX-9");
 });

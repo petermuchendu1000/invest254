@@ -52,7 +52,7 @@ export class PaymentService {
   async approveWithdrawal(txId: string, adminId: string): Promise<{ approved: boolean; conversationId?: string }> {
     const ap = await this.repo.approveWithdrawal(txId, adminId);
     if (!ap.approved || ap.amountCents === null || ap.phone === null) return { approved: false };
-    const b2c = await this.daraja.b2cPayment({ amountCents: ap.amountCents, msisdn: ap.phone, remarks: "Withdrawal" });
+    const b2c = await this.daraja.b2cPayment({ amountCents: ap.amountCents, msisdn: ap.phone, remarks: "Withdrawal", resultId: txId });
     return { approved: true, conversationId: b2c.conversationId };
   }
   /** Finance admin rejects a pending withdrawal: reverses the hold. */

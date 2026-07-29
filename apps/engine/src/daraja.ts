@@ -9,7 +9,7 @@ import type { Cents } from "@invest254/shared";
  */
 export interface StkPushArgs { amountCents: Cents; msisdn: string; accountRef: string; desc: string; }
 export interface StkPushResult { merchantRequestId: string; checkoutRequestId: string; }
-export interface B2cArgs { amountCents: Cents; msisdn: string; remarks: string; }
+export interface B2cArgs { amountCents: Cents; msisdn: string; remarks: string; resultId?: string; }
 export interface B2cResult { conversationId: string; }
 
 export interface DarajaClient {
@@ -85,11 +85,16 @@ export class HttpDarajaClient implements DarajaClient {
     return { merchantRequestId: String(j.MerchantRequestID), checkoutRequestId: String(j.CheckoutRequestID) };
   }
   async b2cPayment(a: B2cArgs): Promise<B2cResult> {
+    // The B2C result route is keyed by transaction id (`/withdrawals/mpesa/result/:txId`), so when a
+    // resultId is supplied we append it to the configured base URL and Safaricom POSTs the result to
+    // that exact path. Without a resultId we fall back to the raw configured URL (legacy behaviour).
+    const base = this.cfg.b2cResultUrl.replace(/\/+$/, "");
+    const resultUrl = a.resultId ? `${base}/${encodeURIComponent(a.resultId)}` : this.cfg.b2cResultUrl;
     const j = await this.post("/mpesa/b2c/v1/paymentrequest", {
       InitiatorName: this.cfg.b2cInitiator, SecurityCredential: this.cfg.b2cSecurityCredential,
       CommandID: "BusinessPayment", Amount: centsToKes(a.amountCents),
       PartyA: this.cfg.shortcode, PartyB: a.msisdn, Remarks: a.remarks,
-      QueueTimeOutURL: this.cfg.b2cTimeoutUrl, ResultURL: this.cfg.b2cResultUrl, Occasion: "Withdrawal",
+      QueueTimeOutURL: this.cfg.b2cTimeoutUrl, ResultURL: resultUrl, Occasion: "Withdrawal",
     });
     return { conversationId: String(j.ConversationID) };
   }
