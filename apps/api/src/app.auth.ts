@@ -25,6 +25,7 @@ const AUTH_STATUS: Readonly<Record<string, number>> = {
   MFA_REQUIRED: 401,
   MFA_INVALID: 401,
   MFA_NOT_ENROLLING: 400,
+  RESET_DISABLED: 403,
   USER_NOT_FOUND: 404,
   NOT_FOUND: 404,
 };
@@ -125,6 +126,26 @@ export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
   router.post(`${BASE}/auth/mfa/disable`, auth, mfaLimit, async (ctx: Ctx) => {
     const code = requireString(asObject(ctx.body), "code");
     return domain(() => deps.auth.disableMfa(ctx.claims!.userId, code));
+  });
+
+  // ── Password management ──
+  // `change` proves possession via the current password, so it is always available. `reset` is the
+  // no-OTP stop-gap: AuthService refuses it unless explicitly enabled, and it is tightly throttled
+  // because an unverified reset is an account-takeover vector.
+  const resetLimit = rateLimit({ name: "password-reset", by: "ip", limit: Number(process.env.RATE_LIMIT_RESET_PER_MIN) || 5, windowMs: 60_000 });
+
+  router.post(`${BASE}/auth/password/change`, auth, authLimit, async (ctx: Ctx) => {
+    const body = asObject(ctx.body);
+    const currentPassword = requireString(body, "current_password");
+    const newPassword = requireString(body, "new_password");
+    return domain(() => deps.auth.changePassword(ctx.claims!.userId, currentPassword, newPassword));
+  });
+
+  router.post(`${BASE}/auth/password/reset`, resetLimit, async (ctx: Ctx) => {
+    const body = asObject(ctx.body);
+    const phone = requireString(body, "phone");
+    const newPassword = requireString(body, "new_password");
+    return domain(() => deps.auth.resetPassword(phone, newPassword));
   });
 
   router.get(`${BASE}/auth/me`, auth, async (ctx: Ctx) => {

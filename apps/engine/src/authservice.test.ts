@@ -168,3 +168,41 @@ test("MFA: disabling requires a valid factor and restores password-only login", 
   assert.equal((await auth.mfaStatus(userId)).enabled, false);
   assert.ok((await auth.login({ phone: PHONE, password: PASS })).token);
 });
+
+// ── password change / reset ──────────────────────────────────────────────────────────────────
+test("changePassword: requires the current password, then the new one works", async () => {
+  const repo = new InMemoryIdentityRepository();
+  const auth = new AuthService(repo, { jwtSecret: SECRET, jwtTtlSeconds: 3600 });
+  const s = await auth.register({ phone: PHONE, username: "operator", password: PASS });
+  await assert.rejects(() => auth.changePassword(s.userId, "wrong-password-9", "Brand3wPass"), /INVALID_CREDENTIALS/);
+  await assert.rejects(() => auth.changePassword(s.userId, PASS, "short"), /PASSWORD_TOO_SHORT/);
+  assert.deepEqual(await auth.changePassword(s.userId, PASS, "Brand3wPass"), { changed: true });
+  await assert.rejects(() => auth.login({ phone: PHONE, password: PASS }), /INVALID_CREDENTIALS/);
+  assert.ok((await auth.login({ phone: PHONE, password: "Brand3wPass" })).token);
+});
+
+test("resetPassword: refused unless unverified reset is explicitly enabled", async () => {
+  const repo = new InMemoryIdentityRepository();
+  const auth = new AuthService(repo, { jwtSecret: SECRET, jwtTtlSeconds: 3600 });
+  await auth.register({ phone: PHONE, username: "operator", password: PASS });
+  await assert.rejects(() => auth.resetPassword(PHONE, "Brand3wPass"), /RESET_DISABLED/);
+  // the old password still works — nothing was changed
+  assert.ok((await auth.login({ phone: PHONE, password: PASS })).token);
+});
+
+test("resetPassword: when enabled, sets the new password and rejects a weak one", async () => {
+  const repo = new InMemoryIdentityRepository();
+  const auth = new AuthService(repo, { jwtSecret: SECRET, jwtTtlSeconds: 3600, allowUnverifiedPasswordReset: true });
+  await auth.register({ phone: PHONE, username: "operator", password: PASS });
+  await assert.rejects(() => auth.resetPassword(PHONE, "short"), /PASSWORD_TOO_SHORT/);
+  await assert.rejects(() => auth.resetPassword("not-a-phone", "Brand3wPass"), /INVALID_PHONE/);
+  assert.deepEqual(await auth.resetPassword("0712345678", "Brand3wPass"), { reset: true });
+  assert.ok((await auth.login({ phone: PHONE, password: "Brand3wPass" })).token);
+  await assert.rejects(() => auth.login({ phone: PHONE, password: PASS }), /INVALID_CREDENTIALS/);
+});
+
+test("resetPassword: unknown phone returns the same shape (no account enumeration)", async () => {
+  const repo = new InMemoryIdentityRepository();
+  const auth = new AuthService(repo, { jwtSecret: SECRET, jwtTtlSeconds: 3600, allowUnverifiedPasswordReset: true });
+  assert.deepEqual(await auth.resetPassword("0700000000", "Brand3wPass"), { reset: true });
+});

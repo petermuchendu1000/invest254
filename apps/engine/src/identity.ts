@@ -80,6 +80,8 @@ export interface IdentityRepository {
   findByPhone(phone: string): Promise<CredentialRecord | null>;
   /** Load the profile by user id, or null if not found. */
   getProfile(userId: string): Promise<ProfileRow | null>;
+  /** Replace an account's password hash. False when there is no such credential row. */
+  setPasswordHash(userId: string, passwordHash: string): Promise<boolean>;
   /** Load MFA state for an account, or null when enrolment was never begun. */
   getMfa(userId: string): Promise<MfaRecord | null>;
   /** Store (or replace) a pending TOTP secret + recovery-code hashes; leaves MFA disabled. */
@@ -277,8 +279,7 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
     return { userId: String(x.id), role: String(x.role), status: String(x.status), passwordHash: String(x.password_hash) };
   }
   async getMfa(userId: string): Promise<MfaRecord | null> {
-    const r = await this.q.query("select user_id, secret, enabled, recovery_codes from user_mfa where user_id = $1", [userId]);
-    if (!r.rows.length) return null;
+    const r = await this.q.query("select user_id, secret, enabled, recovery_codes from user_mfa where user_id = $1", [userId]);    if (!r.rows.length) return null;
     const x = r.rows[0];
     return {
       userId: String(x.user_id), secret: String(x.secret), enabled: Boolean(x.enabled),
@@ -306,6 +307,12 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
   }
   async disableMfa(userId: string): Promise<void> {
     await this.q.query("delete from user_mfa where user_id = $1", [userId]);
+  }
+  async setPasswordHash(userId: string, passwordHash: string): Promise<boolean> {
+    const r = await this.q.query(
+      "update user_credentials set password_hash = $2 where user_id = $1 returning user_id",
+      [userId, passwordHash]);
+    return r.rows.length > 0;
   }
   async getProfile(userId: string): Promise<ProfileRow | null> {
     const r = await this.q.query(
@@ -391,6 +398,12 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   }
   async disableMfa(userId: string): Promise<void> {
     this.mfa.delete(userId);
+  }
+  async setPasswordHash(userId: string, passwordHash: string): Promise<boolean> {
+    const u = this.byId.get(userId);
+    if (!u) return false;
+    u.passwordHash = passwordHash;
+    return true;
   }
   async getProfile(userId: string): Promise<ProfileRow | null> {
     const u = this.byId.get(userId);

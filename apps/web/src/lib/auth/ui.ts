@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AuthMode = 'login' | 'register';
+export type AuthMode = 'login' | 'register' | 'reset';
 
 interface AuthUiState {
   open: boolean;

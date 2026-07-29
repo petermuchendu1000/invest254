@@ -72,6 +72,12 @@ export interface AuthServiceOptions {
   mfaRequiredRoles?: readonly string[];
   /** Issuer label shown in the operator's authenticator app. */
   mfaIssuer?: string;
+  /**
+   * Allow `resetPassword` to set a new password from a phone number alone (no OTP/possession
+   * proof). This is account takeover by design, so it defaults to FALSE and must be switched on
+   * deliberately. Remove once OTP verification ships.
+   */
+  allowUnverifiedPasswordReset?: boolean;
 }
 
 const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -87,6 +93,7 @@ export class AuthService {
   private readonly audience: string | undefined;
   private readonly mfaRoles: ReadonlySet<string>;
   private readonly mfaIssuer: string;
+  private readonly allowUnverifiedReset: boolean;
 
   constructor(private readonly repo: IdentityRepository, opts: AuthServiceOptions) {
     if (!opts.jwtSecret) throw new Error("JWT_SECRET_REQUIRED");
@@ -96,6 +103,7 @@ export class AuthService {
     this.audience = opts.audience;
     this.mfaRoles = new Set(opts.mfaRequiredRoles ?? ["admin", "superadmin"]);
     this.mfaIssuer = opts.mfaIssuer ?? "Invest254";
+    this.allowUnverifiedReset = opts.allowUnverifiedPasswordReset ?? false;
   }
 
   /** Sign an HS256 JWT compatible with makeVerifier (sub = userId, `role` claim). */
@@ -221,8 +229,45 @@ export class AuthService {
     };
   }
 
-  /** Read the caller's profile. Throws NOT_FOUND if no such identity. */
-  async me(userId: string): Promise<Profile> {
+  /**
+   * Change your own password. Requires the current password as possession proof, so this is safe
+   * to expose to every logged-in player and is always enabled.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<{ changed: boolean }> {
+    const pw = validatePassword(newPassword);
+    if (!pw.ok) throw new Error(`PASSWORD_${pw.reason}`);
+    const profile = await this.repo.getProfile(userId);
+    if (!profile) throw new Error("NOT_FOUND");
+    const rec = await this.repo.findByPhone(profile.phone);
+    if (!rec || !(await verifyPassword(currentPassword, rec.passwordHash))) throw new Error("INVALID_CREDENTIALS");
+    await this.repo.setPasswordHash(userId, await hashPassword(newPassword));
+    return { changed: true };
+  }
+
+  /**
+   * Set a new password from a phone number alone — no OTP, no possession proof.
+   *
+   * ⚠️  SECURITY: with nothing to prove the caller owns the number this IS account takeover:
+   * anyone who knows a player's phone can seize their wallet. It therefore throws
+   * RESET_DISABLED unless `allowUnverifiedPasswordReset` is explicitly turned on, and should be
+   * replaced by an OTP-verified flow before real money is at stake.
+   *
+   * The response is identical whether or not the account exists (and the hash is computed either
+   * way) so this cannot be used to enumerate registered phone numbers.
+   */
+  async resetPassword(phone: string, newPassword: string): Promise<{ reset: boolean }> {
+    if (!this.allowUnverifiedReset) throw new Error("RESET_DISABLED");
+    const pw = validatePassword(newPassword);
+    if (!pw.ok) throw new Error(`PASSWORD_${pw.reason}`);
+    let normalized: string;
+    try { normalized = normalizeMsisdn(phone); } catch { throw new Error("INVALID_PHONE"); }
+    const rec = await this.repo.findByPhone(normalized);
+    const hash = await hashPassword(newPassword); // computed unconditionally: uniform timing
+    if (rec) await this.repo.setPasswordHash(rec.userId, hash);
+    return { reset: true };
+  }
+
+  /** Read the caller's profile. Throws NOT_FOUND if no such identity. */  async me(userId: string): Promise<Profile> {
     const p = await this.repo.getProfile(userId);
     if (!p) throw new Error("NOT_FOUND");
     return p;

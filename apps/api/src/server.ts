@@ -67,6 +67,8 @@ async function buildDeps(): Promise<ApiDeps> {
   const identity = new PgIdentityRepository(q);
   const auth = new AuthService(identity, {
     jwtSecret,
+    // No-OTP password reset is account takeover unless verified — opt in deliberately.
+    allowUnverifiedPasswordReset: process.env.ALLOW_UNVERIFIED_PASSWORD_RESET === "true",
     ...(process.env.SUPABASE_JWT_ISSUER ? { issuer: process.env.SUPABASE_JWT_ISSUER } : {}),
     ...(process.env.SUPABASE_JWT_AUD ? { audience: process.env.SUPABASE_JWT_AUD } : {}),
   });

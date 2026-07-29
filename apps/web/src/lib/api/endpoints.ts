@@ -57,6 +57,12 @@ export const api = {
     apiFetch<AuthResult>('/auth/login', { method: 'POST', body }),
   me: (token: string) => apiFetch<MeDto>('/auth/me', { token }),
   refreshToken: (token: string) => apiFetch<AuthResult>('/auth/refresh', { method: 'POST', token }),
+  /** Set a new password from the phone number alone (no OTP). Server-side feature-gated. */
+  resetPassword: (body: { phone: string; new_password: string }) =>
+    apiFetch<{ reset: boolean }>('/auth/password/reset', { method: 'POST', body }),
+  /** Change your own password; requires the current one. Always available when logged in. */
+  changePassword: (token: string, body: { current_password: string; new_password: string }) =>
+    apiFetch<{ changed: boolean }>('/auth/password/change', { method: 'POST', token, body }),
 
   // Wallet & history
   wallet: (token: string) => apiFetch<WalletDto>('/wallet', { token }),
