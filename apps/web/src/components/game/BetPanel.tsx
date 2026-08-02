@@ -19,8 +19,6 @@ import { LivePnl } from '@/components/game/LivePnl';
 
 const CHIP_CENTS = [5000, 10000, 20000, 50000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
-/** Stakes at/above this require a second confirming tap. */
-const CONFIRM_CENTS = 50000;
 
 export function BetPanel() {
   const hydrated = useHydrated();
@@ -43,8 +41,9 @@ export function BetPanel() {
 
   const [stake, setStake] = useState<string>('');
   const [durationS, setDurationS] = useState<number>(defaultDurationS);
-  const [armed, setArmed] = useState<Direction | null>(null);
-  const [justFunded, setJustFunded] = useState(false);
+  // Direction the player picked before topping up. Purely informational: it drives the
+  // "funds added" hint after a deposit settles. It never gates or re-fires the trade.
+  const [resumeDir, setResumeDir] = useState<Direction | null>(null);
 
   // Seed the stake with a sensible default (KES 200) once config arrives, never below the minimum.
   useEffect(() => {
@@ -71,16 +70,16 @@ export function BetPanel() {
   const overBalance = !!token && Number.isFinite(stakeCents) && stakeCents > balanceReal;
   const connecting = status !== 'open';
 
-  // Disarm any pending confirm when the stake changes.
-  useEffect(() => { setArmed(null); setJustFunded(false); }, [stake]);
+  // Editing the stake invalidates the "funds added" hint from a previous top-up.
+  useEffect(() => { setResumeDir(null); }, [stake]);
 
   // Resume after a top-up: once the deposit lands and the balance covers the saved trade,
-  // restore the chosen direction as an armed one-tap confirm. We never auto-fire real money.
+  // surface a hint pointing at the direction the player originally picked. A single tap
+  // places the trade -- we never auto-fire real money, and we never demand an extra tap.
   useEffect(() => {
     if (!pendingTrade || activePosition || status !== 'open') return;
     if (!Number.isFinite(balanceReal) || balanceReal < pendingTrade.stakeCents) return;
-    setArmed(pendingTrade.direction);
-    setJustFunded(true);
+    setResumeDir(pendingTrade.direction);
     clearPending();
   }, [pendingTrade, activePosition, status, balanceReal, clearPending]);
 
@@ -115,16 +114,13 @@ export function BetPanel() {
       openDeposit({ amountCents: stakeCents, pending: { direction: dir, stakeCents } });
       return;
     }
-    if (stakeCents >= CONFIRM_CENTS && armed !== dir) {
-      setArmed(dir);
-      return;
-    }
+    // One tap = one trade. No confirmation step: the stake is already explicit on screen,
+    // the position is reversible via Cash Out, and every extra tap is measurable drop-off.
     openPosition({ stakeCents, direction: dir, durationS });
-    setArmed(null);
-    setJustFunded(false);
+    setResumeDir(null);
   }
 
-  // ── Loading ───────────────────────────────────────────────────────────────
+  // ── Loading ──────────────────────────────────────────────────────────────
   if (!hydrated) {
     return (
       <Card className="flex flex-col gap-2 p-2.5">
@@ -156,7 +152,7 @@ export function BetPanel() {
     );
   }
 
-  // ── Idle — stake + duration + BUY/SELL (always visible) ─────────────────────
+  // ── Idle — stake + duration + BUY/SELL (always visible) ──────────────────
   return (
     <Card className="flex flex-col gap-2 p-2.5">
       {/* Stake input with KES prefix */}
@@ -217,19 +213,17 @@ export function BetPanel() {
       {/* BUY / SELL */}
       <div className="grid grid-cols-2 gap-2">
         <Button variant="up" size="md" fullWidth className="!h-10" disabled={connecting} onClick={() => handleDirection('buy')}>
-          {armed === 'buy' ? `Confirm · ${formatKes(stakeCents)}` : 'BUY'}
+          BUY
         </Button>
         <Button variant="down" size="md" fullWidth className="!h-10" disabled={connecting} onClick={() => handleDirection('sell')}>
-          {armed === 'sell' ? `Confirm · ${formatKes(stakeCents)}` : 'SELL'}
+          SELL
         </Button>
       </div>
 
-      {justFunded && armed ? (
+      {resumeDir ? (
         <p className="text-center text-[11px] font-medium text-up">
-          Funds added — tap {armed === 'buy' ? 'BUY' : 'SELL'} to place your {formatKes(stakeCents)} trade.
+          Funds added — tap {resumeDir === 'buy' ? 'BUY' : 'SELL'} to place your {formatKes(stakeCents)} trade.
         </p>
-      ) : armed ? (
-        <p className="text-center text-[11px] text-muted">Tap again to confirm your stake.</p>
       ) : !token ? (
         <p className="text-center text-[11px] text-muted">Deposit to buy or sell.</p>
       ) : overBalance ? (
