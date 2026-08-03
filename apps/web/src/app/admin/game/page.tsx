@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/Input';
 import { formatRelativeTime } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
-import { checkFeasible } from '@invest254/shared';
+// Subpath import on purpose: the package barrel re-exports prng.ts, which imports
+// node:crypto and cannot be bundled for the browser. config.ts is dependency-free.
+import { checkFeasible } from '@invest254/shared/config';
 import { PageHeader, Section, TableWrap, Th, Td, Empty, ConfirmButton } from '@/components/admin/ui';
 import { useGameConfig, useUpdateGameConfig, useSeeds, useRotateSeed } from '@/lib/admin/hooks';
 import { SuperadminOnly } from '@/components/admin/SuperadminOnly';
