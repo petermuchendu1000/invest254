@@ -253,3 +253,33 @@ begin
   alter table public.game_config_versions enable row level security;
 end
 $mig$;
+
+-- ── 9. Rollout compatibility shim ─────────────────────────────────────────────────────────
+-- Section 6 drops the 8-arg fn_open_position, but a Fly machine running an engine build from
+-- BEFORE this migration still calls it. Without this shim every open_position from the live
+-- engine would fail for the whole window between applying the migration and finishing the
+-- redeploy -- a real trading outage. The shim stamps the config version that is live right
+-- now (exactly what the old engine was implicitly running on) and delegates to the single
+-- real implementation, so there is still only one code path that moves money.
+--
+-- REMOVE this once every engine/API machine reports the 9-arg build.
+create or replace function public.fn_open_position(
+  p_user uuid, p_stake bigint, p_direction text, p_entry_rate numeric,
+  p_duration_s int, p_game_day bigint, p_nonce bigint, p_opened_at timestamptz
+) returns table(position_id uuid, new_balance bigint)
+language plpgsql security definer set search_path = public
+as $fn$
+declare v_cfg bigint;
+begin
+  select version into v_cfg from game_config where id = 1;
+  return query select * from public.fn_open_position(
+    p_user, p_stake, p_direction, p_entry_rate, p_duration_s, p_game_day, p_nonce, p_opened_at, v_cfg);
+end;
+$fn$;
+
+do $mig$
+begin
+  revoke all on function public.fn_open_position(uuid,bigint,text,numeric,int,bigint,bigint,timestamptz) from public;
+  grant execute on function public.fn_open_position(uuid,bigint,text,numeric,int,bigint,bigint,timestamptz) to service_role;
+end
+$mig$;
