@@ -10,6 +10,14 @@ import { useToast } from '@/lib/toast/ToastProvider';
 // Subpath import on purpose: the package barrel re-exports prng.ts, which imports
 // node:crypto and cannot be bundled for the browser. config.ts is dependency-free.
 import { checkFeasible } from '@invest254/shared/config';
+
+// Display formatters that never throw on a missing/instant-stale field. The admin
+// panel must stay usable even if it briefly talks to an API build that predates a
+// derived field (e.g. requiredMeanWinMultiplier) — we recompute from the raw knobs
+// the API has always returned (houseEdge / targetWinRate) rather than trusting the
+// derived echo, and render an em-dash for anything non-finite.
+const fmtPct = (x: number): string => (Number.isFinite(x) ? (x * 100).toFixed(2) : '—');
+const fmtMult = (x: number): string => (Number.isFinite(x) ? x.toFixed(2) : '—');
 import { PageHeader, Section, TableWrap, Th, Td, Empty, ConfirmButton } from '@/components/admin/ui';
 import { useGameConfig, useUpdateGameConfig, useSeeds, useRotateSeed } from '@/lib/admin/hooks';
 import { SuperadminOnly } from '@/components/admin/SuperadminOnly';
@@ -85,7 +93,15 @@ function GameBody() {
     });
   }, [cfg, patch]);
   const blocked = !!preview && !preview.ok;
-  const pendingRtp = cfg ? 1 - ({ ...cfg, ...patch }).houseEdge : 0;
+  const pendingRtp = cfg ? 1 - Number(({ ...cfg, ...patch }).houseEdge) : 0;
+
+  // Derive the live economics from the raw knobs so a stale/partial API payload can never
+  // white-screen this page (issue: `.toFixed` on an undefined derived field). See fmt* above.
+  const liveHouseEdge = Number(cfg?.houseEdge);
+  const liveTargetWinRate = Number(cfg?.targetWinRate);
+  const liveRtp = Number.isFinite(liveHouseEdge) ? 1 - liveHouseEdge : NaN;
+  const liveMeanWin = Number.isFinite(liveRtp) && liveTargetWinRate > 0 ? liveRtp / liveTargetWinRate : NaN;
+  const liveVersion = Number(cfg?.version);
 
   function save() {
     update.mutate(patch as Record<string, number>, {
@@ -110,14 +126,14 @@ function GameBody() {
           <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted">
               <span>
-                RTP target: <span className="font-medium text-fg tabular-nums">{(cfg.rtpTarget * 100).toFixed(2)}%</span>
+                RTP target: <span className="font-medium text-fg tabular-nums">{fmtPct(liveRtp)}%</span>
               </span>
               <span>
-                Live version: <span className="font-medium text-fg tabular-nums">v{cfg.version}</span>
+                Live version: <span className="font-medium text-fg tabular-nums">v{Number.isFinite(liveVersion) ? liveVersion : '—'}</span>
               </span>
               <span>
                 Mean winning multiple:{' '}
-                <span className="font-medium text-fg tabular-nums">{cfg.requiredMeanWinMultiplier.toFixed(2)}x</span>
+                <span className="font-medium text-fg tabular-nums">{fmtMult(liveMeanWin)}x</span>
               </span>
               <span>
                 Last updated:{' '}
@@ -158,9 +174,9 @@ function GameBody() {
                 ) : (
                   <>
                     After saving, RTP becomes{' '}
-                    <span className="font-semibold text-fg tabular-nums">{(pendingRtp * 100).toFixed(2)}%</span>, paid as a mean
+                    <span className="font-semibold text-fg tabular-nums">{fmtPct(pendingRtp)}%</span>, paid as a mean
                     winning multiple of{' '}
-                    <span className="font-semibold text-fg tabular-nums">{preview.requiredMeanWinMultiplier.toFixed(2)}x</span>.
+                    <span className="font-semibold text-fg tabular-nums">{fmtMult(preview.requiredMeanWinMultiplier)}x</span>.
                     Applies to the next round; trades already open keep the parameters they were priced with.
                   </>
                 )}
