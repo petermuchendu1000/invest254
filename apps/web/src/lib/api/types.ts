@@ -45,6 +45,8 @@ export interface GameConfigDto {
   tickRateMs: number;
   rtp: number;
   timeframesS: number[];
+  /** Live game_config version; changes when an operator saves new limits. */
+  configVersion?: number;
 }
 
 /** GET /positions item — wire shape from apps/api `positionDto` (newest-first). */

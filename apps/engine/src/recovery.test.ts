@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_CONFIG } from "@invest254/shared";
+import { DEFAULT_VERSIONED_CONFIG } from "@invest254/shared";
 import { InMemoryGameRepository } from "./wallet.js";
 import { GameServer } from "./game.js";
 import { SeedManager } from "./daycontext.js";
 import { RecoveryService } from "./recovery.js";
+import { StaticConfigProvider } from "./gameconfig.js";
 
 const MASTER = "recovery-test-master";
 // Small calibration sample count keeps the test fast; determinism is unaffected because
@@ -12,16 +13,17 @@ const MASTER = "recovery-test-master";
 const OPTS = { calibrationSamples: 4000 };
 
 test("recovery: settles expired, re-arms in-flight, deterministically and idempotently", async () => {
-  const cfg = DEFAULT_CONFIG;
+  const cfg = DEFAULT_VERSIONED_CONFIG;
+  const config = new StaticConfigProvider(cfg);
   const repo = new InMemoryGameRepository();
   repo.seed("u1", 100000);
   repo.seed("u2", 100000);
   const clock = { ms: 0 };
 
   // --- pre-crash: a SeedManager + GameServer open two positions on the same UTC day ---
-  const seeds1 = new SeedManager(MASTER, cfg, repo, () => clock.ms, OPTS);
+  const seeds1 = new SeedManager(MASTER, config, repo, () => clock.ms, OPTS);
   await seeds1.init();
-  const game1 = new GameServer(() => seeds1.getActive(), repo, cfg, () => clock.ms);
+  const game1 = new GameServer(() => seeds1.getActive(), repo, () => cfg, () => clock.ms);
 
   const C1 = 1000; // open P1 (will be expired by recovery time)
   clock.ms = C1;
@@ -45,9 +47,9 @@ test("recovery: settles expired, re-arms in-flight, deterministically and idempo
   // --- crash: discard game1/seeds1; a fresh process boots with only the durable repo ---
   const recoverAtMs = C1 + 10000 + 1; // P1 expired (opened C1, 10s), P2 in-flight (expires C2+10000)
   clock.ms = recoverAtMs;
-  const seeds2 = new SeedManager(MASTER, cfg, repo, () => clock.ms, OPTS);
+  const seeds2 = new SeedManager(MASTER, config, repo, () => clock.ms, OPTS);
   await seeds2.init();
-  const game2 = new GameServer(() => seeds2.getActive(), repo, cfg, () => clock.ms);
+  const game2 = new GameServer(() => seeds2.getActive(), repo, () => cfg, () => clock.ms);
   const recovery = new RecoveryService(repo, seeds2, game2, () => clock.ms);
 
   const report = await recovery.recover();

@@ -88,7 +88,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     auth,
     affiliate,
     admin,
-    config: DEFAULT_CONFIG,
+    config: () => DEFAULT_CONFIG,
     fairnessById: async (id) => fairness.get(id) ?? null,
     activity: { recent: (limit) => engage.listRecentActivity(limit) },
     payments,

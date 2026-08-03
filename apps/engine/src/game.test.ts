@@ -10,8 +10,8 @@ function makeRig() {
   const eng = new SettlementEngine(curve, cfg);
   const repo = new InMemoryGameRepository();
   const clock = { ms: 0 };
-  const ctx = { curve, settlement: eng, dayStartMs: 0, gameDayId: null };
-  const gs = new GameServer(() => ctx, repo, cfg, () => clock.ms);
+  const ctx = { curve, settlement: eng, dayStartMs: 0, gameDayId: null, configVersion: 1 };
+  const gs = new GameServer(() => ctx, repo, () => cfg, () => clock.ms);
   let winT = -1, loseT = -1;
   for (let t = 0; t < 3600 && (winT < 0 || loseT < 0); t += 0.05) {
     const o = eng.settle(20000, "buy", t);

@@ -9,7 +9,7 @@ import { encodeCursor, decodeCursor } from "./paging.js";
 test("InMemory listLedger: newest-first, cursor pagination", async () => {
   const r = new InMemoryGameRepository();
   r.seed("u", 100_000);                       // ledger #1 (seed)
-  const o = await r.openPosition({ userId: "u", stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: null, nonce: 1, openedAtMs: 0 }); // #2 (stake)
+  const o = await r.openPosition({ userId: "u", stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: null, nonce: 1, openedAtMs: 0 , configVersion: 1}); // #2 (stake)
   await r.settlePosition({ positionId: o.positionId, exitRate: 0.25, result: "win", multiplier: 2.5, payoutCents: 50_000 });                                       // #3 (payout)
 
   const p1 = await r.listLedger("u", { limit: 2 });
@@ -30,8 +30,8 @@ test("InMemory listLedger: newest-first, cursor pagination", async () => {
 test("InMemory listPositions: status filter + newest-first", async () => {
   const r = new InMemoryGameRepository();
   r.seed("u", 1_000_000);
-  const a = await r.openPosition({ userId: "u", stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: null, nonce: 1, openedAtMs: 10 });
-  const b = await r.openPosition({ userId: "u", stakeCents: 30_000, direction: "sell", entryRate: 0.2, durationS: 10, gameDayId: null, nonce: 2, openedAtMs: 20 });
+  const a = await r.openPosition({ userId: "u", stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: null, nonce: 1, openedAtMs: 10 , configVersion: 1});
+  const b = await r.openPosition({ userId: "u", stakeCents: 30_000, direction: "sell", entryRate: 0.2, durationS: 10, gameDayId: null, nonce: 2, openedAtMs: 20 , configVersion: 1});
   await r.settlePosition({ positionId: a.positionId, exitRate: 0.25, result: "win", multiplier: 2, payoutCents: 40_000 });
 
   const all = await r.listPositions("u", {});
@@ -53,7 +53,7 @@ test("InMemory getPositionDetail: includes fairness (seed hidden pre-reveal); nu
   const r = new InMemoryGameRepository();
   r.seed("u", 1_000_000);
   const dayId = await r.ensureGameDay("2026-06-17", "h17");
-  const o = await r.openPosition({ userId: "u", stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: dayId, nonce: 1, openedAtMs: 0 });
+  const o = await r.openPosition({ userId: "u", stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: dayId, nonce: 1, openedAtMs: 0 , configVersion: 1});
 
   const pre = await r.getPositionDetail("u", o.positionId);
   assert.ok(pre);

@@ -20,8 +20,11 @@ export interface RecoveryReport {
  *   3. if expiry has passed, settle it now (idempotent in the DB); otherwise re-arm it on
  *      the GameServer so it resumes live and auto-settles at expiry.
  *
- * Because outcomes are pure functions of (masterSeed, dateKey, entryT, direction), the
- * recovered settlement is identical to what would have happened with no crash.
+ * Because outcomes are pure functions of (masterSeed, dateKey, configVersion, entryT,
+ * direction), the recovered settlement is identical to what would have happened with no
+ * crash -- provided we replay under the SAME configuration. That is why step 2 passes the
+ * position's stored `config_version` rather than the config that happens to be live now:
+ * an admin edit made while the position was in flight must never re-price it.
  */
 export class RecoveryService {
   constructor(
@@ -39,7 +42,7 @@ export class RecoveryService {
     for (const row of open) {
       try {
         const dateKey = dateKeyUTC(row.openedAtMs);
-        const ctx = await this.seeds.contextFor(dateKey);
+        const ctx = await this.seeds.contextFor(dateKey, row.configVersion);
         const entryT = (row.openedAtMs - ctx.dayStartMs) / 1000;
         const outcome = ctx.settlement.settle(row.stakeCents, row.direction, entryT);
         const expiresAtMs = row.openedAtMs + row.durationS * 1000;
@@ -56,6 +59,7 @@ export class RecoveryService {
             id: row.id, userId: row.userId, stakeCents: row.stakeCents, direction: row.direction,
             durationS: row.durationS, openedAtMs: row.openedAtMs, expiresAtMs, entryT, outcome,
             status: "open", sellable: outcome.result === "win", gameDayId: row.gameDayId,
+            configVersion: ctx.configVersion,
           };
           if (this.game.rearm(p)) report.rearmed++; else report.noop++;
         }

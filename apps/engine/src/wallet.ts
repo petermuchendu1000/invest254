@@ -19,6 +19,8 @@ import type { AdminBetSnapshot } from "./admin.js";
 export interface OpenArgs {
   userId: string; stakeCents: Cents; direction: Direction; entryRate: number;
   durationS: number; gameDayId: number | null; nonce: number; openedAtMs: number;
+  /** game_config_versions.version that priced this position (migration 0028). */
+  configVersion: number | null;
 }
 export interface SettleArgs { positionId: string; exitRate: number; result: "win" | "loss"; multiplier: number; payoutCents: Cents; }
 export interface OpenResult { positionId: string; newBalance: Cents; }
@@ -28,6 +30,8 @@ export interface SettleResult { settled: boolean; newBalance: Cents; }
 export interface OpenPositionRow {
   id: string; userId: string; stakeCents: Cents; direction: Direction;
   durationS: number; openedAtMs: number; entryRate: number; gameDayId: number | null; nonce: number;
+  /** Config version the position was opened under; null for rows predating migration 0028. */
+  configVersion: number | null;
 }
 
 /** Public fairness record for a day (commitment always; seed only after reveal). */
@@ -84,7 +88,7 @@ export interface Querier { query(text: string, params: unknown[]): Promise<{ row
 interface MemPos {
   id: string; userId: string; stake: Cents; status: "open" | "settled";
   direction: Direction; durationS: number; openedAtMs: number; entryRate: number;
-  gameDayId: number | null; nonce: number; seq: number;
+  gameDayId: number | null; nonce: number; configVersion: number | null; seq: number;
   exitRate: number | null; multiplier: number | null; payout: Cents | null; pnl: Cents | null;
   result: string | null; settledAtMs: number | null;
 }
@@ -137,7 +141,8 @@ export class InMemoryGameRepository implements GameRepository {
     this.positions.set(id, {
       id, userId: a.userId, stake: a.stakeCents, status: "open",
       direction: a.direction, durationS: a.durationS, openedAtMs: a.openedAtMs,
-      entryRate: a.entryRate, gameDayId: a.gameDayId, nonce: a.nonce, seq: ++this.posSeq,
+      entryRate: a.entryRate, gameDayId: a.gameDayId, nonce: a.nonce,
+      configVersion: a.configVersion ?? null, seq: ++this.posSeq,
       exitRate: null, multiplier: null, payout: null, pnl: null, result: null, settledAtMs: null,
     });
     this.pushLedger(a.userId, "stake", -a.stakeCents, "real", "positions", id);
@@ -186,7 +191,7 @@ export class InMemoryGameRepository implements GameRepository {
     const out: OpenPositionRow[] = [];
     for (const p of this.positions.values()) {
       if (p.status !== "open") continue;
-      out.push({ id: p.id, userId: p.userId, stakeCents: p.stake, direction: p.direction, durationS: p.durationS, openedAtMs: p.openedAtMs, entryRate: p.entryRate, gameDayId: p.gameDayId, nonce: p.nonce });
+      out.push({ id: p.id, userId: p.userId, stakeCents: p.stake, direction: p.direction, durationS: p.durationS, openedAtMs: p.openedAtMs, entryRate: p.entryRate, gameDayId: p.gameDayId, nonce: p.nonce, configVersion: p.configVersion });
     }
     return out;
   }
@@ -267,9 +272,9 @@ export class PgGameRepository implements GameRepository {
     return r.rows.length ? toCents(r.rows[0].real_balance) : 0;
   }
   async openPosition(a: OpenArgs): Promise<OpenResult> {
-    // matches migration 0012: fn_open_position(user,stake,direction,entry_rate,duration_s,game_day,nonce,opened_at)
-    const r = await this.q.query("select position_id, new_balance from fn_open_position($1,$2,$3,$4,$5,$6,$7,$8)",
-      [a.userId, a.stakeCents, a.direction, a.entryRate, a.durationS, a.gameDayId, a.nonce, new Date(a.openedAtMs).toISOString()]);
+    // matches migration 0028: fn_open_position(user,stake,direction,entry_rate,duration_s,game_day,nonce,opened_at,config_version)
+    const r = await this.q.query("select position_id, new_balance from fn_open_position($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [a.userId, a.stakeCents, a.direction, a.entryRate, a.durationS, a.gameDayId, a.nonce, new Date(a.openedAtMs).toISOString(), a.configVersion]);
     return { positionId: r.rows[0].position_id, newBalance: toCents(r.rows[0].new_balance) };
   }
   async settlePosition(a: SettleArgs): Promise<SettleResult> {
@@ -292,11 +297,12 @@ export class PgGameRepository implements GameRepository {
   }
   async listOpenPositions(): Promise<OpenPositionRow[]> {
     const r = await this.q.query(
-      "select id, user_id, stake, direction, duration_s, opened_at, entry_rate, game_day_id, nonce from positions where status = 'open' order by opened_at", []);
+      "select id, user_id, stake, direction, duration_s, opened_at, entry_rate, game_day_id, nonce, config_version from positions where status = 'open' order by opened_at", []);
     return r.rows.map((x) => ({
       id: String(x.id), userId: String(x.user_id), stakeCents: toCents(x.stake), direction: x.direction as Direction,
       durationS: Number(x.duration_s), openedAtMs: toMs(x.opened_at), entryRate: Number(x.entry_rate),
       gameDayId: x.game_day_id === null || x.game_day_id === undefined ? null : Number(x.game_day_id), nonce: Number(x.nonce),
+      configVersion: x.config_version === null || x.config_version === undefined ? null : Number(x.config_version),
     }));
   }
   async getFairness(tradeDate: string): Promise<FairnessRecord | null> {

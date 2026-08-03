@@ -320,6 +320,13 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             }
           break;
         }
+        case 'game_config': {
+          // The engine pushes this when an operator saves new limits. Invalidating the cached
+          // GET /game/config makes stake bounds and round duration update in place, instead of
+          // the player being rejected by limits their tab has not seen yet.
+          void qc.invalidateQueries({ queryKey: ['gameConfig'] });
+          break;
+        }
         case 'online': {
           const d = data as OnlineData;
           if (typeof d?.count === 'number') setOnline(d.count);

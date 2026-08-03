@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { DEFAULT_CONFIG, type Direction } from "@invest254/shared";
+import { type Direction } from "@invest254/shared";
 import { InMemoryGameRepository, PgGameRepository, type GameRepository, type Querier } from "./wallet.js";
+import { GameConfigStore, StaticConfigProvider, affectsPricing, configDiff, type ConfigProvider, type ListenClient } from "./gameconfig.js";
 import { InMemoryEngagementRepository, PgEngagementRepository, maskHandle, type EngagementRepository, type ActivityRow, type ChatRow } from "./engagement.js";
 import { GameServer } from "./game.js";
 import { SeedManager } from "./daycontext.js";
@@ -15,27 +16,41 @@ const ONLINE_FLOOR = Number(process.env.ONLINE_FLOOR ?? 0);           // display
 const BIG_WIN_CENTS = Number(process.env.BIG_WIN_CENTS ?? 500_000);   // wins >= this (KES 5,000) post a real feed event
 const ACTIVITY_SIM = (process.env.ACTIVITY_SIM ?? "on") !== "off";    // simulated-feed generator toggle
 const ACTIVITY_CADENCE_MS = Number(process.env.ACTIVITY_CADENCE_MS ?? 4000);
-
-const cfg = DEFAULT_CONFIG;
+const CONFIG_POLL_MS = Number(process.env.CONFIG_POLL_MS ?? 15_000);   // LISTEN fallback cadence
 
 // Persistence: Postgres in production (atomic RPCs), in-memory for local dev.
 let repo: GameRepository;
 let engage: EngagementRepository;
+let config: ConfigProvider;
+let configStore: GameConfigStore | undefined;
 const usingDb = Boolean(process.env.DATABASE_URL);
 if (usingDb) {
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   repo = new PgGameRepository(pool);
   engage = new PgEngagementRepository(pool as unknown as Querier);
+  // Live configuration: LISTEN for instant pickup, poll as the self-healing fallback.
+  // Until this existed the engine ran on hardcoded defaults and every admin save was inert.
+  configStore = new GameConfigStore(pool as unknown as Querier, {
+    pollMs: CONFIG_POLL_MS,
+    connect: async () => (await pool.connect()) as unknown as ListenClient,
+    onError: (err: Error, ctx: string) => console.error(`[engine] config ${ctx}:`, err.message),
+  });
+  await configStore.init();
+  config = configStore;
+  console.log(`[engine] game_config v${configStore.active().version} loaded from database`);
 } else {
   repo = new InMemoryGameRepository();
   engage = new InMemoryEngagementRepository();
+  config = new StaticConfigProvider();
+  console.log("[engine] no DATABASE_URL — running on DEFAULT_CONFIG (v0)");
 }
+const cfg = () => config.active();
 
 const verifier = makeVerifier();
 if (usingDb && !verifier) throw new Error("AUTH: a JWT verifier is required when DATABASE_URL is set (set SUPABASE_JWT_SECRET or SUPABASE_JWKS_URL)");
 
-const seeds = new SeedManager(MASTER_SEED, cfg, repo);
+const seeds = new SeedManager(MASTER_SEED, config, repo);
 await seeds.init();
 const game = new GameServer(() => seeds.getActive(), repo, cfg);
 
@@ -87,6 +102,29 @@ game.subscribe({
 });
 game.start();
 activity.start();
+
+/**
+ * Apply an admin configuration change without disturbing money already at risk.
+ *
+ *  - Pricing knobs (RTP, win rate, multiplier cap, volatility, drift, duration) require a
+ *    fresh curve + settlement calibration. `seeds.init()` re-points the ACTIVE context at
+ *    the new version; positions already open keep the context they committed to, so the
+ *    admin panel's "takes effect on the next round" promise is now literally true.
+ *  - Tick rate is a timer period, so the interval is rescheduled in place.
+ *  - Stake bounds need no action: they are read per request from the live config.
+ */
+configStore?.subscribe((next, prev) => {
+  const changes = configDiff(prev, next);
+  console.log(`[engine] game_config v${prev.version} -> v${next.version}: ${changes.join("; ") || "no field change"}`);
+  if (game.applyTickRate()) console.log(`[engine] tick loop rescheduled to ${next.tickRateMs}ms`);
+  // Push the new limits to every open socket so stake bounds and duration update without a
+  // reload; clients that predate this message simply ignore it.
+  broadcast("game_config", game.onlineConfigSnapshot());
+  if (!affectsPricing(prev, next)) return;
+  void seeds.init()
+    .then((ctx) => console.log(`[engine] pricing context rebuilt for ${ctx.dateKey} @ config v${ctx.configVersion}`))
+    .catch((err) => console.error("[engine] config context rebuild failed:", (err as Error).message));
+});
 
 // Rotate at the UTC day boundary: derive new day, commit its hash, reveal yesterday's seed.
 setInterval(() => {
@@ -166,4 +204,4 @@ wss.on("connection", (ws) => {
 });
 
 if (!verifier) console.warn("[engine] WARNING: no JWT verifier configured — DEV auth (trusts client userId). Do NOT use in production.");
-console.log(`[engine] listening on ws://localhost:${PORT}  store=${usingDb ? "postgres" : "in-memory"}  auth=${verifier ? "jwt" : "dev"}  day=${seeds.getActive().dateKey}  sim=${ACTIVITY_SIM ? "on" : "off"}  onlineFloor=${ONLINE_FLOOR}  edge=${(cfg.houseEdge * 100).toFixed(0)}%`);
+console.log(`[engine] listening on ws://localhost:${PORT}  store=${usingDb ? "postgres" : "in-memory"}  auth=${verifier ? "jwt" : "dev"}  day=${seeds.getActive().dateKey}  sim=${ACTIVITY_SIM ? "on" : "off"}  onlineFloor=${ONLINE_FLOOR}  edge=${(cfg().houseEdge * 100).toFixed(0)}%  cfgV=${cfg().version ?? 0}  tick=${game.currentTickRateMs()}ms`);

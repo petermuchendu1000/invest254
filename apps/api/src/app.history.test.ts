@@ -14,9 +14,9 @@ function get(api: TestApi, path: string, token?: string): Promise<Response> {
 /** Seed a ledger trail (seed + stake + payout) and a settled+open position for the test user. */
 async function seedHistory(api: TestApi) {
   const dayId = await api.gameRepo.ensureGameDay("2026-06-17", "h17");
-  const a = await api.gameRepo.openPosition({ userId: PLAYER, stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: dayId, nonce: 1, openedAtMs: 10 });
+  const a = await api.gameRepo.openPosition({ userId: PLAYER, stakeCents: 20_000, direction: "buy", entryRate: 0.2, durationS: 10, gameDayId: dayId, nonce: 1, openedAtMs: 10 , configVersion: 1});
   await api.gameRepo.settlePosition({ positionId: a.positionId, exitRate: 0.25, result: "win", multiplier: 2.5, payoutCents: 50_000 });
-  const b = await api.gameRepo.openPosition({ userId: PLAYER, stakeCents: 30_000, direction: "sell", entryRate: 0.2, durationS: 10, gameDayId: dayId, nonce: 2, openedAtMs: 20 });
+  const b = await api.gameRepo.openPosition({ userId: PLAYER, stakeCents: 30_000, direction: "sell", entryRate: 0.2, durationS: 10, gameDayId: dayId, nonce: 2, openedAtMs: 20 , configVersion: 1});
   return { settledId: a.positionId, openId: b.positionId };
 }
 

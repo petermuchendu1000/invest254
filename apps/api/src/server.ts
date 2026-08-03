@@ -1,9 +1,9 @@
-import { DEFAULT_CONFIG } from "@invest254/shared";
 import {
   PgGameRepository, PgEngagementRepository, PgPaymentRepository, PgIdentityRepository,
   PaymentService, ChatService, ActivityService, AuthService, AffiliateService, AdminService, PgAdminRepository, makeDarajaClientFromConfig, loadDarajaConfigFromDb, makeVerifier, maskHandle,
+  GameConfigStore,
   type GameRepository, type EngagementRepository, type PaymentRepository,
-  type Querier, type FairnessRecord,
+  type Querier, type FairnessRecord, type ListenClient,
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance } from "./app.js";
 
@@ -29,6 +29,16 @@ async function buildDeps(): Promise<ApiDeps> {
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const q = pool as unknown as Querier;
+
+  // Live game configuration for the public GET /game/config. Same store the WS engine uses,
+  // so the limits the browser validates against are the limits the engine enforces.
+  const gameConfig = new GameConfigStore(q, {
+    pollMs: Number(process.env.CONFIG_POLL_MS ?? 15_000),
+    connect: async () => (await pool.connect()) as unknown as ListenClient,
+    onError: (err: Error, ctx: string) => console.error(`[api] config ${ctx}:`, err.message),
+  });
+  await gameConfig.init();
+  console.log(`[api] game_config v${gameConfig.active().version} loaded from database`);
 
   const repo: GameRepository = new PgGameRepository(q);
   const engage: EngagementRepository = new PgEngagementRepository(q);
@@ -80,7 +90,7 @@ async function buildDeps(): Promise<ApiDeps> {
     auth,
     affiliate,
     admin,
-    config: DEFAULT_CONFIG,
+    config: () => gameConfig.active(),
     fairnessById: async (gameDayId: number): Promise<FairnessRecord | null> => {
       const r = await q.query(
         "select id, trade_date, server_seed_hash, server_seed, revealed_at from v_fairness where id = $1",

@@ -1,4 +1,4 @@
-import { rtp, type GameConfig, type Cents } from "@invest254/shared";
+import { rtp, type GameConfig, type Cents, type VersionedGameConfig } from "@invest254/shared";
 import type {
   FairnessRecord, ActivityRow, ChatRow, ChatPostResult, PaymentService, AuthService, AffiliateService, AdminService, Verifier,
   Page, PageQuery, LedgerEntry, PositionRecord, PositionDetail, PositionListQuery, TransactionRecord, TxListQuery,
@@ -37,8 +37,13 @@ export interface ApiDeps {
     | "adjustBalance" | "listDeposits" | "depositsReconcile" | "reportDaily" | "reportByUser"
     | "getGameConfig" | "updateGameConfig" | "getMpesaConfig" | "updateMpesaConfig" | "rtpMonitor" | "listSeeds" | "rotateSeed"
     | "listAffiliatePayouts" | "listChat" | "hideChat" | "unhideChat" | "recordAction">;
-  /** Public game configuration snapshot source. */
-  config: GameConfig;
+  /**
+   * Public game configuration source. A PROVIDER, not a value: config is edited live in the
+   * admin panel, so a snapshot captured at boot would serve stale limits forever (the exact
+   * bug this replaced -- GET /game/config used to return the hardcoded DEFAULT_CONFIG while
+   * the database said something else).
+   */
+  config: () => GameConfig | VersionedGameConfig;
   /** Public fairness record for a game-day id (commitment always; seed only after reveal). */
   fairnessById(gameDayId: number): Promise<FairnessRecord | null>;
   /** Live activity feed (newest first). */
@@ -66,7 +71,7 @@ const BASE = "/api/v1";
 
 // ─────────────────────────── DTOs ───────────────────────────
 
-function gameConfigDto(cfg: GameConfig) {
+function gameConfigDto(cfg: GameConfig | VersionedGameConfig) {
   return {
     currency: "KES",
     minStakeCents: cfg.minStakeCents,
@@ -76,6 +81,8 @@ function gameConfigDto(cfg: GameConfig) {
     tickRateMs: cfg.tickRateMs,
     rtp: rtp(cfg),
     timeframesS: [cfg.defaultDurationS],
+    // Lets a client tell "the operator changed the limits" from "my cache is stale".
+    configVersion: (cfg as VersionedGameConfig).version ?? 0,
   };
 }
 
@@ -108,7 +115,7 @@ function parseLimit(ctx: Ctx, def: number, max = 100): number {
 export function registerPublicRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/health`, () => ({ status: "ok", time: new Date().toISOString() }));
 
-  router.get(`${BASE}/game/config`, () => gameConfigDto(deps.config));
+  router.get(`${BASE}/game/config`, () => gameConfigDto(deps.config()));
 
   router.get(`${BASE}/game/fairness/:gameDayId`, async (ctx) => {
     const id = Number(ctx.params.gameDayId);

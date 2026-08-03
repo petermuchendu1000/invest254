@@ -377,9 +377,9 @@ test("admin user activity: merges deposits, withdrawals and bets newest-first wi
     await api.payRepo.createWithdrawal(uid, 20_000, "254712009001", 5_000);
     api.gameRepo.seed(uid, 1_000_000);
     const t0 = Date.now();
-    const bet1 = await api.gameRepo.openPosition({ userId: uid, stakeCents: 10_000, direction: "buy", entryRate: 100, durationS: 10, gameDayId: 2, nonce: 1, openedAtMs: t0 });
+    const bet1 = await api.gameRepo.openPosition({ userId: uid, stakeCents: 10_000, direction: "buy", entryRate: 100, durationS: 10, gameDayId: 2, nonce: 1, openedAtMs: t0 , configVersion: 1});
     await api.gameRepo.settlePosition({ positionId: bet1.positionId, exitRate: 130, result: "win", multiplier: 3, payoutCents: 30_000 });
-    await api.gameRepo.openPosition({ userId: uid, stakeCents: 5_000, direction: "sell", entryRate: 100, durationS: 10, gameDayId: 2, nonce: 2, openedAtMs: t0 + 1 });
+    await api.gameRepo.openPosition({ userId: uid, stakeCents: 5_000, direction: "sell", entryRate: 100, durationS: 10, gameDayId: 2, nonce: 2, openedAtMs: t0 + 1 , configVersion: 1});
 
     // Full timeline: all four events, newest-first by createdAtMs.
     const all = await json(await req(api, "GET", `/api/v1/admin/users/${uid}/activity`, { token: "admin-1:admin" }));

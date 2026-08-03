@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input';
 import { formatRelativeTime } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
+import { checkFeasible } from '@invest254/shared';
 import { PageHeader, Section, TableWrap, Th, Td, Empty, ConfirmButton } from '@/components/admin/ui';
 import { useGameConfig, useUpdateGameConfig, useSeeds, useRotateSeed } from '@/lib/admin/hooks';
 import { SuperadminOnly } from '@/components/admin/SuperadminOnly';
@@ -15,14 +16,15 @@ import type { GameConfigPatch, GameConfigRow } from '@/lib/admin/types';
 // Editable engine knobs. `kes` fields are stored as cents but edited in KES.
 type FieldKey = keyof GameConfigPatch;
 const FIELDS: { key: FieldKey; label: string; hint: string; kes?: boolean; step?: string }[] = [
-  { key: 'houseEdge', label: 'House edge', hint: 'Fraction, e.g. 0.05 = 5%', step: '0.001' },
+  { key: 'houseEdge', label: 'House edge', hint: 'Fraction, e.g. 0.05 = 5%. RTP = 1 - house edge', step: '0.001' },
+  { key: 'targetWinRate', label: 'Target win rate', hint: 'Share of trades that win, e.g. 0.25 = 25%', step: '0.001' },
   { key: 'maxMultiplier', label: 'Max multiplier', hint: 'Hard cap on a round payout multiple', step: '0.1' },
   { key: 'minStakeCents', label: 'Min stake (KES)', hint: 'Smallest accepted stake', kes: true, step: '1' },
   { key: 'maxStakeCents', label: 'Max stake (KES)', hint: 'Largest accepted stake', kes: true, step: '1' },
-  { key: 'defaultDurationS', label: 'Round duration (s)', hint: 'Default round length in seconds', step: '1' },
-  { key: 'tickRateMs', label: 'Tick rate (ms)', hint: 'Price update interval', step: '10' },
-  { key: 'driftBias', label: 'Drift bias', hint: 'Directional bias of the walk', step: '0.001' },
-  { key: 'volatility', label: 'Volatility', hint: 'Amplitude of price movement', step: '0.001' },
+  { key: 'defaultDurationS', label: 'Round duration (s)', hint: 'Default round length in seconds (1-3600)', step: '1' },
+  { key: 'tickRateMs', label: 'Tick rate (ms)', hint: 'Price update interval (50-60000)', step: '10' },
+  { key: 'driftBias', label: 'Drift bias', hint: 'Directional bias of the walk (-1 to 1)', step: '0.001' },
+  { key: 'volatility', label: 'Volatility', hint: 'Amplitude of price movement (> 0)', step: '0.001' },
 ];
 
 /** Current config value formatted for its input (cents → KES for stake fields). */
@@ -59,9 +61,33 @@ function GameBody() {
 
   const dirtyCount = Object.keys(patch).length;
 
+  /**
+   * Preview the economics of the pending edit using the SAME rule the database CHECK and the
+   * engine's hot-reload guard apply. RTP / targetWinRate is the mean multiple winners must be
+   * paid, and it has to land in (1, maxMultiplier] or the settlement calibrator cannot solve
+   * -- so we block the save here instead of letting the operator discover it as a 400.
+   */
+  const preview = useMemo(() => {
+    if (!cfg) return null;
+    const merged = { ...cfg, ...patch };
+    return checkFeasible({
+      houseEdge: merged.houseEdge,
+      maxMultiplier: merged.maxMultiplier,
+      minStakeCents: merged.minStakeCents,
+      maxStakeCents: merged.maxStakeCents,
+      defaultDurationS: merged.defaultDurationS,
+      tickRateMs: merged.tickRateMs,
+      driftBias: merged.driftBias,
+      volatility: merged.volatility,
+      targetWinRate: merged.targetWinRate,
+    });
+  }, [cfg, patch]);
+  const blocked = !!preview && !preview.ok;
+  const pendingRtp = cfg ? 1 - ({ ...cfg, ...patch }).houseEdge : 0;
+
   function save() {
     update.mutate(patch as Record<string, number>, {
-      onSuccess: () => toast.push({ tone: 'success', title: 'Game config updated', description: `${dirtyCount} field(s) saved.` }),
+      onSuccess: (next) => toast.push({ tone: 'success', title: `Game config updated (v${next.version})`, description: `${dirtyCount} field(s) live on the next round.` }),
       onError: (e) => toast.push({ tone: 'error', title: 'Update failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
     });
   }
@@ -70,7 +96,7 @@ function GameBody() {
     <>
       <PageHeader
         title="Game configuration"
-        subtitle="Live engine parameters. Changes take effect on the next round. RTP target is governed and read-only here."
+        subtitle="Live engine parameters, read straight from the database by the game engine. Saving bumps the config version and applies on the next round; trades already open keep the parameters they were priced with."
       />
 
       <Section title="Engine parameters">
@@ -83,6 +109,13 @@ function GameBody() {
             <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted">
               <span>
                 RTP target: <span className="font-medium text-fg tabular-nums">{(cfg.rtpTarget * 100).toFixed(2)}%</span>
+              </span>
+              <span>
+                Live version: <span className="font-medium text-fg tabular-nums">v{cfg.version}</span>
+              </span>
+              <span>
+                Mean winning multiple:{' '}
+                <span className="font-medium text-fg tabular-nums">{cfg.requiredMeanWinMultiplier.toFixed(2)}x</span>
               </span>
               <span>
                 Last updated:{' '}
@@ -106,9 +139,34 @@ function GameBody() {
                 />
               ))}
             </div>
+            {dirtyCount > 0 && preview ? (
+              <div
+                className={
+                  blocked
+                    ? 'rounded-xl border border-down/40 bg-down/10 p-3 text-xs text-down'
+                    : 'rounded-xl border border-border bg-surface-2 p-3 text-xs text-muted'
+                }
+                role={blocked ? 'alert' : undefined}
+              >
+                {blocked ? (
+                  <>
+                    <span className="font-semibold">Cannot apply: </span>
+                    {preview.reason}
+                  </>
+                ) : (
+                  <>
+                    After saving, RTP becomes{' '}
+                    <span className="font-semibold text-fg tabular-nums">{(pendingRtp * 100).toFixed(2)}%</span>, paid as a mean
+                    winning multiple of{' '}
+                    <span className="font-semibold text-fg tabular-nums">{preview.requiredMeanWinMultiplier.toFixed(2)}x</span>.
+                    Applies to the next round; trades already open keep the parameters they were priced with.
+                  </>
+                )}
+              </div>
+            ) : null}
             <div className="flex items-center gap-3">
-              <Button onClick={save} disabled={dirtyCount === 0 || update.isPending}>
-                {update.isPending ? 'Saving…' : dirtyCount > 0 ? `Save ${dirtyCount} change${dirtyCount > 1 ? 's' : ''}` : 'No changes'}
+              <Button onClick={save} disabled={dirtyCount === 0 || blocked || update.isPending}>
+                {update.isPending ? 'Saving…' : blocked ? 'Invalid configuration' : dirtyCount > 0 ? `Save ${dirtyCount} change${dirtyCount > 1 ? 's' : ''}` : 'No changes'}
               </Button>
               {dirtyCount > 0 ? (
                 <Button variant="ghost" onClick={() => cfg && setForm(Object.fromEntries(FIELDS.map((f) => [f.key, toField(cfg, f)])))}>

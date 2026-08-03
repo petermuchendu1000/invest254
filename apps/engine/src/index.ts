@@ -16,6 +16,7 @@ export * from "./authservice.js";
 export * from "./affiliateservice.js";
 export * from "./paging.js";
 export * from "./wallet.js";
+export * from "./gameconfig.js";
 export * from "./engagement.js";
 export * from "./game.js";
 export * from "./daycontext.js";

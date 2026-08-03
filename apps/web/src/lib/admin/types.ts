@@ -150,7 +150,12 @@ export interface GameConfigRow {
   tickRateMs: number;
   driftBias: number;
   volatility: number;
+  targetWinRate: number;
   rtpTarget: number;
+  /** Live config version; bumps on every save and is stamped on every position opened after. */
+  version: number;
+  /** RTP / targetWinRate. Must land in (1, maxMultiplier] or the engine cannot calibrate. */
+  requiredMeanWinMultiplier: number;
   updatedBy: string | null;
   updatedAtMs: number;
 }
@@ -163,6 +168,7 @@ export interface GameConfigPatch {
   tickRateMs?: number;
   driftBias?: number;
   volatility?: number;
+  targetWinRate?: number;
 }
 export interface AdminSeedRow {
   gameDayId: number | null;

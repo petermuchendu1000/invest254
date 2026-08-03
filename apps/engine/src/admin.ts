@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, type Cents } from "@invest254/shared";
+import { DEFAULT_CONFIG, checkFeasible, type Cents } from "@invest254/shared";
 import type { Querier } from "./wallet.js";
 import { type Page, type PageQuery, clampLimit, decodeKeyset, pageFrom } from "./paging.js";
 import type { InMemoryIdentityRepository } from "./identity.js";
@@ -64,13 +64,19 @@ export interface UserReportRow { userId: string; username: string; depositsCents
 export interface GameConfigRow {
   houseEdge: number; maxMultiplier: number; minStakeCents: Cents; maxStakeCents: Cents;
   defaultDurationS: number; tickRateMs: number; driftBias: number; volatility: number;
+  targetWinRate: number;             // share of positions that win, per direction (0028)
   rtpTarget: number;                 // derived: 1 - house_edge
+  /** game_config_versions.version now live. Bumps on every save; positions record it. */
+  version: number;
+  /** RTP / targetWinRate — must sit in (1, maxMultiplier] for the calibrator to solve. */
+  requiredMeanWinMultiplier: number;
   updatedBy: string | null; updatedAtMs: number;
 }
 /** Partial game_config edit (J5). Only provided keys change; the rest are left untouched. */
 export interface GameConfigPatch {
   houseEdge?: number; maxMultiplier?: number; minStakeCents?: number; maxStakeCents?: number;
   defaultDurationS?: number; tickRateMs?: number; driftBias?: number; volatility?: number;
+  targetWinRate?: number;
 }
 /** Realised RTP over one rolling window (J5). `realisedRtp` is null when there is no turnover yet. */
 export interface RtpWindowRow { window: string; settledPositions: number; turnoverCents: Cents; payoutCents: Cents; realisedRtp: number | null; }
@@ -219,10 +225,13 @@ function buildRtpMonitor(targetRtp: number, windows: RtpWindowRow[]): RtpMonitor
 /** Map a raw game_config row to the public DTO (rtpTarget derived as 1 - house_edge). */
 function mapGameConfigRow(x: any): GameConfigRow {
   const houseEdge = Number(x.house_edge);
+  const targetWinRate = Number(x.target_win_rate);
   return {
     houseEdge, maxMultiplier: Number(x.max_multiplier), minStakeCents: num(x.min_stake), maxStakeCents: num(x.max_stake),
     defaultDurationS: Number(x.default_duration_s), tickRateMs: Number(x.tick_rate_ms),
-    driftBias: Number(x.drift_bias), volatility: Number(x.volatility), rtpTarget: 1 - houseEdge,
+    driftBias: Number(x.drift_bias), volatility: Number(x.volatility), targetWinRate,
+    rtpTarget: 1 - houseEdge, version: Number(x.version ?? 0),
+    requiredMeanWinMultiplier: targetWinRate > 0 ? (1 - houseEdge) / targetWinRate : Number.POSITIVE_INFINITY,
     updatedBy: x.updated_by == null ? null : String(x.updated_by), updatedAtMs: ms(x.updated_at),
   };
 }
@@ -233,7 +242,9 @@ function defaultGameConfigRow(): GameConfigRow {
   return {
     houseEdge: c.houseEdge, maxMultiplier: c.maxMultiplier, minStakeCents: c.minStakeCents, maxStakeCents: c.maxStakeCents,
     defaultDurationS: c.defaultDurationS, tickRateMs: c.tickRateMs, driftBias: c.driftBias, volatility: c.volatility,
-    rtpTarget: 1 - c.houseEdge, updatedBy: null, updatedAtMs: Date.now(),
+    targetWinRate: c.targetWinRate, rtpTarget: 1 - c.houseEdge, version: 1,
+    requiredMeanWinMultiplier: (1 - c.houseEdge) / c.targetWinRate,
+    updatedBy: null, updatedAtMs: Date.now(),
   };
 }
 
@@ -304,12 +315,18 @@ export async function loadDarajaConfigFromDb(q: Querier): Promise<Partial<Daraja
   }
 }
 
-/** Mirror the game_config CHECK constraints; raises INVALID_CONFIG on any violation (J5). */
+/**
+ * Mirror the game_config CHECK constraints; raises INVALID_CONFIG on any violation (J5).
+ * Delegates to the shared `checkFeasible` so the in-memory repository, the database
+ * constraint and the engine's hot-reload guard cannot drift apart.
+ */
 function validateGameConfig(c: GameConfigRow): void {
-  const ok = c.houseEdge >= 0 && c.houseEdge < 1 && c.maxMultiplier > 1 && c.minStakeCents > 0
-    && c.maxStakeCents >= c.minStakeCents && c.defaultDurationS > 0 && c.tickRateMs > 0 && c.volatility > 0
-    && Number.isFinite(c.driftBias);
-  if (!ok) throw new Error("INVALID_CONFIG");
+  const verdict = checkFeasible({
+    houseEdge: c.houseEdge, maxMultiplier: c.maxMultiplier, minStakeCents: c.minStakeCents,
+    maxStakeCents: c.maxStakeCents, defaultDurationS: c.defaultDurationS, tickRateMs: c.tickRateMs,
+    driftBias: c.driftBias, volatility: c.volatility, targetWinRate: c.targetWinRate,
+  });
+  if (!verdict.ok) throw new Error("INVALID_CONFIG");
 }
 
 const num = (v: unknown): number => (typeof v === "string" ? Number(v) : (v as number)) || 0;
@@ -604,7 +621,7 @@ export class PgAdminRepository implements AdminRepository {
 
   async getGameConfig(): Promise<GameConfigRow> {
     const r = await this.q.query(
-      "select house_edge, max_multiplier, min_stake, max_stake, default_duration_s, tick_rate_ms, drift_bias, volatility, updated_by, updated_at from game_config where id = 1", []);
+      "select house_edge, max_multiplier, min_stake, max_stake, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version, updated_by, updated_at from game_config where id = 1", []);
     if (!r.rows.length) throw new Error("NOT_FOUND");
     return mapGameConfigRow(r.rows[0]);
   }
@@ -612,7 +629,7 @@ export class PgAdminRepository implements AdminRepository {
   async updateGameConfig(actorId: string, actorRole: string, patch: GameConfigPatch): Promise<GameConfigRow> {
     try {
       const r = await this.q.query(
-        "select house_edge, max_multiplier, min_stake, max_stake, default_duration_s, tick_rate_ms, drift_bias, volatility, updated_by, updated_at from fn_admin_update_game_config($1,$2,$3::jsonb)",
+        "select house_edge, max_multiplier, min_stake, max_stake, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version, updated_by, updated_at from fn_admin_update_game_config($1,$2,$3::jsonb)",
         [actorId, actorRole, JSON.stringify(patch)]);
       return mapGameConfigRow(r.rows[0]);
     } catch (e) { mapAdminError(e); }
@@ -1046,8 +1063,11 @@ export class InMemoryAdminRepository implements AdminRepository {
     if (patch.tickRateMs !== undefined) next.tickRateMs = patch.tickRateMs;
     if (patch.driftBias !== undefined) next.driftBias = patch.driftBias;
     if (patch.volatility !== undefined) next.volatility = patch.volatility;
+    if (patch.targetWinRate !== undefined) next.targetWinRate = patch.targetWinRate;
     next.rtpTarget = 1 - next.houseEdge;
+    next.requiredMeanWinMultiplier = next.targetWinRate > 0 ? next.rtpTarget / next.targetWinRate : Number.POSITIVE_INFINITY;
     validateGameConfig(next);
+    next.version = before.version + 1;
     next.updatedBy = actorId;
     next.updatedAtMs = Date.now();
     this.gameConfig = next;

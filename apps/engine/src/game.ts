@@ -1,5 +1,6 @@
 import {
-  CurveGenerator, SettlementEngine, type GameConfig, type Direction, type Outcome, type Tick,
+  CurveGenerator, SettlementEngine, type GameConfig, type VersionedGameConfig,
+  type Direction, type Outcome, type Tick,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
 
@@ -10,6 +11,7 @@ export interface Position {
   status: "open" | "settled";
   sellable: boolean;
   gameDayId: number | null;               // the day whose seed determined this outcome
+  configVersion: number;                  // the game_config version that priced this outcome
 }
 export interface SettledEvent { position: Position; lockedMultiplier: number; payoutCents: number; pnlCents: number; balance: number; mode: "auto" | "manual"; }
 export interface UpdateEvent { positionId: string; liveMultiplier: number; livePnlCents: number; secondsLeft: number; sellable: boolean; }
@@ -27,6 +29,8 @@ export interface ActiveContext {
   settlement: SettlementEngine;
   dayStartMs: number;
   gameDayId: number | null;
+  /** The game_config version baked into `curve`/`settlement`; recorded on every position. */
+  configVersion: number;
 }
 export type ActiveContextProvider = () => ActiveContext;
 
@@ -39,12 +43,23 @@ export class GameServer {
   private tickTimer: NodeJS.Timeout | undefined;
   private stepping = false;
 
+  /** tickRateMs the running interval was created with, so we only reschedule on a real change. */
+  private tickRateMs: number | undefined;
+
+  /**
+   * `getConfig` is a provider rather than a value: game configuration is edited live in the
+   * admin panel, and every read below must see the current row instead of a snapshot frozen
+   * at process boot (which is precisely the bug this replaced).
+   */
   constructor(
     private readonly getActiveContext: ActiveContextProvider,
     private readonly repo: GameRepository,
-    private readonly cfg: GameConfig,
+    private readonly getConfig: () => GameConfig | VersionedGameConfig,
     private readonly now: () => number = () => Date.now(),
   ) {}
+
+  /** The configuration in force right now. */
+  private get cfg(): GameConfig { return this.getConfig(); }
 
   subscribe(l: Listener): () => void { this.listeners.add(l); return () => this.listeners.delete(l); }
   private emitTick(t: Tick) { for (const l of this.listeners) l.onTick?.(t); }
@@ -52,8 +67,33 @@ export class GameServer {
   private emitSettled(e: SettledEvent) { for (const l of this.listeners) l.onSettled?.(e); }
   private emitError(err: Error, ctx: string) { for (const l of this.listeners) l.onError?.(err, ctx); }
 
-  start(): void { if (!this.tickTimer) this.tickTimer = setInterval(() => { void this.step(); }, this.cfg.tickRateMs); }
-  stop(): void { if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = undefined; } }
+  start(): void {
+    if (this.tickTimer) return;
+    this.tickRateMs = this.cfg.tickRateMs;
+    this.tickTimer = setInterval(() => { void this.step(); }, this.tickRateMs);
+  }
+  stop(): void {
+    if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = undefined; }
+    this.tickRateMs = undefined;
+  }
+
+  /**
+   * Re-arm the tick loop when the configured tick rate changes. setInterval captures its
+   * period at creation, so a live tick-rate edit needs the timer torn down and recreated;
+   * without this the admin's "Tick rate (ms)" field would be silently inert until redeploy.
+   * Returns true when the loop was actually rescheduled.
+   */
+  applyTickRate(): boolean {
+    const next = this.cfg.tickRateMs;
+    if (!this.tickTimer || next === this.tickRateMs) return false;
+    clearInterval(this.tickTimer);
+    this.tickRateMs = next;
+    this.tickTimer = setInterval(() => { void this.step(); }, next);
+    return true;
+  }
+
+  /** Current tick period in ms, or undefined when the loop is stopped. Exposed for tests/health. */
+  currentTickRateMs(): number | undefined { return this.tickRateMs; }
 
   async step(): Promise<void> {
     if (this.stepping) return;
@@ -97,8 +137,9 @@ export class GameServer {
     const { positionId, newBalance } = await this.repo.openPosition({
       userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
       entryRate: outcome.entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
+      configVersion: ctx.configVersion,
     });
-    const p: Position = { id: positionId, userId: input.userId, stakeCents: input.stakeCents, direction: input.direction, durationS, openedAtMs, expiresAtMs: openedAtMs + durationS * 1000, entryT, outcome, status: "open", sellable: outcome.result === "win", gameDayId: ctx.gameDayId };
+    const p: Position = { id: positionId, userId: input.userId, stakeCents: input.stakeCents, direction: input.direction, durationS, openedAtMs, expiresAtMs: openedAtMs + durationS * 1000, entryT, outcome, status: "open", sellable: outcome.result === "win", gameDayId: ctx.gameDayId, configVersion: ctx.configVersion };
     this.positions.set(positionId, p);
     return { position: p, balance: newBalance };
   }
@@ -145,5 +186,12 @@ export class GameServer {
 
   getPosition(id: string): Position | undefined { return this.positions.get(id); }
   openCount(): number { let n = 0; for (const p of this.positions.values()) if (p.status === "open") n++; return n; }
-  onlineConfigSnapshot() { return { minStakeCents: this.cfg.minStakeCents, maxMultiplier: this.cfg.maxMultiplier, defaultDurationS: this.cfg.defaultDurationS, tickRateMs: this.cfg.tickRateMs }; }
+  onlineConfigSnapshot() {
+    const c = this.cfg;
+    return {
+      minStakeCents: c.minStakeCents, maxStakeCents: c.maxStakeCents, maxMultiplier: c.maxMultiplier,
+      defaultDurationS: c.defaultDurationS, tickRateMs: c.tickRateMs,
+      configVersion: (c as VersionedGameConfig).version ?? 0,
+    };
+  }
 }
