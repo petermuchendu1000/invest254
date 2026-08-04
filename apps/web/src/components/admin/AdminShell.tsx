@@ -53,18 +53,15 @@ const SECTIONS: NavSection[] = [
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const hydrated = useHydrated();
   const pathname = usePathname();
-  const { status, user, token } = useSession();
-  const { open: openAuth } = useAuthUi();
+  const token = useSession((s) => s.token);
+  const user = useSession((s) => s.user);
+  const openAuth = useAuthUi((s) => s.openAuth);
   const { logout } = useAuthActions();
 
-  const isSuper = user?.role === 'superadmin' || user?.role === 'owner';
-  const sections = SECTIONS.filter((s) => !s.superadmin || isSuper);
-  const active = (href: string) => (href === '/admin' ? pathname === '/admin' : pathname?.startsWith(href));
-
-  if (!hydrated || status === 'loading') {
+  if (!hydrated) {
     return (
-      <div className="flex min-h-dvh items-center justify-center">
-        <Skeleton className="h-8 w-40" />
+      <div className="mx-auto w-full max-w-app p-4">
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
@@ -72,63 +69,91 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   if (!token) {
     return (
       <Gate
-        title="Admin sign in required"
-        body="Sign in with an admin account to access the control panel."
+        title="Admin sign-in required"
+        body="Log in with an administrator account to access the back office."
+        action={<Button onClick={() => openAuth('login')}>Log in</Button>}
+      />
+    );
+  }
+  if (user && user.role !== 'admin' && user.role !== 'superadmin') {
+    return (
+      <Gate
+        title="Not authorised"
+        body="This area is for administrators only."
         action={
-          <Button onClick={() => openAuth('login')}>Sign in</Button>
+          <Link href="/">
+            <Button variant="outline">Back to app</Button>
+          </Link>
         }
       />
     );
   }
 
-  if (user?.role !== 'admin' && !isSuper) {
-    return (
-      <Gate
-        title="No admin access"
-        body="This account doesn't have admin privileges."
-        action={<Button variant="outline" onClick={logout}>Log out</Button>}
-      />
-    );
-  }
+  const isSuper = user?.role === 'superadmin';
+  const sections = SECTIONS.filter((s) => !s.superadmin || isSuper);
+  const active = (href: string) => (href === '/admin' ? pathname === '/admin' : pathname?.startsWith(href));
 
   return (
-    <div className="flex min-h-dvh">
-      <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-border bg-surface px-3 py-4">
-        <Link href="/" className="flex items-center gap-2 px-1">
-          <LogoMark className="h-7 w-7" />
-          <span className="text-sm font-semibold tracking-tight">Invest254 Admin</span>
-        </Link>
+    <div className="flex min-h-dvh flex-col md:flex-row">
+      {/* Sidebar (desktop) / top bar + scroll nav (mobile) */}
+      <aside
+        className={cn(
+          'flex shrink-0 flex-col border-b bg-surface md:h-dvh md:w-60 md:border-b-0 md:border-r md:sticky md:top-0',
+          isSuper ? 'border-warn/40' : 'border-border',
+        )}
+      >
+        <div className="flex items-center justify-between px-4 py-3">
+          <Link href="/admin" className="flex items-center gap-2">
+            <LogoMark className="h-7 w-7" />
+            <span className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold tracking-tight">invest254 {isSuper ? 'Console' : 'Admin'}</span>
+              <span className={cn('text-[10px] font-medium uppercase tracking-wide', isSuper ? 'text-warn' : 'text-muted')}>
+                {isSuper ? 'Owner · full authority' : 'Operations'}
+              </span>
+            </span>
+          </Link>
+        </div>
 
-        <nav className="flex flex-1 flex-col gap-3 overflow-y-auto">
-          {sections.map((s) => (
-            <div key={s.title} className="flex flex-col gap-0.5">
-              <span className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted">{s.title}</span>
-              {s.items.map((item) => (
+        <nav className="no-scrollbar flex gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:overflow-visible md:px-2">
+          {sections.map((section) => (
+            <React.Fragment key={section.title}>
+              <span
+                className={cn(
+                  'mt-2 hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider md:block',
+                  section.superadmin ? 'text-warn' : 'text-muted',
+                )}
+              >
+                {section.title}
+                {section.superadmin ? ' · owner' : ''}
+              </span>
+              {section.items.map((n) => (
                 <Link
-                  key={item.href}
-                  href={item.href}
+                  key={n.href}
+                  href={n.href}
+                  aria-current={active(n.href) ? 'page' : undefined}
                   className={cn(
-                    'flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition',
-                    active(item.href) ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:bg-surface-2 hover:text-fg',
+                    'flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition',
+                    active(n.href)
+                      ? section.superadmin
+                        ? 'bg-warn text-bg'
+                        : 'bg-accent text-accent-fg'
+                      : 'text-muted hover:bg-surface-2 hover:text-fg',
                   )}
                 >
-                  {item.icon}
-                  {item.label}
+                  {n.icon}
+                  {n.label}
                 </Link>
               ))}
-            </div>
+            </React.Fragment>
           ))}
         </nav>
 
-        <div className="flex flex-col gap-2 border-t border-border pt-3">
-          <div className="flex items-center gap-2 px-1">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold">
-              {user?.username?.slice(0, 2).toUpperCase() ?? '??'}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-xs font-medium">{user?.username}</span>
+        <div className="mt-auto hidden flex-col gap-2 border-t border-border px-4 py-3 md:flex">
+          <div className="flex flex-col gap-1">
+            <span className="truncate text-sm font-medium">@{user?.username}</span>
             <span
               className={cn(
-                'rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
                 isSuper ? 'bg-warn/15 text-warn' : 'bg-surface-2 text-muted',
               )}
             >
