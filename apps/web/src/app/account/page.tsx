@@ -42,7 +42,6 @@ export default function AccountPage() {
 
       <Card className="flex flex-col gap-3">
         <Row label="Username" value={`@${user.username}`} />
-        <Row label="Role" value={user.role} />
       </Card>
 
       <Card className="flex flex-col gap-3">

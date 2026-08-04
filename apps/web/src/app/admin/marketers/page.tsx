@@ -364,7 +364,7 @@ function PinAction({ m }: { m: AdminMarketerRow }) {
   const pin = useMarketerPin(m.id);
   const toast = useToast();
   const [p, setP] = useState('');
-  const valid = /^\d{4,6}$/.test(p);
+  const valid = /^\d{4}$/.test(p);
 
   function run() {
     pin.mutate(p, {
@@ -383,11 +383,11 @@ function PinAction({ m }: { m: AdminMarketerRow }) {
           <Input
             label="Set / reset PIN"
             inputMode="numeric"
-            maxLength={6}
+            maxLength={4}
             value={p}
-            onChange={(e) => setP(e.target.value.replace(/\D/g, ''))}
-            placeholder="4–6 digits"
-            hint="The marketer uses phone + this PIN to log in."
+            onChange={(e) => setP(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            placeholder="4 digits"
+            hint="The marketer uses phone + this 4-digit PIN to log in."
           />
         </div>
         <Button size="sm" variant="secondary" onClick={run} disabled={pin.isPending || !valid}>
