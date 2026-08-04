@@ -244,3 +244,31 @@ export function useAudit() {
     getNextPageParam: (l: Paginated<unknown>) => l.nextCursor ?? undefined,
   });
 }
+
+// ── User notifications (J7) ──
+import type { NotificationInput } from '@/lib/admin/types';
+
+export function useUserNotifications(id: string | null) {
+  const t = useTok();
+  return useQuery({
+    queryKey: ['admin', 'user-notifications', id],
+    queryFn: () => adminApi.userNotifications(t, id as string),
+    enabled: !!t && !!id,
+  });
+}
+export function useSendNotification(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: NotificationInput) => adminApi.sendNotification(t, id, body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin', 'user-notifications', id] }),
+  });
+}
+export function useResolveNotification(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (notificationId: number) => adminApi.resolveNotification(t, notificationId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin', 'user-notifications', id] }),
+  });
+}

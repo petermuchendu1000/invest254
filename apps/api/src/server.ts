@@ -1,6 +1,7 @@
 import {
   PgGameRepository, PgEngagementRepository, PgPaymentRepository, PgIdentityRepository,
   PaymentService, ChatService, ActivityService, AuthService, AffiliateService, AdminService, PgAdminRepository, makeDarajaClientFromConfig, loadDarajaConfigFromDb, makeVerifier, maskHandle,
+  NotificationService, PgNotificationRepository,
   GameConfigStore,
   type GameRepository, type EngagementRepository, type PaymentRepository,
   type Querier, type FairnessRecord, type ListenClient,
@@ -84,12 +85,14 @@ async function buildDeps(): Promise<ApiDeps> {
   });
   const affiliate = new AffiliateService(identity, daraja);
   const admin = new AdminService(new PgAdminRepository(q));
+  const notifications = new NotificationService(new PgNotificationRepository(q));
 
   return {
     verifier,
     auth,
     affiliate,
     admin,
+    notifications,
     config: () => gameConfig.active(),
     fairnessById: async (gameDayId: number): Promise<FairnessRecord | null> => {
       const r = await q.query(

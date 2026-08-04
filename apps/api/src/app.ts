@@ -1,6 +1,6 @@
 import { rtp, type GameConfig, type Cents, type VersionedGameConfig } from "@invest254/shared";
 import type {
-  FairnessRecord, ActivityRow, ChatRow, ChatPostResult, PaymentService, AuthService, AffiliateService, AdminService, Verifier,
+  FairnessRecord, ActivityRow, ChatRow, ChatPostResult, PaymentService, AuthService, AffiliateService, AdminService, NotificationService, Verifier,
   Page, PageQuery, LedgerEntry, PositionRecord, PositionDetail, PositionListQuery, TransactionRecord, TxListQuery,
 } from "@invest254/engine";
 import { Router, ApiError, serverFrom, type Ctx } from "./http.js";
@@ -9,6 +9,7 @@ import { registerHistoryRoutes } from "./app.history.js";
 import { registerAuthRoutes } from "./app.auth.js";
 import { registerAffiliateRoutes } from "./app.affiliate.js";
 import { registerAdminRoutes } from "./app.admin.js";
+import { registerNotificationRoutes } from "./app.notifications.js";
 import type { Server } from "node:http";
 
 /**
@@ -37,6 +38,8 @@ export interface ApiDeps {
     | "adjustBalance" | "listDeposits" | "depositsReconcile" | "reportDaily" | "reportByUser"
     | "getGameConfig" | "updateGameConfig" | "getMpesaConfig" | "updateMpesaConfig" | "rtpMonitor" | "listSeeds" | "rotateSeed"
     | "listAffiliatePayouts" | "listChat" | "hideChat" | "unhideChat" | "recordAction">;
+  /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
+  notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
   /**
    * Public game configuration source. A PROVIDER, not a value: config is edited live in the
    * admin panel, so a snapshot captured at boot would serve stale limits forever (the exact
@@ -139,6 +142,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerAuthRoutes(router, deps);
   registerAffiliateRoutes(router, deps);
   registerAdminRoutes(router, deps);
+  registerNotificationRoutes(router, deps);
   registerProtectedRoutes(router, deps);
   registerHistoryRoutes(router, deps);
   return router;

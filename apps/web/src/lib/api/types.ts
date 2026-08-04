@@ -168,3 +168,14 @@ export interface PayoutRequestResult {
   payoutId: string;
   amountCents: Cents;
 }
+
+/** A sticky notification shown to the player (J7). */
+export interface NotificationDto {
+  id: number;
+  level: 'info' | 'success' | 'warning' | 'error';
+  title: string;
+  body: string;
+  dismissible: boolean;
+  category: string | null;
+  createdAtMs: number;
+}

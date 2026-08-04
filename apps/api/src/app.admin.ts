@@ -215,7 +215,31 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     router.post(`${BASE}/admin/users/:id/${action}`, auth, admin, async (ctx: Ctx) => {
       const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
       const reason = typeof body.reason === "string" ? body.reason : null;
-      return domain(() => deps.admin.setUserStatus(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, STATUS_ACTION[action]!, reason));
+      const targetId = ctx.params.id!;
+      const result = await domain(() => deps.admin.setUserStatus(ctx.claims!.userId, ctx.claims!.role ?? "player", targetId, STATUS_ACTION[action]!, reason));
+      // Blocking, non-dismissible banner while the account is limited; auto-resolve on reactivate.
+      // Best-effort so a notification hiccup never fails the status change (the money-safe op).
+      try {
+        if (action === "suspend" || action === "ban") {
+          await deps.notifications.resolveByCategory(targetId, "account_limited");
+          await deps.notifications.create({
+            userId: targetId, level: "error", dismissible: false, category: "account_limited",
+            title: action === "ban" ? "Your account has been banned" : "Your account is suspended",
+            body: reason && reason.trim() !== ""
+              ? `Reason: ${reason.trim()}. Contact support if you believe this is a mistake.`
+              : "Some actions are unavailable. Contact support if you believe this is a mistake.",
+            createdBy: ctx.claims!.userId,
+          });
+        } else if (action === "reactivate") {
+          await deps.notifications.resolveByCategory(targetId, "account_limited");
+          await deps.notifications.create({
+            userId: targetId, level: "success", dismissible: true, category: "account_reactivated",
+            title: "Your account has been reactivated", body: "Welcome back — full access is restored.",
+            createdBy: ctx.claims!.userId,
+          });
+        }
+      } catch { /* non-fatal: status change already succeeded */ }
+      return result;
     });
   }
 

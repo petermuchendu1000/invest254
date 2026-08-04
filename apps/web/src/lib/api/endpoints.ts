@@ -9,6 +9,7 @@ import type {
   GameConfigDto,
   LedgerEntryDto,
   MeDto,
+  NotificationDto,
   Paginated,
   PayoutRequestResult,
   PositionDetailDto,
@@ -108,4 +109,9 @@ export const api = {
     }),
   affiliateRequestPayout: (token: string) =>
     apiFetch<PayoutRequestResult>('/affiliate/payouts', { method: 'POST', token }),
+
+  // Sticky notifications (J7)
+  notifications: (token: string) => apiFetch<{ items: NotificationDto[] }>('/notifications', { token }),
+  dismissNotification: (token: string, id: number) =>
+    apiFetch<{ dismissed: boolean }>(`/notifications/${id}/dismiss`, { method: 'POST', token }),
 };
