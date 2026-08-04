@@ -17,7 +17,7 @@ import { useHydrated } from '@/lib/useHydrated';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { LivePnl } from '@/components/game/LivePnl';
 
-const CHIP_CENTS = [5000, 10000, 20000, 50000];
+const CHIP_CENTS = [10000, 20000, 50000, 100000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
 
 export function BetPanel() {
@@ -35,7 +35,7 @@ export function BetPanel() {
   const { data: wallet } = useWallet();
   const { status, activePosition, openPosition, sell } = useGameSocket();
 
-  const minStakeCents = config?.minStakeCents ?? 5000;
+  const minStakeCents = config?.minStakeCents ?? 10000;
   const maxStakeCents = config?.maxStakeCents;
   const defaultDurationS = config?.defaultDurationS ?? 10;
 

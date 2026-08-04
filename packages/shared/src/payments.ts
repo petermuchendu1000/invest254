@@ -4,9 +4,9 @@ import { assertCents, type Cents } from "./money.js";
  * Payment input rules (M-Pesa / KES). Pure and deterministic so they can be unit-tested
  * and shared by the engine and any HTTP transport. Money is integer cents of KES.
  *
- * Defaults (docs/07 §5): min deposit KES 100, min withdrawal KES 200.
+ * Defaults (docs/07 §5): min deposit KES 200, min withdrawal KES 200.
  */
-export const MIN_DEPOSIT_CENTS: Cents = 10_000;     // KES 100
+export const MIN_DEPOSIT_CENTS: Cents = 20_000;     // KES 200
 export const MIN_WITHDRAWAL_CENTS: Cents = 20_000;  // KES 200
 
 /**
