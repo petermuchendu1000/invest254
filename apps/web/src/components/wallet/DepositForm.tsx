@@ -15,7 +15,7 @@ import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
 
 /** Common top-up amounts (KES). One tap beats typing on mobile (NN/g: match input to data). */
-const QUICK_KES = [100, 500, 1000, 5000] as const;
+const QUICK_KES = [200, 500, 1000, 5000] as const;
 const MIN_KES = centsToKes(MIN_DEPOSIT_CENTS);
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
