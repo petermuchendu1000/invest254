@@ -41,6 +41,7 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
       return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit).map(profileOf);
     },
     async profile(id: string): Promise<MarketerProfile | null> { const m = byId.get(id); return m ? profileOf(m) : null; },
+    async profileByPhone(phone: string): Promise<MarketerProfile | null> { const id = byPhone.get(phone); const m = id ? byId.get(id) : undefined; return m ? profileOf(m) : null; },
     async credit(id: string, amountCents: number, ref: string | null, meta: unknown): Promise<number> {
       if (amountCents <= 0) throw new Error("AMOUNT_MUST_BE_POSITIVE");
       if (ref && refs.has(ref)) return refs.get(ref)!.balance;

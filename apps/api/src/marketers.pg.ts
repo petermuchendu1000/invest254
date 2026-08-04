@@ -44,6 +44,11 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
       return rows.length ? toProfile(rows[0]) : null;
     },
 
+    async profileByPhone(phone): Promise<MarketerProfile | null> {
+      const { rows } = await query("SELECT * FROM public.marketer_profiles WHERE phone = $1", [phone]);
+      return rows.length ? toProfile(rows[0]) : null;
+    },
+
     async credit(id, amountCents, ref, meta): Promise<number> {
       const { rows } = await query(
         "SELECT public.fn_marketer_credit($1, $2, $3, $4::jsonb) AS balance",

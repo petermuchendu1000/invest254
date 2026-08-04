@@ -92,6 +92,8 @@ export interface MarketerRepo {
   create(name: string, phone: string): Promise<MarketerRow>;
   list(limit: number): Promise<MarketerProfile[]>;
   profile(id: string): Promise<MarketerProfile | null>;
+  /** Look up a marketer by phone (the identity shared with the invest254 website account). */
+  profileByPhone(phone: string): Promise<MarketerProfile | null>;
   credit(id: string, amountCents: number, ref: string | null, meta: unknown): Promise<number>;
   withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, method: string): Promise<WithdrawResult>;
   setFuliza(id: string, amountCents: number): Promise<number>;
@@ -270,6 +272,37 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const token = await deps.auth.issueToken(id, "marketer");
     const marketerProfile = await deps.marketers.profile(id);
     return { token, marketer: marketerProfile };
+  });
+
+  // Website-credential login: the marketer signs in with the SAME phone + password they use on the
+  // invest254 website. We verify the website account, then resolve the marketer wallet linked to
+  // that phone and mint a marketer-scoped token. This is what lets the app fetch the correct
+  // marketer name + number at login instead of showing a hardcoded identity.
+  //  - bad phone/password           -> 401 INVALID_CREDENTIALS (generic, no enumeration)
+  //  - valid account, not a marketer -> 403 NOT_MARKETER
+  //  - marketer suspended/disabled   -> 403 MARKETER_INACTIVE
+  router.post(`${BASE}/marketers/auth/login-web`, loginLimit, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const phone = reqStr(b, "phone");
+    // Read the password verbatim (no trim) so credentials aren't silently mangled.
+    const password = typeof b.password === "string" ? b.password : "";
+    if (password.length === 0) throw new ApiError("VALIDATION", "password is required", 400);
+
+    // 1) Prove the website account (phone + password). Any failure collapses to a generic 401.
+    try {
+      await deps.auth.login({ phone, password });
+    } catch {
+      throw new ApiError("INVALID_CREDENTIALS", "invalid phone or password", 401);
+    }
+
+    // 2) The website identity must be linked to an ACTIVE marketer wallet (same phone).
+    const profile = await domain(() => deps.marketers.profileByPhone(phone));
+    if (!profile) throw new ApiError("NOT_MARKETER", "not a marketer account", 403);
+    if (profile.status !== "active") throw new ApiError("MARKETER_INACTIVE", `marketer is ${profile.status}`, 403);
+
+    // 3) Mint a marketer-scoped token (subject = marketer id, as requireMarketer/me expect).
+    const token = await deps.auth.issueToken(profile.id, "marketer");
+    return { token, marketer: profile };
   });
 
   // The authenticated marketer's own profile (name/initials/balance/Fuliza/airtime).
