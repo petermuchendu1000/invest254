@@ -145,7 +145,7 @@ setInterval(() => {
   })();
 }, 60_000).unref();
 
-const wss = new WebSocketServer({ port: PORT });
+const wss = new WebSocketServer({ host: "0.0.0.0", port: PORT });
 wss.on("connection", (ws) => {
   all.add(ws);
   send(ws, "hello", { serverTime: Date.now(), serverSeedHash: seeds.getActive().seedHash, tradeDate: seeds.getActive().dateKey, gameConfig: game.onlineConfigSnapshot() });
