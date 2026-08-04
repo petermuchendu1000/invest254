@@ -68,14 +68,19 @@ test("login rejects wrong password and unknown phone with a generic error", asyn
   await assert.rejects(() => auth.login({ phone: "garbage", password: "Password1" }), /INVALID_CREDENTIALS/);
 });
 
-test("login is gated on active status (suspended/banned rejected)", async () => {
+test("login is NOT gated on status — a limited account can still sign in to deposit", async () => {
   const repo = new InMemoryIdentityRepository();
   const { auth } = svc(repo);
-  await auth.register({ phone: "0712345678", username: "alice", password: "Password1" });
+  const reg = await auth.register({ phone: "0712345678", username: "alice", password: "Password1" });
+  // A suspended (limited) player can still log in — trading/withdrawal are blocked at the money
+  // layer, but the account must be able to deposit and view its balance.
   repo.setStatus("254712345678", "suspended");
-  await assert.rejects(() => auth.login({ phone: "0712345678", password: "Password1" }), /ACCOUNT_SUSPENDED/);
+  const s1 = await auth.login({ phone: "0712345678", password: "Password1" });
+  assert.equal(s1.userId, reg.userId);
+  // Even a banned account can sign in (so it can still deposit); cash-out is blocked elsewhere.
   repo.setStatus("254712345678", "banned");
-  await assert.rejects(() => auth.login({ phone: "0712345678", password: "Password1" }), /ACCOUNT_BANNED/);
+  const s2 = await auth.login({ phone: "0712345678", password: "Password1" });
+  assert.equal(s2.userId, reg.userId);
 });
 
 test("AuthService requires a jwt secret", () => {

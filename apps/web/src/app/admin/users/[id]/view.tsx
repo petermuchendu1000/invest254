@@ -233,7 +233,7 @@ function StatusActions({ id, status }: { id: string; status: string }) {
             <ConfirmButton label="Ban" variant="down" confirmLabel="Ban account" busy={m.isPending} onConfirm={() => run('ban')} />
           ) : null}
         </div>
-        <p className="text-xs text-muted">Suspended users can&apos;t log in; banned is permanent. Every change is audited.</p>
+        <p className="text-xs text-muted">Suspended or banned accounts can still sign in and deposit, but cannot open trades or withdraw. Banned is permanent. Every change is audited.</p>
       </Card>
     </Section>
   );

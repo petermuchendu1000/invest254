@@ -151,7 +151,10 @@ export class AuthService {
     const rec = await this.repo.findByPhone(phone);
     const ok = await verifyPassword(input.password, rec?.passwordHash ?? (await DUMMY_HASH));
     if (!rec || !ok) throw new Error("INVALID_CREDENTIALS");
-    if (rec.status !== "active") throw new Error(`ACCOUNT_${rec.status.toUpperCase()}`); // SUSPENDED / BANNED
+    // Account status does NOT gate login. A limited/suspended/banned player can still sign in
+    // so they can DEPOSIT and see their balance. Trading and withdrawal are gated separately at
+    // the money layer (fn_open_position / fn_create_withdrawal reject a non-active account), so a
+    // limited account can top up but cannot open new trades or cash out. Deposits stay open.
     const mfa = await this.repo.getMfa(rec.userId);
     if (mfa?.enabled) await this.assertSecondFactor(rec.userId, mfa, input.totp, input.recoveryCode);
     const token = await this.issueToken(rec.userId, rec.role);
