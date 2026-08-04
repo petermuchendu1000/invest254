@@ -37,7 +37,8 @@ export interface ApiDeps {
     "overview" | "listUsers" | "getUserDetail" | "listUserActivity" | "setUserStatus" | "setCommissionRate" | "setUserRole" | "listWithdrawals" | "listAudit"
     | "adjustBalance" | "listDeposits" | "depositsReconcile" | "reportDaily" | "reportByUser"
     | "getGameConfig" | "updateGameConfig" | "getMpesaConfig" | "updateMpesaConfig" | "rtpMonitor" | "listSeeds" | "rotateSeed"
-    | "listAffiliatePayouts" | "listChat" | "hideChat" | "unhideChat" | "recordAction">;
+    | "listAffiliatePayouts" | "listChat" | "hideChat" | "unhideChat" | "recordAction"
+    | "adjustBalanceKind" | "clearBalance" | "getUserOverrides" | "setUserOverrides">;
   /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
   /**

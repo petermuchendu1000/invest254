@@ -3,6 +3,10 @@ import {
   type Direction, type Outcome, type Tick,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
+import { overrideAffectsPricing, userSettlement, type UserOverride } from "./overrides.js";
+
+/** Async provider of a user's admin overrides (null = none). Injected so the money engine stays testable. */
+export type LoadOverride = (userId: string) => Promise<UserOverride | null>;
 
 export interface Position {
   id: string; userId: string; stakeCents: number; direction: Direction; durationS: number;
@@ -56,7 +60,29 @@ export class GameServer {
     private readonly repo: GameRepository,
     private readonly getConfig: () => GameConfig | VersionedGameConfig,
     private readonly now: () => number = () => Date.now(),
+    /** Optional per-user admin overrides (J8): win rate / max multiplier / duration / stake bounds. */
+    private readonly loadOverride?: LoadOverride,
   ) {}
+
+  /** Per-user pricing settlements, cached by (configVersion, gameDay, winRate, maxMultiplier). */
+  private readonly userSettlementCache = new Map<string, SettlementEngine>();
+
+  /**
+   * The SettlementEngine that prices THIS user's round. For a pricing override (win rate / cap)
+   * a per-user engine is built once and cached; an infeasible override safely falls back to the
+   * global engine. Non-override users always get the global engine.
+   */
+  private settlementFor(ctx: ActiveContext, ov: UserOverride | null): SettlementEngine {
+    if (!overrideAffectsPricing(ov)) return ctx.settlement;
+    const o = ov!;
+    const key = `${ctx.configVersion}:${ctx.gameDayId}:${o.winRate ?? "g"}:${o.maxWinMultiplier ?? "g"}`;
+    let s = this.userSettlementCache.get(key);
+    if (!s) {
+      s = userSettlement(ctx.curve, this.cfg, o) ?? ctx.settlement;
+      this.userSettlementCache.set(key, s);
+    }
+    return s;
+  }
 
   /** The configuration in force right now. */
   private get cfg(): GameConfig { return this.getConfig(); }
@@ -124,15 +150,20 @@ export class GameServer {
 
   /** Open a position: outcome committed in memory; stake+position+ledger persisted atomically by the repo. */
   async openPosition(input: { userId: string; stakeCents: number; direction: Direction; durationS?: number }): Promise<{ position: Position; balance: number }> {
-    const durationS = input.durationS ?? this.cfg.defaultDurationS;
+    // Per-user admin overrides (J8): forced auto-sell duration, per-user stake bounds, and a
+    // per-user pricing settlement (win rate / max multiplier). NULL fields fall back to global.
+    const ov = this.loadOverride ? await this.loadOverride(input.userId) : null;
+    const durationS = input.durationS ?? ov?.tradeDurationS ?? this.cfg.defaultDurationS;
+    const minStake = ov?.minStakeCents ?? this.cfg.minStakeCents;
+    const maxStake = ov?.maxStakeCents ?? this.cfg.maxStakeCents;
     if (!Number.isInteger(input.stakeCents)) throw new RangeError("stake must be integer cents");
-    if (input.stakeCents < this.cfg.minStakeCents) throw new Error(`STAKE_BELOW_MIN: min ${this.cfg.minStakeCents}`);
-    if (input.stakeCents > this.cfg.maxStakeCents) throw new Error(`STAKE_ABOVE_MAX: max ${this.cfg.maxStakeCents}`);
+    if (input.stakeCents < minStake) throw new Error(`STAKE_BELOW_MIN: min ${minStake}`);
+    if (input.stakeCents > maxStake) throw new Error(`STAKE_ABOVE_MAX: max ${maxStake}`);
     if (durationS <= 0) throw new RangeError("duration must be > 0");
     const ctx = this.getActiveContext();
     const openedAtMs = this.now();
     const entryT = (openedAtMs - ctx.dayStartMs) / 1000;
-    const outcome = ctx.settlement.settle(input.stakeCents, input.direction, entryT);
+    const outcome = this.settlementFor(ctx, ov).settle(input.stakeCents, input.direction, entryT);
     const nonce = (nonceCounter = (nonceCounter + 1) % Number.MAX_SAFE_INTEGER);
     const { positionId, newBalance } = await this.repo.openPosition({
       userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,

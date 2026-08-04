@@ -1,7 +1,8 @@
 import { dateKeyUTC } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
 import type { SeedManager } from "./daycontext.js";
-import type { GameServer, Position } from "./game.js";
+import type { GameServer, Position, LoadOverride } from "./game.js";
+import { overrideAffectsPricing, userSettlement } from "./overrides.js";
 
 export interface RecoveryReport {
   scanned: number;   // open positions found in the DB
@@ -32,6 +33,9 @@ export class RecoveryService {
     private readonly seeds: SeedManager,
     private readonly game: GameServer,
     private readonly now: () => number = () => Date.now(),
+    /** Same per-user override provider the GameServer opens with, so an override position reprices
+     *  identically after a crash (see overrides.ts for the mid-flight-change caveat). */
+    private readonly loadOverride?: LoadOverride,
   ) {}
 
   async recover(): Promise<RecoveryReport> {
@@ -44,7 +48,13 @@ export class RecoveryService {
         const dateKey = dateKeyUTC(row.openedAtMs);
         const ctx = await this.seeds.contextFor(dateKey, row.configVersion);
         const entryT = (row.openedAtMs - ctx.dayStartMs) / 1000;
-        const outcome = ctx.settlement.settle(row.stakeCents, row.direction, entryT);
+        // Reprice an override position with its per-user settlement (falls back to global if the
+        // override is absent or infeasible), exactly matching how it was priced at open.
+        const ov = this.loadOverride ? await this.loadOverride(row.userId) : null;
+        const settlement = overrideAffectsPricing(ov)
+          ? (userSettlement(ctx.curve, ctx.cfg, ov!) ?? ctx.settlement)
+          : ctx.settlement;
+        const outcome = settlement.settle(row.stakeCents, row.direction, entryT);
         const expiresAtMs = row.openedAtMs + row.durationS * 1000;
 
         if (nowMs >= expiresAtMs) {

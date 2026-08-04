@@ -40,6 +40,20 @@ export interface SetCommissionRateResult { userId: string; commissionRate: numbe
 export interface SetUserRoleResult { userId: string; role: string; }
 /** Result of a manual wallet balance adjustment (J3). */
 export interface AdjustBalanceResult { userId: string; amountCents: Cents; newBalanceCents: Cents; direction: "credit" | "debit"; }
+// J8 — per-player controls: balance ops on either wallet + clear, and per-user engine overrides.
+export type BalanceKind = "real" | "bonus";
+export interface AdjustBalanceKindResult { userId: string; kind: BalanceKind; amountCents: Cents; newBalanceCents: Cents; direction: "credit" | "debit"; }
+export interface ClearBalanceResult { userId: string; realBalanceCents: Cents; bonusBalanceCents: Cents; }
+export interface UserOverrideRow {
+  userId: string;
+  winRate: number | null; tradeDurationS: number | null; maxWinMultiplier: number | null;
+  minStakeCents: Cents | null; maxStakeCents: Cents | null; notes: string | null;
+  updatedBy: string | null; updatedAtMs: number | null;
+}
+export interface UserOverridePatch {
+  winRate?: number | null; tradeDurationS?: number | null; maxWinMultiplier?: number | null;
+  minStakeCents?: Cents | null; maxStakeCents?: Cents | null; notes?: string | null;
+}
 /** A deposit transaction as the admin deposits monitor sees it (J3). */
 export interface AdminDepositRow {
   txId: string; userId: string; amountCents: Cents; status: string; phone: string;
@@ -171,6 +185,11 @@ export interface AdminRepository {
   listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>>;
   listAudit(q: PageQuery): Promise<Page<AdminAuditRow>>;
   adjustBalance(actorId: string, actorRole: string, targetId: string, amountCents: Cents, reason: string): Promise<AdjustBalanceResult>;
+  // J8 — balance ops on either wallet, one-shot clear, and per-user engine overrides.
+  adjustBalanceKind(actorId: string, actorRole: string, targetId: string, amountCents: Cents, kind: BalanceKind, reason: string): Promise<AdjustBalanceKindResult>;
+  clearBalance(actorId: string, actorRole: string, targetId: string, kind: "real" | "bonus" | "both", reason: string): Promise<ClearBalanceResult>;
+  getUserOverrides(userId: string): Promise<UserOverrideRow | null>;
+  setUserOverrides(actorId: string, actorRole: string, targetId: string, patch: UserOverridePatch): Promise<UserOverrideRow>;
   listDeposits(q: AdminDepositListQuery): Promise<Page<AdminDepositRow>>;
   depositsReconcile(staleMinutes: number): Promise<AdminDepositsReconcile>;
   reportDaily(range: ReportRange): Promise<DailyReportRow[]>;
@@ -347,6 +366,35 @@ function mapAdminError(e: unknown): never {
 
 // ─────────────────────────── Postgres-backed admin repository ───────────────────────────
 
+/** Map a user_overrides row to the wire DTO (nulls preserved = "use the global value"). */
+function mapOverrideRow(x: any): UserOverrideRow {
+  const n = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+  return {
+    userId: String(x.user_id),
+    winRate: n(x.win_rate),
+    tradeDurationS: x.trade_duration_s == null ? null : Number(x.trade_duration_s),
+    maxWinMultiplier: n(x.max_win_multiplier),
+    minStakeCents: x.min_stake == null ? null : Number(x.min_stake),
+    maxStakeCents: x.max_stake == null ? null : Number(x.max_stake),
+    notes: x.notes == null ? null : String(x.notes),
+    updatedBy: x.updated_by == null ? null : String(x.updated_by),
+    updatedAtMs: x.updated_at == null ? null : ms(x.updated_at),
+  };
+}
+
+/** camelCase patch -> the snake_case jsonb the RPC reads. A key present (even null) is applied;
+ *  an absent key is left unchanged. null clears a field back to the global default. */
+function buildOverridePatch(patch: UserOverridePatch): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if ("winRate" in patch) out["win_rate"] = patch.winRate ?? null;
+  if ("tradeDurationS" in patch) out["trade_duration_s"] = patch.tradeDurationS ?? null;
+  if ("maxWinMultiplier" in patch) out["max_win_multiplier"] = patch.maxWinMultiplier ?? null;
+  if ("minStakeCents" in patch) out["min_stake"] = patch.minStakeCents ?? null;
+  if ("maxStakeCents" in patch) out["max_stake"] = patch.maxStakeCents ?? null;
+  if ("notes" in patch) out["notes"] = patch.notes ?? null;
+  return out;
+}
+
 export class PgAdminRepository implements AdminRepository {
   constructor(private readonly q: Querier) {}
 
@@ -514,6 +562,38 @@ export class PgAdminRepository implements AdminRepository {
       const x = r.rows[0];
       const amt = num(x.amount);
       return { userId: String(x.user_id), amountCents: amt, newBalanceCents: num(x.new_balance), direction: amt >= 0 ? "credit" : "debit" };
+    } catch (e) { mapAdminError(e); }
+  }
+
+  async adjustBalanceKind(actorId: string, actorRole: string, targetId: string, amountCents: Cents, kind: BalanceKind, reason: string): Promise<AdjustBalanceKindResult> {
+    try {
+      const r = await this.q.query("select user_id, kind, amount, new_balance from fn_admin_adjust_balance_kind($1,$2,$3,$4,$5,$6)", [actorId, actorRole, targetId, amountCents, kind, reason]);
+      const x = r.rows[0];
+      const amt = num(x.amount);
+      return { userId: String(x.user_id), kind: String(x.kind) as BalanceKind, amountCents: amt, newBalanceCents: num(x.new_balance), direction: amt >= 0 ? "credit" : "debit" };
+    } catch (e) { mapAdminError(e); }
+  }
+
+  async clearBalance(actorId: string, actorRole: string, targetId: string, kind: "real" | "bonus" | "both", reason: string): Promise<ClearBalanceResult> {
+    try {
+      const r = await this.q.query("select user_id, real_balance, bonus_balance from fn_admin_clear_balance($1,$2,$3,$4,$5)", [actorId, actorRole, targetId, kind, reason]);
+      const x = r.rows[0];
+      return { userId: String(x.user_id), realBalanceCents: num(x.real_balance), bonusBalanceCents: num(x.bonus_balance) };
+    } catch (e) { mapAdminError(e); }
+  }
+
+  async getUserOverrides(userId: string): Promise<UserOverrideRow | null> {
+    const r = await this.q.query(
+      "select user_id, win_rate, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at from user_overrides where user_id = $1", [userId]);
+    return r.rows.length ? mapOverrideRow(r.rows[0]) : null;
+  }
+
+  async setUserOverrides(actorId: string, actorRole: string, targetId: string, patch: UserOverridePatch): Promise<UserOverrideRow> {
+    try {
+      const r = await this.q.query(
+        "select user_id, win_rate, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at from fn_admin_set_user_overrides($1,$2,$3,$4::jsonb)",
+        [actorId, actorRole, targetId, JSON.stringify(buildOverridePatch(patch))]);
+      return mapOverrideRow(r.rows[0]);
     } catch (e) { mapAdminError(e); }
   }
 
@@ -809,6 +889,9 @@ export class InMemoryAdminRepository implements AdminRepository {
   private gameConfig: GameConfigRow = defaultGameConfigRow();
   private mpesa: MpesaInternal = defaultMpesaInternal();
   private readonly seedRows = new Map<string, AdminSeedRow>();
+  // J8 in-memory stores (bonus wallet + per-user overrides) for the test harness.
+  private readonly bonusBal = new Map<string, number>();
+  private readonly overrides = new Map<string, UserOverrideRow>();
   constructor(
     private readonly identity: InMemoryIdentityRepository,
     private readonly payments: InMemoryPaymentRepository,
@@ -969,6 +1052,71 @@ export class InMemoryAdminRepository implements AdminRepository {
     const after = this.payments.adminApplyAdjustment(targetId, amountCents);
     this.record(actorId, actorRole, "balance.adjust", "user", targetId, { amount: amountCents, reason, before, after });
     return { userId: targetId, amountCents, newBalanceCents: after, direction: amountCents > 0 ? "credit" : "debit" };
+  }
+
+  async adjustBalanceKind(actorId: string, actorRole: string, targetId: string, amountCents: Cents, kind: BalanceKind, reason: string): Promise<AdjustBalanceKindResult> {
+    if (!ADMIN_ROLES.includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    if (!Number.isInteger(amountCents) || amountCents === 0) throw new Error("INVALID_AMOUNT");
+    if (kind !== "real" && kind !== "bonus") throw new Error("INVALID_KIND");
+    if (!reason || reason.trim() === "") throw new Error("REASON_REQUIRED");
+    const tgt = this.identity.adminUser(targetId);
+    if (!tgt) throw new Error("USER_NOT_FOUND");
+    if (tgt.role === "superadmin") throw new Error("SUPERADMIN_PROTECTED");
+    let after: number;
+    if (kind === "real") {
+      const before = await this.payments.getBalance(targetId);
+      if (before + amountCents < 0) throw new Error("INSUFFICIENT_FUNDS");
+      after = this.payments.adminApplyAdjustment(targetId, amountCents);
+    } else {
+      const before = this.bonusBal.get(targetId) ?? 0;
+      if (before + amountCents < 0) throw new Error("INSUFFICIENT_FUNDS");
+      after = before + amountCents;
+      this.bonusBal.set(targetId, after);
+    }
+    this.record(actorId, actorRole, "balance.adjust", "user", targetId, { kind, amount: amountCents, reason, after });
+    return { userId: targetId, kind, amountCents, newBalanceCents: after, direction: amountCents > 0 ? "credit" : "debit" };
+  }
+
+  async clearBalance(actorId: string, actorRole: string, targetId: string, kind: "real" | "bonus" | "both", reason: string): Promise<ClearBalanceResult> {
+    if (!ADMIN_ROLES.includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    if (kind !== "real" && kind !== "bonus" && kind !== "both") throw new Error("INVALID_KIND");
+    if (!reason || reason.trim() === "") throw new Error("REASON_REQUIRED");
+    const tgt = this.identity.adminUser(targetId);
+    if (!tgt) throw new Error("USER_NOT_FOUND");
+    if (tgt.role === "superadmin") throw new Error("SUPERADMIN_PROTECTED");
+    if (kind === "real" || kind === "both") {
+      const real = await this.payments.getBalance(targetId);
+      if (real !== 0) this.payments.adminApplyAdjustment(targetId, -real);
+    }
+    if (kind === "bonus" || kind === "both") this.bonusBal.set(targetId, 0);
+    this.record(actorId, actorRole, "balance.clear", "user", targetId, { kind, reason });
+    return { userId: targetId, realBalanceCents: await this.payments.getBalance(targetId), bonusBalanceCents: this.bonusBal.get(targetId) ?? 0 };
+  }
+
+  async getUserOverrides(userId: string): Promise<UserOverrideRow | null> {
+    return this.overrides.get(userId) ?? null;
+  }
+
+  async setUserOverrides(actorId: string, actorRole: string, targetId: string, patch: UserOverridePatch): Promise<UserOverrideRow> {
+    if (!ADMIN_ROLES.includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    const tgt = this.identity.adminUser(targetId);
+    if (!tgt) throw new Error("USER_NOT_FOUND");
+    const cur: UserOverrideRow = this.overrides.get(targetId) ?? {
+      userId: targetId, winRate: null, tradeDurationS: null, maxWinMultiplier: null,
+      minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null,
+    };
+    const next: UserOverrideRow = { ...cur };
+    if ("winRate" in patch) next.winRate = patch.winRate ?? null;
+    if ("tradeDurationS" in patch) next.tradeDurationS = patch.tradeDurationS ?? null;
+    if ("maxWinMultiplier" in patch) next.maxWinMultiplier = patch.maxWinMultiplier ?? null;
+    if ("minStakeCents" in patch) next.minStakeCents = patch.minStakeCents ?? null;
+    if ("maxStakeCents" in patch) next.maxStakeCents = patch.maxStakeCents ?? null;
+    if ("notes" in patch) next.notes = patch.notes ?? null;
+    next.updatedBy = actorId;
+    next.updatedAtMs = Date.now();
+    this.overrides.set(targetId, next);
+    this.record(actorId, actorRole, "user.overrides", "user", targetId, { patch, after: next });
+    return next;
   }
 
   async listDeposits(q: AdminDepositListQuery): Promise<Page<AdminDepositRow>> {

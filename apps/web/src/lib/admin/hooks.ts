@@ -79,12 +79,36 @@ export function useAdjustBalance() {
   const t = useTok();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: string; amountCents: number; reason: string }) =>
-      adminApi.adjustBalance(t, v.id, v.amountCents, v.reason),
+    mutationFn: (v: { id: string; amountCents: number; reason: string; kind?: 'real' | 'bonus' }) =>
+      adminApi.adjustBalance(t, v.id, v.amountCents, v.reason, v.kind),
     onSuccess: (_d, v) => {
       void qc.invalidateQueries({ queryKey: ['admin', 'user', v.id] });
       void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
     },
+  });
+}
+export function useClearBalance() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; kind: 'real' | 'bonus' | 'both'; reason: string }) =>
+      adminApi.clearBalance(t, v.id, v.kind, v.reason),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'user', v.id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+export function useUserOverrides(id: string | null) {
+  const t = useTok();
+  return useQuery({ queryKey: ['admin', 'overrides', id], queryFn: () => adminApi.userOverrides(t, id as string), enabled: !!t && !!id });
+}
+export function useSetOverrides(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: import('@/lib/admin/types').UserOverridePatch) => adminApi.setUserOverrides(t, id, patch),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin', 'overrides', id] }),
   });
 }
 
