@@ -115,6 +115,10 @@ export interface DepositResult {
 export interface WithdrawalResult {
   transactionId: string;
   newBalance: Cents;
+  /** Marketer instant transfer: the amount went straight to the mpesa-app wallet (no approval). */
+  paid?: boolean;
+  /** New mpesa-app (marketer) wallet balance after an instant transfer. */
+  mpesaBalance?: Cents;
 }
 
 

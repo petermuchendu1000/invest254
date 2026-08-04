@@ -11,6 +11,12 @@ import { type Page, type PageQuery, clampLimit, decodeCursor, decodeKeyset, page
  */
 export interface CompleteResult { applied: boolean; status: string; newBalance: Cents; }
 export interface CreateWithdrawalResult { txId: string; newBalance: Cents; }
+/** Result of the marketer instant game->mpesa transfer path (see fn_marketer_game_withdraw). */
+export interface GameWithdrawResult { isMarketer: boolean; txId?: string; newBalance?: Cents; mpesaBalanceCents?: Cents; }
+/** Outcome of a player withdrawal request: an instant marketer transfer, or a normal (Daraja) hold. */
+export type WithdrawalOutcome =
+  | { mode: "marketer"; txId: string; newBalance: Cents; mpesaBalanceCents: Cents }
+  | { mode: "daraja"; txId: string; newBalance: Cents };
 export interface ApproveResult { approved: boolean; amountCents: Cents | null; phone: string | null; }
 export interface TxRow { id: string; userId: string; kind: "deposit" | "withdrawal"; amountCents: Cents; status: string; phone: string; }
 
@@ -33,6 +39,12 @@ export interface PaymentRepository {
   attachStk(txId: string, merchantRequestId: string, checkoutRequestId: string): Promise<boolean>;
   completeDeposit(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult>;
   createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents): Promise<CreateWithdrawalResult>;
+  /**
+   * Marketer instant withdrawal: if this player's phone is a marketer, move the amount from the
+   * game wallet into that phone's mpesa (marketer) wallet atomically and return the balances.
+   * `isMarketer:false` means the caller should fall back to the normal (Daraja) withdrawal.
+   */
+  gameWithdraw(userId: string, amountCents: Cents): Promise<GameWithdrawResult>;
   approveWithdrawal(txId: string, adminId: string): Promise<ApproveResult>;
   rejectWithdrawal(txId: string, adminId: string): Promise<{ reversed: boolean; newBalance: Cents }>;
   completeWithdrawal(txId: string, resultCode: number, conversationId: string | null, receipt: string | null, raw: unknown): Promise<CompleteResult>;
@@ -106,6 +118,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     this.txns.set(id, { id, userId, kind: "withdrawal", amount: amountCents, status: "pending", phone, seq: ++this.txSeq, createdAtMs: this.now(), receipt: null });
     this.ledger.push({ userId, type: "withdrawal", amount: -amountCents, ref: `transactions:${id}` });
     return { txId: id, newBalance: next };
+  }
+  /** In-memory tests have no marketer records; always fall through to the normal path. */
+  async gameWithdraw(_userId: string, _amountCents: Cents): Promise<GameWithdrawResult> {
+    return { isMarketer: false };
   }
   async approveWithdrawal(txId: string, _adminId: string): Promise<ApproveResult> {
     const tx = this.txns.get(txId);
@@ -224,6 +240,12 @@ export class PgPaymentRepository implements PaymentRepository {
   async createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents): Promise<CreateWithdrawalResult> {
     const r = await this.q.query("select tx_id, new_balance from fn_create_withdrawal($1,$2,$3,$4)", [userId, amountCents, phone, minCents]);
     return { txId: String(r.rows[0].tx_id), newBalance: toCents(r.rows[0].new_balance) };
+  }
+  async gameWithdraw(userId: string, amountCents: Cents): Promise<GameWithdrawResult> {
+    const r = await this.q.query("select is_marketer, tx_id, new_balance, mpesa_balance from fn_marketer_game_withdraw($1,$2)", [userId, amountCents]);
+    const x = r.rows[0];
+    if (!x || x.is_marketer !== true) return { isMarketer: false };
+    return { isMarketer: true, txId: String(x.tx_id), newBalance: toCents(x.new_balance), mpesaBalanceCents: toCents(x.mpesa_balance) };
   }  async approveWithdrawal(txId: string, adminId: string): Promise<ApproveResult> {
     const ok = await this.q.query("select fn_approve_withdrawal($1,$2) as ok", [txId, adminId]);
     if (!ok.rows[0]?.ok) return { approved: false, amountCents: null, phone: null };

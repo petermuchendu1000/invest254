@@ -128,15 +128,6 @@ function StrengthMeter({ password }: { password: string }) {
   );
 }
 
-/* ── phone field: fixed +254 prefix keeps the expected MSISDN shape obvious ── */
-function PhonePrefix() {
-  return (
-    <span className="flex h-full select-none items-center border-r border-border pr-3 text-sm font-medium text-muted">
-      +254
-    </span>
-  );
-}
-
 export function AuthModal() {
   const { open, mode, openAuth, close } = useAuthUi();
   const { login, register } = useAuthActions();
@@ -311,10 +302,9 @@ export function AuthModal() {
           autoComplete="tel"
           required
           autoFocus
-          placeholder="712 345 678"
-          leading={<PhonePrefix />}
+          placeholder="07XX XXX XXX"
           value={phone}
-          onChange={(e) => setPhone(e.target.value.replace(/[^\d]/g, '').slice(0, 12))}
+          onChange={(e) => setPhone(e.target.value.replace(/[^\d]/g, '').slice(0, 10))}
           error={errors['phone']}
         />
 

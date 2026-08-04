@@ -1,5 +1,5 @@
 import { normalizeMsisdn, MIN_DEPOSIT_CENTS, MIN_WITHDRAWAL_CENTS, type Cents } from "@invest254/shared";
-import type { PaymentRepository, CompleteResult, CreateWithdrawalResult } from "./payments.js";
+import type { PaymentRepository, CompleteResult, CreateWithdrawalResult, WithdrawalOutcome } from "./payments.js";
 import type { DarajaClient } from "./daraja.js";
 
 /**
@@ -88,12 +88,24 @@ export class PaymentService {
   }
 
   // ── Withdrawal (B2C) ──
-  /** Player requests a withdrawal: validates and HOLDS funds atomically (status pending). */
-  async requestWithdrawal(userId: string, amountCents: number, phoneRaw: string): Promise<CreateWithdrawalResult> {
+  /**
+   * Player requests a withdrawal.
+   *  - If the player's phone is a MARKETER, the money is moved INSTANTLY from the game wallet into
+   *    that phone's mpesa (marketer) wallet — no Daraja, no admin approval — and returned as paid.
+   *  - Otherwise it validates and HOLDS funds atomically (status pending) for the normal M-Pesa flow.
+   */
+  async requestWithdrawal(userId: string, amountCents: number, phoneRaw: string): Promise<WithdrawalOutcome> {
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
     if (amountCents < this.minWithdrawal) throw new Error("BELOW_MIN");
+    // Marketer instant path (game -> mpesa wallet). Phone is resolved from the player's profile.
+    const gw = await this.repo.gameWithdraw(userId, amountCents);
+    if (gw.isMarketer) {
+      return { mode: "marketer", txId: gw.txId!, newBalance: gw.newBalance!, mpesaBalanceCents: gw.mpesaBalanceCents! };
+    }
+    // Normal player: real M-Pesa payout via the pending -> admin approve -> Daraja B2C flow.
     const msisdn = normalizeMsisdn(phoneRaw);
-    return this.repo.createWithdrawal(userId, amountCents, msisdn, this.minWithdrawal);
+    const res: CreateWithdrawalResult = await this.repo.createWithdrawal(userId, amountCents, msisdn, this.minWithdrawal);
+    return { mode: "daraja", txId: res.txId, newBalance: res.newBalance };
   }
   /** Finance admin approves: flips to processing and dispatches the B2C payment. */
   async approveWithdrawal(txId: string, adminId: string): Promise<{ approved: boolean; conversationId?: string }> {

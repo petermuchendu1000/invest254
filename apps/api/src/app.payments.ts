@@ -156,6 +156,10 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     const amount = requireIntAmount(body);
     const phone = requirePhone(body);
     const out = await domain(() => deps.payments.requestWithdrawal(ctx.claims!.userId, amount, phone));
+    // Marketer instant transfer -> paid to the mpesa app wallet (200). Normal player -> pending (202).
+    if (out.mode === "marketer") {
+      return { status: 200, body: { paid: true, transactionId: out.txId, newBalance: out.newBalance, mpesaBalance: out.mpesaBalanceCents } };
+    }
     return { status: 202, body: { transactionId: out.txId, newBalance: out.newBalance } };
   });
 
