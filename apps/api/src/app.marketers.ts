@@ -1,5 +1,6 @@
 import { Router, ApiError, requireAuth, requireRole, rateLimit, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
+import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
 
 /**
  * Admin marketer routes (marketers = special players who RECEIVE payments and can withdraw).
@@ -36,6 +37,54 @@ export interface MarketerLedgerRow {
 }
 export interface WithdrawResult {
   idempotent: boolean; balance_cents: number; withdrawal_id?: string; ledger_id: number;
+}
+
+/**
+ * A marketer-facing transaction, shaped for the mpesa_2 app: the raw ledger fields plus a
+ * ready-to-render M-PESA confirmation (code + full SMS text + amount) so the app can post an
+ * OS/in-app notification that looks exactly like a real "money received" alert. Game winnings
+ * withdrawn on invest254 land here as a `credit` with `source: "game_withdrawal"`.
+ */
+export interface MarketerTxDto {
+  id: number;
+  entryType: string;
+  amountCents: number;          // signed: +credit / -withdrawal
+  balanceAfterCents: number;
+  ref: string | null;
+  source: string | null;        // meta.source, e.g. "game_withdrawal"
+  direction: "in" | "out";
+  createdAtMs: number;
+  mpesa: { code: string; party: string; amountText: string; message: string };
+}
+
+/** Map a raw ledger row to the app DTO, generating the M-PESA confirmation text. */
+export function ledgerToTxDto(r: MarketerLedgerRow): MarketerTxDto {
+  const createdAtMs = Number.isFinite(Date.parse(r.created_at)) ? Date.parse(r.created_at) : Date.now();
+  const meta = (r.meta && typeof r.meta === "object" ? r.meta : {}) as Record<string, unknown>;
+  const source = typeof meta.source === "string" ? meta.source : null;
+  const direction: "in" | "out" = r.amount_cents >= 0 ? "in" : "out";
+  // Counterparty on the confirmation. Game winnings paid instantly into the mpesa wallet read as
+  // coming from the platform; otherwise honour an explicit meta.name, else the generic "M-PESA".
+  const rawParty = source === "game_withdrawal"
+    ? "Invest254"
+    : (typeof meta.name === "string" && meta.name.trim() ? meta.name.trim() : "M-PESA");
+  const party = rawParty.toUpperCase();
+  const code = mpesaCode(createdAtMs, r.id);
+  const amountCents = Math.abs(r.amount_cents);
+  const message = direction === "in"
+    ? mpesaReceivedMessage({ code, amountCents, party, balanceCents: r.balance_after_cents, atMs: createdAtMs })
+    : mpesaSentMessage({ code, amountCents, party, balanceCents: r.balance_after_cents, atMs: createdAtMs });
+  return {
+    id: r.id,
+    entryType: r.entry_type,
+    amountCents: r.amount_cents,
+    balanceAfterCents: r.balance_after_cents,
+    ref: r.ref,
+    source,
+    direction,
+    createdAtMs,
+    mpesa: { code, party, amountText: ksh(amountCents), message },
+  };
 }
 
 /** Persistence contract for the marketer module (Postgres impl in marketers.pg.ts). */
@@ -225,6 +274,14 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
 
   // The authenticated marketer's own profile (name/initials/balance/Fuliza/airtime).
   router.get(`${BASE}/marketers/me`, auth, marketer, async (ctx: Ctx) => marketerCtx.get(ctx)!);
+
+  // Marketer's own transaction feed (newest-first), each with a ready-to-render M-PESA
+  // confirmation. The app polls this to raise "money received" notifications when a game
+  // withdrawal lands in the wallet. The token subject IS the marketer id (see requireMarketer).
+  router.get(`${BASE}/marketers/me/transactions`, auth, marketer, async (ctx: Ctx) => {
+    const rows = await domain(() => deps.marketers.statement(ctx.claims!.userId, limitOf(ctx)));
+    return { items: rows.map(ledgerToTxDto) };
+  });
 
   // Change own PIN (proves possession of the current PIN).
   router.post(`${BASE}/marketers/auth/pin`, auth, marketer, loginLimit, async (ctx: Ctx) => {
