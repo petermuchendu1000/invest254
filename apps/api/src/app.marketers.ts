@@ -125,11 +125,12 @@ function idOf(ctx: Ctx): string {
   return id;
 }
 
-/** 4–6 digit PIN (accepts a string or number in the body). */
+/** Exactly-4-digit PIN (accepts a string or number in the body). The marketer app enters it
+ *  in four boxes, so the PIN is always exactly 4 digits — no more, no less. */
 function reqPin(o: Record<string, unknown>, key: string): string {
   const v = o[key];
   const s = typeof v === "number" ? String(v) : typeof v === "string" ? v.trim() : "";
-  if (!/^\d{4,6}$/.test(s)) throw new ApiError("INVALID_PIN", `${key} must be 4-6 digits`, 400);
+  if (!/^\d{4}$/.test(s)) throw new ApiError("INVALID_PIN", `${key} must be exactly 4 digits`, 400);
   return s;
 }
 
