@@ -52,7 +52,7 @@ function amountCents(rng: SeededRng, kind: Exclude<ActivityKind, "signup">): Cen
 /** Build the human-readable feed line for an event. */
 export function activityMessage(kind: ActivityKind, username: string, amountCents: Cents | null, multiplier?: number): string {
   switch (kind) {
-    case "withdrawal": return `🎉 CONGRATULATIONS @${username} on withdrawal of ${formatKes(amountCents ?? 0)}`;
+    case "withdrawal": return `@${username} cashed out ${formatKes(amountCents ?? 0)} to M-Pesa`;
     case "win": return `@${username} just won ${formatKes(amountCents ?? 0)}${multiplier ? ` on a ×${multiplier.toFixed(2)} trade` : ""}`;
     case "bonus": return `BONUS of ${formatKes(amountCents ?? 0)} issued to @${username}`;
     case "signup": return `@${username} just joined Invest254`;
@@ -69,14 +69,63 @@ export function simulateActivity(rng: SeededRng): ActivityEvent {
   return { kind, username, amountCents: amt, message: activityMessage(kind, username, amt, mult) };
 }
 
-/** Short, upbeat chat filler lines (player-style). */
+/**
+ * Simulated chat filler — written to read like real Kenyan Aviator/betting group chat
+ * (Sheng/Swahili-English mix, M-Pesa cash-out talk), not AI copy. Emoji is rare on purpose:
+ * real chat is mostly plain text. Simulated rows are always flagged (user_id = null), so this
+ * is social-proof filler, never presented as verified individual advice.
+ */
 export const CHAT_LINES: readonly string[] = [
-  "buy buy buy 🚀", "green day today 💚", "nikona x3 🔥", "cashing out now", "let's gooo",
-  "this curve is climbing", "sell before it drops", "easy money", "🚀🚀🚀", "patience pays",
-  "who else is up?", "x5 incoming", "hold hold hold", "just hit my target 🎯", "lucky streak fr",
-  "down bad lol", "back to back wins", "trust the process", "KES flowing 💸", "one more trade",
-  "this is the way", "calling a green run", "sold at the top 😎", "almost got x5", "GG everyone",
-  "feeling lucky today", "small stake big win", "the dip is a gift", "loading another", "🤑🤑",
+  "nimeweka 200 nimetoa 1,500 leo",
+  "cashout mapema bro usingoje x10",
+  "mimi huwa nacashout kwa 2x tu",
+  "hii curve iko poa leo",
+  "weka pesa polepole usiharakishe",
+  "nani ako up leo?",
+  "niko na streak ya wins tatu mfululizo",
+  "usiogope kuweka, weka tu utaona",
+  "form ni kucashout mapema",
+  "nimeanza na 100 saa hii niko 800",
+  "weka 500 utoe 3k",
+  "polepole ndio mwendo",
+  "tumia akili usiweke yote kwa moja",
+  "M-Pesa deposit ni instant kabisa",
+  "green run imeanza, tuweke",
+  "nacashout na 3x sina stress",
+  "deposit small, toa mapema, rudia",
+  "wewe umeweka ngapi leo?",
+  "chukua profit mapema bro",
+  "hii ndio side hustle yangu fr",
+  "nimetoa 5k nimeweka kwa M-Pesa",
+  "cashout ni discipline bana",
+  "usikimbie x10, chukua 2x uende",
+  "leo niko poa, wins tatu",
+  "weka ka 200 hivi ujaribu",
+  "pesa iko, deposit iko instant",
+  "mimi nacashout kabla curve ianguke",
+  "naona green leo, tuweke haraka",
+  "sina haraka, polepole na 2x",
+  "form ni kuweka na kutoa mapema",
+  "nani anajua timing ya cashout?",
+  "leo nimeanza vizuri, deposit imeingia",
+  "toa mapema ushinde mara nyingi",
+  "mimi huweka kidogo natoa mob",
+  "usikae pembeni, weka deposit ushiriki",
+  "niko na target ya 2k leo",
+  "cashout ni kila kitu, ni timing bro",
+  "weka deposit uone vibe yenyewe",
+  "nimeweka rent nikatoa double 💰",
+  "cashout kwa 1.5x pia ni win",
+  "hapa ni akili sio bahati tu",
+  "leo ni leo, deposit tu",
+  "green tena, weka haraka 🔥",
+  "aki hii game inanipa doo",
+  "nimecashout, next round tuko",
+  "weka pesa mnono uone difference",
+  "timing ya cashout ndio kila kitu",
+  "small stake, toa mapema, rudia tena",
+  "leo doo iko, tumefika",
+  "usiogope, anza na 200 tu",
 ];
 
 /** One deterministic simulated chat line (username has no backing profile -> system/simulated). */
