@@ -67,99 +67,124 @@ export interface SetUserRoleResult {
 }
 export interface AdjustBalanceResult {
   userId: string;
-  realBalanceCents: Cents;
-  bonusBalanceCents: Cents;
+  amountCents: Cents;
+  newBalanceCents: Cents;
+  direction: 'credit' | 'debit';
 }
 
+export type AdminActivityKind = 'deposit' | 'withdrawal' | 'bet';
+/** One event in a user's unified activity timeline (mirrors engine AdminUserActivityRow). */
 export interface AdminUserActivityRow {
-  kind: string;
+  kind: AdminActivityKind;
   id: string;
-  amountCents: Cents | null;
-  status: string | null;
   createdAtMs: number;
-  summary: string;
+  status: string;
+  amountCents: Cents;
+  direction: string | null;
+  payoutCents: Cents | null;
+  pnlCents: Cents | null;
+  multiplier: number | null;
+  result: string | null;
+  settledAtMs: number | null;
+  gameDayId: number | null;
+  phone: string | null;
+  mpesaReceipt: string | null;
 }
 
 export interface AdminWithdrawalRow {
   txId: string;
   userId: string;
   amountCents: Cents;
-  phone: string;
   status: string;
+  phone: string;
   createdAtMs: number;
 }
+
 export interface AdminDepositRow {
   txId: string;
   userId: string;
   amountCents: Cents;
-  phone: string;
   status: string;
+  phone: string;
   mpesaReceipt: string | null;
+  checkoutRequestId: string | null;
   createdAtMs: number;
 }
-export interface AdminDepositsReconcile {
-  stalePending: AdminDepositRow[];
+export interface AdminDepositStatusBucket {
+  status: string;
   count: number;
+  amountCents: Cents;
+}
+export interface AdminDepositsReconcile {
+  summary: AdminDepositStatusBucket[];
+  staleMinutes: number;
+  stale: AdminDepositRow[];
 }
 
 export interface AdminPayoutRow {
   payoutId: string;
-  marketerId: string;
-  marketerName: string;
+  affiliateId: string;
+  username: string;
+  phone: string;
   amountCents: Cents;
   status: string;
+  approvedBy: string | null;
   createdAtMs: number;
-}
-
-export interface GameConfigRow {
-  version: number;
-  minStakeCents: Cents;
-  maxStakeCents: Cents;
-  minDepositCents: Cents;
-  maxDepositCents: Cents;
-  minWithdrawalCents: Cents;
-  maxWithdrawalCents: Cents;
-  dailyWithdrawalCapCents: Cents;
-  tradeDurationS: number;
-  winRate: number;
-  maxWinMultiplier: number;
-  targetRtp: number;
-  updatedAtMs: number;
-}
-export type GameConfigPatch = Partial<Omit<GameConfigRow, 'version' | 'updatedAtMs'>>;
-
-export interface MpesaConfigRow {
-  env: string;
-  shortcode: string;
-  callbackUrl: string;
-  b2cEnabled: boolean;
-  updatedAtMs: number;
-}
-export type MpesaConfigPatch = Partial<Omit<MpesaConfigRow, 'updatedAtMs'>>;
-
-export interface AdminSeedRow {
-  tradeDate: string;
-  serverSeedHash: string;
-  revealed: boolean;
-  rotatedAtMs: number | null;
-}
-export interface SeedRotateResult {
-  tradeDate: string;
-  serverSeed: string;
 }
 
 export interface AdminChatModRow {
   id: number;
-  userId: string;
+  userId: string | null;
   username: string;
-  body: string;
-  hidden: boolean;
+  message: string;
+  isHidden: boolean;
   createdAtMs: number;
 }
 
+export interface GameConfigRow {
+  houseEdge: number;
+  maxMultiplier: number;
+  minStakeCents: Cents;
+  maxStakeCents: Cents;
+  defaultDurationS: number;
+  tickRateMs: number;
+  driftBias: number;
+  volatility: number;
+  targetWinRate: number;
+  rtpTarget: number;
+  /** Live config version; bumps on every save and is stamped on every position opened after. */
+  version: number;
+  /** RTP / targetWinRate. Must land in (1, maxMultiplier] or the engine cannot calibrate. */
+  requiredMeanWinMultiplier: number;
+  updatedBy: string | null;
+  updatedAtMs: number;
+}
+export interface GameConfigPatch {
+  houseEdge?: number;
+  maxMultiplier?: number;
+  minStakeCents?: number;
+  maxStakeCents?: number;
+  defaultDurationS?: number;
+  tickRateMs?: number;
+  driftBias?: number;
+  volatility?: number;
+  targetWinRate?: number;
+}
+export interface AdminSeedRow {
+  gameDayId: number | null;
+  tradeDate: string;
+  serverSeedHash: string | null;
+  seedVersion: number;
+  revealed: boolean;
+  revealedAtMs: number | null;
+}
+export interface SeedRotateResult {
+  tradeDate: string;
+  seedVersion: number;
+}
+
 export interface DailyReportRow {
-  day: string;
-  signups: number;
+  date: string;
   depositsCents: Cents;
   withdrawalsCents: Cents;
   turnoverCents: Cents;
@@ -175,12 +200,41 @@ export interface UserReportRow {
 }
 
 export interface AdminAuditRow {
-  id: number;
+  id: string;
   actorId: string;
+  actorRole: string;
   action: string;
-  target: string | null;
-  meta: unknown;
+  targetType: string;
+  targetId: string | null;
+  detail: unknown;
   createdAtMs: number;
+}
+
+export interface MpesaConfigRow {
+  environment: 'sandbox' | 'production';
+  shortcode: string;
+  stkCallbackUrl: string;
+  b2cInitiator: string;
+  b2cResultUrl: string;
+  b2cTimeoutUrl: string;
+  hasConsumerKey: boolean;
+  hasConsumerSecret: boolean;
+  hasPasskey: boolean;
+  hasSecurityCredential: boolean;
+  updatedBy: string | null;
+  updatedAtMs: number;
+}
+export interface MpesaConfigPatch {
+  environment?: 'sandbox' | 'production';
+  shortcode?: string;
+  stkCallbackUrl?: string;
+  b2cInitiator?: string;
+  b2cResultUrl?: string;
+  b2cTimeoutUrl?: string;
+  consumerKey?: string;
+  consumerSecret?: string;
+  passkey?: string;
+  securityCredential?: string;
 }
 
 // ── User notifications (J7) ──
