@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, rateLimit, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
 
 /**
@@ -48,6 +48,12 @@ export interface MarketerRepo {
   setFuliza(id: string, amountCents: number): Promise<number>;
   setAirtime(id: string, amountCents: number): Promise<number>;
   statement(id: string, limit: number): Promise<MarketerLedgerRow[]>;
+  // ── auth / lifecycle ──
+  setPin(id: string, pin: string): Promise<void>;
+  /** Returns the marketer id on success, or null on ANY failure (no enumeration). */
+  login(phone: string, pin: string): Promise<string | null>;
+  changePin(id: string, currentPin: string, newPin: string): Promise<void>;
+  setStatus(id: string, status: string): Promise<string>;
 }
 
 // ── Domain-error → HTTP status ───────────────────────────────────────────────
@@ -59,6 +65,10 @@ const MARKETER_STATUS: Readonly<Record<string, number>> = {
   AMOUNT_MUST_BE_NONNEGATIVE: 400,
   NAME_REQUIRED: 400,
   PHONE_REQUIRED: 400,
+  INVALID_PIN: 400,
+  NO_PIN_SET: 409,
+  INVALID_CREDENTIALS: 401,
+  INVALID_STATUS: 400,
 };
 
 /** Translate a thrown DB/domain error (code prefix before ':') into a controlled ApiError. */
@@ -115,10 +125,40 @@ function idOf(ctx: Ctx): string {
   return id;
 }
 
+/** 4–6 digit PIN (accepts a string or number in the body). */
+function reqPin(o: Record<string, unknown>, key: string): string {
+  const v = o[key];
+  const s = typeof v === "number" ? String(v) : typeof v === "string" ? v.trim() : "";
+  if (!/^\d{4,6}$/.test(s)) throw new ApiError("INVALID_PIN", `${key} must be 4-6 digits`, 400);
+  return s;
+}
+
+/** Marketer resolved by requireMarketer, keyed by request ctx. */
+const marketerCtx = new WeakMap<Ctx, MarketerProfile>();
+
+/**
+ * Marketer-scoped gate. The DB is the source of truth for access (NOT the JWT role claim):
+ *  - token subject must be an existing marketer  -> else 403 NOT_MARKETER (e.g. a player, or a
+ *    demoted user whose marketer record never existed)
+ *  - the marketer must be status='active'        -> else 403 MARKETER_INACTIVE (suspended/disabled),
+ *    so a demotion/suspension takes effect immediately even while an old token is still valid.
+ */
+function requireMarketer(deps: ApiDeps) {
+  return async (ctx: Ctx): Promise<void> => {
+    if (!ctx.claims) throw new ApiError("AUTH_REQUIRED", "authentication required", 401);
+    const profile = await deps.marketers.profile(ctx.claims.userId);
+    if (!profile) throw new ApiError("NOT_MARKETER", "not a marketer account", 403);
+    if (profile.status !== "active") throw new ApiError("MARKETER_INACTIVE", `marketer is ${profile.status}`, 403);
+    marketerCtx.set(ctx, profile);
+  };
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   const auth = requireAuth(deps.verifier);
   const admin = requireRole("admin");
+  const marketer = requireMarketer(deps);
+  const loginLimit = rateLimit({ name: "marketer-login", by: "ip", limit: Number(process.env.RATE_LIMIT_AUTH_PER_MIN) || 40, windowMs: 60_000 });
 
   // Create / upsert a marketer (by phone) + provision wallet.
   router.post(`${BASE}/admin/marketers`, auth, admin, async (ctx: Ctx) => {
@@ -168,4 +208,40 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   // Marketer ledger statement (newest-first).
   router.get(`${BASE}/admin/marketers/:id/statement`, auth, admin, async (ctx: Ctx) =>
     domain(() => deps.marketers.statement(idOf(ctx), limitOf(ctx))));
+
+  // ── Marketer self-service auth (phone + PIN) ───────────────────────────────
+  // Login: returns a marketer-role JWT + the caller's profile. Generic 401 on any failure.
+  router.post(`${BASE}/marketers/auth/login`, loginLimit, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const phone = reqStr(b, "phone");
+    const pin = reqPin(b, "pin");
+    const id = await domain(() => deps.marketers.login(phone, pin));
+    if (!id) throw new ApiError("INVALID_CREDENTIALS", "invalid phone or PIN", 401);
+    const token = await deps.auth.issueToken(id, "marketer");
+    const marketerProfile = await deps.marketers.profile(id);
+    return { token, marketer: marketerProfile };
+  });
+
+  // The authenticated marketer's own profile (name/initials/balance/Fuliza/airtime).
+  router.get(`${BASE}/marketers/me`, auth, marketer, async (ctx: Ctx) => marketerCtx.get(ctx)!);
+
+  // Change own PIN (proves possession of the current PIN).
+  router.post(`${BASE}/marketers/auth/pin`, auth, marketer, loginLimit, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    await domain(() => deps.marketers.changePin(marketerCtx.get(ctx)!.id, reqPin(b, "currentPin"), reqPin(b, "newPin")));
+    return { ok: true };
+  });
+
+  // ── Admin lifecycle (onboarding + demotion/suspension) ─────────────────────
+  // Set/reset a marketer's PIN (onboarding or admin recovery — no self-service reset).
+  router.post(`${BASE}/admin/marketers/:id/pin`, auth, admin, async (ctx: Ctx) => {
+    await domain(() => deps.marketers.setPin(idOf(ctx), reqPin(bodyObj(ctx), "pin")));
+    return { ok: true };
+  });
+
+  // Set status: active | suspended | disabled. 'disabled'/'suspended' = demotion (blocks login + /me).
+  router.patch(`${BASE}/admin/marketers/:id/status`, auth, admin, async (ctx: Ctx) => {
+    const status = await domain(() => deps.marketers.setStatus(idOf(ctx), reqStr(bodyObj(ctx), "status")));
+    return { status };
+  });
 }

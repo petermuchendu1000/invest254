@@ -16,6 +16,7 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
   const byPhone = new Map<string, string>();
   const ledgers = new Map<string, MarketerLedgerRow[]>();
   const refs = new Map<string, { balance: number; ledgerId: number }>();
+  const pins = new Map<string, string>();
   let mseq = 0, lseq = 0;
   const now = () => new Date().toISOString();
   const parts = (n: string) => n.trim().split(/\s+/).filter(Boolean);
@@ -63,6 +64,23 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
     async setFuliza(id: string, amountCents: number): Promise<number> { if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.fuliza = amountCents; m.updated_at = now(); return amountCents; },
     async setAirtime(id: string, amountCents: number): Promise<number> { if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.airtime = amountCents; m.updated_at = now(); return amountCents; },
     async statement(id: string, limit: number): Promise<MarketerLedgerRow[]> { return (ledgers.get(id) ?? []).slice().reverse().slice(0, limit); },
+    async setPin(id: string, pin: string): Promise<void> { if (!/^\d{4,6}$/.test(pin)) throw new Error("INVALID_PIN"); if (!byId.has(id)) throw new Error("MARKETER_NOT_FOUND"); pins.set(id, pin); },
+    async login(phone: string, pin: string): Promise<string | null> {
+      const id = byPhone.get(phone); if (!id) return null;
+      const m = byId.get(id)!; if (!pins.has(id) || m.status !== "active") return null;
+      return pins.get(id) === pin ? id : null;
+    },
+    async changePin(id: string, currentPin: string, newPin: string): Promise<void> {
+      if (!/^\d{4,6}$/.test(newPin)) throw new Error("INVALID_PIN");
+      if (!pins.has(id)) throw new Error("NO_PIN_SET");
+      if (pins.get(id) !== currentPin) throw new Error("INVALID_CREDENTIALS");
+      pins.set(id, newPin);
+    },
+    async setStatus(id: string, status: string): Promise<string> {
+      if (!["active", "suspended", "disabled"].includes(status)) throw new Error("INVALID_STATUS");
+      const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
+      m.status = status; m.updated_at = now(); return status;
+    },
   };
 }
 

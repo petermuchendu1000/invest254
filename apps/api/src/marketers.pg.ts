@@ -82,5 +82,23 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
         created_at: r.created_at,
       }));
     },
+
+    async setPin(id, pin): Promise<void> {
+      await query("SELECT public.fn_marketer_set_pin($1, $2)", [id, pin]);
+    },
+
+    async login(phone, pin): Promise<string | null> {
+      const { rows } = await query("SELECT public.fn_marketer_login($1, $2) AS id", [phone, pin]);
+      return rows[0]?.id ?? null;
+    },
+
+    async changePin(id, currentPin, newPin): Promise<void> {
+      await query("SELECT public.fn_marketer_change_pin($1, $2, $3)", [id, currentPin, newPin]);
+    },
+
+    async setStatus(id, status): Promise<string> {
+      const { rows } = await query("SELECT public.fn_marketer_set_status($1, $2) AS s", [id, status]);
+      return rows[0].s as string;
+    },
   };
 }
