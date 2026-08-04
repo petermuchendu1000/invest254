@@ -257,3 +257,24 @@ export interface NotificationInput {
   dismissible?: boolean;
   category?: string | null;
 }
+
+// ── Per-user engine overrides (J8) ──
+export interface UserOverrideRow {
+  userId: string;
+  winRate: number | null;
+  tradeDurationS: number | null;
+  maxWinMultiplier: number | null;
+  minStakeCents: Cents | null;
+  maxStakeCents: Cents | null;
+  notes: string | null;
+  updatedBy: string | null;
+  updatedAtMs: number | null;
+}
+export interface UserOverridePatch {
+  winRate?: number | null;
+  tradeDurationS?: number | null;
+  maxWinMultiplier?: number | null;
+  minStakeCents?: Cents | null;
+  maxStakeCents?: Cents | null;
+  notes?: string | null;
+}

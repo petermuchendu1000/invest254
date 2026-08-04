@@ -1,5 +1,5 @@
 import { Router, ApiError, requireAuth, requireRole, type Ctx } from "./http.js";
-import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery } from "@invest254/engine";
+import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery, UserOverridePatch } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 
 /**
@@ -31,6 +31,8 @@ const ADMIN_STATUS: Readonly<Record<string, number>> = {
   INVALID_RATE: 400,
   INVALID_ROLE: 400,
   INVALID_AMOUNT: 400,
+  INVALID_KIND: 400,
+  INVALID_PATCH: 400,
   REASON_REQUIRED: 400,
   INSUFFICIENT_FUNDS: 409,
   USER_NOT_FOUND: 404,
@@ -132,6 +134,28 @@ function parseGameConfigPatch(ctx: Ctx): GameConfigPatch {
   }
   if (Object.keys(patch).length === 0) throw new ApiError("VALIDATION", "provide at least one config field to update", 400);
   return patch as GameConfigPatch;
+}
+
+/** Parse a per-user overrides patch (J8). Numeric fields accept a value or null (clear to global). */
+const OVERRIDE_NUM_FIELDS = ["winRate", "tradeDurationS", "maxWinMultiplier", "minStakeCents", "maxStakeCents"] as const;
+function parseOverridePatch(ctx: Ctx): UserOverridePatch {
+  const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+  const patch: Record<string, unknown> = {};
+  for (const key of OVERRIDE_NUM_FIELDS) {
+    if (!(key in body)) continue;
+    const raw = body[key];
+    if (raw === null || raw === "") { patch[key] = null; continue; } // clear back to the global value
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(n)) throw new ApiError("VALIDATION", `${key} must be a number or null`, 400);
+    if (key === "winRate" && !(n > 0 && n <= 1)) throw new ApiError("VALIDATION", "winRate must be in (0,1]", 400);
+    if (key === "maxWinMultiplier" && !(n > 1)) throw new ApiError("VALIDATION", "maxWinMultiplier must be > 1", 400);
+    if (key === "tradeDurationS" && (!Number.isInteger(n) || n < 1 || n > 3600)) throw new ApiError("VALIDATION", "tradeDurationS must be an integer in 1..3600", 400);
+    if ((key === "minStakeCents" || key === "maxStakeCents") && (!Number.isInteger(n) || n <= 0)) throw new ApiError("VALIDATION", `${key} must be a positive integer (cents)`, 400);
+    patch[key] = n;
+  }
+  if ("notes" in body) patch["notes"] = body.notes === null ? null : String(body.notes).slice(0, 500);
+  if (Object.keys(patch).length === 0) throw new ApiError("VALIDATION", "provide at least one override field", 400);
+  return patch as UserOverridePatch;
 }
 
 /** Plain (non-secret) and secret M-Pesa config fields the PATCH accepts. */
@@ -270,7 +294,30 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     // Optional explicit direction makes the sign unambiguous; otherwise a signed amount is taken as-is.
     const dir = body.direction;
     const signed = dir === "credit" || dir === "debit" ? Math.abs(magnitude) * (dir === "debit" ? -1 : 1) : magnitude;
+    // J8: optional `kind` ('real'|'bonus'); default keeps the legacy real-wallet behaviour.
+    const kind = body.kind === "bonus" ? "bonus" : body.kind === "real" ? "real" : undefined;
+    if (kind) return domain(() => deps.admin.adjustBalanceKind(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, signed, kind, reason));
     return domain(() => deps.admin.adjustBalance(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, signed, reason));
+  });
+
+  // J8: clear a wallet (real|bonus|both) to zero.
+  router.post(`${BASE}/admin/wallets/:id/clear`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const reason = typeof body.reason === "string" ? body.reason : "";
+    if (reason.trim() === "") throw new ApiError("REASON_REQUIRED", "reason is required", 400);
+    const kind = body.kind === "real" || body.kind === "bonus" || body.kind === "both" ? body.kind : "real";
+    return domain(() => deps.admin.clearBalance(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, kind, reason));
+  });
+
+  // J8: per-user engine overrides (win rate / auto-sell duration / max multiplier / stake bounds).
+  router.get(`${BASE}/admin/users/:id/overrides`, auth, admin, async (ctx: Ctx) =>
+    (await deps.admin.getUserOverrides(ctx.params.id!)) ?? {
+      userId: ctx.params.id!, winRate: null, tradeDurationS: null, maxWinMultiplier: null,
+      minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null,
+    });
+  router.post(`${BASE}/admin/users/:id/overrides`, auth, admin, async (ctx: Ctx) => {
+    const patch = parseOverridePatch(ctx);
+    return domain(() => deps.admin.setUserOverrides(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
   });
 
   router.get(`${BASE}/admin/withdrawals`, auth, admin, async (ctx: Ctx) => {

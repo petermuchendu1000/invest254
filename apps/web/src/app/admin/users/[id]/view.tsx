@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -13,8 +13,8 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification } from '@/lib/admin/hooks';
-import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel } from '@/lib/admin/types';
+import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides } from '@/lib/admin/hooks';
+import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel, UserOverridePatch } from '@/lib/admin/types';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
 
@@ -76,6 +76,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <StatusActions id={id} status={q.data.status} />
               <RoleManage id={id} current={q.data.role} />
               <BalanceAdjust id={id} />
+              <OverridesPanel id={id} />
               <NotificationSend id={id} />
               {q.data.role === 'marketer' ? <CommissionRate id={id} /> : null}
             </>
@@ -293,18 +294,31 @@ function RoleManage({ id, current }: { id: string; current: string }) {
 
 function BalanceAdjust({ id }: { id: string }) {
   const m = useAdjustBalance();
+  const clear = useClearBalance();
   const toast = useToast();
   const [amount, setAmount] = useState('');
   const [dir, setDir] = useState<'credit' | 'debit'>('credit');
+  const [kind, setKind] = useState<'real' | 'bonus'>('real');
   const [reason, setReason] = useState('');
 
   const cents = Math.round(Number(amount) * 100);
   const valid = Number.isFinite(cents) && cents > 0 && reason.trim().length > 0;
+  const clearValid = reason.trim().length > 0;
+
+  function runClear(clearKind: 'real' | 'bonus' | 'both') {
+    clear.mutate(
+      { id, kind: clearKind, reason: reason.trim() },
+      {
+        onSuccess: () => { setReason(''); toast.push({ tone: 'success', title: `Cleared ${clearKind} balance`, description: 'Wallet zeroed and audited.' }); },
+        onError: (e) => toast.push({ tone: 'error', title: 'Clear failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+      },
+    );
+  }
 
   function run() {
     const signed = dir === 'debit' ? -cents : cents;
     m.mutate(
-      { id, amountCents: signed, reason: reason.trim() },
+      { id, amountCents: signed, reason: reason.trim(), kind },
       {
         onSuccess: (r) => {
           setAmount('');
@@ -321,6 +335,14 @@ function BalanceAdjust({ id }: { id: string }) {
     <Section title="Manual balance adjustment">
       <Card className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row">
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as 'real' | 'bonus')}
+            className="h-10 rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+          >
+            <option value="real">Real</option>
+            <option value="bonus">Bonus</option>
+          </select>
           <select
             value={dir}
             onChange={(e) => setDir(e.target.value as 'credit' | 'debit')}
@@ -344,7 +366,7 @@ function BalanceAdjust({ id }: { id: string }) {
           className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
         />
         <ConfirmButton
-          label={dir === 'credit' ? 'Credit wallet' : 'Debit wallet'}
+          label={`${dir === 'credit' ? 'Credit' : 'Debit'} ${kind} wallet`}
           confirmLabel="Confirm adjustment"
           variant={dir === 'credit' ? 'primary' : 'down'}
           size="md"
@@ -352,7 +374,13 @@ function BalanceAdjust({ id }: { id: string }) {
           disabled={!valid}
           onConfirm={run}
         />
-        <p className="text-xs text-muted">Adjusts the real balance with an immutable ledger entry. No overdraw on debit.</p>
+        <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+          <span className="w-full text-xs font-semibold text-muted">Clear balance (needs a reason)</span>
+          <ConfirmButton label="Clear real" confirmLabel="Confirm clear real" variant="down" size="sm" busy={clear.isPending} disabled={!clearValid} onConfirm={() => runClear('real')} />
+          <ConfirmButton label="Clear bonus" confirmLabel="Confirm clear bonus" variant="down" size="sm" busy={clear.isPending} disabled={!clearValid} onConfirm={() => runClear('bonus')} />
+          <ConfirmButton label="Clear both" confirmLabel="Confirm clear both" variant="down" size="sm" busy={clear.isPending} disabled={!clearValid} onConfirm={() => runClear('both')} />
+        </div>
+        <p className="text-xs text-muted">Adjusts/clears the chosen wallet with an immutable ledger entry. No overdraw on debit.</p>
       </Card>
     </Section>
   );
@@ -519,6 +547,97 @@ function NotificationSend({ id }: { id: string }) {
               </div>
             ))}
           </div>
+        ) : null}
+      </Card>
+    </Section>
+  );
+}
+
+function LabeledInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <label className="flex flex-col gap-1 text-xs text-muted">
+      {label}
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-10 rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+      />
+    </label>
+  );
+}
+
+/** Per-user engine overrides: win rate, forced auto-sell duration, payout cap, stake bounds (J8). */
+function OverridesPanel({ id }: { id: string }) {
+  const q = useUserOverrides(id);
+  const m = useSetOverrides(id);
+  const toast = useToast();
+  const [form, setForm] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const o = q.data;
+    if (!o) return;
+    setForm({
+      winRate: o.winRate != null ? String(o.winRate) : '',
+      tradeDurationS: o.tradeDurationS != null ? String(o.tradeDurationS) : '',
+      maxWinMultiplier: o.maxWinMultiplier != null ? String(o.maxWinMultiplier) : '',
+      minStake: o.minStakeCents != null ? String(o.minStakeCents / 100) : '',
+      maxStake: o.maxStakeCents != null ? String(o.maxStakeCents / 100) : '',
+      notes: o.notes ?? '',
+    });
+  }, [q.data]);
+
+  const set = (k: string, v: string) => setForm((s) => ({ ...s, [k]: v }));
+  const numOrNull = (s: string): number | null => {
+    const t = (s ?? '').trim();
+    if (t === '') return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+  const centsOrNull = (s: string): number | null => {
+    const n = numOrNull(s);
+    return n == null ? null : Math.round(n * 100);
+  };
+  const intOrNull = (s: string): number | null => {
+    const n = numOrNull(s);
+    return n == null ? null : Math.round(n);
+  };
+
+  function save() {
+    const patch: UserOverridePatch = {
+      winRate: numOrNull(form.winRate ?? ''),
+      tradeDurationS: intOrNull(form.tradeDurationS ?? ''),
+      maxWinMultiplier: numOrNull(form.maxWinMultiplier ?? ''),
+      minStakeCents: centsOrNull(form.minStake ?? ''),
+      maxStakeCents: centsOrNull(form.maxStake ?? ''),
+      notes: (form.notes ?? '').trim() === '' ? null : (form.notes ?? '').trim(),
+    };
+    m.mutate(patch, {
+      onSuccess: () => toast.push({ tone: 'success', title: 'Overrides saved', description: "Applied to the user's next trades." }),
+      onError: (e) => toast.push({ tone: 'error', title: 'Save failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+    });
+  }
+
+  return (
+    <Section title="Player overrides">
+      <Card className="flex flex-col gap-3">
+        <p className="text-xs text-muted">
+          Blank = use the global game setting. Win rate is a fraction (feasible band depends on RTP — e.g. 0.05–0.24 at 25% RTP).
+          Duration is the forced auto-sell time in seconds. Stake bounds and payout cap apply only to this user.
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <LabeledInput label="Win rate (fraction)" value={form.winRate ?? ''} onChange={(v) => set('winRate', v)} placeholder="e.g. 0.20" />
+          <LabeledInput label="Auto-sell duration (s)" value={form.tradeDurationS ?? ''} onChange={(v) => set('tradeDurationS', v)} placeholder="e.g. 30" />
+          <LabeledInput label="Max win multiplier" value={form.maxWinMultiplier ?? ''} onChange={(v) => set('maxWinMultiplier', v)} placeholder="e.g. 4" />
+          <LabeledInput label="Min stake (KES)" value={form.minStake ?? ''} onChange={(v) => set('minStake', v)} placeholder="e.g. 100" />
+          <LabeledInput label="Max stake (KES)" value={form.maxStake ?? ''} onChange={(v) => set('maxStake', v)} placeholder="e.g. 50000" />
+          <LabeledInput label="Notes" value={form.notes ?? ''} onChange={(v) => set('notes', v)} placeholder="optional" />
+        </div>
+        <ConfirmButton label="Save overrides" confirmLabel="Confirm save" variant="primary" size="md" busy={m.isPending} disabled={q.isLoading} onConfirm={save} />
+        {q.data?.updatedAtMs ? (
+          <p className="text-xs text-muted">
+            Last updated {formatRelativeTime(q.data.updatedAtMs)} ago{q.data.updatedBy ? ` by ${q.data.updatedBy.slice(0, 8)}…` : ''}.
+          </p>
         ) : null}
       </Card>
     </Section>

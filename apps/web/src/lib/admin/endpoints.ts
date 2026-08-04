@@ -6,6 +6,8 @@ import type {
   AdminChatModRow,
   AdminNotificationRow,
   NotificationInput,
+  UserOverrideRow,
+  UserOverridePatch,
   AdminDepositRow,
   AdminDepositsReconcile,
   AdminOverview,
@@ -53,8 +55,14 @@ export const adminApi = {
     apiFetch<SetUserStatusResult>(`/admin/users/${id}/${action}`, { method: 'POST', token: t, body: { reason } }),
   setUserRole: (t: string, id: string, role: string) =>
     apiFetch<SetUserRoleResult>(`/admin/users/${id}/role`, { method: 'POST', token: t, body: { role } }),
-  adjustBalance: (t: string, id: string, amountCents: number, reason: string) =>
-    apiFetch<AdjustBalanceResult>(`/admin/wallets/${id}/adjust`, { method: 'POST', token: t, body: { amountCents, reason } }),
+  adjustBalance: (t: string, id: string, amountCents: number, reason: string, kind?: 'real' | 'bonus') =>
+    apiFetch<AdjustBalanceResult>(`/admin/wallets/${id}/adjust`, { method: 'POST', token: t, body: { amountCents, reason, kind } }),
+  clearBalance: (t: string, id: string, kind: 'real' | 'bonus' | 'both', reason: string) =>
+    apiFetch<{ userId: string; realBalanceCents: number; bonusBalanceCents: number }>(`/admin/wallets/${id}/clear`, { method: 'POST', token: t, body: { kind, reason } }),
+  userOverrides: (t: string, id: string) =>
+    apiFetch<UserOverrideRow>(`/admin/users/${id}/overrides`, { token: t }),
+  setUserOverrides: (t: string, id: string, patch: UserOverridePatch) =>
+    apiFetch<UserOverrideRow>(`/admin/users/${id}/overrides`, { method: 'POST', token: t, body: patch }),
 
   // Finance — withdrawals + deposits
   withdrawals: (t: string, p: Page & { status?: string | undefined } = {}) =>

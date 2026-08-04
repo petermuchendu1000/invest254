@@ -8,6 +8,7 @@ import { SeedManager } from "./daycontext.js";
 import { RecoveryService } from "./recovery.js";
 import { ActivityService } from "./activityservice.js";
 import { ChatService } from "./chatservice.js";
+import { PgUserOverridesRepository, type UserOverridesRepository } from "./overrides.js";
 import { makeVerifier } from "./auth.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -23,12 +24,14 @@ let repo: GameRepository;
 let engage: EngagementRepository;
 let config: ConfigProvider;
 let configStore: GameConfigStore | undefined;
+let overridesRepo: UserOverridesRepository | undefined;
 const usingDb = Boolean(process.env.DATABASE_URL);
 if (usingDb) {
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   repo = new PgGameRepository(pool);
   engage = new PgEngagementRepository(pool as unknown as Querier);
+  overridesRepo = new PgUserOverridesRepository(pool as unknown as Querier);
   // Live configuration: LISTEN for instant pickup, poll as the self-healing fallback.
   // Until this existed the engine ran on hardcoded defaults and every admin save was inert.
   configStore = new GameConfigStore(pool as unknown as Querier, {
@@ -52,9 +55,11 @@ if (usingDb && !verifier) throw new Error("AUTH: a JWT verifier is required when
 
 const seeds = new SeedManager(MASTER_SEED, config, repo);
 await seeds.init();
-const game = new GameServer(() => seeds.getActive(), repo, cfg);
+// J8: per-user admin overrides (win rate / max multiplier / auto-sell duration / stake bounds).
+const loadOverride = overridesRepo ? (uid: string) => overridesRepo!.getForUser(uid) : undefined;
+const game = new GameServer(() => seeds.getActive(), repo, cfg, undefined, loadOverride);
 
-const recovery = new RecoveryService(repo, seeds, game);
+const recovery = new RecoveryService(repo, seeds, game, undefined, loadOverride);
 const recovered = await recovery.recover();
 console.log(`[engine] recovery: scanned=${recovered.scanned} settled=${recovered.settled} rearmed=${recovered.rearmed} noop=${recovered.noop} failed=${recovered.failed}`);
 
