@@ -34,6 +34,8 @@ export function WithdrawForm() {
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [paid, setPaid] = useState(false);
+  const [paidAmountKes, setPaidAmountKes] = useState(0);
 
   const realCents = wallet?.real ?? 0;
   const maxKes = Math.floor(centsToKes(realCents));
@@ -54,7 +56,9 @@ export function WithdrawForm() {
     setErrors(next);
     if (Object.values(next).some(Boolean)) return;
     try {
-      await withdraw.mutateAsync({ amount: kesToCents(kes), phone: effectivePhone });
+      const res = await withdraw.mutateAsync({ amount: kesToCents(kes), phone: effectivePhone });
+      setPaid(Boolean(res?.paid));
+      setPaidAmountKes(kes);
       setDone(true);
     } catch (err) {
       setServerError(authErrorMessage(err));
@@ -64,9 +68,15 @@ export function WithdrawForm() {
   if (done) {
     return (
       <div className="flex flex-col gap-3 p-4">
-        <p className="rounded-xl border border-up/40 bg-up/10 px-3 py-2 text-sm text-up">
-          Withdrawal requested. Funds are held and paid out to {maskMsisdn(normalizeMsisdn(effectivePhone))} after approval.
-        </p>
+        {paid ? (
+          <p className="rounded-xl border border-up/40 bg-up/10 px-3 py-2 text-sm text-up">
+            {formatKes(kesToCents(paidAmountKes))} sent to your M-Pesa. It reflects in your M-Pesa balance instantly.
+          </p>
+        ) : (
+          <p className="rounded-xl border border-up/40 bg-up/10 px-3 py-2 text-sm text-up">
+            Withdrawal requested. Funds are held and paid out to {maskMsisdn(normalizeMsisdn(effectivePhone))} after approval.
+          </p>
+        )}
         <Button fullWidth onClick={close}>Done</Button>
       </div>
     );

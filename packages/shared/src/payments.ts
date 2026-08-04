@@ -16,13 +16,23 @@ export const MIN_WITHDRAWAL_CENTS: Cents = 20_000;  // KES 200
  */
 export function normalizeMsisdn(input: string): string {
   const raw = String(input ?? "").replace(/[\s\-()]/g, "").replace(/^\+/, "");
-  let msisdn: string;
-  if (/^0(7|1)\d{8}$/.test(raw)) msisdn = `254${raw.slice(1)}`;        // 0712345678 -> 254712345678
-  else if (/^254(7|1)\d{8}$/.test(raw)) msisdn = raw;                  // already MSISDN
-  else if (/^(7|1)\d{8}$/.test(raw)) msisdn = `254${raw}`;            // 712345678 -> 254712345678
+  let local: string;
+  if (/^0(7|1)\d{8}$/.test(raw)) local = raw;                       // 0712345678 (already local)
+  else if (/^254(7|1)\d{8}$/.test(raw)) local = `0${raw.slice(3)}`; // 254712345678 -> 0712345678
+  else if (/^(7|1)\d{8}$/.test(raw)) local = `0${raw}`;             // 712345678 -> 0712345678
   else throw new Error(`INVALID_PHONE: ${input}`);
-  if (!/^254(7|1)\d{8}$/.test(msisdn)) throw new Error(`INVALID_PHONE: ${input}`);
-  return msisdn;
+  if (!/^0(7|1)\d{8}$/.test(local)) throw new Error(`INVALID_PHONE: ${input}`);
+  return local;
+}
+
+/**
+ * Convert a Kenyan phone to E.164 MSISDN (254XXXXXXXXX) for the Safaricom / Daraja edge ONLY.
+ * The whole app uses the local 0XXXXXXXXX form as the canonical identity; Safaricom's STK/B2C
+ * APIs require the 254 form, so we convert right before hitting them (see daraja.ts).
+ */
+export function msisdnToE164(input: string): string {
+  const local = normalizeMsisdn(input);
+  return `254${local.slice(1)}`;
 }
 
 export interface AmountCheck { ok: boolean; reason?: string }

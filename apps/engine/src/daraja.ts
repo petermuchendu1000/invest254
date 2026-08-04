@@ -1,4 +1,5 @@
 import type { Cents } from "@invest254/shared";
+import { msisdnToE164 } from "@invest254/shared";
 
 /**
  * Daraja (Safaricom M-Pesa) provider abstraction. The engine/service depend only on this
@@ -86,11 +87,12 @@ export class HttpDarajaClient implements DarajaClient {
 
   async stkPush(a: StkPushArgs): Promise<StkPushResult> {
     const t = ts();
+    const e164 = msisdnToE164(a.msisdn); // Safaricom requires 254XXXXXXXXX
     const password = Buffer.from(`${this.cfg.shortcode}${this.cfg.passkey}${t}`).toString("base64");
     const j = await this.post("/mpesa/stkpush/v1/processrequest", {
       BusinessShortCode: this.cfg.shortcode, Password: password, Timestamp: t,
       TransactionType: "CustomerPayBillOnline", Amount: centsToKes(a.amountCents),
-      PartyA: a.msisdn, PartyB: this.cfg.shortcode, PhoneNumber: a.msisdn,
+      PartyA: e164, PartyB: this.cfg.shortcode, PhoneNumber: e164,
       CallBackURL: this.cfg.stkCallbackUrl, AccountReference: a.accountRef, TransactionDesc: a.desc,
     });
     return { merchantRequestId: String(j.MerchantRequestID), checkoutRequestId: String(j.CheckoutRequestID) };
@@ -123,7 +125,7 @@ export class HttpDarajaClient implements DarajaClient {
     const j = await this.post("/mpesa/b2c/v1/paymentrequest", {
       InitiatorName: this.cfg.b2cInitiator, SecurityCredential: this.cfg.b2cSecurityCredential,
       CommandID: "BusinessPayment", Amount: centsToKes(a.amountCents),
-      PartyA: this.cfg.shortcode, PartyB: a.msisdn, Remarks: a.remarks,
+      PartyA: this.cfg.shortcode, PartyB: msisdnToE164(a.msisdn), Remarks: a.remarks,
       QueueTimeOutURL: this.cfg.b2cTimeoutUrl, ResultURL: resultUrl, Occasion: "Withdrawal",
     });
     return { conversationId: String(j.ConversationID) };
