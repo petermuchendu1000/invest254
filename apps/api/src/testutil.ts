@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG, type Cents } from "@invest254/shared";
 import {
   InMemoryEngagementRepository, InMemoryPaymentRepository, InMemoryGameRepository, StubDarajaClient,
   InMemoryIdentityRepository, PaymentService, ChatService, ActivityService, AuthService, AffiliateService, AdminService, InMemoryAdminRepository, maskHandle,
+  NotificationService, InMemoryNotificationRepository,
   type FairnessRecord, type AuthClaims, type Verifier,
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance } from "./app.js";
@@ -39,6 +40,7 @@ export interface TestApi {
   fairness: Map<number, FairnessRecord>;
   bonus: Map<string, Cents>;
   withdrawalSuccesses: Array<{ userId: string; amountCents: Cents }>;
+  notifications: NotificationService;
   close(): Promise<void>;
 }
 
@@ -82,12 +84,14 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const auth = new AuthService(identity, { jwtSecret: "test-secret-which-is-long-enough-123456", jwtTtlSeconds: 3600 });
   const affiliate = new AffiliateService(identity, daraja);
   const admin = new AdminService(new InMemoryAdminRepository(identity, payRepo, engage, gameRepo));
+  const notifications = new NotificationService(new InMemoryNotificationRepository());
 
   const deps: ApiDeps = {
     verifier: stubVerifier(),
     auth,
     affiliate,
     admin,
+    notifications,
     config: () => DEFAULT_CONFIG,
     fairnessById: async (id) => fairness.get(id) ?? null,
     activity: { recent: (limit) => engage.listRecentActivity(limit) },
@@ -110,6 +114,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     deps, identity, engage, payRepo, gameRepo, daraja, fairness, bonus, withdrawalSuccesses,
+    notifications,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

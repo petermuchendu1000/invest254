@@ -4,6 +4,8 @@ import type {
   AdjustBalanceResult,
   AdminAuditRow,
   AdminChatModRow,
+  AdminNotificationRow,
+  NotificationInput,
   AdminDepositRow,
   AdminDepositsReconcile,
   AdminOverview,
@@ -112,4 +114,12 @@ export const adminApi = {
       token: t,
       query: { cursor: p.cursor ?? undefined, limit: p.limit },
     }),
+
+  // User notifications (J7) — raise a sticky banner for a player; list + resolve.
+  userNotifications: (t: string, id: string) =>
+    apiFetch<{ items: AdminNotificationRow[] }>(`/admin/users/${id}/notifications`, { token: t }),
+  sendNotification: (t: string, id: string, body: NotificationInput) =>
+    apiFetch<AdminNotificationRow>(`/admin/users/${id}/notifications`, { method: 'POST', token: t, body }),
+  resolveNotification: (t: string, id: number) =>
+    apiFetch<{ resolved: boolean }>(`/admin/notifications/${id}/resolve`, { method: 'POST', token: t }),
 };

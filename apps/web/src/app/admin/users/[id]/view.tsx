@@ -13,8 +13,8 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useSetCommissionRate, useSetUserRole } from '@/lib/admin/hooks';
-import type { AdminUserActivityRow } from '@/lib/admin/types';
+import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification } from '@/lib/admin/hooks';
+import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel } from '@/lib/admin/types';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
 
@@ -76,6 +76,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <StatusActions id={id} status={q.data.status} />
               <RoleManage id={id} current={q.data.role} />
               <BalanceAdjust id={id} />
+              <NotificationSend id={id} />
               {q.data.role === 'marketer' ? <CommissionRate id={id} /> : null}
             </>
           )}
@@ -388,6 +389,137 @@ function CommissionRate({ id }: { id: string }) {
           />
         </label>
         <ConfirmButton label="Update rate" size="md" busy={m.isPending} disabled={!valid} onConfirm={run} />
+      </Card>
+    </Section>
+  );
+}
+
+const LEVELS: { value: NotificationLevel; label: string }[] = [
+  { value: 'info', label: 'Info' },
+  { value: 'success', label: 'Success' },
+  { value: 'warning', label: 'Warning' },
+  { value: 'error', label: 'Error' },
+];
+
+// One-tap templates for the issues operators raise most (matches issue #3).
+const TEMPLATES: { key: string; label: string; level: NotificationLevel; dismissible: boolean; title: string; body: string; category: string }[] = [
+  { key: 'bonus', label: 'Bonus added', level: 'success', dismissible: true, title: 'Bonus added', body: 'A bonus of KES 0 has been added to your wallet.', category: 'bonus' },
+  { key: 'system', label: 'System issue', level: 'warning', dismissible: true, title: 'Temporary system issue', body: 'We are resolving a temporary issue. Your balance and open trades are safe.', category: 'system' },
+  { key: 'suspend', label: 'Account limited (blocking)', level: 'error', dismissible: false, title: 'Your account is limited', body: 'Some actions are unavailable. Contact support if you believe this is a mistake.', category: 'account_limited' },
+];
+
+function NotificationSend({ id }: { id: string }) {
+  const listQ = useUserNotifications(id);
+  const send = useSendNotification(id);
+  const resolve = useResolveNotification(id);
+  const toast = useToast();
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [level, setLevel] = useState<NotificationLevel>('info');
+  const [dismissible, setDismissible] = useState(true);
+  const [category, setCategory] = useState('');
+
+  const valid = title.trim().length > 0 && title.trim().length <= 120;
+  const active = (listQ.data?.items ?? []).filter((n) => n.dismissedAtMs === null && n.resolvedAtMs === null);
+
+  function applyTemplate(k: string) {
+    const t = TEMPLATES.find((x) => x.key === k);
+    if (!t) return;
+    setTitle(t.title); setBody(t.body); setLevel(t.level); setDismissible(t.dismissible); setCategory(t.category);
+  }
+
+  function run() {
+    send.mutate(
+      { title: title.trim(), body: body.trim(), level, dismissible, category: category.trim() || null },
+      {
+        onSuccess: () => {
+          setTitle(''); setBody(''); setCategory(''); setLevel('info'); setDismissible(true);
+          toast.push({ tone: 'success', title: 'Notification sent', description: dismissible ? 'The player can dismiss it.' : 'Blocking — stays until resolved.' });
+        },
+        onError: (e) => toast.push({ tone: 'error', title: 'Send failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+      },
+    );
+  }
+
+  function clear(nid: number) {
+    resolve.mutate(nid, {
+      onSuccess: () => toast.push({ tone: 'success', title: 'Notification cleared' }),
+      onError: (e) => toast.push({ tone: 'error', title: 'Clear failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+    });
+  }
+
+  return (
+    <Section title="Send notification">
+      <Card className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-2">
+          {TEMPLATES.map((t) => (
+            <Button key={t.key} variant="ghost" size="sm" onClick={() => applyTemplate(t.key)}>{t.label}</Button>
+          ))}
+        </div>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Title (required)"
+          maxLength={120}
+          className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+        />
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Message (optional)"
+          rows={2}
+          className="w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <select
+            value={level}
+            onChange={(e) => setLevel(e.target.value as NotificationLevel)}
+            className="h-10 rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+          >
+            {LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+          </select>
+          <input
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="Category (optional, e.g. bonus)"
+            className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+          />
+          <label className="flex items-center gap-2 whitespace-nowrap text-sm text-fg">
+            <input type="checkbox" checked={dismissible} onChange={(e) => setDismissible(e.target.checked)} />
+            Dismissible
+          </label>
+        </div>
+        <ConfirmButton
+          label={dismissible ? 'Send notification' : 'Send blocking notice'}
+          confirmLabel="Confirm send"
+          variant={dismissible ? 'primary' : 'down'}
+          size="md"
+          busy={send.isPending}
+          disabled={!valid}
+          onConfirm={run}
+        />
+        <p className="text-xs text-muted">
+          Dismissible notices clear when the player taps X. Blocking notices (e.g. account limits) stay until an admin resolves them.
+        </p>
+
+        {active.length > 0 ? (
+          <div className="flex flex-col gap-2 border-t border-border pt-3">
+            <p className="text-xs font-semibold text-muted">Active notifications</p>
+            {active.map((n: AdminNotificationRow) => (
+              <div key={n.id} className="flex items-start justify-between gap-3 rounded-xl border border-border bg-surface-2 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-fg">{n.title}</span>
+                    <span className="rounded-md bg-surface px-1.5 py-0.5 text-[10px] uppercase text-muted">{n.level}</span>
+                    {!n.dismissible ? <span className="rounded-md bg-down/15 px-1.5 py-0.5 text-[10px] uppercase text-down">blocking</span> : null}
+                  </div>
+                  {n.body ? <p className="truncate text-xs text-muted">{n.body}</p> : null}
+                </div>
+                <Button variant="ghost" size="sm" disabled={resolve.isPending} onClick={() => clear(n.id)}>Clear</Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </Card>
     </Section>
   );

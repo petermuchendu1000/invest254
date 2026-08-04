@@ -236,3 +236,24 @@ export interface MpesaConfigPatch {
   passkey?: string;
   securityCredential?: string;
 }
+
+// ── User notifications (J7) ──
+export type NotificationLevel = 'info' | 'success' | 'warning' | 'error';
+export interface AdminNotificationRow {
+  id: number;
+  level: NotificationLevel;
+  title: string;
+  body: string;
+  dismissible: boolean;
+  category: string | null;
+  createdAtMs: number;
+  dismissedAtMs: number | null;
+  resolvedAtMs: number | null;
+}
+export interface NotificationInput {
+  title: string;
+  body?: string;
+  level?: NotificationLevel;
+  dismissible?: boolean;
+  category?: string | null;
+}
