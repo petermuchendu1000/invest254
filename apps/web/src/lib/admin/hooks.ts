@@ -296,3 +296,97 @@ export function useResolveNotification(id: string) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin', 'user-notifications', id] }),
   });
 }
+
+// ── Marketers ──
+export function useMarketers() {
+  const t = useTok();
+  return useQuery({ queryKey: ['admin', 'marketers'], queryFn: () => adminApi.marketers(t), enabled: !!t });
+}
+export function useMarketer(id: string | null) {
+  const t = useTok();
+  return useQuery({ queryKey: ['admin', 'marketer', id], queryFn: () => adminApi.marketer(t, id as string), enabled: !!t && !!id });
+}
+export function useMarketerStatement(id: string | null) {
+  const t = useTok();
+  return useQuery({
+    queryKey: ['admin', 'marketer-statement', id],
+    queryFn: () => adminApi.marketerStatement(t, id as string),
+    enabled: !!t && !!id,
+  });
+}
+export function useCreateMarketer() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; phone: string }) => adminApi.createMarketer(t, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+export function useMarketerCredit(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { amountCents: number; ref?: string | undefined }) => adminApi.creditMarketer(t, id, v.amountCents, v.ref),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketer', id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketer-statement', id] });
+    },
+  });
+}
+export function useMarketerWithdraw(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { amountCents: number; ref?: string; method?: string }) =>
+      adminApi.withdrawMarketer(t, id, v.amountCents, v.ref, v.method),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketer', id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketer-statement', id] });
+    },
+  });
+}
+export function useMarketerFuliza(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (amountCents: number) => adminApi.setMarketerFuliza(t, id, amountCents),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketer', id] });
+    },
+  });
+}
+export function useMarketerAirtime(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (amountCents: number) => adminApi.setMarketerAirtime(t, id, amountCents),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketer', id] });
+    },
+  });
+}
+export function useMarketerPin(id: string) {
+  const t = useTok();
+  return useMutation({
+    mutationFn: (pin: string) => adminApi.setMarketerPin(t, id, pin),
+  });
+}
+export function useMarketerStatus(id: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (status: 'active' | 'suspended' | 'disabled') => adminApi.setMarketerStatus(t, id, status),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketer', id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
