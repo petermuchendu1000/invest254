@@ -45,7 +45,7 @@ test("admin lists users and reads the overview", async () => {
   } finally { await api.close(); }
 });
 
-test("admin suspend blocks login and is audited", async () => {
+test("admin suspend is applied + audited; login still works (deposits) but the account is limited", async () => {
   const api = await startTestApi();
   try {
     const uid = await register(api, "0712000004", "victim");
@@ -56,8 +56,10 @@ test("admin suspend blocks login and is audited", async () => {
     assert.equal(sus.status, 200);
     assert.equal((await json(sus)).status, "suspended");
 
-    const blocked = await req(api, "POST", "/api/v1/auth/login", { body: { phone: "0712000004", password: "Password1" } });
-    assert.equal(blocked.status, 403);
+    // A limited account can STILL log in (so it can deposit); trading/withdrawal are gated at
+    // the money layer, not at login.
+    const stillIn = await req(api, "POST", "/api/v1/auth/login", { body: { phone: "0712000004", password: "Password1" } });
+    assert.equal(stillIn.status, 200);
 
     const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "admin-9:admin" }));
     assert.ok(audit.items.some((a: any) => a.action === "user.status" && a.targetId === uid));
