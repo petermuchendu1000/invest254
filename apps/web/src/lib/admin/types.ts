@@ -67,124 +67,99 @@ export interface SetUserRoleResult {
 }
 export interface AdjustBalanceResult {
   userId: string;
-  amountCents: Cents;
-  newBalanceCents: Cents;
-  direction: 'credit' | 'debit';
+  realBalanceCents: Cents;
+  bonusBalanceCents: Cents;
 }
 
-export type AdminActivityKind = 'deposit' | 'withdrawal' | 'bet';
-/** One event in a user's unified activity timeline (mirrors engine AdminUserActivityRow). */
 export interface AdminUserActivityRow {
-  kind: AdminActivityKind;
+  kind: string;
   id: string;
+  amountCents: Cents | null;
+  status: string | null;
   createdAtMs: number;
-  status: string;
-  amountCents: Cents;
-  direction: string | null;
-  payoutCents: Cents | null;
-  pnlCents: Cents | null;
-  multiplier: number | null;
-  result: string | null;
-  settledAtMs: number | null;
-  gameDayId: number | null;
-  phone: string | null;
-  mpesaReceipt: string | null;
+  summary: string;
 }
 
 export interface AdminWithdrawalRow {
   txId: string;
   userId: string;
   amountCents: Cents;
-  status: string;
   phone: string;
+  status: string;
   createdAtMs: number;
 }
-
 export interface AdminDepositRow {
   txId: string;
   userId: string;
   amountCents: Cents;
-  status: string;
   phone: string;
+  status: string;
   mpesaReceipt: string | null;
-  checkoutRequestId: string | null;
   createdAtMs: number;
 }
-export interface AdminDepositStatusBucket {
-  status: string;
-  count: number;
-  amountCents: Cents;
-}
 export interface AdminDepositsReconcile {
-  summary: AdminDepositStatusBucket[];
-  staleMinutes: number;
-  stale: AdminDepositRow[];
+  stalePending: AdminDepositRow[];
+  count: number;
 }
 
 export interface AdminPayoutRow {
   payoutId: string;
-  affiliateId: string;
-  username: string;
-  phone: string;
+  marketerId: string;
+  marketerName: string;
   amountCents: Cents;
   status: string;
-  approvedBy: string | null;
-  createdAtMs: number;
-}
-
-export interface AdminChatModRow {
-  id: number;
-  userId: string | null;
-  username: string;
-  message: string;
-  isHidden: boolean;
   createdAtMs: number;
 }
 
 export interface GameConfigRow {
-  houseEdge: number;
-  maxMultiplier: number;
+  version: number;
   minStakeCents: Cents;
   maxStakeCents: Cents;
-  defaultDurationS: number;
-  tickRateMs: number;
-  driftBias: number;
-  volatility: number;
-  targetWinRate: number;
-  rtpTarget: number;
-  /** Live config version; bumps on every save and is stamped on every position opened after. */
-  version: number;
-  /** RTP / targetWinRate. Must land in (1, maxMultiplier] or the engine cannot calibrate. */
-  requiredMeanWinMultiplier: number;
-  updatedBy: string | null;
+  minDepositCents: Cents;
+  maxDepositCents: Cents;
+  minWithdrawalCents: Cents;
+  maxWithdrawalCents: Cents;
+  dailyWithdrawalCapCents: Cents;
+  tradeDurationS: number;
+  winRate: number;
+  maxWinMultiplier: number;
+  targetRtp: number;
   updatedAtMs: number;
 }
-export interface GameConfigPatch {
-  houseEdge?: number;
-  maxMultiplier?: number;
-  minStakeCents?: number;
-  maxStakeCents?: number;
-  defaultDurationS?: number;
-  tickRateMs?: number;
-  driftBias?: number;
-  volatility?: number;
-  targetWinRate?: number;
+export type GameConfigPatch = Partial<Omit<GameConfigRow, 'version' | 'updatedAtMs'>>;
+
+export interface MpesaConfigRow {
+  env: string;
+  shortcode: string;
+  callbackUrl: string;
+  b2cEnabled: boolean;
+  updatedAtMs: number;
 }
+export type MpesaConfigPatch = Partial<Omit<MpesaConfigRow, 'updatedAtMs'>>;
+
 export interface AdminSeedRow {
-  gameDayId: number | null;
   tradeDate: string;
-  serverSeedHash: string | null;
-  seedVersion: number;
+  serverSeedHash: string;
   revealed: boolean;
-  revealedAtMs: number | null;
+  rotatedAtMs: number | null;
 }
 export interface SeedRotateResult {
   tradeDate: string;
-  seedVersion: number;
+  serverSeed: string;
+}
+
+export interface AdminChatModRow {
+  id: number;
+  userId: string;
+  username: string;
+  body: string;
+  hidden: boolean;
+  createdAtMs: number;
 }
 
 export interface DailyReportRow {
-  date: string;
+  day: string;
+  signups: number;
   depositsCents: Cents;
   withdrawalsCents: Cents;
   turnoverCents: Cents;
@@ -200,41 +175,12 @@ export interface UserReportRow {
 }
 
 export interface AdminAuditRow {
-  id: string;
+  id: number;
   actorId: string;
-  actorRole: string;
   action: string;
-  targetType: string;
-  targetId: string | null;
-  detail: unknown;
+  target: string | null;
+  meta: unknown;
   createdAtMs: number;
-}
-
-export interface MpesaConfigRow {
-  environment: 'sandbox' | 'production';
-  shortcode: string;
-  stkCallbackUrl: string;
-  b2cInitiator: string;
-  b2cResultUrl: string;
-  b2cTimeoutUrl: string;
-  hasConsumerKey: boolean;
-  hasConsumerSecret: boolean;
-  hasPasskey: boolean;
-  hasSecurityCredential: boolean;
-  updatedBy: string | null;
-  updatedAtMs: number;
-}
-export interface MpesaConfigPatch {
-  environment?: 'sandbox' | 'production';
-  shortcode?: string;
-  stkCallbackUrl?: string;
-  b2cInitiator?: string;
-  b2cResultUrl?: string;
-  b2cTimeoutUrl?: string;
-  consumerKey?: string;
-  consumerSecret?: string;
-  passkey?: string;
-  securityCredential?: string;
 }
 
 // ── User notifications (J7) ──
@@ -277,4 +223,34 @@ export interface UserOverridePatch {
   minStakeCents?: Cents | null;
   maxStakeCents?: Cents | null;
   notes?: string | null;
+}
+
+// ── Marketers (special players who RECEIVE payments) ──
+// Wire shapes mirror apps/api/src/app.marketers.ts (snake_case, as returned by the API).
+export interface AdminMarketerRow {
+  id: string;
+  name: string;
+  first_name: string;
+  initials: string;
+  phone: string;
+  status: string;
+  balance_cents: Cents;
+  available_fuliza_cents: Cents;
+  airtime_balance_cents: Cents;
+  currency: string;
+}
+export interface AdminMarketerLedgerRow {
+  id: number;
+  entry_type: string;
+  amount_cents: Cents;
+  balance_after_cents: Cents;
+  ref: string | null;
+  meta: unknown;
+  created_at: string;
+}
+export interface MarketerWithdrawResult {
+  idempotent: boolean;
+  balance_cents: Cents;
+  withdrawal_id?: string;
+  ledger_id: number;
 }
