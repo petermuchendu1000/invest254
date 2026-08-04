@@ -7,6 +7,7 @@ import {
   type Querier, type FairnessRecord, type ListenClient,
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance } from "./app.js";
+import { makePgMarketerRepo } from "./marketers.pg.js";
 
 /**
  * Production bootstrap for the HTTP API. Wires the Postgres-backed repositories, the
@@ -93,6 +94,7 @@ async function buildDeps(): Promise<ApiDeps> {
     affiliate,
     admin,
     notifications,
+    marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
     config: () => gameConfig.active(),
     fairnessById: async (gameDayId: number): Promise<FairnessRecord | null> => {
       const r = await q.query(
