@@ -10,6 +10,7 @@ import { registerAuthRoutes } from "./app.auth.js";
 import { registerAffiliateRoutes } from "./app.affiliate.js";
 import { registerAdminRoutes } from "./app.admin.js";
 import { registerNotificationRoutes } from "./app.notifications.js";
+import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
 import type { Server } from "node:http";
 
 /**
@@ -41,6 +42,8 @@ export interface ApiDeps {
     | "adjustBalanceKind" | "clearBalance" | "getUserOverrides" | "setUserOverrides">;
   /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
+  /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
+  marketers: MarketerRepo;
   /**
    * Public game configuration source. A PROVIDER, not a value: config is edited live in the
    * admin panel, so a snapshot captured at boot would serve stale limits forever (the exact
@@ -144,6 +147,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerAffiliateRoutes(router, deps);
   registerAdminRoutes(router, deps);
   registerNotificationRoutes(router, deps);
+  registerMarketerRoutes(router, deps);
   registerProtectedRoutes(router, deps);
   registerHistoryRoutes(router, deps);
   return router;

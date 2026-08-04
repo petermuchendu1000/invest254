@@ -7,6 +7,64 @@ import {
   type FairnessRecord, type AuthClaims, type Verifier,
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance } from "./app.js";
+import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
+
+/** In-memory MarketerRepo mirroring the SQL RPCs (0033): overdraw guard, idempotency, initials. */
+export function makeInMemoryMarketerRepo(): MarketerRepo {
+  interface Rec { id: string; name: string; phone: string; status: string; created_at: string; updated_at: string; balance: number; fuliza: number; airtime: number; }
+  const byId = new Map<string, Rec>();
+  const byPhone = new Map<string, string>();
+  const ledgers = new Map<string, MarketerLedgerRow[]>();
+  const refs = new Map<string, { balance: number; ledgerId: number }>();
+  let mseq = 0, lseq = 0;
+  const now = () => new Date().toISOString();
+  const parts = (n: string) => n.trim().split(/\s+/).filter(Boolean);
+  const firstName = (n: string) => parts(n)[0] ?? "";
+  const initials = (n: string) => { const p = parts(n); return p.length === 0 ? "" : p.length === 1 ? p[0]!.slice(0, 2).toUpperCase() : (p[0]![0]! + p[p.length - 1]![0]!).toUpperCase(); };
+  const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES" });
+  const push = (id: string, entry_type: string, amount_cents: number, balance_after_cents: number, ref: string | null, meta: unknown): number => {
+    const row: MarketerLedgerRow = { id: ++lseq, entry_type, amount_cents, balance_after_cents, ref, meta: meta ?? {}, created_at: now() };
+    (ledgers.get(id) ?? []).push(row);
+    return row.id;
+  };
+  return {
+    async create(name: string, phone: string): Promise<MarketerRow> {
+      const existing = byPhone.get(phone);
+      if (existing) { const m = byId.get(existing)!; m.name = name; m.updated_at = now(); return { id: m.id, name: m.name, phone: m.phone, status: m.status, created_at: m.created_at, updated_at: m.updated_at }; }
+      const id = `m-${++mseq}`; const ts = now();
+      const m: Rec = { id, name, phone, status: "active", created_at: ts, updated_at: ts, balance: 0, fuliza: 0, airtime: 0 };
+      byId.set(id, m); byPhone.set(phone, id); ledgers.set(id, []);
+      return { id, name, phone, status: "active", created_at: ts, updated_at: ts };
+    },
+    async list(limit: number): Promise<MarketerProfile[]> {
+      return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit).map(profileOf);
+    },
+    async profile(id: string): Promise<MarketerProfile | null> { const m = byId.get(id); return m ? profileOf(m) : null; },
+    async credit(id: string, amountCents: number, ref: string | null, meta: unknown): Promise<number> {
+      if (amountCents <= 0) throw new Error("AMOUNT_MUST_BE_POSITIVE");
+      if (ref && refs.has(ref)) return refs.get(ref)!.balance;
+      const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
+      m.balance += amountCents; m.updated_at = now();
+      const lid = push(id, "credit", amountCents, m.balance, ref, meta);
+      if (ref) refs.set(ref, { balance: m.balance, ledgerId: lid });
+      return m.balance;
+    },
+    async withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, _method: string): Promise<WithdrawResult> {
+      if (amountCents <= 0) throw new Error("AMOUNT_MUST_BE_POSITIVE");
+      if (ref && refs.has(ref)) { const e = refs.get(ref)!; return { idempotent: true, balance_cents: e.balance, ledger_id: e.ledgerId }; }
+      const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
+      if (m.status !== "active") throw new Error(`MARKETER_NOT_ACTIVE:${m.status}`);
+      if (m.balance < amountCents) throw new Error(`INSUFFICIENT_FUNDS: have ${m.balance}, need ${amountCents}`);
+      m.balance -= amountCents; m.updated_at = now();
+      const lid = push(id, "withdrawal", -amountCents, m.balance, ref, meta);
+      if (ref) refs.set(ref, { balance: m.balance, ledgerId: lid });
+      return { idempotent: false, balance_cents: m.balance, withdrawal_id: `w-${lid}`, ledger_id: lid };
+    },
+    async setFuliza(id: string, amountCents: number): Promise<number> { if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.fuliza = amountCents; m.updated_at = now(); return amountCents; },
+    async setAirtime(id: string, amountCents: number): Promise<number> { if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.airtime = amountCents; m.updated_at = now(); return amountCents; },
+    async statement(id: string, limit: number): Promise<MarketerLedgerRow[]> { return (ledgers.get(id) ?? []).slice().reverse().slice(0, limit); },
+  };
+}
 
 /**
  * In-memory test harness: builds an app from REAL engine services backed by in-memory
@@ -92,6 +150,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     affiliate,
     admin,
     notifications,
+    marketers: makeInMemoryMarketerRepo(),
     config: () => DEFAULT_CONFIG,
     fairnessById: async (id) => fairness.get(id) ?? null,
     activity: { recent: (limit) => engage.listRecentActivity(limit) },

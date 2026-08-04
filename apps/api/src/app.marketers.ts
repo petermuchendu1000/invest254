@@ -1,0 +1,171 @@
+import { Router, ApiError, requireAuth, requireRole, type Ctx } from "./http.js";
+import type { ApiDeps } from "./app.js";
+
+/**
+ * Admin marketer routes (marketers = special players who RECEIVE payments and can withdraw).
+ * All admin-gated (superadmin satisfies the hierarchy). Thin transport over the DB RPCs
+ * (0033_marketers): fn_marketer_create / _credit / _withdraw / _set_fuliza / _set_airtime and
+ * the marketer_profiles view. Amounts are integer cents (KES).
+ *
+ *  - POST   /admin/marketers                     { name, phone }                       -> marketer
+ *  - GET    /admin/marketers?limit                                                     -> profiles[]
+ *  - GET    /admin/marketers/:id                                                       -> profile
+ *  - POST   /admin/marketers/:id/credit          { amountCents, ref?, meta? }          -> { balanceCents }
+ *  - POST   /admin/marketers/:id/withdraw        { amountCents, ref?, meta?, method? } -> WithdrawResult
+ *  - PATCH  /admin/marketers/:id/fuliza          { amountCents }                       -> { availableFulizaCents }
+ *  - PATCH  /admin/marketers/:id/airtime         { amountCents }                       -> { airtimeBalanceCents }
+ *  - GET    /admin/marketers/:id/statement?limit                                       -> ledger[]
+ */
+
+const BASE = "/api/v1";
+
+// ── DTOs / repository contract ───────────────────────────────────────────────
+export interface MarketerRow {
+  id: string; name: string; phone: string; status: string;
+  created_at: string; updated_at: string;
+}
+export interface MarketerProfile {
+  id: string; name: string; first_name: string; initials: string;
+  phone: string; status: string;
+  balance_cents: number; available_fuliza_cents: number; airtime_balance_cents: number;
+  currency: string;
+}
+export interface MarketerLedgerRow {
+  id: number; entry_type: string; amount_cents: number; balance_after_cents: number;
+  ref: string | null; meta: unknown; created_at: string;
+}
+export interface WithdrawResult {
+  idempotent: boolean; balance_cents: number; withdrawal_id?: string; ledger_id: number;
+}
+
+/** Persistence contract for the marketer module (Postgres impl in marketers.pg.ts). */
+export interface MarketerRepo {
+  create(name: string, phone: string): Promise<MarketerRow>;
+  list(limit: number): Promise<MarketerProfile[]>;
+  profile(id: string): Promise<MarketerProfile | null>;
+  credit(id: string, amountCents: number, ref: string | null, meta: unknown): Promise<number>;
+  withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, method: string): Promise<WithdrawResult>;
+  setFuliza(id: string, amountCents: number): Promise<number>;
+  setAirtime(id: string, amountCents: number): Promise<number>;
+  statement(id: string, limit: number): Promise<MarketerLedgerRow[]>;
+}
+
+// ── Domain-error → HTTP status ───────────────────────────────────────────────
+const MARKETER_STATUS: Readonly<Record<string, number>> = {
+  MARKETER_NOT_FOUND: 404,
+  MARKETER_NOT_ACTIVE: 409,
+  INSUFFICIENT_FUNDS: 409,
+  AMOUNT_MUST_BE_POSITIVE: 400,
+  AMOUNT_MUST_BE_NONNEGATIVE: 400,
+  NAME_REQUIRED: 400,
+  PHONE_REQUIRED: 400,
+};
+
+/** Translate a thrown DB/domain error (code prefix before ':') into a controlled ApiError. */
+async function domain<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    const code = message.split(":")[0]!.trim();
+    const status = MARKETER_STATUS[code];
+    if (status) throw new ApiError(code, message, status);
+    throw err;
+  }
+}
+
+// ── Input helpers ────────────────────────────────────────────────────────────
+function bodyObj(ctx: Ctx): Record<string, unknown> {
+  return ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+}
+function reqStr(o: Record<string, unknown>, key: string): string {
+  const v = o[key];
+  if (typeof v !== "string" || v.trim().length === 0) throw new ApiError("INVALID_INPUT", `${key} is required`, 400);
+  return v.trim();
+}
+function optStr(o: Record<string, unknown>, key: string): string | null {
+  const v = o[key];
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+/** Positive integer cents (for credit/withdraw). */
+function reqPositiveCents(o: Record<string, unknown>, key = "amountCents"): number {
+  const raw = o[key];
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isInteger(n) || n <= 0) throw new ApiError("INVALID_AMOUNT", `${key} must be a positive integer (cents)`, 400);
+  return n;
+}
+/** Non-negative integer cents (for admin-set balances like Fuliza / airtime). */
+function reqNonNegCents(o: Record<string, unknown>, key = "amountCents"): number {
+  const raw = o[key];
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new ApiError("INVALID_AMOUNT", `${key} must be a non-negative integer (cents)`, 400);
+  return n;
+}
+function limitOf(ctx: Ctx, def = 50, max = 200): number {
+  const raw = ctx.query.get("limit");
+  if (raw === null) return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) throw new ApiError("INVALID_LIMIT", "limit must be a positive integer", 400);
+  return Math.min(Math.floor(n), max);
+}
+function idOf(ctx: Ctx): string {
+  const id = ctx.params.id;
+  if (!id) throw new ApiError("INVALID_INPUT", "marketer id is required", 400);
+  return id;
+}
+
+// ── Routes ───────────────────────────────────────────────────────────────────
+export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
+  const auth = requireAuth(deps.verifier);
+  const admin = requireRole("admin");
+
+  // Create / upsert a marketer (by phone) + provision wallet.
+  router.post(`${BASE}/admin/marketers`, auth, admin, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const m = await domain(() => deps.marketers.create(reqStr(b, "name"), reqStr(b, "phone")));
+    return { status: 201, body: m };
+  });
+
+  // List marketer profiles (incl. derived first_name + initials and balances).
+  router.get(`${BASE}/admin/marketers`, auth, admin, async (ctx: Ctx) =>
+    domain(() => deps.marketers.list(limitOf(ctx))));
+
+  // Single marketer profile.
+  router.get(`${BASE}/admin/marketers/:id`, auth, admin, async (ctx: Ctx) => {
+    const p = await domain(() => deps.marketers.profile(idOf(ctx)));
+    if (!p) throw new ApiError("MARKETER_NOT_FOUND", "marketer not found", 404);
+    return p;
+  });
+
+  // Pay a marketer (credit). Idempotent when `ref` is supplied.
+  router.post(`${BASE}/admin/marketers/:id/credit`, auth, admin, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const balanceCents = await domain(() =>
+      deps.marketers.credit(idOf(ctx), reqPositiveCents(b), optStr(b, "ref"), b.meta ?? {}));
+    return { balanceCents };
+  });
+
+  // Withdraw from a marketer. Blocks overdraw; idempotent when `ref` is supplied.
+  router.post(`${BASE}/admin/marketers/:id/withdraw`, auth, admin, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    return domain(() =>
+      deps.marketers.withdraw(idOf(ctx), reqPositiveCents(b), optStr(b, "ref"), b.meta ?? {}, optStr(b, "method") ?? "internal"));
+  });
+
+  // Admin sets Available Fuliza for a marketer.
+  router.patch(`${BASE}/admin/marketers/:id/fuliza`, auth, admin, async (ctx: Ctx) => {
+    const availableFulizaCents = await domain(() => deps.marketers.setFuliza(idOf(ctx), reqNonNegCents(bodyObj(ctx))));
+    return { availableFulizaCents };
+  });
+
+  // Admin sets airtime balance for a marketer.
+  router.patch(`${BASE}/admin/marketers/:id/airtime`, auth, admin, async (ctx: Ctx) => {
+    const airtimeBalanceCents = await domain(() => deps.marketers.setAirtime(idOf(ctx), reqNonNegCents(bodyObj(ctx))));
+    return { airtimeBalanceCents };
+  });
+
+  // Marketer ledger statement (newest-first).
+  router.get(`${BASE}/admin/marketers/:id/statement`, auth, admin, async (ctx: Ctx) =>
+    domain(() => deps.marketers.statement(idOf(ctx), limitOf(ctx))));
+}
