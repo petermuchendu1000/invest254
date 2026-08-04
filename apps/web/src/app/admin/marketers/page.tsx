@@ -32,10 +32,21 @@ const STATUS_OPTIONS = [
   { value: 'disabled', label: 'Disabled' },
 ];
 
-/** Parse a KES amount (shillings) into cents; null when invalid/non-positive. */
+/** Parse a KES amount (shillings) into POSITIVE cents; null when empty/invalid/non-positive. */
 function kesToCents(v: string): number | null {
-  const n = Number(v);
+  const t = v.trim();
+  if (t === '') return null;
+  const n = Number(t);
   if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100);
+}
+
+/** Parse a KES amount into NON-NEGATIVE cents (floats can be cleared to 0); null when empty/invalid/negative. */
+function kesToNonNegCents(v: string): number | null {
+  const t = v.trim();
+  if (t === '') return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n * 100);
 }
 
@@ -160,12 +171,12 @@ function CreateMarketerModal({ open, onClose }: { open: boolean; onClose: () => 
       { name: name.trim(), phone: phone.trim() },
       {
         onSuccess: (m) => {
-          toast.push({ tone: 'success', title: 'Marketer created', description: `${m.name} (${m.phone}) is ready. Set their PIN next.` });
+          toast.push({ tone: 'success', title: 'Marketer saved', description: `${m.name} (${m.phone}) is ready. Set their PIN next.` });
           setName('');
           setPhone('');
           onClose();
         },
-        onError: (e) => toast.push({ tone: 'error', title: 'Create failed', description: errMsg(e) }),
+        onError: (e) => toast.push({ tone: 'error', title: 'Save failed', description: errMsg(e) }),
       },
     );
   }
@@ -174,6 +185,7 @@ function CreateMarketerModal({ open, onClose }: { open: boolean; onClose: () => 
     <Modal open={open} onClose={onClose} title="New marketer">
       <div className="flex flex-col gap-4 p-5">
         <h2 className="text-lg font-semibold tracking-tight">New marketer</h2>
+        <p className="text-xs text-muted">If this phone already belongs to a marketer, their name is updated (wallet is preserved).</p>
         <Input label="Full name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Peter Muchendu" required />
         <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 0722000001" required />
         <div className="flex justify-end gap-2">
@@ -181,7 +193,7 @@ function CreateMarketerModal({ open, onClose }: { open: boolean; onClose: () => 
             Cancel
           </Button>
           <Button onClick={submit} disabled={create.isPending || !name.trim() || !phone.trim()}>
-            {create.isPending ? 'Creating…' : 'Create marketer'}
+            {create.isPending ? 'Saving…' : 'Save marketer'}
           </Button>
         </div>
       </div>
@@ -315,8 +327,8 @@ function FloatActions({ m }: { m: AdminMarketerRow }) {
   const [a, setA] = useState('');
 
   function run(kind: 'fuliza' | 'airtime') {
-    const cents = kesToCents(kind === 'fuliza' ? f : a);
-    if (!cents) return;
+    const cents = kesToNonNegCents(kind === 'fuliza' ? f : a);
+    if (cents === null) return;
     const mut = kind === 'fuliza' ? fuliza : airtime;
     mut.mutate(cents, {
       onSuccess: () => {
@@ -332,15 +344,15 @@ function FloatActions({ m }: { m: AdminMarketerRow }) {
     <Section title="Floats">
       <div className="flex flex-wrap items-end gap-2 rounded-2xl border border-border bg-surface p-3">
         <div className="min-w-28 flex-1">
-          <Input label="Set Fuliza (KES)" inputMode="decimal" value={f} onChange={(e) => setF(e.target.value)} placeholder="0.00" />
+          <Input label="Set Fuliza (KES)" inputMode="decimal" value={f} onChange={(e) => setF(e.target.value)} placeholder="0.00" hint="Set to 0 to clear." />
         </div>
-        <Button size="sm" variant="secondary" onClick={() => run('fuliza')} disabled={fuliza.isPending || !kesToCents(f)}>
+        <Button size="sm" variant="secondary" onClick={() => run('fuliza')} disabled={fuliza.isPending || kesToNonNegCents(f) === null}>
           Set
         </Button>
         <div className="min-w-28 flex-1">
-          <Input label="Set airtime (KES)" inputMode="decimal" value={a} onChange={(e) => setA(e.target.value)} placeholder="0.00" />
+          <Input label="Set airtime (KES)" inputMode="decimal" value={a} onChange={(e) => setA(e.target.value)} placeholder="0.00" hint="Set to 0 to clear." />
         </div>
-        <Button size="sm" variant="secondary" onClick={() => run('airtime')} disabled={airtime.isPending || !kesToCents(a)}>
+        <Button size="sm" variant="secondary" onClick={() => run('airtime')} disabled={airtime.isPending || kesToNonNegCents(a) === null}>
           Set
         </Button>
       </div>
@@ -352,7 +364,7 @@ function PinAction({ m }: { m: AdminMarketerRow }) {
   const pin = useMarketerPin(m.id);
   const toast = useToast();
   const [p, setP] = useState('');
-  const valid = /^\d{4,8}$/.test(p);
+  const valid = /^\d{4,6}$/.test(p);
 
   function run() {
     pin.mutate(p, {
@@ -371,10 +383,10 @@ function PinAction({ m }: { m: AdminMarketerRow }) {
           <Input
             label="Set / reset PIN"
             inputMode="numeric"
-            maxLength={8}
+            maxLength={6}
             value={p}
             onChange={(e) => setP(e.target.value.replace(/\D/g, ''))}
-            placeholder="4–8 digits"
+            placeholder="4–6 digits"
             hint="The marketer uses phone + this PIN to log in."
           />
         </div>
