@@ -23,24 +23,27 @@ import { useGameConfig, useUpdateGameConfig, useSeeds, useRotateSeed } from '@/l
 import { SuperadminOnly } from '@/components/admin/SuperadminOnly';
 import type { GameConfigPatch, GameConfigRow } from '@/lib/admin/types';
 
-// Editable engine knobs. `kes` fields are stored as cents but edited in KES.
+// Editable engine knobs. `kes` fields are cents edited in KES; `pct` fields are fractions
+// (0–1) edited as a percentage (0–100) so an operator types "75", not "0.75".
 type FieldKey = keyof GameConfigPatch;
-const FIELDS: { key: FieldKey; label: string; hint: string; kes?: boolean; step?: string }[] = [
-  { key: 'houseEdge', label: 'House edge', hint: 'Fraction, e.g. 0.05 = 5%. RTP = 1 - house edge', step: '0.001' },
-  { key: 'targetWinRate', label: 'Target win rate', hint: 'Share of trades that win, e.g. 0.25 = 25%', step: '0.001' },
-  { key: 'maxMultiplier', label: 'Max multiplier', hint: 'Hard cap on a round payout multiple', step: '0.1' },
-  { key: 'minStakeCents', label: 'Min stake (KES)', hint: 'Smallest accepted stake', kes: true, step: '1' },
-  { key: 'maxStakeCents', label: 'Max stake (KES)', hint: 'Largest accepted stake', kes: true, step: '1' },
-  { key: 'defaultDurationS', label: 'Round duration (s)', hint: 'Default round length in seconds (1-3600)', step: '1' },
-  { key: 'tickRateMs', label: 'Tick rate (ms)', hint: 'Price update interval (50-60000)', step: '10' },
-  { key: 'driftBias', label: 'Drift bias', hint: 'Directional bias of the walk (-1 to 1)', step: '0.001' },
-  { key: 'volatility', label: 'Volatility', hint: 'Amplitude of price movement (> 0)', step: '0.001' },
+const FIELDS: { key: FieldKey; label: string; hint: string; kes?: boolean; pct?: boolean; step?: string }[] = [
+  { key: 'targetWinRate', label: 'Win rate (%)', hint: 'Share of rounds a player wins. Type a percentage — e.g. 75 means players win 75% of the time.', pct: true, step: '1' },
+  { key: 'houseEdge', label: 'House edge (%)', hint: 'The house margin. Type a percentage — e.g. 10. Players get back 100% − house edge over time.', pct: true, step: '0.5' },
+  { key: 'minStakeCents', label: 'Min stake (KES)', hint: 'Smallest stake a player can place', kes: true, step: '1' },
+  { key: 'maxStakeCents', label: 'Max stake (KES)', hint: 'Largest stake a player can place', kes: true, step: '1' },
+  { key: 'defaultDurationS', label: 'Round duration (s)', hint: 'How long a round lasts, in seconds (1–3600)', step: '1' },
+  { key: 'maxMultiplier', label: 'Max payout multiple (×)', hint: 'Hard cap on a single winning round payout', step: '0.1' },
+  { key: 'driftBias', label: 'Drift bias (advanced)', hint: 'Directional bias of the price walk (−1 to 1). Leave as-is unless you know why.', step: '0.001' },
+  { key: 'volatility', label: 'Volatility (advanced)', hint: 'Amplitude of price movement (> 0). Leave as-is unless you know why.', step: '0.001' },
+  { key: 'tickRateMs', label: 'Tick rate (ms) (advanced)', hint: 'Price update interval, 50–60000 ms', step: '10' },
 ];
 
-/** Current config value formatted for its input (cents → KES for stake fields). */
+/** Current config value formatted for its input (cents → KES; fraction → percent). */
 function toField(cfg: GameConfigRow, f: (typeof FIELDS)[number]): string {
   const raw = cfg[f.key] as number;
-  return f.kes ? String(raw / 100) : String(raw);
+  if (f.kes) return String(raw / 100);
+  if (f.pct) return String(Math.round(raw * 1000) / 10); // 0.75 -> 75 (1dp)
+  return String(raw);
 }
 
 function GameBody() {
@@ -62,7 +65,7 @@ function GameBody() {
     for (const f of FIELDS) {
       const cur = form[f.key];
       if (cur === undefined || cur === '') continue;
-      const next = f.kes ? Math.round(Number(cur) * 100) : Number(cur);
+      const next = f.kes ? Math.round(Number(cur) * 100) : f.pct ? Number(cur) / 100 : Number(cur);
       if (!Number.isFinite(next)) continue;
       if (next !== (cfg[f.key] as number)) out[f.key] = next;
     }
@@ -114,7 +117,7 @@ function GameBody() {
     <>
       <PageHeader
         title="Game configuration"
-        subtitle="Live engine parameters, read straight from the database by the game engine. Saving bumps the config version and applies on the next round; trades already open keep the parameters they were priced with."
+        subtitle="Live engine parameters, read straight from the database by the game engine. Win rate and house edge are entered as percentages. Saving bumps the config version and applies on the next round; trades already open keep the parameters they were priced with."
       />
 
       <Section title="Engine parameters">
