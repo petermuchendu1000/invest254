@@ -19,6 +19,9 @@ import type {
   DailyReportRow,
   GameConfigPatch,
   GameConfigRow,
+  AdminMarketerLedgerRow,
+  AdminMarketerRow,
+  MarketerWithdrawResult,
   MpesaConfigPatch,
   MpesaConfigRow,
   RtpMonitor,
@@ -122,6 +125,27 @@ export const adminApi = {
       token: t,
       query: { cursor: p.cursor ?? undefined, limit: p.limit },
     }),
+
+  // Marketers — special players who RECEIVE payments; wallet, Fuliza, airtime, PIN, status.
+  marketers: (t: string, limit = 100) =>
+    apiFetch<AdminMarketerRow[]>('/admin/marketers', { token: t, query: { limit } }),
+  marketer: (t: string, id: string) => apiFetch<AdminMarketerRow>(`/admin/marketers/${id}`, { token: t }),
+  createMarketer: (t: string, body: { name: string; phone: string }) =>
+    apiFetch<AdminMarketerRow>('/admin/marketers', { method: 'POST', token: t, body }),
+  creditMarketer: (t: string, id: string, amountCents: number, ref?: string) =>
+    apiFetch<{ balanceCents: number }>(`/admin/marketers/${id}/credit`, { method: 'POST', token: t, body: { amountCents, ref } }),
+  withdrawMarketer: (t: string, id: string, amountCents: number, ref?: string, method?: string) =>
+    apiFetch<MarketerWithdrawResult>(`/admin/marketers/${id}/withdraw`, { method: 'POST', token: t, body: { amountCents, ref, method } }),
+  setMarketerFuliza: (t: string, id: string, amountCents: number) =>
+    apiFetch<{ availableFulizaCents: number }>(`/admin/marketers/${id}/fuliza`, { method: 'PATCH', token: t, body: { amountCents } }),
+  setMarketerAirtime: (t: string, id: string, amountCents: number) =>
+    apiFetch<{ airtimeBalanceCents: number }>(`/admin/marketers/${id}/airtime`, { method: 'PATCH', token: t, body: { amountCents } }),
+  marketerStatement: (t: string, id: string, limit = 50) =>
+    apiFetch<AdminMarketerLedgerRow[]>(`/admin/marketers/${id}/statement`, { token: t, query: { limit } }),
+  setMarketerPin: (t: string, id: string, pin: string) =>
+    apiFetch<{ ok: boolean }>(`/admin/marketers/${id}/pin`, { method: 'POST', token: t, body: { pin } }),
+  setMarketerStatus: (t: string, id: string, status: 'active' | 'suspended' | 'disabled') =>
+    apiFetch<{ status: string }>(`/admin/marketers/${id}/status`, { method: 'PATCH', token: t, body: { status } }),
 
   // User notifications (J7) — raise a sticky banner for a player; list + resolve.
   userNotifications: (t: string, id: string) =>

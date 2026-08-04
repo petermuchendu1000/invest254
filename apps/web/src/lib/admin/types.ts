@@ -278,3 +278,33 @@ export interface UserOverridePatch {
   maxStakeCents?: Cents | null;
   notes?: string | null;
 }
+
+// ── Marketers (special players who RECEIVE payments) ──
+// Wire shapes mirror apps/api/src/app.marketers.ts (snake_case, as returned by the API).
+export interface AdminMarketerRow {
+  id: string;
+  name: string;
+  first_name: string;
+  initials: string;
+  phone: string;
+  status: string;
+  balance_cents: Cents;
+  available_fuliza_cents: Cents;
+  airtime_balance_cents: Cents;
+  currency: string;
+}
+export interface AdminMarketerLedgerRow {
+  id: number;
+  entry_type: string;
+  amount_cents: Cents;
+  balance_after_cents: Cents;
+  ref: string | null;
+  meta: unknown;
+  created_at: string;
+}
+export interface MarketerWithdrawResult {
+  idempotent: boolean;
+  balance_cents: Cents;
+  withdrawal_id?: string;
+  ledger_id: number;
+}
