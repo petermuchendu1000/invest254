@@ -119,9 +119,35 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     this.ledger.push({ userId, type: "withdrawal", amount: -amountCents, ref: `transactions:${id}` });
     return { txId: id, newBalance: next };
   }
-  /** In-memory tests have no marketer records; always fall through to the normal path. */
-  async gameWithdraw(_userId: string, _amountCents: Cents): Promise<GameWithdrawResult> {
-    return { isMarketer: false };
+  /**
+   * In-memory mirror of fn_marketer_game_withdraw (0036): when a marketer phone is registered
+   * via markAsMarketer(), the amount moves instantly from the game wallet into the marketer
+   * wallet (recorded via the injected hook so tests can mirror the marketer ledger); otherwise
+   * falls through to the normal (Daraja) path. Guards mirror the SQL: active-only, positive
+   * amount, sufficient funds.
+   */
+  private marketerPhones = new Map<string, string>(); // local phone -> marketer id
+  /** Test hook: register a phone as an active marketer wallet (mirrors the marketers table). */
+  markAsMarketer(phone: string, marketerId: string): void { this.marketerPhones.set(phone, marketerId); }
+  /** Test hook: invoked with the credited marketer id/amount so tests can mirror fn_marketer_credit. */
+  onMarketerCredit: ((marketerId: string, amountCents: Cents, ref: string) => void) | null = null;
+  private phones = new Map<string, string>(); // userId -> local phone (seed via setPhone)
+  /** Test hook: set the player's profile phone (local 0XXXXXXXXX form). */
+  setPhone(userId: string, phone: string): void { this.phones.set(userId, phone); }
+  async gameWithdraw(userId: string, amountCents: Cents): Promise<GameWithdrawResult> {
+    const phone = this.phones.get(userId);
+    const marketerId = phone ? this.marketerPhones.get(phone) : undefined;
+    if (!marketerId) return { isMarketer: false };
+    if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
+    const bal = this.balances.get(userId) ?? 0;
+    if (bal < amountCents) throw new Error("INSUFFICIENT_FUNDS");
+    const next = bal - amountCents;
+    this.balances.set(userId, next);
+    const txId = `tx-${++this.txSeq}`;
+    this.txns.set(txId, { id: txId, userId, kind: "withdrawal", amount: amountCents, status: "success", phone: phone!, seq: this.txSeq, createdAtMs: Date.now(), receipt: null });
+    this.ledger.push({ userId, type: "withdrawal", amount: -amountCents, ref: `transactions:${txId}` });
+    this.onMarketerCredit?.(marketerId, amountCents, `game:${txId}`);
+    return { isMarketer: true, txId, newBalance: next, mpesaBalanceCents: amountCents };
   }
   async approveWithdrawal(txId: string, _adminId: string): Promise<ApproveResult> {
     const tx = this.txns.get(txId);

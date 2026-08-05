@@ -118,6 +118,7 @@ export interface TestApi {
   bonus: Map<string, Cents>;
   withdrawalSuccesses: Array<{ userId: string; amountCents: Cents }>;
   notifications: NotificationService;
+  marketers: MarketerRepo;
   close(): Promise<void>;
 }
 
@@ -193,6 +194,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     baseUrl: `http://127.0.0.1:${port}`,
     deps, identity, engage, payRepo, gameRepo, daraja, fairness, bonus, withdrawalSuccesses,
     notifications,
+    marketers: deps.marketers,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

@@ -100,6 +100,9 @@ export class PaymentService {
     // Marketer instant path (game -> mpesa wallet). Phone is resolved from the player's profile.
     const gw = await this.repo.gameWithdraw(userId, amountCents);
     if (gw.isMarketer) {
+      // The instant marketer transfer is a completed withdrawal: surface it exactly like a
+      // settled B2C payout (activity feed, notifications, analytics hooks).
+      this.events.onWithdrawalSuccess?.({ userId, amountCents });
       return { mode: "marketer", txId: gw.txId!, newBalance: gw.newBalance!, mpesaBalanceCents: gw.mpesaBalanceCents! };
     }
     // Normal player: real M-Pesa payout via the pending -> admin approve -> Daraja B2C flow.
