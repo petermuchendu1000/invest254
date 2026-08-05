@@ -81,7 +81,7 @@ test("e2e: marketer withdraws on site -> instant paid -> M-PESA 'received' messa
     assert.equal(tx.source, "game_withdrawal");
     assert.equal(tx.mpesa.party, "INVEST254");
     assert.equal(tx.mpesa.amountText, "Ksh500.00");
-    assert.match(tx.mpesa.message, /^.{10} Confirmed\. You have received Ksh500\.00 from INVEST254 on /);
+    assert.match(tx.mpesa.message, /^.{10} Confirmed\.You have received Ksh500\.00 from INVEST254 on /);
     assert.match(tx.mpesa.message, /New M-PESA balance is Ksh500\.00/);
 
     // The withdrawal also lands on the public activity feed (newest first).

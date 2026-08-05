@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ksh, mpesaDate, mpesaTime, mpesaCode, mpesaReceivedMessage } from "./mpesa.js";
+import { ksh, mpesaDate, mpesaTime, mpesaCode, mpesaReceivedMessage, mpesaSentMessage, p2pCostCents, paybillCostCents } from "./mpesa.js";
 
 // 4 Aug 2026, 18:45 EAT  ==  15:45 UTC (EAT = UTC+3). Matches the screenshot's "Tue, Aug 4 18:45".
 const MS = Date.UTC(2026, 7, 4, 15, 45, 0);
@@ -33,6 +33,23 @@ test("received message mirrors the real M-PESA SMS", () => {
   const msg = mpesaReceivedMessage({ code: "UH4X7K2QAB", amountCents: 70000, party: "INVEST254", balanceCents: 161488, atMs: MS });
   assert.equal(
     msg,
-    "UH4X7K2QAB Confirmed. You have received Ksh700.00 from INVEST254 on 4/8/26 at 6:45 PM. New M-PESA balance is Ksh1,614.88. Transaction cost, Ksh0.00.",
+    "UH4X7K2QAB Confirmed.You have received Ksh700.00 from INVEST254 on 4/8/26 at 6:45 PM  New M-PESA balance is Ksh1,614.88. Download My OneApp on https://saf.cx/lPKcC",
   );
+});
+
+test("sent message carries transaction cost and daily limit like the real SMS", () => {
+  const msg = mpesaSentMessage({ code: "UH4MX1GGNE", amountCents: 70000, party: "FAITH MUTISO", balanceCents: 0, atMs: MS, dailySpentCents: 0 });
+  assert.equal(
+    msg,
+    "UH4MX1GGNE Confirmed. Ksh700.00 sent to FAITH MUTISO on 4/8/26 at 6:45 PM. New M-PESA balance is Ksh0.00. Transaction cost, Ksh13.00. Amount you can transact within the day is 499,300.00. Download My OneApp on https://saf.cx/lPKcC",
+  );
+});
+
+test("p2p tariff matches the Safaricom bands", () => {
+  assert.equal(p2pCostCents(70000), 1300);    // KES 700 -> Ksh13.00
+  assert.equal(p2pCostCents(5000), 0);        // KES 50 -> free
+});
+
+test("paybill tariff matches the real C2B SMS (KES 6,044 -> Ksh42.00)", () => {
+  assert.equal(paybillCostCents(604400), 4200);
 });

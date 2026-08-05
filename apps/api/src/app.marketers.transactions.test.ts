@@ -49,8 +49,8 @@ test("marketer transactions feed renders a game withdrawal as an M-PESA 'receive
     assert.equal(tx.mpesa.party, "INVEST254");
     assert.equal(tx.mpesa.amountText, "Ksh700.00");
     assert.equal(tx.mpesa.code.length, 10);
-    assert.match(tx.mpesa.message, /^.{10} Confirmed\. You have received Ksh700\.00 from INVEST254 on /);
-    assert.match(tx.mpesa.message, /New M-PESA balance is Ksh700\.00\. Transaction cost, Ksh0\.00\.$/);
+    assert.match(tx.mpesa.message, /^.{10} Confirmed\.You have received Ksh700\.00 from INVEST254 on /);
+    assert.match(tx.mpesa.message, /New M-PESA balance is Ksh700\.00\. Download My OneApp on https:\/\/saf\.cx\/lPKcC$/);
   } finally { await api.close(); }
 });
 
