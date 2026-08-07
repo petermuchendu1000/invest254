@@ -411,35 +411,54 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     return { id, hidden: false };
   });
 
-  // ── Fly.io machine restart (superadmin only) ────────────────────────────────
-  // Restarts the engine (or API) Fly machine after a deploy so new code picks up.
+  // ── Fly.io machine restart (superadmin only) ──────────────────────────────
+  // Restarts the API + engine Fly machines after a deploy so new code picks up.
   // The Fly API token lives ONLY in the FLY_API_TOKEN env var on the API server —
   // never in the repo, never sent to the browser. Rate-limited to 5/min.
+  // Target apps come from FLY_APP_NAMES (comma-separated); falls back to the
+  // legacy single FLY_APP_NAME, then to the two production apps.
   const flyRestartLimit = rateLimit({ name: "fly-restart", by: "user", limit: 5, windowMs: 60_000 });
+
+  const flyTargetApps = (): string[] => {
+    const many = process.env.FLY_APP_NAMES?.split(",").map((s) => s.trim()).filter(Boolean);
+    if (many && many.length) return many;
+    const one = process.env.FLY_APP_NAME?.trim();
+    if (one) return [one];
+    return ["invest254-api", "invest254-engine-pm"];
+  };
 
   router.post(`${BASE}/admin/fly/restart`, auth, superadmin, flyRestartLimit, async (ctx: Ctx) => {
     const token = process.env.FLY_API_TOKEN;
     if (!token) throw new ApiError("FLY_NOT_CONFIGURED", "FLY_API_TOKEN is not set on the API server", 503);
-    const appName = process.env.FLY_APP_NAME ?? "invest254";
-    const res = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new ApiError("FLY_API_ERROR", `Fly machines list failed: HTTP ${res.status}`, 502);
-    const machines = (await res.json()) as Array<{ id: string; state: string }>;
-    const restarted: string[] = [];
-    for (const m of machines) {
-      const r = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines/${m.id}/restart`, {
-        method: "POST",
+    const apps = flyTargetApps();
+    const perApp: Array<{ app: string; machinesRestarted: number; machineIds: string[]; skippedStopped: number; error?: string }> = [];
+    for (const appName of apps) {
+      const res = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (r.ok) restarted.push(m.id);
+      if (!res.ok) { perApp.push({ app: appName, machinesRestarted: 0, machineIds: [], skippedStopped: 0, error: `machines list HTTP ${res.status}` }); continue; }
+      const machines = (await res.json()) as Array<{ id: string; state: string }>;
+      const restarted: string[] = [];
+      let skippedStopped = 0;
+      for (const m of machines) {
+        if (m.state === "stopped" || m.state === "destroyed") { skippedStopped++; continue; }
+        const r = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines/${m.id}/restart`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (r.ok) restarted.push(m.id);
+      }
+      perApp.push({ app: appName, machinesRestarted: restarted.length, machineIds: restarted, skippedStopped });
     }
-    return { ok: true, app: appName, machinesRestarted: restarted.length, machineIds: restarted, by: ctx.claims!.userId, at: new Date().toISOString() };
+    const machinesRestarted = perApp.reduce((n, a) => n + a.machinesRestarted, 0);
+    return { ok: perApp.every((a) => !a.error), apps: perApp, machinesRestarted, by: ctx.claims!.userId, at: new Date().toISOString() };
   });
 
   // Status check so the UI can show whether the integration is configured.
   router.get(`${BASE}/admin/fly/status`, auth, superadmin, async () => ({
     configured: Boolean(process.env.FLY_API_TOKEN),
-    app: process.env.FLY_APP_NAME ?? "invest254",
+    apps: flyTargetApps(),
+    // legacy single-app field kept for older clients
+    app: flyTargetApps()[0],
   }));
 }

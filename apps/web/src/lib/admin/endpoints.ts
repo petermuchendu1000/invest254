@@ -116,9 +116,9 @@ export const adminApi = {
   unhideChat: (t: string, id: number) => apiFetch<unknown>(`/admin/chat/${id}/unhide`, { method: 'POST', token: t }),
 
   // Fly.io machine restart (superadmin only)
-  flyStatus: (t: string) => apiFetch<{ configured: boolean; app: string }>('/admin/fly/status', { token: t }),
+  flyStatus: (t: string) => apiFetch<{ configured: boolean; apps: string[]; app: string }>('/admin/fly/status', { token: t }),
   flyRestart: (t: string) =>
-    apiFetch<{ ok: boolean; app: string; machinesRestarted: number; machineIds: string[]; by: string; at: string }>(
+    apiFetch<{ ok: boolean; apps: Array<{ app: string; machinesRestarted: number; machineIds: string[]; skippedStopped: number; error?: string }>; machinesRestarted: number; by: string; at: string }>(
       '/admin/fly/restart', { method: 'POST', token: t }),
 
   // Reports + audit

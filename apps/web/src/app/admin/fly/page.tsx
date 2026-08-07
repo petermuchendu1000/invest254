@@ -18,14 +18,19 @@ function FlyBody() {
   if (statusQ.isLoading) return <Skeleton className="h-48 w-full" />;
 
   const configured = statusQ.data?.configured ?? false;
-  const app = statusQ.data?.app ?? 'invest254';
+  const apps = statusQ.data?.apps ?? [statusQ.data?.app ?? 'invest254-api'];
 
   const doRestart = async () => {
     setConfirming(false);
     try {
       const r = await restart.mutateAsync();
       setLastResult({ at: r.at, machines: r.machinesRestarted });
-      toast.push({ tone: 'success', title: `Restarted ${r.machinesRestarted} machine(s) on ${r.app}` });
+      const failed = r.apps.filter((a) => a.error);
+      if (failed.length === 0) {
+        toast.push({ tone: 'success', title: `Restarted ${r.machinesRestarted} machine(s) across ${r.apps.length} app(s)` });
+      } else {
+        toast.push({ tone: 'error', title: 'Some apps failed', description: failed.map((a) => `${a.app}: ${a.error}`).join('; ') });
+      }
     } catch (e) {
       toast.push({ tone: 'error', title: 'Restart failed', description: e instanceof Error ? e.message : 'Try again.' });
     }
@@ -39,8 +44,10 @@ function FlyBody() {
         </p>
         <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-5">
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span className="text-muted">Target app:</span>
-            <code className="rounded bg-surface-2 px-2 py-0.5 font-mono text-xs">{app}</code>
+            <span className="text-muted">Target apps:</span>
+            {apps.map((a) => (
+              <code key={a} className="rounded bg-surface-2 px-2 py-0.5 font-mono text-xs">{a}</code>
+            ))}
             <span
               className={
                 'ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ' +
@@ -65,7 +72,7 @@ function FlyBody() {
           ) : (
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-down/40 bg-down/10 p-4">
               <p className="text-sm">
-                Restart all machines on <strong>{app}</strong>? The app will be briefly unavailable (~10–30s).
+                Restart all running machines on <strong>{apps.join(' + ')}</strong>? Brief unavailability (~10–30s) per app.
               </p>
               <div className="ml-auto flex gap-2">
                 <Button variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
