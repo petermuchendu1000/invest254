@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, rateLimit, type Ctx } from "./http.js";
 import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery, UserOverridePatch } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 
@@ -410,4 +410,36 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     if (!restored) throw new ApiError("NOT_FOUND", `no hidden chat message ${id}`, 404);
     return { id, hidden: false };
   });
+
+  // ── Fly.io machine restart (superadmin only) ────────────────────────────────
+  // Restarts the engine (or API) Fly machine after a deploy so new code picks up.
+  // The Fly API token lives ONLY in the FLY_API_TOKEN env var on the API server —
+  // never in the repo, never sent to the browser. Rate-limited to 5/min.
+  const flyRestartLimit = rateLimit({ name: "fly-restart", by: "user", limit: 5, windowMs: 60_000 });
+
+  router.post(`${BASE}/admin/fly/restart`, auth, superadmin, flyRestartLimit, async (ctx: Ctx) => {
+    const token = process.env.FLY_API_TOKEN;
+    if (!token) throw new ApiError("FLY_NOT_CONFIGURED", "FLY_API_TOKEN is not set on the API server", 503);
+    const appName = process.env.FLY_APP_NAME ?? "invest254";
+    const res = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new ApiError("FLY_API_ERROR", `Fly machines list failed: HTTP ${res.status}`, 502);
+    const machines = (await res.json()) as Array<{ id: string; state: string }>;
+    const restarted: string[] = [];
+    for (const m of machines) {
+      const r = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines/${m.id}/restart`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (r.ok) restarted.push(m.id);
+    }
+    return { ok: true, app: appName, machinesRestarted: restarted.length, machineIds: restarted, by: ctx.claims!.userId, at: new Date().toISOString() };
+  });
+
+  // Status check so the UI can show whether the integration is configured.
+  router.get(`${BASE}/admin/fly/status`, auth, superadmin, async () => ({
+    configured: Boolean(process.env.FLY_API_TOKEN),
+    app: process.env.FLY_APP_NAME ?? "invest254",
+  }));
 }

@@ -390,3 +390,15 @@ export function useMarketerStatus(id: string) {
     },
   });
 }
+
+// ── Fly.io machine restart (superadmin only) ──
+export function useFlyStatus() {
+  const t = useTok();
+  return useQuery({ queryKey: ['admin', 'fly-status'], queryFn: () => adminApi.flyStatus(t), enabled: !!t });
+}
+export function useFlyRestart() {
+  const t = useTok();
+  return useMutation({
+    mutationFn: () => adminApi.flyRestart(t),
+  });
+}

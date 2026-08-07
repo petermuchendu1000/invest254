@@ -115,6 +115,12 @@ export const adminApi = {
   hideChat: (t: string, id: number) => apiFetch<unknown>(`/admin/chat/${id}/hide`, { method: 'POST', token: t }),
   unhideChat: (t: string, id: number) => apiFetch<unknown>(`/admin/chat/${id}/unhide`, { method: 'POST', token: t }),
 
+  // Fly.io machine restart (superadmin only)
+  flyStatus: (t: string) => apiFetch<{ configured: boolean; app: string }>('/admin/fly/status', { token: t }),
+  flyRestart: (t: string) =>
+    apiFetch<{ ok: boolean; app: string; machinesRestarted: number; machineIds: string[]; by: string; at: string }>(
+      '/admin/fly/restart', { method: 'POST', token: t }),
+
   // Reports + audit
   reportDaily: (t: string, range: { from?: string | undefined; to?: string | undefined } = {}) =>
     apiFetch<{ items: DailyReportRow[] }>('/admin/reports/daily', { token: t, query: { from: range.from, to: range.to } }),
