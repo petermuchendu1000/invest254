@@ -2,6 +2,7 @@ import { CurveGenerator } from "./curve.js";
 import { SeededRng } from "./prng.js";
 import { type GameConfig, assertFeasible, rtp } from "./config.js";
 import { mulCents } from "./money.js";
+import { variableRatioMultiplier, DEFAULT_WIN_SPREAD, type WinSpread } from "./engagement.js";
 import type { Direction, Outcome } from "./types.js";
 
 interface DirParams { tau: number; gain: number; }
@@ -87,6 +88,39 @@ export class SettlementEngine {
       return { result: "win", multiplier, payoutCents, pnlCents: payoutCents - stakeCents, entryRate, exitRate, signedMove: move };
     }
     return { result: "loss", multiplier: 0, payoutCents: 0, pnlCents: -stakeCents, entryRate, exitRate, signedMove: move };
+  }
+
+  /**
+   * Variable-ratio settle: same win/loss decision and same calibrated mean winning
+   * multiplier as settle(), but the individual winning multiplier is drawn from the
+   * engagement spread (frequent small wins, rare larger ones) via a per-position
+   * seeded RNG. RTP is preserved: the spread distribution's mean equals the
+   * calibrated mean by construction. `nonce` makes the draw deterministic and
+   * auditable per position.
+   */
+  settleVariable(stakeCents: number, dir: Direction, entryT: number, nonce: number, serverSeed: string, spread: WinSpread = DEFAULT_WIN_SPREAD): Outcome {
+    const base = this.settle(stakeCents, dir, entryT);
+    if (base.result !== "win") return base;
+    const p = this.params[dir];
+    // calibrated mean winning multiplier for this direction (the RTP-pinned value)
+    const meanMult = 1 + p.gain * (p.tau > 0 ? this.meanWinningMove(dir, p.tau) : 0);
+    const rng = new SeededRng(serverSeed, `engage:${nonce}`);
+    const shaped = variableRatioMultiplier(rng, Math.min(meanMult, this.cfg.maxMultiplier), this.cfg.maxMultiplier, spread);
+    const multiplier = Math.min(shaped, this.cfg.maxMultiplier);
+    const payoutCents = mulCents(stakeCents, multiplier);
+    return { ...base, multiplier, payoutCents, pnlCents: payoutCents - stakeCents };
+  }
+
+  /** Mean signed move among winning samples at threshold tau (calibration mirror). */
+  private meanWinningMove(dir: Direction, tau: number): number {
+    const rng = new SeededRng("calibration", `calib:${dir}`);
+    const n = 50_000;
+    let sum = 0, count = 0;
+    for (let i = 0; i < n; i++) {
+      const m = this.signedMove(dir, rng.range(0, 3600));
+      if (m >= tau) { sum += m; count++; }
+    }
+    return count ? sum / count : tau;
   }
 
   /**

@@ -20,10 +20,22 @@ export interface MeDto {
   phone: string | null;
 }
 
+export interface BonusStatusDto {
+  bonusId: string;
+  amount: Cents;
+  wageringX: number;
+  wagered: Cents;
+  required: Cents;
+  remaining: Cents;
+  status: string;
+  createdAt: string;
+}
+
 export interface WalletDto {
   real: Cents;
   bonus: Cents;
   currency: string;
+  bonuses?: BonusStatusDto[];
 }
 
 /** GET /activity item (newest-first). Mirrors the WS `activity` DTO. */

@@ -6,7 +6,7 @@ import {
   type GameRepository, type EngagementRepository, type PaymentRepository,
   type Querier, type FairnessRecord, type ListenClient,
 } from "@invest254/engine";
-import { createApp, type ApiDeps, type WalletBalance } from "./app.js";
+import { createApp, type ApiDeps, type WalletBalance, type BonusStatus } from "./app.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 
 /**
@@ -117,10 +117,26 @@ async function buildDeps(): Promise<ApiDeps> {
     resolveHandle,
     walletBalance: async (userId: string): Promise<WalletBalance> => {
       const r = await q.query("select real_balance, bonus_balance, currency from wallets where user_id = $1", [userId]);
-      if (!r.rows.length) return { real: 0, bonus: 0, currency: "KES" };
-      const x = r.rows[0];
       const toCents = (v: unknown): number => (typeof v === "string" ? Number(v) : (v as number)) || 0;
-      return { real: toCents(x.real_balance), bonus: toCents(x.bonus_balance), currency: String(x.currency ?? "KES") };
+      const base = !r.rows.length
+        ? { real: 0, bonus: 0, currency: "KES" }
+        : { real: toCents(r.rows[0].real_balance), bonus: toCents(r.rows[0].bonus_balance), currency: String(r.rows[0].currency ?? "KES") };
+      // Active deposit bonuses with wagering progress (migration 0037). Fail-open: if the
+      // RPC is not yet deployed the wallet still returns balances without bonus detail.
+      try {
+        const b = await q.query(
+          "select bonus_id, amount, wagering_x, wagered, required, remaining, status, created_at from fn_wallet_bonus_status($1)",
+          [userId]);
+        const bonuses: BonusStatus[] = b.rows.map((x: Record<string, unknown>) => ({
+          bonusId: String(x.bonus_id), amount: toCents(x.amount), wageringX: Number(x.wagering_x),
+          wagered: toCents(x.wagered), required: toCents(x.required), remaining: toCents(x.remaining),
+          status: String(x.status),
+          createdAt: x.created_at instanceof Date ? x.created_at.toISOString() : String(x.created_at),
+        }));
+        return { ...base, bonuses };
+      } catch {
+        return base;
+      }
     },
     ledger: (userId, qy) => repo.listLedger(userId, qy),
     positions: (userId, qy) => repo.listPositions(userId, qy),

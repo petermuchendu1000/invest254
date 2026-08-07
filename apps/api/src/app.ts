@@ -20,7 +20,8 @@ import type { Server } from "node:http";
  * implementations; tests wire in-memory fakes. Player/payments/admin routes (E2) extend
  * this interface — E1 ships the public surface (health, game config, fairness, activity).
  */
-export interface WalletBalance { real: Cents; bonus: Cents; currency: string; }
+export interface BonusStatus { bonusId: string; amount: Cents; wageringX: number; wagered: Cents; required: Cents; remaining: Cents; status: string; createdAt: string; }
+export interface WalletBalance { real: Cents; bonus: Cents; currency: string; bonuses?: BonusStatus[]; }
 
 export interface ApiDeps {
   /** JWT verifier for player/admin routes; null → DEV header auth (see requireAuth). */

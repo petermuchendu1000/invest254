@@ -1,6 +1,6 @@
 import {
   CurveGenerator, SettlementEngine, type GameConfig, type VersionedGameConfig,
-  type Direction, type Outcome, type Tick,
+  type Direction, type Outcome, type Tick, presentOutcome, type OutcomePresentation,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
 import { overrideAffectsPricing, userSettlement, type UserOverride } from "./overrides.js";
@@ -17,7 +17,7 @@ export interface Position {
   gameDayId: number | null;               // the day whose seed determined this outcome
   configVersion: number;                  // the game_config version that priced this outcome
 }
-export interface SettledEvent { position: Position; lockedMultiplier: number; payoutCents: number; pnlCents: number; balance: number; mode: "auto" | "manual"; }
+export interface SettledEvent { position: Position; lockedMultiplier: number; payoutCents: number; pnlCents: number; balance: number; mode: "auto" | "manual"; presentation: OutcomePresentation; }
 export interface UpdateEvent { positionId: string; liveMultiplier: number; livePnlCents: number; secondsLeft: number; sellable: boolean; }
 type Listener = { onTick?: (t: Tick) => void; onUpdate?: (u: UpdateEvent) => void; onSettled?: (e: SettledEvent) => void; onError?: (err: Error, ctx: string) => void; };
 
@@ -33,6 +33,8 @@ export interface ActiveContext {
   settlement: SettlementEngine;
   dayStartMs: number;
   gameDayId: number | null;
+  /** The day seed (kept server-side) for deterministic per-position engagement draws. */
+  seed?: string | null;
   /** The game_config version baked into `curve`/`settlement`; recorded on every position. */
   configVersion: number;
 }
@@ -163,8 +165,15 @@ export class GameServer {
     const ctx = this.getActiveContext();
     const openedAtMs = this.now();
     const entryT = (openedAtMs - ctx.dayStartMs) / 1000;
-    const outcome = this.settlementFor(ctx, ov).settle(input.stakeCents, input.direction, entryT);
     const nonce = (nonceCounter = (nonceCounter + 1) % Number.MAX_SAFE_INTEGER);
+    // Variable-ratio win sizing: same win/loss decision and same RTP as the calibrated
+    // engine, but winning multipliers are spread (frequent small wins, rare bigger ones)
+    // via a deterministic per-position draw. Requires the day seed; falls back to the
+    // plain calibrated settle when no seed is attached (local dev without a DB).
+    const engine = this.settlementFor(ctx, ov);
+    const outcome = ctx.seed
+      ? engine.settleVariable(input.stakeCents, input.direction, entryT, nonce, ctx.seed)
+      : engine.settle(input.stakeCents, input.direction, entryT);
     const { positionId, newBalance } = await this.repo.openPosition({
       userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
       entryRate: outcome.entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
@@ -209,7 +218,9 @@ export class GameServer {
     const result: "win" | "loss" = payoutCents > 0 ? "win" : "loss";
     try {
       const { newBalance } = await this.repo.settlePosition({ positionId: p.id, exitRate: p.outcome.exitRate, result, multiplier, payoutCents });
-      const e: SettledEvent = { position: p, lockedMultiplier: multiplier, payoutCents, pnlCents: payoutCents - p.stakeCents, balance: newBalance, mode };
+      const tau = this.getActiveContext().settlement.params[p.direction].tau;
+      const presentation = presentOutcome({ result, multiplier, signedMove: p.outcome.signedMove, tau });
+      const e: SettledEvent = { position: p, lockedMultiplier: multiplier, payoutCents, pnlCents: payoutCents - p.stakeCents, balance: newBalance, mode, presentation };
       this.emitSettled(e);
       return e;
     } catch (err) { p.status = "open"; throw err; }

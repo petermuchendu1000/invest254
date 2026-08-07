@@ -13,6 +13,7 @@
     "./totp": "./src/totp.ts",
     "./payments": "./src/payments.ts",
     "./curve": "./src/curve.ts",
+    "./engagement": "./src/engagement.ts",
     "./activity": "./src/activity.ts",
     "./chatfilter": "./src/chatfilter.ts"
   }
