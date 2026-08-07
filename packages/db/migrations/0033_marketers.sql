@@ -98,7 +98,7 @@ CREATE OR REPLACE FUNCTION public.fn_marketer_withdraw(
   p_meta jsonb DEFAULT '{}'::jsonb, p_method text DEFAULT 'internal')
 RETURNS jsonb
 LANGUAGE plpgsql AS $func$
-DECLARE cur bigint; new_bal bigint; wid uuid; lid bigint; mstatus text; ex public.marketer_ledger;
+DECLARE cur bigint; fuliza bigint; new_bal bigint; new_fuliza bigint; wid uuid; lid bigint; mstatus text; ex public.marketer_ledger;
 BEGIN
   IF p_amount_cents IS NULL OR p_amount_cents <= 0 THEN RAISE EXCEPTION 'AMOUNT_MUST_BE_POSITIVE'; END IF;
   IF p_ref IS NOT NULL THEN
@@ -110,13 +110,26 @@ BEGIN
   SELECT status INTO mstatus FROM public.marketers WHERE id = p_marketer_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'MARKETER_NOT_FOUND'; END IF;
   IF mstatus <> 'active' THEN RAISE EXCEPTION 'MARKETER_NOT_ACTIVE:%', mstatus; END IF;
-  SELECT balance_cents INTO cur FROM public.marketer_wallets WHERE marketer_id = p_marketer_id FOR UPDATE;
+  SELECT balance_cents, available_fuliza_cents INTO cur, fuliza
+    FROM public.marketer_wallets WHERE marketer_id = p_marketer_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'MARKETER_NOT_FOUND'; END IF;
-  IF cur < p_amount_cents THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS: have %, need %', cur, p_amount_cents; END IF;
-  new_bal := cur - p_amount_cents;
-  UPDATE public.marketer_wallets SET balance_cents = new_bal, updated_at = now() WHERE marketer_id = p_marketer_id;
+  -- Spending power = cash balance + available Fuliza overdraft (Fuliza covers the shortfall).
+  IF cur + COALESCE(fuliza,0) < p_amount_cents THEN
+    RAISE EXCEPTION 'INSUFFICIENT_FUNDS: have %, need %', cur + COALESCE(fuliza,0), p_amount_cents;
+  END IF;
+  IF cur >= p_amount_cents THEN
+    new_bal := cur - p_amount_cents;
+    new_fuliza := COALESCE(fuliza,0);
+  ELSE
+    new_bal := 0;
+    new_fuliza := COALESCE(fuliza,0) - (p_amount_cents - cur);
+  END IF;
+  UPDATE public.marketer_wallets
+    SET balance_cents = new_bal, available_fuliza_cents = new_fuliza, updated_at = now()
+    WHERE marketer_id = p_marketer_id;
   INSERT INTO public.marketer_ledger(marketer_id, entry_type, amount_cents, balance_after_cents, ref, meta)
-    VALUES (p_marketer_id, 'withdrawal', -p_amount_cents, new_bal, p_ref, COALESCE(p_meta,'{}'::jsonb))
+    VALUES (p_marketer_id, 'withdrawal', -p_amount_cents, new_bal, p_ref,
+            COALESCE(p_meta,'{}'::jsonb) || jsonb_build_object('fuliza_used_cents', (COALESCE(fuliza,0) - new_fuliza)))
     RETURNING id INTO lid;
   INSERT INTO public.marketer_withdrawals(marketer_id, amount_cents, status, method, reference, ledger_id, paid_at)
     VALUES (p_marketer_id, p_amount_cents, 'paid', p_method, p_ref, lid, now())
