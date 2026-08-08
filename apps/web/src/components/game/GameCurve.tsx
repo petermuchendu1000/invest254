@@ -23,16 +23,12 @@ export function GameCurve() {
   const rateLabel = last ? toValue(last.rate).toFixed(4) : '—';
 
   return (
-    <div className="flex h-full flex-col gap-3">
-      <div className="flex items-center justify-end">
-        <span className="shrink-0 rounded-lg border border-accent/60 bg-accent/10 px-3 py-1.5 text-xs font-semibold tabular-nums text-accent">
-          Rate: {rateLabel}
-        </span>
-      </div>
-
-      <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-xl bg-surface">
-        <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} />
-      </div>
+    <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface">
+      {/* Floating live-rate chip over the chart (top-right), exchange-style. */}
+      <span className="absolute right-2.5 top-2.5 z-10 rounded-md border border-accent/50 bg-bg/80 px-2.5 py-1 text-[11px] font-semibold tabular-nums text-accent backdrop-blur-sm">
+        Rate: {rateLabel}
+      </span>
+      <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} />
     </div>
   );
 }

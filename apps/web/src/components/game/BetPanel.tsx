@@ -123,7 +123,7 @@ export function BetPanel() {
   // ── Loading ──────────────────────────────────────────────────────────────
   if (!hydrated) {
     return (
-      <Card className="flex flex-col gap-2 p-2.5">
+      <Card className="flex flex-col gap-2.5 rounded-xl p-3">
         <Skeleton className="h-10 w-full" />
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-10 w-full" />
@@ -136,9 +136,9 @@ export function BetPanel() {
     const canCashOut =
       activePosition.phase === 'open' && activePosition.sellable && !!activePosition.positionId;
     return (
-      <Card className="flex flex-col gap-2 p-2.5">
+      <Card className="flex flex-col gap-2.5 rounded-xl p-3">
         <LivePnl pos={activePosition} />
-        <Button variant="secondary" size="md" fullWidth className="!h-10" disabled={!canCashOut} onClick={sell}>
+        <Button variant="secondary" size="md" fullWidth className="!h-11" disabled={!canCashOut} onClick={sell}>
           {activePosition.phase === 'settling'
             ? 'Cashing out…'
             : canCashOut
@@ -154,7 +154,7 @@ export function BetPanel() {
 
   // ── Idle — stake + duration + BUY/SELL (always visible) ──────────────────
   return (
-    <Card className="flex flex-col gap-2 p-2.5">
+    <Card className="flex flex-col gap-2.5 rounded-xl p-3">
       {/* Stake input with KES prefix */}
       <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3">
         <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">KES</span>
@@ -164,7 +164,7 @@ export function BetPanel() {
           onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, ''))}
           placeholder="0"
           aria-label="Stake amount in KES"
-          className="h-10 w-full bg-transparent text-xl font-bold tabular-nums text-fg outline-none placeholder:text-muted"
+          className="h-11 w-full bg-transparent text-xl font-bold tabular-nums text-fg outline-none placeholder:text-muted"
         />
       </div>
 
@@ -176,7 +176,7 @@ export function BetPanel() {
             type="button"
             onClick={() => setStake(String(centsToKes(c)))}
             className={cn(
-              'h-9 rounded-lg border text-sm font-semibold tabular-nums transition',
+              'h-10 rounded-lg border text-sm font-semibold tabular-nums transition',
               chipActive(c)
                 ? 'border-accent bg-accent/10 text-accent'
                 : 'border-border bg-surface-2 text-fg hover:border-accent/60',
@@ -212,10 +212,10 @@ export function BetPanel() {
 
       {/* BUY / SELL */}
       <div className="grid grid-cols-2 gap-2">
-        <Button variant="up" size="md" fullWidth className="!h-10" disabled={connecting} onClick={() => handleDirection('buy')}>
+        <Button variant="up" size="md" fullWidth className="!h-11" disabled={connecting} onClick={() => handleDirection('buy')}>
           BUY
         </Button>
-        <Button variant="down" size="md" fullWidth className="!h-10" disabled={connecting} onClick={() => handleDirection('sell')}>
+        <Button variant="down" size="md" fullWidth className="!h-11" disabled={connecting} onClick={() => handleDirection('sell')}>
           SELL
         </Button>
       </div>

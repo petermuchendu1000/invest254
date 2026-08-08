@@ -51,19 +51,19 @@ export function PriceHeader() {
   const statusDot = status === 'open' ? 'bg-up' : status === 'connecting' ? 'bg-warn' : 'bg-down';
 
   return (
-    <div className="flex items-start justify-between gap-2 sm:gap-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className={cn('mt-2 h-2 w-2 shrink-0 rounded-full', statusDot)} title={status} />
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status} />
         <div className="flex min-w-0 flex-col">
-          <span className="text-xs font-medium text-muted">BTC/KES</span>
-          <div className="flex items-center gap-2">
-            <span className={cn('text-xl font-bold tabular-nums sm:text-2xl', up ? 'text-up' : 'text-down')}>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted">BTC/KES</span>
+          <div className="flex items-baseline gap-2">
+            <span className={cn('text-2xl font-bold leading-none tabular-nums', up ? 'text-up' : 'text-down')}>
               {value !== null ? fmt(value) : '—'}
             </span>
             {value !== null ? (
               <span
                 className={cn(
-                  'shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums',
+                  'shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
                   up ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
                 )}
               >
@@ -74,10 +74,10 @@ export function PriceHeader() {
         </div>
       </div>
 
-      <div className="flex shrink-0 gap-2.5 text-right sm:gap-4">
-        <Stat className="hidden xs:flex" label="24H HIGH" value={hi !== null ? fmt(hi) : '—'} />
-        <Stat className="hidden xs:flex" label="24H LOW" value={lo !== null ? fmt(lo) : '—'} />
-        <Stat label="ONLINE" value={displayOnline > 0 ? displayOnline.toLocaleString('en-KE') : '—'} />
+      <div className="flex shrink-0 items-center gap-3 text-right sm:gap-5">
+        <Stat className="hidden xs:flex" label="24H High" value={hi !== null ? fmt(hi) : '—'} />
+        <Stat className="hidden xs:flex" label="24H Low" value={lo !== null ? fmt(lo) : '—'} />
+        <Stat label="Online" value={displayOnline > 0 ? displayOnline.toLocaleString('en-KE') : '—'} />
       </div>
     </div>
   );
@@ -85,9 +85,9 @@ export function PriceHeader() {
 
 function Stat({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className={cn('flex flex-col', className)}>
-      <span className="text-[10px] uppercase tracking-wide text-muted">{label}</span>
-      <span className="text-sm font-semibold tabular-nums text-fg">{value}</span>
+    <div className={cn('flex flex-col gap-0.5', className)}>
+      <span className="text-[9px] font-medium uppercase tracking-wider text-muted">{label}</span>
+      <span className="text-sm font-semibold leading-none tabular-nums text-fg">{value}</span>
     </div>
   );
 }

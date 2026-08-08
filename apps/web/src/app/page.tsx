@@ -8,15 +8,16 @@ export default function GamePage() {
   return (
     <GameSocketProvider>
       {/*
-        Full-height column: header info on top, the chart stretches to fill the
-        middle, and the trade controls dock to the bottom (above the tab bar on
-        mobile). The chart is the only flexible element, so there is never dead
-        space between the curve and the panel.
+        Trading-terminal layout: the section is a fixed-height column sized to the
+        viewport (minus the sticky top bar). Header stats sit on top, the chart
+        flex-fills every remaining pixel, and the trade console is docked to the
+        bottom above the mobile tab bar — so there is never dead space anywhere.
+        The page itself never scrolls on mobile; only the chart stretches.
       */}
-      <section className="flex min-h-[calc(100dvh-8rem)] flex-col gap-3 pb-[17rem] md:min-h-0 md:pb-0">
+      <section className="flex h-[calc(100dvh-7.5rem)] flex-col gap-2.5 md:h-auto md:min-h-[calc(100dvh-10rem)]">
         <PriceHeader />
         <TickerStrip />
-        <div className="min-h-[280px] flex-1 md:min-h-[420px]">
+        <div className="min-h-0 flex-1 md:min-h-[420px]">
           <GameCurve />
         </div>
         <div
