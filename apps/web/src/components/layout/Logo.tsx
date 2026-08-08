@@ -41,15 +41,12 @@ export function Logo({ className = '' }: { className?: string }) {
   return (
     <Link
       href="/"
-      aria-label="invest254 home"
+      aria-label="invest254.com home"
       className={`flex items-center gap-2 text-fg ${className}`}
     >
       <LogoMark />
-      <span className="text-lg font-extrabold tracking-tight leading-none">
-        <span>invest</span>
-        <span style={{ color: GREEN }}>2</span>
-        <span>5</span>
-        <span style={{ color: RED }}>4</span>
+      <span className="text-lg font-extrabold leading-none tracking-tight text-white">
+        invest254.com
       </span>
     </Link>
   );
