@@ -18,7 +18,7 @@ green/red curve, cyan accents).
 - **Ticker strip:** decorative crypto list (ETH, BNB, SOL, …) — display-only.
 - **Left rail:** Live Activity feed + chat input.
 - **Center:** the live smooth curve with timeframe toggles (30s/1m/2m/5m) and "Rate" badge.
-- **Right panel:** Stake amount + quick chips (250/500/1,000/2,500), Auto-sell timer (default 10s),
+- **Right panel:** Stake amount + quick chips (250/500/750/1,000), Auto-sell timer (default 10s),
   Live P&L, **BUY** (green) / **SELL** (red) buttons.
 - **Footer:** licence line.
 

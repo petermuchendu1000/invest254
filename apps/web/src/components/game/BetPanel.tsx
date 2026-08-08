@@ -17,7 +17,7 @@ import { useHydrated } from '@/lib/useHydrated';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { LivePnl } from '@/components/game/LivePnl';
 
-const CHIP_CENTS = [25000, 50000, 100000, 250000];
+const CHIP_CENTS = [25000, 50000, 75000, 100000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
 
 export function BetPanel() {
