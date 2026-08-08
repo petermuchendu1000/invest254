@@ -7,20 +7,23 @@ import { BetPanel } from '@/components/game/BetPanel';
 export default function GamePage() {
   return (
     <GameSocketProvider>
-      <section className="flex flex-col gap-3 pb-[21rem] md:pb-0">
+      {/*
+        Full-height column: header info on top, the chart stretches to fill the
+        middle, and the trade controls dock to the bottom (above the tab bar on
+        mobile). The chart is the only flexible element, so there is never dead
+        space between the curve and the panel.
+      */}
+      <section className="flex min-h-[calc(100dvh-8rem)] flex-col gap-3 pb-[17rem] md:min-h-0 md:pb-0">
         <PriceHeader />
         <TickerStrip />
-        <GameCurve />
-        {/*
-          On mobile, dock the trade controls to the bottom of the screen so BUY/SELL
-          is always visible. The dock is `fixed` (out of normal flow); on md+ the
-          wrapper collapses to `display:contents`, restoring the inline stacked layout.
-        */}
+        <div className="min-h-[280px] flex-1 md:min-h-[420px]">
+          <GameCurve />
+        </div>
         <div
           data-testid="bet-panel-dock"
-          className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-border bg-bg pt-2 md:contents"
+          className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-border bg-bg pt-2 md:static md:border-0 md:bg-transparent md:pt-0"
         >
-          <div className="mx-auto flex w-full max-w-app flex-col gap-3 px-4 md:contents md:px-0">
+          <div className="mx-auto w-full max-w-app px-4 md:px-0">
             <BetPanel />
           </div>
         </div>
