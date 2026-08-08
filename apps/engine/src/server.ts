@@ -15,7 +15,7 @@ const PORT = Number(process.env.PORT ?? 8080);
 const MASTER_SEED = process.env.MASTER_SEED ?? process.env.SERVER_SEED ?? "dev-master-seed-0001";
 const ONLINE_FLOOR = Number(process.env.ONLINE_FLOOR ?? 0);           // display floor for the online counter
 const BIG_WIN_CENTS = Number(process.env.BIG_WIN_CENTS ?? 500_000);   // wins >= this (KES 5,000) post a real feed event
-const ACTIVITY_SIM = (process.env.ACTIVITY_SIM ?? "on") !== "off";    // simulated-feed generator toggle
+const ACTIVITY_SIM = (process.env.ACTIVITY_SIM ?? "off") === "on";    // simulated-feed generator toggle (default OFF: real events only)
 const ACTIVITY_CADENCE_MS = Number(process.env.ACTIVITY_CADENCE_MS ?? 4000);
 const CONFIG_POLL_MS = Number(process.env.CONFIG_POLL_MS ?? 15_000);   // LISTEN fallback cadence
 
