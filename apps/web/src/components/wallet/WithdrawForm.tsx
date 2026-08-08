@@ -12,12 +12,6 @@ import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
 
 const MIN_KES = centsToKes(MIN_WITHDRAWAL_CENTS);
-const QUICK = [
-  { label: '25%', frac: 0.25 },
-  { label: '50%', frac: 0.5 },
-  { label: '75%', frac: 0.75 },
-  { label: 'Max', frac: 1 },
-] as const;
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
@@ -58,7 +52,6 @@ export function WithdrawForm() {
   const [paidAmountKes, setPaidAmountKes] = useState(0);
 
   const realCents = wallet?.real ?? 0;
-  const maxKes = Math.floor(centsToKes(realCents));
   const effectivePhone = editingPhone || !accountPhone ? phone : accountPhone;
 
   const kes = Number(amount);
@@ -127,7 +120,7 @@ export function WithdrawForm() {
 
   // ── Form ─────────────────────────────────────────────────────────────────────
   return (
-    <form className="mx-auto flex w-full max-w-sm flex-col gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
+    <form className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
       {/* Amount hero — centered entry, the focal point of the form. */}
       <div
         className={[
@@ -150,37 +143,9 @@ export function WithdrawForm() {
             className="max-w-full bg-transparent text-4xl font-black tabular-nums text-fg outline-none placeholder:text-muted"
           />
         </div>
-        <div className="mt-2 text-xs text-muted">
-          Available <span className="font-semibold text-fg">{formatKes(realCents)}</span>
-          <span className="mx-1.5 text-border">·</span>
-          Min {formatKes(MIN_WITHDRAWAL_CENTS)}
-        </div>
       </div>
-
-      {/* Quick amounts */}
-      <div className="grid grid-cols-4 gap-2">
-        {QUICK.map((q) => {
-          const val = q.frac === 1 ? maxKes : Math.floor(maxKes * q.frac);
-          const active = Number(amount) === val && val > 0;
-          return (
-            <button
-              key={q.label}
-              type="button"
-              disabled={maxKes <= 0}
-              onClick={() => { setAmount(String(val)); setErrors((p) => ({ ...p, amount: undefined })); }}
-              className={[
-                'h-10 rounded-lg border text-sm font-semibold transition disabled:opacity-40',
-                active
-                  ? 'border-accent bg-accent/10 text-accent'
-                  : 'border-border bg-surface-2 text-fg hover:border-accent/60',
-              ].join(' ')}
-            >
-              {q.label}
-            </button>
-          );
-        })}
-      </div>
-      {errors['amount'] ? <p className="-mt-1 text-xs text-down">{errors['amount']}</p> : null}
+      <p className="-mt-1 text-center text-xs text-muted">Min {formatKes(MIN_WITHDRAWAL_CENTS)}</p>
+      {errors['amount'] ? <p className="text-center text-xs text-down">{errors['amount']}</p> : null}
 
       {/* Destination */}
       <div className="flex flex-col gap-1.5">
