@@ -411,24 +411,32 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     const token = process.env.FLY_API_TOKEN;
     if (!token) throw new ApiError("FLY_NOT_CONFIGURED", "FLY_API_TOKEN is not set on the API server", 503);
     const apps = flyTargetApps();
-    const perApp: Array<{ app: string; machinesRestarted: number; machineIds: string[]; skippedStopped: number; error?: string }> = [];
+    // The machine SERVING this request must not restart itself — that kills the in-flight
+    // HTTP response and the UI shows a false "restart failed" even though the restart fired.
+    // Fly injects FLY_MACHINE_ID into every machine; skip it and report it separately.
+    const selfMachineId = process.env.FLY_MACHINE_ID;
+    const perApp: Array<{ app: string; machinesRestarted: number; machineIds: string[]; skippedStopped: number; skippedSelf: number; failed: number; error?: string }> = [];
     for (const appName of apps) {
       const res = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) { perApp.push({ app: appName, machinesRestarted: 0, machineIds: [], skippedStopped: 0, error: `machines list HTTP ${res.status}` }); continue; }
+      if (!res.ok) { perApp.push({ app: appName, machinesRestarted: 0, machineIds: [], skippedStopped: 0, skippedSelf: 0, failed: 0, error: `machines list HTTP ${res.status}` }); continue; }
       const machines = (await res.json()) as Array<{ id: string; state: string }>;
       const restarted: string[] = [];
-      let skippedStopped = 0;
+      let skippedStopped = 0, skippedSelf = 0, failed = 0;
       for (const m of machines) {
         if (m.state === "stopped" || m.state === "destroyed") { skippedStopped++; continue; }
+        if (selfMachineId && m.id === selfMachineId) { skippedSelf++; continue; }
         const r = await fetch(`https://api.machines.dev/v1/apps/${appName}/machines/${m.id}/restart`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (r.ok) restarted.push(m.id);
+        if (r.ok) restarted.push(m.id); else failed++;
       }
-      perApp.push({ app: appName, machinesRestarted: restarted.length, machineIds: restarted, skippedStopped });
+      const entry: { app: string; machinesRestarted: number; machineIds: string[]; skippedStopped: number; skippedSelf: number; failed: number; error?: string } =
+        { app: appName, machinesRestarted: restarted.length, machineIds: restarted, skippedStopped, skippedSelf, failed };
+      if (failed > 0) entry.error = `${failed} machine restart(s) failed`;
+      perApp.push(entry);
     }
     const machinesRestarted = perApp.reduce((n, a) => n + a.machinesRestarted, 0);
     return { ok: perApp.every((a) => !a.error), apps: perApp, machinesRestarted, by: ctx.claims!.userId, at: new Date().toISOString() };

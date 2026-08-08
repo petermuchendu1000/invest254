@@ -396,3 +396,88 @@ test("admin user activity: merges deposits, withdrawals and bets newest-first wi
     assert.equal((await req(api, "GET", `/api/v1/admin/users/${uid}/activity`, { token: uid })).status, 403);
   } finally { await api.close(); }
 });
+
+test("fly restart: restarts engine, skips the serving (self) machine + stopped ones, aggregates result", async () => {
+  process.env.FLY_API_TOKEN = "test-fly-token";
+  process.env.FLY_APP_NAMES = "invest254-engine-pm,invest254-api";
+  process.env.FLY_MACHINE_ID = "self-machine"; // the API machine serving this request
+  const realFetch = globalThis.fetch;
+  const restarted: string[] = [];
+  globalThis.fetch = (async (input: any, init?: any): Promise<Response> => {
+    const url = typeof input === "string" ? input : (input?.url ?? "");
+    if (url.includes("api.machines.dev")) {
+      if (url.endsWith("/machines")) {
+        const app = url.split("/apps/")[1].split("/")[0];
+        const machines = app === "invest254-api"
+          ? [{ id: "self-machine", state: "started" }, { id: "api-2", state: "stopped" }]
+          : [{ id: "eng-1", state: "started" }, { id: "eng-2", state: "started" }];
+        return new Response(JSON.stringify(machines), { status: 200 });
+      }
+      if (url.endsWith("/restart")) {
+        restarted.push(url.split("/machines/")[1].split("/")[0]);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+
+  const api = await startTestApi();
+  try {
+    // player is forbidden; admin is forbidden (superadmin-only); superadmin succeeds.
+    assert.equal((await req(api, "POST", "/api/v1/admin/fly/restart", { token: "p:player" })).status, 403);
+    assert.equal((await req(api, "POST", "/api/v1/admin/fly/restart", { token: "a:admin" })).status, 403);
+
+    const res = await req(api, "POST", "/api/v1/admin/fly/restart", { token: "owner:superadmin" });
+    assert.equal(res.status, 200);
+    const body = await json(res);
+
+    assert.equal(body.ok, true);
+    assert.equal(body.machinesRestarted, 2, "both engine machines restart");
+    assert.ok(restarted.includes("eng-1") && restarted.includes("eng-2"));
+    assert.ok(!restarted.includes("self-machine"), "must NOT restart the machine serving the request");
+
+    const apiApp = body.apps.find((a: any) => a.app === "invest254-api");
+    assert.equal(apiApp.machinesRestarted, 0);
+    assert.equal(apiApp.skippedSelf, 1);
+    assert.equal(apiApp.skippedStopped, 1);
+
+    // status endpoint reflects both target apps + configured
+    const st = await json(await req(api, "GET", "/api/v1/admin/fly/status", { token: "owner:superadmin" }));
+    assert.equal(st.configured, true);
+    assert.deepEqual(st.apps, ["invest254-engine-pm", "invest254-api"]);
+  } finally {
+    await api.close();
+    globalThis.fetch = realFetch;
+    delete process.env.FLY_API_TOKEN;
+    delete process.env.FLY_APP_NAMES;
+    delete process.env.FLY_MACHINE_ID;
+  }
+});
+
+test("fly restart: surfaces a per-app error when a machine restart call fails", async () => {
+  process.env.FLY_API_TOKEN = "test-fly-token";
+  process.env.FLY_APP_NAMES = "invest254-engine-pm";
+  delete process.env.FLY_MACHINE_ID;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init?: any): Promise<Response> => {
+    const url = typeof input === "string" ? input : (input?.url ?? "");
+    if (url.includes("api.machines.dev")) {
+      if (url.endsWith("/machines")) return new Response(JSON.stringify([{ id: "eng-1", state: "started" }]), { status: 200 });
+      if (url.endsWith("/restart")) return new Response("nope", { status: 500 });
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+  const api = await startTestApi();
+  try {
+    const body = await json(await req(api, "POST", "/api/v1/admin/fly/restart", { token: "owner:superadmin" }));
+    assert.equal(body.ok, false);
+    assert.equal(body.machinesRestarted, 0);
+    assert.equal(body.apps[0].failed, 1);
+    assert.ok(String(body.apps[0].error).includes("failed"));
+  } finally {
+    await api.close();
+    globalThis.fetch = realFetch;
+    delete process.env.FLY_API_TOKEN;
+    delete process.env.FLY_APP_NAMES;
+  }
+});
