@@ -101,26 +101,19 @@ export class SettlementEngine {
   settleVariable(stakeCents: number, dir: Direction, entryT: number, nonce: number, serverSeed: string, spread: WinSpread = DEFAULT_WIN_SPREAD): Outcome {
     const base = this.settle(stakeCents, dir, entryT);
     if (base.result !== "win") return base;
-    const p = this.params[dir];
-    // calibrated mean winning multiplier for this direction (the RTP-pinned value)
-    const meanMult = 1 + p.gain * (p.tau > 0 ? this.meanWinningMove(dir, p.tau) : 0);
+    // Mean winning multiplier is the RTP-pinned target the calibrator solves for:
+    //   E[multiplier | win] = rtp / targetWinRate.
+    // The previous derivation (1 + gain * meanWinningMove, gated on `tau > 0`) collapsed to
+    // 1.0 whenever the win threshold tau was <= 0 — which is the NORMAL case for any
+    // targetWinRate >= ~0.5 on a near-symmetric curve (driftBias 0). That made every win pay
+    // exactly x1.00 (net zero) and silently degraded RTP down to the win-rate. Pinning the
+    // mean to rtp/targetWinRate directly preserves RTP for every feasible config.
+    const meanMult = rtp(this.cfg) / this.cfg.targetWinRate;
     const rng = new SeededRng(serverSeed, `engage:${nonce}`);
     const shaped = variableRatioMultiplier(rng, Math.min(meanMult, this.cfg.maxMultiplier), this.cfg.maxMultiplier, spread);
     const multiplier = Math.min(shaped, this.cfg.maxMultiplier);
     const payoutCents = mulCents(stakeCents, multiplier);
     return { ...base, multiplier, payoutCents, pnlCents: payoutCents - stakeCents };
-  }
-
-  /** Mean signed move among winning samples at threshold tau (calibration mirror). */
-  private meanWinningMove(dir: Direction, tau: number): number {
-    const rng = new SeededRng("calibration", `calib:${dir}`);
-    const n = 50_000;
-    let sum = 0, count = 0;
-    for (let i = 0; i < n; i++) {
-      const m = this.signedMove(dir, rng.range(0, 3600));
-      if (m >= tau) { sum += m; count++; }
-    }
-    return count ? sum / count : tau;
   }
 
   /**

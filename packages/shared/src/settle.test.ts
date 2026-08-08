@@ -17,6 +17,36 @@ function measureRtp(eng: SettlementEngine, dir: "buy" | "sell" | "both", seed: s
   return { rtp: payoutSum / stakeSum, winRate: wins / n };
 }
 
+test("REGRESSION: settleVariable wins are not all x1.00 when tau <= 0 (targetWinRate > 0.5)", () => {
+  // Repro of the "WIN x1.00 / +KES 0.00" bug: for any targetWinRate above ~0.5 on a
+  // near-symmetric curve (driftBias 0) the win threshold tau is NEGATIVE, which used to
+  // force the shaped mean multiplier to 1.0 -> every win paid back exactly the stake and
+  // RTP silently degraded to the win-rate. This is the live config (edge 0.1, winRate 0.7).
+  const cfg = { ...DEFAULT_CONFIG, houseEdge: 0.1, targetWinRate: 0.7, driftBias: 0, defaultDurationS: 5 };
+  const seed = "regression-seed-x100";
+  const curve = new CurveGenerator(seed, cfg);
+  const eng = new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, 3600, 30_000);
+
+  // tau must be negative here — that's the trigger for the old bug.
+  assert.ok(eng.params.buy.tau <= 0, `expected tau <= 0, got ${eng.params.buy.tau}`);
+
+  const N = 8000, stake = 20000;
+  let wins = 0, payout = 0, sumMult = 0, atOne = 0;
+  for (let i = 0; i < N; i++) {
+    const dir = i % 2 ? "sell" : "buy";
+    const o = eng.settleVariable(stake, dir, (i * 1.37) % 3600, i, seed);
+    payout += o.payoutCents;
+    if (o.result === "win") { wins++; sumMult += o.multiplier; if (o.multiplier < 1.001) atOne++; }
+  }
+  const meanWinMult = sumMult / wins;
+  const aggRtp = payout / (N * stake);
+
+  // The bug produced 100% of wins at exactly x1.00 and RTP == winRate (~0.70).
+  assert.ok(atOne / wins < 0.05, `too many break-even wins: ${(atOne / wins * 100).toFixed(1)}%`);
+  assert.ok(meanWinMult > 1.1, `mean winning multiplier collapsed: ${meanWinMult.toFixed(3)}`);
+  assert.ok(aggRtp > rtp(cfg) - 0.06, `RTP degraded well below target: ${aggRtp.toFixed(3)} vs ${rtp(cfg)}`);
+});
+
 test("PROOF: aggregate RTP ~= 25% on held-out samples", () => {
   const curve = new CurveGenerator("rtp-day-1", DEFAULT_CONFIG);
   const eng = new SettlementEngine(curve, DEFAULT_CONFIG);
