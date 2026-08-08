@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { kesToCents, centsToKes, formatKes } from '@invest254/shared/money';
 import { normalizeMsisdn, MIN_WITHDRAWAL_CENTS } from '@invest254/shared/payments';
 import { Input } from '@/components/ui/Input';
@@ -15,11 +15,31 @@ const MIN_KES = centsToKes(MIN_WITHDRAWAL_CENTS);
 const QUICK = [
   { label: '25%', frac: 0.25 },
   { label: '50%', frac: 0.5 },
+  { label: '75%', frac: 0.75 },
   { label: 'Max', frac: 1 },
 ] as const;
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
+
+function MpesaIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <rect x="4" y="3" width="16" height="18" rx="3" />
+      <path d="M9 3v18" strokeOpacity="0" />
+      <path d="M12 7v6M9.5 9h4a1.5 1.5 0 010 3h-2.5a1.5 1.5 0 000 3H14" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckCircle() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-14 w-14 text-up" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <circle cx="12" cy="12" r="10" opacity="0.3" />
+      <path d="M7 12.5l3.2 3.2L17 9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 /** Withdraw body for the unified wallet sheet (no Modal/header — WalletModal provides those). */
 export function WithdrawForm() {
@@ -41,10 +61,20 @@ export function WithdrawForm() {
   const maxKes = Math.floor(centsToKes(realCents));
   const effectivePhone = editingPhone || !accountPhone ? phone : accountPhone;
 
+  const kes = Number(amount);
+  const amountCents = Number.isFinite(kes) ? kesToCents(kes) : 0;
+  const amountValid = Number.isInteger(kes) && kes >= MIN_KES && amountCents <= realCents;
+  const destMasked = useMemo(() => {
+    try {
+      return maskMsisdn(normalizeMsisdn(effectivePhone));
+    } catch {
+      return effectivePhone ? effectivePhone : '—';
+    }
+  }, [effectivePhone]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setServerError(null);
-    const kes = Number(amount);
     const next: Record<string, string | undefined> = {};
     if (!Number.isInteger(kes) || kes < MIN_KES) next['amount'] = `Minimum withdrawal is ${formatKes(MIN_WITHDRAWAL_CENTS)}.`;
     else if (kesToCents(kes) > realCents) next['amount'] = 'Amount exceeds your real balance.';
@@ -65,26 +95,70 @@ export function WithdrawForm() {
     }
   }
 
+  // ── Success ────────────────────────────────────────────────────────────────
   if (done) {
     return (
-      <div className="flex flex-col gap-3 p-4">
-        {paid ? (
-          <p className="rounded-xl border border-up/40 bg-up/10 px-3 py-2 text-sm text-up">
-            {formatKes(kesToCents(paidAmountKes))} sent to your M-Pesa. It reflects in your M-Pesa balance instantly.
+      <div className="flex flex-col items-center gap-4 px-5 py-8 text-center">
+        <CheckCircle />
+        <div>
+          <h3 className="text-lg font-bold text-fg">
+            {paid ? 'Sent to M-Pesa' : 'Withdrawal requested'}
+          </h3>
+          <p className="mt-1 text-sm text-muted">
+            {paid
+              ? 'It reflects in your M-Pesa balance instantly.'
+              : 'Funds are held and paid out after approval.'}
           </p>
-        ) : (
-          <p className="rounded-xl border border-up/40 bg-up/10 px-3 py-2 text-sm text-up">
-            Withdrawal requested. Funds are held and paid out to {maskMsisdn(normalizeMsisdn(effectivePhone))} after approval.
-          </p>
-        )}
-        <Button fullWidth onClick={close}>Done</Button>
+        </div>
+        <div className="w-full max-w-xs rounded-2xl border border-border bg-surface-2 p-4">
+          <div className="flex items-center justify-between py-1">
+            <span className="text-xs text-muted">Amount</span>
+            <span className="text-sm font-bold tabular-nums text-fg">{formatKes(kesToCents(paidAmountKes))}</span>
+          </div>
+          <div className="flex items-center justify-between py-1">
+            <span className="text-xs text-muted">To</span>
+            <span className="text-sm font-medium tabular-nums text-fg">{destMasked}</span>
+          </div>
+        </div>
+        <Button fullWidth size="lg" onClick={close}>Done</Button>
       </div>
     );
   }
 
+  // ── Form ─────────────────────────────────────────────────────────────────────
   return (
-    <form className="flex flex-col gap-4 p-4" onSubmit={onSubmit} noValidate>
-      <div className="flex gap-2">
+    <form className="mx-auto flex w-full max-w-sm flex-col gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
+      {/* Amount hero — centered entry, the focal point of the form. */}
+      <div
+        className={[
+          'rounded-2xl border bg-surface-2 px-4 py-5 text-center transition',
+          errors['amount'] ? 'border-down' : 'border-border focus-within:border-accent',
+        ].join(' ')}
+      >
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted">Amount to withdraw</span>
+        <div className="mt-2 flex items-baseline justify-center gap-1.5">
+          <span className="text-2xl font-bold text-muted">KES</span>
+          <input
+            name="amount"
+            inputMode="numeric"
+            autoComplete="off"
+            aria-label="Amount to withdraw in KES"
+            placeholder="0"
+            value={grouped(amount)}
+            onChange={(e) => { setAmount(digitsOnly(e.target.value)); setErrors((p) => ({ ...p, amount: undefined })); }}
+            style={{ width: `${Math.max(1, (grouped(amount) || '0').length)}ch` }}
+            className="max-w-full bg-transparent text-4xl font-black tabular-nums text-fg outline-none placeholder:text-muted"
+          />
+        </div>
+        <div className="mt-2 text-xs text-muted">
+          Available <span className="font-semibold text-fg">{formatKes(realCents)}</span>
+          <span className="mx-1.5 text-border">·</span>
+          Min {formatKes(MIN_WITHDRAWAL_CENTS)}
+        </div>
+      </div>
+
+      {/* Quick amounts */}
+      <div className="grid grid-cols-4 gap-2">
         {QUICK.map((q) => {
           const val = q.frac === 1 ? maxKes : Math.floor(maxKes * q.frac);
           const active = Number(amount) === val && val > 0;
@@ -95,8 +169,10 @@ export function WithdrawForm() {
               disabled={maxKes <= 0}
               onClick={() => { setAmount(String(val)); setErrors((p) => ({ ...p, amount: undefined })); }}
               className={[
-                'flex-1 rounded-full border px-3 py-2 text-sm font-semibold transition disabled:opacity-40',
-                active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface-2 text-fg hover:border-accent/60',
+                'h-10 rounded-lg border text-sm font-semibold transition disabled:opacity-40',
+                active
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-border bg-surface-2 text-fg hover:border-accent/60',
               ].join(' ')}
             >
               {q.label}
@@ -104,51 +180,60 @@ export function WithdrawForm() {
           );
         })}
       </div>
+      {errors['amount'] ? <p className="-mt-1 text-xs text-down">{errors['amount']}</p> : null}
 
-      <Input
-        label="Amount (KES)"
-        name="amount"
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        required
-        leading={<span className="text-sm font-semibold text-muted">KES</span>}
-        value={grouped(amount)}
-        onChange={(e) => setAmount(digitsOnly(e.target.value))}
-        error={errors['amount']}
-        hint={`Min ${formatKes(MIN_WITHDRAWAL_CENTS)} · Max ${formatKes(realCents)}`}
-        className="text-lg font-semibold"
-      />
-
-      {accountPhone && !editingPhone ? (
-        <div className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3.5 py-3">
-          <div>
-            <div className="text-xs text-muted">M-Pesa number</div>
-            <div className="text-sm font-medium text-fg">{maskMsisdn(accountPhone)}</div>
+      {/* Destination */}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-fg">M-Pesa number</span>
+        {accountPhone && !editingPhone ? (
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 px-3.5 py-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-up/15 text-up">
+              <MpesaIcon />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold tabular-nums text-fg">{maskMsisdn(accountPhone)}</div>
+              <div className="text-xs text-muted">Your account number</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setEditingPhone(true); setPhone(''); }}
+              className="shrink-0 text-sm font-semibold text-accent hover:underline"
+            >
+              Change
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => { setEditingPhone(true); setPhone(''); }}
-            className="text-sm font-semibold text-accent hover:underline"
-          >
-            Change
-          </button>
+        ) : (
+          <Input
+            name="phone"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            required
+            placeholder="0712 345 678"
+            leading={<MpesaIcon />}
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            error={errors['phone']}
+            {...(accountPhone
+              ? { hint: 'Paying out to a different number than your account.' }
+              : { hint: 'Funds are sent to this M-Pesa number.' })}
+          />
+        )}
+      </div>
+
+      {/* Payout summary — appears once the amount is valid. */}
+      {amountValid ? (
+        <div className="rounded-xl border border-border bg-surface-2 p-3.5">
+          <div className="flex items-center justify-between py-1">
+            <span className="text-xs text-muted">You’ll receive</span>
+            <span className="text-base font-bold tabular-nums text-up">{formatKes(amountCents)}</span>
+          </div>
+          <div className="flex items-center justify-between py-1">
+            <span className="text-xs text-muted">To M-Pesa</span>
+            <span className="text-sm font-medium tabular-nums text-fg">{destMasked}</span>
+          </div>
         </div>
-      ) : (
-        <Input
-          label="M-Pesa number"
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          required
-          placeholder="0712 345 678"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          error={errors['phone']}
-          {...(accountPhone ? { hint: 'Paying out to a different number than your account.' } : {})}
-        />
-      )}
+      ) : null}
 
       {serverError ? (
         <p className="rounded-xl border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">
@@ -156,9 +241,17 @@ export function WithdrawForm() {
         </p>
       ) : null}
 
-      <Button type="submit" size="lg" fullWidth disabled={withdraw.isPending}>
-        {withdraw.isPending ? 'Requesting…' : 'Withdraw'}
+      <Button type="submit" size="lg" fullWidth disabled={withdraw.isPending || !amountValid}>
+        {withdraw.isPending ? 'Requesting…' : amountValid ? `Withdraw ${formatKes(amountCents)}` : 'Withdraw'}
       </Button>
+
+      <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted">
+        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+          <path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6l7-3Z" />
+          <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Paid instantly to M-Pesa · Secured
+      </p>
     </form>
   );
 }
