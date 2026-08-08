@@ -14,6 +14,7 @@ import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
 import { env } from '@/lib/env';
 import { useSession } from '@/lib/auth/session';
 import { useToast } from '@/lib/toast/ToastProvider';
+import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { WalletDto } from '@/lib/api/types';
 import type {
   ConnStatus,
@@ -338,13 +339,25 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           if (typeof d.balance === 'number') setWalletReal(d.balance);
           void qc.invalidateQueries({ queryKey: ['positions'] });
           void qc.invalidateQueries({ queryKey: ['ledger'] });
+
           const won = d.result === 'win';
-          toast.push({
-            tone: won ? 'success' : 'error',
-            title: won
-              ? `Won ×${d.lockedMultiplier.toFixed(2)} · +${formatKes(d.payoutCents)}`
-              : `Lost · ${formatKes(d.pnlCents)}`,
-            description: d.mode === 'manual' ? 'Cashed out' : 'Auto-settled at expiry',
+          // stake is recoverable from the authoritative figures: payout − pnl.
+          const stakeCents = Math.max(0, Math.round(d.payoutCents - d.pnlCents));
+          const mult = d.lockedMultiplier;
+          // Prefer the engine's engagement presentation; fall back to a safe local derivation.
+          const headline =
+            d.presentation?.headline ??
+            (won ? (mult >= 2.5 ? 'big_win' : mult < 1.25 ? 'small_win' : 'win') : 'loss');
+          useOutcomeFx.getState().show({
+            result: d.result,
+            headline,
+            nearMiss: d.presentation?.nearMiss ?? false,
+            lossDisguisedAsWin: d.presentation?.lossDisguisedAsWin ?? (won && mult < 1.25),
+            lockedMultiplier: mult,
+            payoutCents: d.payoutCents,
+            pnlCents: d.pnlCents,
+            stakeCents,
+            mode: d.mode,
           });
           break;
         }

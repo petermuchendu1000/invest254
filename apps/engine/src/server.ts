@@ -76,6 +76,7 @@ game.subscribe({
     toUser(e.position.userId, "position_settled", {
       positionId: e.position.id, result: e.position.outcome.result, lockedMultiplier: e.lockedMultiplier,
       payoutCents: e.payoutCents, pnlCents: e.pnlCents, balance: e.balance, mode: e.mode,
+      presentation: e.presentation,
     });
   },
   onError: (err, ctx) => console.error(`[engine] ${ctx}:`, err.message),

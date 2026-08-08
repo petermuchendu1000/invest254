@@ -57,6 +57,32 @@ body {
   .animate-marquee { animation: none; }
 }
 
+/* Outcome FX: card pop-in, loss shake, and balance-pill reward pulse. */
+@keyframes pp-pop {
+  0%   { transform: scale(0.82); opacity: 0; }
+  60%  { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes pp-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes pp-balance-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(63,185,80,0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(63,185,80,0); }
+  100% { box-shadow: 0 0 0 0 rgba(63,185,80,0); }
+}
+.pp-balance-bump {
+  animation: pp-balance-pulse 700ms ease-out;
+  border-color: var(--pp-up) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-balance-bump { animation: none; }
+}
+
 /* Hide scrollbars on the horizontal chip/ticker rails while keeping them scrollable. */
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }

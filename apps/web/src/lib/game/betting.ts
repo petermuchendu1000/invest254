@@ -34,6 +34,13 @@ export interface PositionSettledData {
   pnlCents: number;
   balance: number; // new real balance, cents
   mode: 'auto' | 'manual';
+  /** Engagement-layer presentation metadata (engine `presentOutcome`). Optional
+   *  for backward-compat with servers that predate forwarding it. */
+  presentation?: {
+    headline: 'big_win' | 'win' | 'small_win' | 'near_miss' | 'loss';
+    nearMiss: boolean;
+    lossDisguisedAsWin: boolean;
+  };
 }
 
 /** S→C: authoritative real-balance push (only `real` moves on the socket). */
