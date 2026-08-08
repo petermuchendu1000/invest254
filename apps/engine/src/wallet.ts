@@ -25,6 +25,8 @@ export interface OpenArgs {
 export interface SettleArgs { positionId: string; exitRate: number; result: "win" | "loss"; multiplier: number; payoutCents: Cents; }
 export interface OpenResult { positionId: string; newBalance: Cents; }
 export interface SettleResult { settled: boolean; newBalance: Cents; }
+/** A user's full wallet, as pushed over the WS `balance` frame. */
+export interface WalletSnapshot { real: Cents; bonus: Cents; currency: string; }
 
 /** A still-open position as persisted — the durable facts needed to recompute its outcome. */
 export interface OpenPositionRow {
@@ -62,6 +64,8 @@ export interface PositionListQuery extends PageQuery { status?: string | undefin
 
 export interface GameRepository {
   getBalance(userId: string): Promise<Cents>;
+  /** Full wallet snapshot (real + bonus + currency) for the real-time `balance` push. */
+  getWalletSnapshot(userId: string): Promise<WalletSnapshot>;
   openPosition(a: OpenArgs): Promise<OpenResult>;
   settlePosition(a: SettleArgs): Promise<SettleResult>;
   /** Idempotently commit a game day (stores hash; seed stays hidden). Returns its id. */
@@ -116,6 +120,9 @@ export class InMemoryGameRepository implements GameRepository {
 
   seed(userId: string, amount: Cents): void { this.balances.set(userId, assertCents(amount)); this.pushLedger(userId, "seed", amount, "real", null, "seed"); }
   async getBalance(userId: string): Promise<Cents> { return this.balances.get(userId) ?? 0; }
+  async getWalletSnapshot(userId: string): Promise<WalletSnapshot> {
+    return { real: this.balances.get(userId) ?? 0, bonus: 0, currency: "KES" };
+  }
 
   /** All of a user's positions projected for the admin activity timeline (J7). */
   adminBetsOf(userId: string): AdminBetSnapshot[] {
@@ -270,6 +277,15 @@ export class PgGameRepository implements GameRepository {
   async getBalance(userId: string): Promise<Cents> {
     const r = await this.q.query("select real_balance from wallets where user_id = $1", [userId]);
     return r.rows.length ? toCents(r.rows[0].real_balance) : 0;
+  }
+  async getWalletSnapshot(userId: string): Promise<WalletSnapshot> {
+    const r = await this.q.query(
+      "select real_balance, bonus_balance, currency from wallets where user_id = $1",
+      [userId],
+    );
+    if (!r.rows.length) return { real: 0, bonus: 0, currency: "KES" };
+    const row = r.rows[0];
+    return { real: toCents(row.real_balance), bonus: toCents(row.bonus_balance), currency: (row.currency as string) ?? "KES" };
   }
   async openPosition(a: OpenArgs): Promise<OpenResult> {
     // matches migration 0028: fn_open_position(user,stake,direction,entry_rate,duration_s,game_day,nonce,opened_at,config_version)
