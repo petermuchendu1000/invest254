@@ -51,43 +51,67 @@ export function PriceHeader() {
   const statusDot = status === 'open' ? 'bg-up' : status === 'connecting' ? 'bg-warn' : 'bg-down';
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status} />
-        <div className="flex min-w-0 flex-col">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-muted">BTC/KES</span>
-          <div className="flex items-baseline gap-2">
-            <span className={cn('text-2xl font-bold leading-none tabular-nums', up ? 'text-up' : 'text-down')}>
-              {value !== null ? fmt(value) : '—'}
-            </span>
-            {value !== null ? (
-              <span
-                className={cn(
-                  'shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
-                  up ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
-                )}
-              >
-                {signed(value * 100)}%
-              </span>
-            ) : null}
-          </div>
+    <div className="shrink-0 rounded-xl border border-border bg-surface px-3 py-2.5">
+      {/* Row 1: pair + live badge | compact 24H stats (never collides with the hero). */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status} />
+          <span className="text-sm font-semibold text-fg">BTC/KES</span>
+          <span
+            className={cn(
+              'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide',
+              status === 'open' ? 'bg-up/15 text-up' : status === 'connecting' ? 'bg-warn/15 text-warn' : 'bg-down/15 text-down',
+            )}
+          >
+            {status === 'open' ? 'Live' : status === 'connecting' ? 'Sync' : 'Off'}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-right sm:gap-4">
+          <Stat className="hidden xs:flex" label="24H H" value={hi !== null ? fmt(hi) : '—'} />
+          <Stat className="hidden xs:flex" label="24H L" value={lo !== null ? fmt(lo) : '—'} />
+          <Stat
+            label="Online"
+            valueClassName="text-up"
+            value={displayOnline > 0 ? displayOnline.toLocaleString('en-KE') : '—'}
+          />
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-3 text-right sm:gap-5">
-        <Stat className="hidden xs:flex" label="24H High" value={hi !== null ? fmt(hi) : '—'} />
-        <Stat className="hidden xs:flex" label="24H Low" value={lo !== null ? fmt(lo) : '—'} />
-        <Stat label="Online" value={displayOnline > 0 ? displayOnline.toLocaleString('en-KE') : '—'} />
+      {/* Row 2: hero price + % change — the emotional anchor. */}
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <span className={cn('text-3xl font-bold leading-none tabular-nums', up ? 'text-up' : 'text-down')}>
+          {value !== null ? fmt(value) : '—'}
+        </span>
+        {value !== null ? (
+          <span
+            className={cn(
+              'rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums',
+              up ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
+            )}
+          >
+            {signed(value * 100)}%
+          </span>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, className }: { label: string; value: string; className?: string }) {
+function Stat({
+  label,
+  value,
+  className,
+  valueClassName,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+  valueClassName?: string;
+}) {
   return (
-    <div className={cn('flex flex-col gap-0.5', className)}>
+    <div className={cn('flex flex-col leading-none', className)}>
       <span className="text-[9px] font-medium uppercase tracking-wider text-muted">{label}</span>
-      <span className="text-sm font-semibold leading-none tabular-nums text-fg">{value}</span>
+      <span className={cn('mt-0.5 text-[11px] font-semibold tabular-nums text-fg', valueClassName)}>{value}</span>
     </div>
   );
 }

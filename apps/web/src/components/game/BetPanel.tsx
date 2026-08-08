@@ -19,6 +19,8 @@ import { LivePnl } from '@/components/game/LivePnl';
 
 const CHIP_CENTS = [25000, 50000, 75000, 100000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
+// Stepper granularity for the +/- buttons on the stake field (KES).
+const STEP_KES = 50;
 
 export function BetPanel() {
   const hydrated = useHydrated();
@@ -95,6 +97,16 @@ export function BetPanel() {
     return Number.isFinite(n) && kesToCents(n) === c;
   }
 
+  function bumpStake(deltaKes: number) {
+    const minKes = centsToKes(minStakeCents);
+    const cur = Number.parseFloat(stake);
+    const base = Number.isFinite(cur) ? cur : minKes;
+    let next = Math.round((base + deltaKes) / STEP_KES) * STEP_KES;
+    if (next < minKes) next = minKes;
+    if (maxStakeCents !== undefined && kesToCents(next) > maxStakeCents) next = centsToKes(maxStakeCents);
+    setStake(String(next));
+  }
+
   function cycleDuration() {
     const i = durations.indexOf(durationS);
     setDurationS(durations[(i + 1) % durations.length] ?? durations[0]!);
@@ -155,7 +167,7 @@ export function BetPanel() {
   // ── Idle — stake + duration + BUY/SELL (always visible) ──────────────────
   return (
     <Card className="flex flex-col gap-2.5 rounded-xl p-3">
-      {/* Stake input with KES prefix */}
+      {/* Stake input with KES prefix + quick steppers */}
       <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3">
         <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">KES</span>
         <input
@@ -166,6 +178,24 @@ export function BetPanel() {
           aria-label="Stake amount in KES"
           className="h-11 w-full bg-transparent text-xl font-bold tabular-nums text-fg outline-none placeholder:text-muted"
         />
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label="Decrease stake"
+            onClick={() => bumpStake(-STEP_KES)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="Increase stake"
+            onClick={() => bumpStake(STEP_KES)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* Quick chips */}
@@ -210,13 +240,39 @@ export function BetPanel() {
         <p className="text-center text-xs text-muted">Connecting to the live market…</p>
       ) : null}
 
-      {/* BUY / SELL */}
-      <div className="grid grid-cols-2 gap-2">
-        <Button variant="up" size="md" fullWidth className="!h-11" disabled={connecting} onClick={() => handleDirection('buy')}>
-          BUY
+      {/* BUY / SELL — primary CTAs: largest, most saturated, gain/loss framed. */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <Button
+          variant="up"
+          size="md"
+          fullWidth
+          className="!h-14 flex-col !gap-0.5 !text-base"
+          disabled={connecting}
+          onClick={() => handleDirection('buy')}
+        >
+          <span className="flex items-center gap-1.5 font-bold">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-4 w-4" aria-hidden>
+              <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            BUY
+          </span>
+          <span className="text-[10px] font-medium opacity-90">Price rises</span>
         </Button>
-        <Button variant="down" size="md" fullWidth className="!h-11" disabled={connecting} onClick={() => handleDirection('sell')}>
-          SELL
+        <Button
+          variant="down"
+          size="md"
+          fullWidth
+          className="!h-14 flex-col !gap-0.5 !text-base"
+          disabled={connecting}
+          onClick={() => handleDirection('sell')}
+        >
+          <span className="flex items-center gap-1.5 font-bold">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-4 w-4" aria-hidden>
+              <path d="M12 5v14M5 12l7 7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            SELL
+          </span>
+          <span className="text-[10px] font-medium opacity-90">Price falls</span>
         </Button>
       </div>
 

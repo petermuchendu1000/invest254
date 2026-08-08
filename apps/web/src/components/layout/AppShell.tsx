@@ -26,6 +26,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // The trade screen is an app-like, single-viewport surface: it must never
+  // page-scroll on mobile and the chart must flex-fill the space between the
+  // header and the trade console. We lock the frame to the viewport height and
+  // drop the marketing footer + spacer here (legal lives in Profile/Legal).
+  const isTrade = pathname === '/';
+  if (isTrade) {
+    return (
+      <div className="flex h-dvh flex-col overflow-hidden">
+        <TopBar />
+        <NotificationBanners />
+        <main className="relative mx-auto flex w-full min-h-0 max-w-app flex-1 flex-col px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-2 md:px-4 md:pb-4">
+          {children}
+        </main>
+        <BottomNav />
+        <SessionBootstrap />
+        <AuthModal />
+        <WalletModal />
+        <RegisterSW />
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-dvh flex-col">
       <TopBar />
