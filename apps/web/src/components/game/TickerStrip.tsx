@@ -72,6 +72,9 @@ export function TickerStrip() {
         LIVE
       </div>
       <div className="relative flex-1 overflow-hidden">
+        {/* Fade the marquee edges so partial pills never crowd the LIVE badge. */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-4 bg-gradient-to-r from-surface to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-4 bg-gradient-to-l from-surface to-transparent" />
         <div className="flex w-max animate-marquee" aria-hidden>
           {[...assets, ...assets].map((a, i) => (
             <Pill key={`${a.sym}-${i}`} a={a} />
