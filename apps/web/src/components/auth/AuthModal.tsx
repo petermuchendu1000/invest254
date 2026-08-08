@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/layout/Logo';
+import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { api } from '@/lib/api/endpoints';
 import { useAuthUi } from '@/lib/auth/ui';
 import { useDepositUi } from '@/lib/wallet/depositUi';
@@ -467,17 +468,20 @@ function Header({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex items-center justify-between px-6 pb-5 pt-5">
       <Logo />
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close"
-        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg"
-      >
-        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
-          <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
-        </svg>
-      </button>
+      <div className="flex items-center gap-1">
+        <ThemeToggle />
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg"
+        >
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
+            <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

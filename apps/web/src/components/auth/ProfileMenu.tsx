@@ -39,19 +39,6 @@ const LogoutIcon = () => (
     <path d="M10 8l-4 4 4 4M6 12h11" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-const SunIcon = () => (
-  <svg viewBox="0 0 24 24" className={ic} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" strokeLinecap="round" />
-  </svg>
-);
-const MoonIcon = () => (
-  <svg viewBox="0 0 24 24" className={ic} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-    <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-type Theme = 'dark' | 'light';
 
 /**
  * Profile avatar + quick-actions dropdown. Collapses the top-bar clutter (username + log out
@@ -60,16 +47,10 @@ type Theme = 'dark' | 'light';
  */
 export function ProfileMenu({ user }: { user: MeDto }) {
   const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>('dark');
   const rootRef = useRef<HTMLDivElement>(null);
   const { logout } = useAuthActions();
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem('pp-theme');
-    setTheme(stored === 'light' ? 'light' : 'dark');
-  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -84,13 +65,6 @@ export function ProfileMenu({ user }: { user: MeDto }) {
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
-
-  function toggleTheme() {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    document.documentElement.classList.toggle('light', next === 'light');
-    window.localStorage.setItem('pp-theme', next);
-  }
 
   const initial = user.username.charAt(0).toUpperCase() || '@';
   const itemCls = 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-fg transition hover:bg-surface-2';
@@ -120,7 +94,6 @@ export function ProfileMenu({ user }: { user: MeDto }) {
             </span>
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-fg">@{user.username}</div>
-              <div className="text-xs capitalize text-muted">{user.role}</div>
             </div>
           </div>
 
@@ -144,11 +117,6 @@ export function ProfileMenu({ user }: { user: MeDto }) {
           </Link>
 
           {/* Theme toggle stays in the menu (doesn't close it) */}
-          <button role="menuitem" className={itemCls} onClick={toggleTheme}>
-            {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
-            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-          </button>
-
           <div className="my-1 h-px bg-border" />
 
           <button

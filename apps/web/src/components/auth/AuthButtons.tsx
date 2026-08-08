@@ -2,7 +2,6 @@
 
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { ProfileMenu } from '@/components/auth/ProfileMenu';
 import { useAuthUi } from '@/lib/auth/ui';
 import { useSession } from '@/lib/auth/session';
@@ -18,7 +17,6 @@ export function AuthButtons() {
   if (!hydrated || !token) {
     return (
       <>
-        <ThemeToggle />
         <Button variant="ghost" size="sm" className="px-2.5 sm:px-3" onClick={() => openAuth('login')}>
           Login
         </Button>
