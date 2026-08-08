@@ -341,33 +341,6 @@ test("J6 affiliate payout queue: admin lists requests and approves (audited)", a
   } finally { await api.close(); }
 });
 
-test("J6 chat moderation: list, hide (excluded), includeHidden, unhide, 404 + audit", async () => {
-  const api = await startTestApi();
-  try {
-    const msg = await api.engage.insertChat({ userId: null, username: "ann", message: "gm everyone" });
-
-    // default list shows the visible message
-    let list = await json(await req(api, "GET", "/api/v1/admin/chat", { token: "admin-1:admin" }));
-    assert.ok(list.items.some((m: any) => m.id === msg.id && m.isHidden === false));
-
-    // hide it -> excluded from the default list, present (hidden) with includeHidden
-    assert.equal((await req(api, "POST", `/api/v1/admin/chat/${msg.id}/hide`, { token: "mod-1:admin" })).status, 200);
-    list = await json(await req(api, "GET", "/api/v1/admin/chat", { token: "admin-1:admin" }));
-    assert.ok(!list.items.some((m: any) => m.id === msg.id));
-    const all = await json(await req(api, "GET", "/api/v1/admin/chat?includeHidden=true", { token: "admin-1:admin" }));
-    assert.ok(all.items.some((m: any) => m.id === msg.id && m.isHidden === true));
-
-    // hiding again is a no-op -> 404; unhide restores it
-    assert.equal((await req(api, "POST", `/api/v1/admin/chat/${msg.id}/hide`, { token: "mod-1:admin" })).status, 404);
-    assert.equal((await req(api, "POST", `/api/v1/admin/chat/${msg.id}/unhide`, { token: "mod-1:admin" })).status, 200);
-    assert.equal((await req(api, "POST", "/api/v1/admin/chat/999999/hide", { token: "mod-1:admin" })).status, 404);
-
-    const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "mod-1:admin" }));
-    assert.ok(audit.items.some((a: any) => a.action === "chat.hide"));
-    assert.ok(audit.items.some((a: any) => a.action === "chat.unhide"));
-  } finally { await api.close(); }
-});
-
 test("admin user activity: merges deposits, withdrawals and bets newest-first with kind filter + paging", async () => {
   const api = await startTestApi();
   try {

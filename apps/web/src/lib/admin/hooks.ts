@@ -231,23 +231,6 @@ export function useRotateSeed() {
   });
 }
 
-// ── Chat moderation ──
-export function useChatMod(includeHidden: boolean) {
-  const t = useTok();
-  return useQuery({
-    queryKey: ['admin', 'chat', includeHidden],
-    queryFn: () => adminApi.chat(t, includeHidden),
-    enabled: !!t,
-  });
-}
-export function useChatModAction() {
-  const t = useTok();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (v: { id: number; hide: boolean }) => (v.hide ? adminApi.hideChat(t, v.id) : adminApi.unhideChat(t, v.id)),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin', 'chat'] }),
-  });
-}
 
 // ── Reports + audit ──
 export function useReportDaily(range: { from?: string; to?: string }) {

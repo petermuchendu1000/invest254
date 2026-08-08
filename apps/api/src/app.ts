@@ -1,6 +1,6 @@
 import { rtp, type GameConfig, type Cents, type VersionedGameConfig } from "@invest254/shared";
 import type {
-  FairnessRecord, ActivityRow, ChatRow, ChatPostResult, PaymentService, AuthService, AffiliateService, AdminService, NotificationService, Verifier,
+  FairnessRecord, PaymentService, AuthService, AffiliateService, AdminService, NotificationService, Verifier,
   Page, PageQuery, LedgerEntry, PositionRecord, PositionDetail, PositionListQuery, TransactionRecord, TxListQuery,
 } from "@invest254/engine";
 import { Router, ApiError, serverFrom, type Ctx } from "./http.js";
@@ -18,7 +18,7 @@ import type { Server } from "node:http";
  * engine service/repository (or a thin read function over one); the API layer only adds
  * routing, validation, auth and serialization. `server.ts` wires the production (Postgres)
  * implementations; tests wire in-memory fakes. Player/payments/admin routes (E2) extend
- * this interface — E1 ships the public surface (health, game config, fairness, activity).
+ * this interface — E1 ships the public surface (health, game config, fairness).
  */
 export interface BonusStatus { bonusId: string; amount: Cents; wageringX: number; wagered: Cents; required: Cents; remaining: Cents; status: string; createdAt: string; }
 export interface WalletBalance { real: Cents; bonus: Cents; currency: string; bonuses?: BonusStatus[]; }
@@ -39,7 +39,7 @@ export interface ApiDeps {
     "overview" | "listUsers" | "getUserDetail" | "listUserActivity" | "setUserStatus" | "setCommissionRate" | "setUserRole" | "listWithdrawals" | "listAudit"
     | "adjustBalance" | "listDeposits" | "depositsReconcile" | "reportDaily" | "reportByUser"
     | "getGameConfig" | "updateGameConfig" | "getMpesaConfig" | "updateMpesaConfig" | "rtpMonitor" | "listSeeds" | "rotateSeed"
-    | "listAffiliatePayouts" | "listChat" | "hideChat" | "unhideChat" | "recordAction"
+    | "listAffiliatePayouts" | "recordAction"
     | "adjustBalanceKind" | "clearBalance" | "getUserOverrides" | "setUserOverrides">;
   /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
@@ -54,15 +54,11 @@ export interface ApiDeps {
   config: () => GameConfig | VersionedGameConfig;
   /** Public fairness record for a game-day id (commitment always; seed only after reveal). */
   fairnessById(gameDayId: number): Promise<FairnessRecord | null>;
-  /** Live activity feed (newest first). */
-  activity: { recent(limit: number): Promise<ActivityRow[]> };
 
   // ── E2: player + payments + admin ──
   /** Deposit/withdrawal orchestration over the atomic 0014 RPCs + Daraja. */
   payments: Pick<PaymentService,
     "initiateDeposit" | "requestWithdrawal" | "handleStkCallback" | "handleB2cResult" | "approveWithdrawal" | "rejectWithdrawal" | "reconcileDeposits">;
-  /** Server-authoritative chat. */
-  chat: { recent(): Promise<ChatRow[]>; post(userId: string, username: string, raw: string): Promise<ChatPostResult> };
   /** Resolve a player's display handle (falls back to a guest handle). */
   resolveHandle(userId: string): Promise<string>;
   /** Wallet balances (real + bonus) for the authenticated player. */
@@ -104,9 +100,6 @@ function fairnessDto(r: FairnessRecord) {
   };
 }
 
-function activityDto(r: ActivityRow) {
-  return { kind: r.kind, username: r.username, amountCents: r.amountCents, message: r.message, ts: r.createdAtMs };
-}
 
 /** Parse a `?limit=` query param, clamped to [1, max] with a default. */
 function parseLimit(ctx: Ctx, def: number, max = 100): number {
@@ -133,11 +126,6 @@ export function registerPublicRoutes(router: Router, deps: ApiDeps): void {
     return fairnessDto(rec);
   });
 
-  router.get(`${BASE}/activity`, async (ctx) => {
-    const limit = parseLimit(ctx, 30);
-    const items = await deps.activity.recent(limit);
-    return { items: items.map(activityDto) };
-  });
 }
 
 /** Build the configured API router. */

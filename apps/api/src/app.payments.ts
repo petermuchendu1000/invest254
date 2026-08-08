@@ -1,5 +1,4 @@
 import type { Cents } from "@invest254/shared";
-import type { ChatRow } from "@invest254/engine";
 import { Router, ApiError, requireAuth, requireRole, rateLimit, restrictToCidrs, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
 
@@ -70,7 +69,6 @@ function requirePhone(body: Record<string, unknown>): string {
 
 // ─────────────────────────── DTOs ───────────────────────────
 
-const chatDto = (r: ChatRow) => ({ id: r.id, username: r.username, message: r.message, ts: r.createdAtMs });
 
 // ─────────────────────────── Daraja payload parsing ───────────────────────────
 
@@ -121,25 +119,6 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
   // ── Player: wallet & chat ──
   router.get(`${BASE}/wallet`, auth, async (ctx: Ctx) => {
     return deps.walletBalance(ctx.claims!.userId);
-  });
-
-  router.get(`${BASE}/chat`, auth, async () => {
-    const items = await deps.chat.recent();
-    return { items: items.map(chatDto) };
-  });
-
-  router.post(`${BASE}/chat`, auth, async (ctx: Ctx) => {
-    const body = asObject(ctx.body);
-    const message = body.message;
-    if (typeof message !== "string") throw new ApiError("VALIDATION", "message must be a string", 400);
-    const userId = ctx.claims!.userId;
-    const handle = await deps.resolveHandle(userId);
-    const res = await deps.chat.post(userId, handle, message);
-    if (!res.ok) {
-      if (res.code === "RATE_LIMITED") throw new ApiError("RATE_LIMITED", "posting too fast", 429);
-      throw new ApiError("REJECTED", `message rejected: ${res.reasons.join(", ")}`, 422);
-    }
-    return { status: 201, body: { message: chatDto(res.row), reasons: res.reasons } };
   });
 
   // ── Player: payments ──

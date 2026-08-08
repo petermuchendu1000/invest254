@@ -1,4 +1,4 @@
-import type { ActivityKind, Cents, Direction, PositionStatus, PositionResult } from '@invest254/shared';
+import type { Cents, Direction, PositionStatus, PositionResult } from '@invest254/shared';
 
 /** Cursor-paginated list envelope (docs/05 §8). */
 export interface Paginated<T> {
@@ -38,14 +38,6 @@ export interface WalletDto {
   bonuses?: BonusStatusDto[];
 }
 
-/** GET /activity item (newest-first). Mirrors the WS `activity` DTO. */
-export interface ActivityDto {
-  kind: ActivityKind;
-  username: string;
-  amountCents: Cents | null;
-  message: string;
-  ts: number;
-}
 
 /** Wire shape of GET /game/config (docs/05 §4). */
 export interface GameConfigDto {

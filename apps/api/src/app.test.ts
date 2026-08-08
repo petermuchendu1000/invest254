@@ -79,40 +79,6 @@ test("GET /api/v1/game/fairness/:id → 400 for non-numeric id", async () => {
   } finally { await api.close(); }
 });
 
-test("GET /api/v1/activity → newest-first feed", async () => {
-  const api = await startTestApi();
-  try {
-    const res = await fetch(`${api.baseUrl}/api/v1/activity`);
-    assert.equal(res.status, 200);
-    const body = await json(res);
-    assert.equal(body.items.length, 2);
-    assert.equal(body.items[0].kind, "win");        // most recent insert first
-    assert.equal(body.items[0].amountCents, 500_000);
-    assert.equal(body.items[1].kind, "signup");
-  } finally { await api.close(); }
-});
-
-test("GET /api/v1/activity?limit=1 → respects limit", async () => {
-  const api = await startTestApi();
-  try {
-    const res = await fetch(`${api.baseUrl}/api/v1/activity?limit=1`);
-    assert.equal(res.status, 200);
-    const body = await json(res);
-    assert.equal(body.items.length, 1);
-    assert.equal(body.items[0].kind, "win");
-  } finally { await api.close(); }
-});
-
-test("GET /api/v1/activity?limit=0 → 400 invalid limit", async () => {
-  const api = await startTestApi();
-  try {
-    const res = await fetch(`${api.baseUrl}/api/v1/activity?limit=0`);
-    assert.equal(res.status, 400);
-    const body = await json(res);
-    assert.equal(body.error.code, "INVALID_LIMIT");
-  } finally { await api.close(); }
-});
-
 test("unknown route → 404 envelope", async () => {
   const api = await startTestApi();
   try {

@@ -314,7 +314,7 @@ export function AuthModal() {
             name="username"
             autoComplete="username"
             required
-            placeholder="Shown in chat & the live feed"
+            placeholder="Shown on your profile"
             leading={<UserIcon />}
             value={username}
             onChange={(e) => setUsername(e.target.value)}

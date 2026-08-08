@@ -390,26 +390,6 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     return deps.admin.listAffiliatePayouts(q);
   });
 
-  // ── J6: chat moderation ──────────────────────────────────────────────────────────────────────
-
-  router.get(`${BASE}/admin/chat`, auth, admin, async (ctx: Ctx) => {
-    const includeHidden = (ctx.query.get("includeHidden") ?? "").toLowerCase() === "true";
-    return { items: await deps.admin.listChat(listLimit(ctx, 50), includeHidden) };
-  });
-
-  router.post(`${BASE}/admin/chat/:id/hide`, auth, admin, async (ctx: Ctx) => {
-    const id = intParam(ctx, "id");
-    const hidden = await deps.admin.hideChat(ctx.claims!.userId, ctx.claims!.role ?? "player", id);
-    if (!hidden) throw new ApiError("NOT_FOUND", `no visible chat message ${id}`, 404);
-    return { id, hidden: true };
-  });
-
-  router.post(`${BASE}/admin/chat/:id/unhide`, auth, admin, async (ctx: Ctx) => {
-    const id = intParam(ctx, "id");
-    const restored = await deps.admin.unhideChat(ctx.claims!.userId, ctx.claims!.role ?? "player", id);
-    if (!restored) throw new ApiError("NOT_FOUND", `no hidden chat message ${id}`, 404);
-    return { id, hidden: false };
-  });
 
   // ── Fly.io machine restart (superadmin only) ──────────────────────────────
   // Restarts the API + engine Fly machines after a deploy so new code picks up.

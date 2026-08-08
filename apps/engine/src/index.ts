@@ -21,8 +21,6 @@ export * from "./engagement.js";
 export * from "./game.js";
 export * from "./daycontext.js";
 export * from "./recovery.js";
-export * from "./activityservice.js";
-export * from "./chatservice.js";
 export * from "./payments.js";
 export * from "./paymentservice.js";
 export * from "./admin.js";

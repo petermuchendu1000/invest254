@@ -40,33 +40,6 @@ test("GET /wallet → real+bonus+currency for the authenticated player", async (
   } finally { await api.close(); }
 });
 
-// ─────────────────────────── chat ───────────────────────────
-
-test("POST /chat → 201 sanitized + GET /chat returns it", async () => {
-  const api = await startTestApi();
-  try {
-    const post = await req(api, "POST", "/api/v1/chat", { token: PLAYER, body: { message: "  hello world  " } });
-    assert.equal(post.status, 201);
-    const posted = await json(post);
-    assert.equal(posted.message.message, "hello world");
-    assert.equal(posted.message.username, "tester");      // server-resolved handle, not client-supplied
-
-    const list = await req(api, "GET", "/api/v1/chat", { token: PLAYER });
-    assert.equal(list.status, 200);
-    const items = (await json(list)).items;
-    assert.equal(items.length, 1);
-    assert.equal(items[0].message, "hello world");
-  } finally { await api.close(); }
-});
-
-test("POST /chat → 400 when message is not a string", async () => {
-  const api = await startTestApi();
-  try {
-    const res = await req(api, "POST", "/api/v1/chat", { token: PLAYER, body: { message: 42 } });
-    assert.equal(res.status, 400);
-    assert.equal((await json(res)).error.code, "VALIDATION");
-  } finally { await api.close(); }
-});
 
 // ─────────────────────────── deposit flow ───────────────────────────
 
@@ -126,7 +99,7 @@ test("deposit: malformed STK callback → 400 BAD_CALLBACK", async () => {
 
 // ─────────────────────────── withdrawal flow ───────────────────────────
 
-test("withdrawal: request holds funds, admin approves, B2C result settles + feeds activity", async () => {
+test("withdrawal: request holds funds, admin approves, B2C result settles", async () => {
   const api = await startTestApi({ startingBalanceCents: 1_000_000 });
   try {
     const wd = await req(api, "POST", "/api/v1/withdrawals", { token: PLAYER, body: { amount: 300_000, phone: "0712345678" } });
@@ -152,10 +125,8 @@ test("withdrawal: request holds funds, admin approves, B2C result settles + feed
     assert.equal(result.status, 200);
     assert.deepEqual(await json(result), { ResultCode: 0, ResultDesc: "Accepted" });
 
-    // Success event fired and a masked withdrawal activity row was recorded.
+    // Success event fired.
     assert.deepEqual(api.withdrawalSuccesses, [{ userId: PLAYER, amountCents: 300_000 }]);
-    const feed = await json(await req(api, "GET", "/api/v1/activity", { token: PLAYER }));
-    assert.equal(feed.items[0].kind, "withdrawal");
 
     // Balance stays debited after a successful payout.
     const wallet = await json(await req(api, "GET", "/api/v1/wallet", { token: PLAYER }));

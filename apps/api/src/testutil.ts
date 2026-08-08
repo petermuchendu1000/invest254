@@ -2,7 +2,7 @@ import type { AddressInfo } from "node:net";
 import { DEFAULT_CONFIG, type Cents } from "@invest254/shared";
 import {
   InMemoryEngagementRepository, InMemoryPaymentRepository, InMemoryGameRepository, StubDarajaClient,
-  InMemoryIdentityRepository, PaymentService, ChatService, ActivityService, AuthService, AffiliateService, AdminService, InMemoryAdminRepository, maskHandle,
+  InMemoryIdentityRepository, PaymentService, AuthService, AffiliateService, AdminService, InMemoryAdminRepository, maskHandle,
   NotificationService, InMemoryNotificationRepository,
   type FairnessRecord, type AuthClaims, type Verifier,
 } from "@invest254/engine";
@@ -91,7 +91,7 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
  * underlying fakes so tests can pre-seed and assert. No Postgres, no real network.
  *
  * The stub verifier accepts a `<userId>` or `<userId>:<role>` bearer token so player and
- * finance-admin routes can be exercised without minting JWTs. Chat rate-limiting is disabled
+ * finance-admin routes can be exercised without minting JWTs.
  * in the harness (rateLimitMs:0) — its time-based behaviour is covered by unit tests.
  */
 export function stubVerifier(): Verifier {
@@ -126,8 +126,6 @@ export interface TestApiOptions { startingBalanceCents?: Cents; depsOverrides?: 
 
 export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> {
   const engage = new InMemoryEngagementRepository();
-  await engage.insertActivity({ kind: "signup", username: "newbie", amountCents: null, isSimulated: false, message: "@newbie just joined Invest254" });
-  await engage.insertActivity({ kind: "win", username: "wanj***", amountCents: 500_000, isSimulated: false, message: "@wanj*** just won KES 5,000.00 on a ×3.50 trade" });
   engage.setUsername(TEST_USER, "tester");
 
   const payRepo = new InMemoryPaymentRepository();
@@ -136,7 +134,6 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   gameRepo.seed(TEST_USER, opts.startingBalanceCents ?? 1_000_000);
   const daraja = new StubDarajaClient();
   const withdrawalSuccesses: Array<{ userId: string; amountCents: Cents }> = [];
-  const activity = new ActivityService(engage, () => {}, { enabled: false });
 
   const resolveHandle = async (userId: string): Promise<string> =>
     (await engage.getUsername(userId)) ?? `guest_${userId.slice(0, 6)}`;
@@ -145,12 +142,10 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     events: {
       onWithdrawalSuccess: (e) => {
         withdrawalSuccesses.push(e);
-        void resolveHandle(e.userId).then((h) => activity.recordWithdrawal(maskHandle(h), e.amountCents)).catch(() => {});
       },
     },
   });
 
-  const chat = new ChatService(engage, { rateLimitMs: 0 });
 
   const fairness = new Map<number, FairnessRecord>([
     [1, { gameDayId: 1, tradeDate: "2026-06-17", serverSeedHash: "hash-yesterday", serverSeed: "revealed-seed-yesterday", revealedAt: "2026-06-18T00:00:00.000Z" }],
@@ -173,9 +168,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     marketers: makeInMemoryMarketerRepo(),
     config: () => DEFAULT_CONFIG,
     fairnessById: async (id) => fairness.get(id) ?? null,
-    activity: { recent: (limit) => engage.listRecentActivity(limit) },
     payments,
-    chat,
     resolveHandle,
     walletBalance: async (userId): Promise<WalletBalance> =>
       ({ real: await payRepo.getBalance(userId), bonus: bonus.get(userId) ?? 0, currency: "KES" }),

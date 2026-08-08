@@ -1,6 +1,6 @@
 import {
   PgGameRepository, PgEngagementRepository, PgPaymentRepository, PgIdentityRepository,
-  PaymentService, ChatService, ActivityService, AuthService, AffiliateService, AdminService, PgAdminRepository, makeDarajaClientFromConfig, loadDarajaConfigFromDb, makeVerifier, maskHandle,
+  PaymentService, AuthService, AffiliateService, AdminService, PgAdminRepository, makeDarajaClientFromConfig, loadDarajaConfigFromDb, makeVerifier,
   NotificationService, PgNotificationRepository,
   GameConfigStore,
   type GameRepository, type EngagementRepository, type PaymentRepository,
@@ -11,9 +11,8 @@ import { makePgMarketerRepo } from "./marketers.pg.js";
 
 /**
  * Production bootstrap for the HTTP API. Wires the Postgres-backed repositories, the
- * PaymentService (atomic 0014 RPCs + Daraja provider), ChatService, and the Supabase JWT
- * verifier from the environment, then listens. Withdrawal-success events are mirrored to
- * the activity feed (privacy-masked), demonstrating the end-to-end integration.
+ * PaymentService (atomic 0014 RPCs + Daraja provider) and the Supabase JWT
+ * verifier from the environment, then listens.
  *
  * `fairnessById`/`walletBalance` read leak-safe views/columns directly (single indexed
  * lookups) rather than widening the engine repository contract for two read paths.
@@ -46,10 +45,6 @@ async function buildDeps(): Promise<ApiDeps> {
   const engage: EngagementRepository = new PgEngagementRepository(q);
   const payRepo: PaymentRepository = new PgPaymentRepository(q);
 
-  // Real activity feed: record genuine withdrawals (masked). No simulator in the API process
-  // (the WS engine owns the simulated feed); emit is a no-op since the API doesn't broadcast.
-  const activity = new ActivityService(engage, () => {}, { enabled: false });
-
   const resolveHandle = async (userId: string): Promise<string> =>
     (await engage.getUsername(userId)) ?? `guest_${userId.slice(0, 6)}`;
 
@@ -62,13 +57,10 @@ async function buildDeps(): Promise<ApiDeps> {
     events: {
       onWithdrawalSuccess: ({ userId, amountCents }) => {
         void resolveHandle(userId)
-          .then((h) => activity.recordWithdrawal(maskHandle(h), amountCents))
-          .catch((err) => console.error("[api] activity.recordWithdrawal:", (err as Error).message));
       },
     },
   });
 
-  const chat = new ChatService(engage);
 
   // Self-managed auth issues HS256 tokens signed with SUPABASE_JWT_SECRET — the same secret
   // makeVerifier checks. Asymmetric (JWKS) verification can't verify our self-issued tokens.
@@ -111,9 +103,7 @@ async function buildDeps(): Promise<ApiDeps> {
         revealedAt: x.revealed_at ? (x.revealed_at instanceof Date ? x.revealed_at.toISOString() : String(x.revealed_at)) : null,
       };
     },
-    activity: { recent: (limit: number) => engage.listRecentActivity(limit) },
     payments,
-    chat,
     resolveHandle,
     walletBalance: async (userId: string): Promise<WalletBalance> => {
       const r = await q.query("select real_balance, bonus_balance, currency from wallets where user_id = $1", [userId]);

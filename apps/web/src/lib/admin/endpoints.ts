@@ -3,7 +3,6 @@ import type { Paginated } from '@/lib/api/types';
 import type {
   AdjustBalanceResult,
   AdminAuditRow,
-  AdminChatModRow,
   AdminNotificationRow,
   NotificationInput,
   UserOverrideRow,
@@ -108,12 +107,6 @@ export const adminApi = {
   seeds: (t: string, limit = 30) => apiFetch<{ items: AdminSeedRow[] }>('/admin/seeds', { token: t, query: { limit } }),
   rotateSeed: (t: string, tradeDate: string) =>
     apiFetch<SeedRotateResult>('/admin/seeds/rotate', { method: 'POST', token: t, body: { tradeDate } }),
-
-  // Engagement — chat moderation
-  chat: (t: string, includeHidden = false, limit = 50) =>
-    apiFetch<{ items: AdminChatModRow[] }>('/admin/chat', { token: t, query: { includeHidden, limit } }),
-  hideChat: (t: string, id: number) => apiFetch<unknown>(`/admin/chat/${id}/hide`, { method: 'POST', token: t }),
-  unhideChat: (t: string, id: number) => apiFetch<unknown>(`/admin/chat/${id}/unhide`, { method: 'POST', token: t }),
 
   // Fly.io machine restart (superadmin only)
   flyStatus: (t: string) => apiFetch<{ configured: boolean; apps: string[]; app: string }>('/admin/fly/status', { token: t }),

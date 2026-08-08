@@ -132,14 +132,6 @@ export interface AdminPayoutRow {
   createdAtMs: number;
 }
 
-export interface AdminChatModRow {
-  id: number;
-  userId: string | null;
-  username: string;
-  message: string;
-  isHidden: boolean;
-  createdAtMs: number;
-}
 
 export interface GameConfigRow {
   houseEdge: number;
