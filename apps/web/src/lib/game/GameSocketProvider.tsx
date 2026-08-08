@@ -145,9 +145,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const setWalletReal = useCallback(
-    (real: number, currency?: string) => {
+    (real: number, currency?: string, bonus?: number) => {
       qc.setQueryData<WalletDto>(['wallet'], (old) =>
-        old ? { ...old, real } : { real, bonus: 0, currency: currency ?? 'KES' },
+        old
+          ? { ...old, real, ...(typeof bonus === 'number' ? { bonus } : {}) }
+          : { real, bonus: bonus ?? 0, currency: currency ?? 'KES' },
       );
     },
     [qc],
@@ -291,7 +293,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         }
         case 'balance': {
           const d = data as BalanceData;
-          if (typeof d?.real === 'number') setWalletReal(d.real, d.currency);
+          if (typeof d?.real === 'number') setWalletReal(d.real, d.currency, d.bonus);
           break;
         }
         case 'position_opened': {

@@ -1,8 +1,8 @@
 # Fly.io config for the Invest254 WebSocket game engine.
 # Deploy:  fly deploy -c fly.engine.toml
-# URL:     wss://invest254-engine.fly.dev  -> web NEXT_PUBLIC_WS_URL
+# URL:     wss://invest254-engine-pm.fly.dev  -> web NEXT_PUBLIC_WS_URL
 
-app = "invest254-engine-v2"
+app = "invest254-engine-pm"
 primary_region = "jnb"   # Johannesburg — Fly's closest region to Kenya
 
 [build]

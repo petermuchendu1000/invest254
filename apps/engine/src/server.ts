@@ -8,6 +8,7 @@ import { SeedManager } from "./daycontext.js";
 import { RecoveryService } from "./recovery.js";
 import { PgUserOverridesRepository, type UserOverridesRepository } from "./overrides.js";
 import { makeVerifier } from "./auth.js";
+import { WalletNotifier, type WalletListenClient, type WalletListenConnector } from "./walletnotify.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const MASTER_SEED = process.env.MASTER_SEED ?? process.env.SERVER_SEED ?? "dev-master-seed-0001";
@@ -20,6 +21,8 @@ let engage: EngagementRepository;
 let config: ConfigProvider;
 let configStore: GameConfigStore | undefined;
 let overridesRepo: UserOverridesRepository | undefined;
+// Opens a dedicated LISTEN connection for real-time wallet balance pushes (set only with a DB).
+let walletListenConnect: WalletListenConnector | undefined;
 const usingDb = Boolean(process.env.DATABASE_URL);
 if (usingDb) {
   const { Pool } = await import("pg");
@@ -27,6 +30,9 @@ if (usingDb) {
   repo = new PgGameRepository(pool);
   engage = new PgEngagementRepository(pool as unknown as Querier);
   overridesRepo = new PgUserOverridesRepository(pool as unknown as Querier);
+  // Dedicated connection factory for the wallet LISTEN (see migration 0040). Session-mode
+  // pooling on :5432 supports LISTEN; the same pool already backs the game_config LISTEN.
+  walletListenConnect = async () => (await pool.connect()) as unknown as WalletListenClient;
   // Live configuration: LISTEN for instant pickup, poll as the self-healing fallback.
   // Until this existed the engine ran on hardcoded defaults and every admin save was inert.
   configStore = new GameConfigStore(pool as unknown as Querier, {
@@ -66,6 +72,28 @@ const send = (ws: WebSocket, type: string, data: unknown) => ws.readyState === w
 const toUser = (userId: string, type: string, data: unknown) => byUser.get(userId)?.forEach((ws) => send(ws, type, data));
 const broadcast = (type: string, data: unknown) => all.forEach((ws) => send(ws, type, data));
 const onlineCount = () => Math.max(all.size, ONLINE_FLOOR);
+
+// Real-time balance push: when ANY wallet row changes (deposit confirm, withdrawal, admin
+// credit/debit, deposit bonus, bonus conversion — all of which UPDATE `wallets`), migration
+// 0040's trigger emits pg_notify('wallet_changed', userId). We re-read that user's wallet and
+// push a fresh `balance` frame to their live sockets, so the on-screen balance updates without
+// a reload. Only does work for users who currently have an open socket.
+if (walletListenConnect) {
+  const notifier = new WalletNotifier({
+    connect: walletListenConnect,
+    reconnectMs: 5_000,
+    onError: (err, ctx) => console.error(`[engine] wallet-notify ${ctx}:`, err.message),
+    onChange: (userId) => {
+      if (!byUser.has(userId)) return; // nobody from this user is connected — nothing to push
+      void repo
+        .getWalletSnapshot(userId)
+        .then((w) => toUser(userId, "balance", { real: w.real, bonus: w.bonus, currency: w.currency }))
+        .catch((err) => console.error("[engine] wallet-notify push:", (err as Error).message));
+    },
+  });
+  await notifier.init();
+  console.log("[engine] wallet balance push armed (LISTEN wallet_changed)");
+}
 
 // Activity feed: simulated generator (flagged) + real-event recorder; both broadcast `activity`.
 

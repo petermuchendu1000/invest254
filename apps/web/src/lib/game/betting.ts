@@ -47,6 +47,8 @@ export interface PositionSettledData {
 export interface BalanceData {
   real: number;
   currency: string;
+  /** Present on out-of-band pushes (deposit/withdraw/admin/bonus). Omitted on trade frames. */
+  bonus?: number;
 }
 
 /** S→C: validation / engine error envelope. */
