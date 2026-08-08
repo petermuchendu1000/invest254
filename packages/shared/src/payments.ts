@@ -4,10 +4,10 @@ import { assertCents, type Cents } from "./money.js";
  * Payment input rules (M-Pesa / KES). Pure and deterministic so they can be unit-tested
  * and shared by the engine and any HTTP transport. Money is integer cents of KES.
  *
- * Defaults (docs/07 §5): min deposit KES 200, min withdrawal KES 200.
+ * Defaults (docs/07 §5): min deposit KES 200, min withdrawal KES 250.
  */
 export const MIN_DEPOSIT_CENTS: Cents = 20_000;     // KES 200
-export const MIN_WITHDRAWAL_CENTS: Cents = 20_000;  // KES 200
+export const MIN_WITHDRAWAL_CENTS: Cents = 25_000;  // KES 250
 
 /**
  * Normalize a Kenyan mobile number to MSISDN form `2547XXXXXXXX` / `2541XXXXXXXX`

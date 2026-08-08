@@ -27,22 +27,22 @@ test("recovery: settles expired, re-arms in-flight, deterministically and idempo
 
   const C1 = 1000; // open P1 (will be expired by recovery time)
   clock.ms = C1;
-  const { position: p1 } = await game1.openPosition({ userId: "u1", stakeCents: 20000, direction: "buy" });
+  const { position: p1 } = await game1.openPosition({ userId: "u1", stakeCents: 25000, direction: "buy" });
 
   const C2 = C1 + 5000; // open P2 5s later (still in-flight at recovery time)
   clock.ms = C2;
-  const { position: p2 } = await game1.openPosition({ userId: "u2", stakeCents: 20000, direction: "sell" });
+  const { position: p2 } = await game1.openPosition({ userId: "u2", stakeCents: 25000, direction: "sell" });
 
   const balU1AfterOpen = await repo.getBalance("u1");
   const balU2AfterOpen = await repo.getBalance("u2");
-  assert.equal(balU1AfterOpen, 80000);
-  assert.equal(balU2AfterOpen, 80000);
+  assert.equal(balU1AfterOpen, 75000);
+  assert.equal(balU2AfterOpen, 75000);
   assert.equal((await repo.listOpenPositions()).length, 2);
 
   // expected hold-to-expiry payout for the expired P1, recomputed independently
   const ctx = await seeds1.contextFor("1970-01-01");
-  const oP1 = ctx.settlement.settle(20000, "buy", (C1 - ctx.dayStartMs) / 1000);
-  const expectedP1Payout = oP1.result === "win" ? Math.round(20000 * oP1.multiplier) : 0;
+  const oP1 = ctx.settlement.settle(25000, "buy", (C1 - ctx.dayStartMs) / 1000);
+  const expectedP1Payout = oP1.result === "win" ? Math.round(25000 * oP1.multiplier) : 0;
 
   // --- crash: discard game1/seeds1; a fresh process boots with only the durable repo ---
   const recoverAtMs = C1 + 10000 + 1; // P1 expired (opened C1, 10s), P2 in-flight (expires C2+10000)
@@ -59,7 +59,7 @@ test("recovery: settles expired, re-arms in-flight, deterministically and idempo
   assert.equal(report.failed, 0);
 
   // P1 settled deterministically to the recomputed outcome
-  assert.equal(await repo.getBalance("u1"), 80000 + expectedP1Payout);
+  assert.equal(await repo.getBalance("u1"), 75000 + expectedP1Payout);
   // P2 is back on the live server, still open
   assert.ok(game2.getPosition(p2.id));
   assert.equal(game2.getPosition(p2.id)!.status, "open");
@@ -70,7 +70,7 @@ test("recovery: settles expired, re-arms in-flight, deterministically and idempo
   assert.equal(report2.scanned, 1);            // only P2 still open in the DB
   assert.equal(report2.settled + report2.rearmed, 0);
   assert.equal(report2.noop, 1);               // P2 already tracked -> no-op
-  assert.equal(await repo.getBalance("u1"), 80000 + expectedP1Payout); // no double credit
+  assert.equal(await repo.getBalance("u1"), 75000 + expectedP1Payout); // no double credit
 
   // P2 settles normally at its expiry through the live tick loop
   clock.ms = p2.expiresAtMs;

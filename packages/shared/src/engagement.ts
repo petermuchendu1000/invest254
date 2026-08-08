@@ -119,18 +119,5 @@ export function positionRng(serverSeed: string, nonce: number): SeededRng {
   return new SeededRng(serverSeed, `engage:${nonce}`);
 }
 
-/** Wagering-tier helper shared by API + tests: bonus pct for a deposit amount. */
-export interface BonusTier { minCents: Cents; maxCents: Cents | null; pct: number; }
-
-export const DEFAULT_BONUS_TIERS: BonusTier[] = [
-  { minCents: 100_000, maxCents: 500_000, pct: 0.5 },   // KES 1,000–5,000 -> 50%
-  { minCents: 500_001, maxCents: 1_000_000, pct: 0.25 }, // >5,000–10,000  -> 25%
-  { minCents: 1_000_001, maxCents: null, pct: 0.15 },    // >10,000         -> 15%
-];
-
-export function bonusPctForDeposit(amountCents: Cents, tiers: BonusTier[] = DEFAULT_BONUS_TIERS): number {
-  for (const t of tiers) {
-    if (amountCents >= t.minCents && (t.maxCents === null || amountCents <= t.maxCents)) return t.pct;
-  }
-  return 0;
-}
+/** Wagering-tier helpers live in ./bonus.js (dependency-free, browser-safe). */
+export { DEFAULT_BONUS_TIERS, bonusPctForDeposit, type BonusTier } from "./bonus.js";

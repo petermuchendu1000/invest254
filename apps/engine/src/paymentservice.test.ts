@@ -33,14 +33,14 @@ test("PaymentService: deposit validation (min, integer, positive) + phone normal
 test("PaymentService: withdrawal request holds, approve dispatches B2C, success keeps debit + fires event", async () => {
   const fired: any[] = [];
   const { repo, svc } = rig({ onWithdrawalSuccess: (e: any) => fired.push(e) });
-  const w = await svc.requestWithdrawal("u", 20_000, "0712345678");
-  assert.equal(w.newBalance, 80_000);
+  const w = await svc.requestWithdrawal("u", 25_000, "0712345678");
+  assert.equal(w.newBalance, 75_000);
   const ap = await svc.approveWithdrawal(w.txId, "admin");
   assert.ok(ap.approved && ap.conversationId);
   const c = await svc.handleB2cResult(w.txId, 0, ap.conversationId!, "RCPT", {});
-  assert.deepEqual(c, { applied: true, status: "success", newBalance: 80_000 });
-  assert.deepEqual(fired, [{ userId: "u", amountCents: 20_000 }]); // real activity hook
-  assert.equal(await repo.getBalance("u"), 80_000);
+  assert.deepEqual(c, { applied: true, status: "success", newBalance: 75_000 });
+  assert.deepEqual(fired, [{ userId: "u", amountCents: 25_000 }]); // real activity hook
+  assert.equal(await repo.getBalance("u"), 75_000);
 });
 
 test("PaymentService: reject reverses; failed B2C reverses; no event on failure", async () => {
@@ -61,9 +61,9 @@ test("PaymentService: reject reverses; failed B2C reverses; no event on failure"
 
 test("PaymentService: withdrawal validation (min, positive, phone)", async () => {
   const { svc } = rig();
-  await assert.rejects(() => svc.requestWithdrawal("u", 19_999, "0712345678"), /BELOW_MIN/);
+  await assert.rejects(() => svc.requestWithdrawal("u", 24_999, "0712345678"), /BELOW_MIN/);
   await assert.rejects(() => svc.requestWithdrawal("u", -1, "0712345678"), /INVALID_AMOUNT/);
-  await assert.rejects(() => svc.requestWithdrawal("u", 20_000, "bad"), /INVALID_PHONE/);
+  await assert.rejects(() => svc.requestWithdrawal("u", 25_000, "bad"), /INVALID_PHONE/);
 });
 
 test("makeDarajaClient: stub without creds, HttpDarajaClient when configured", () => {

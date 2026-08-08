@@ -629,7 +629,7 @@ function OverridesPanel({ id }: { id: string }) {
           <LabeledInput label="Win rate (fraction)" value={form.winRate ?? ''} onChange={(v) => set('winRate', v)} placeholder="e.g. 0.20" />
           <LabeledInput label="Auto-sell duration (s)" value={form.tradeDurationS ?? ''} onChange={(v) => set('tradeDurationS', v)} placeholder="e.g. 30" />
           <LabeledInput label="Max win multiplier" value={form.maxWinMultiplier ?? ''} onChange={(v) => set('maxWinMultiplier', v)} placeholder="e.g. 4" />
-          <LabeledInput label="Min stake (KES)" value={form.minStake ?? ''} onChange={(v) => set('minStake', v)} placeholder="e.g. 100" />
+          <LabeledInput label="Min stake (KES)" value={form.minStake ?? ''} onChange={(v) => set('minStake', v)} placeholder="e.g. 250" />
           <LabeledInput label="Max stake (KES)" value={form.maxStake ?? ''} onChange={(v) => set('maxStake', v)} placeholder="e.g. 50000" />
           <LabeledInput label="Notes" value={form.notes ?? ''} onChange={(v) => set('notes', v)} placeholder="optional" />
         </div>

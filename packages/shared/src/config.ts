@@ -12,7 +12,7 @@ export const CURVE_AMPLITUDE = 0.25;
 export interface GameConfig {
   houseEdge: number;        // 0.75 -> RTP 0.25
   maxMultiplier: number;    // 5.0
-  minStakeCents: Cents;     // 5000 (KES 50)
+  minStakeCents: Cents;     // 25000 (KES 250)
   maxStakeCents: Cents;     // 5_000_000
   defaultDurationS: number; // 10
   tickRateMs: number;       // 150
@@ -48,7 +48,7 @@ export const CONFIG_BOUNDS = {
 export const DEFAULT_CONFIG: GameConfig = {
   houseEdge: 0.75,
   maxMultiplier: 5.0,
-  minStakeCents: 5000,
+  minStakeCents: 25000,
   maxStakeCents: 5_000_000,
   defaultDurationS: 10,
   tickRateMs: 150,

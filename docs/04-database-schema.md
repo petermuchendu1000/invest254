@@ -57,7 +57,7 @@ create table game_config (
   id                 int primary key default 1 check (id = 1), -- singleton
   house_edge         numeric not null default 0.75,
   max_multiplier     numeric not null default 5.0,
-  min_stake          bigint  not null default 5000,   -- KES 50.00
+  min_stake          bigint  not null default 25000,  -- KES 250.00
   max_stake          bigint  not null default 5000000,
   default_duration_s int     not null default 10,
   tick_rate_ms       int     not null default 150,

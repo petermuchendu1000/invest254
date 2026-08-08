@@ -183,7 +183,7 @@ test("J5 game config: admin reads; only superadmin edits; validates; audited", a
     assert.equal(u.houseEdge, 0.7);
     assert.ok(Math.abs(u.rtpTarget - 0.3) < 1e-9);
     assert.equal(u.maxStakeCents, 6_000_000);
-    assert.equal(u.minStakeCents, 5000); // untouched key preserved
+    assert.equal(u.minStakeCents, 25000); // untouched key preserved
 
     // out-of-range value -> 400; non-integer cents -> 400; empty patch -> 400
     assert.equal((await req(api, "PATCH", "/api/v1/admin/game-config", { token: "root:superadmin", body: { houseEdge: 1.5 } })).status, 400);

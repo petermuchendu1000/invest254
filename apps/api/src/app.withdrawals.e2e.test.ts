@@ -100,7 +100,7 @@ test("e2e: multiple withdrawals appear newest-first (latest message on top)", as
     const mid = await onboardMarketer(api);
     wireMarketerPath(api, mid);
 
-    for (const amount of [20_000, 30_000, 40_000]) {
+    for (const amount of [25_000, 30_000, 40_000]) {
       const r = await req(api, "POST", "/api/v1/withdrawals", { token: PLAYER, body: { amount, phone: PHONE } });
       assert.equal(r.status, 200);
     }
@@ -109,11 +109,11 @@ test("e2e: multiple withdrawals appear newest-first (latest message on top)", as
     assert.equal(items.length, 3);
     assert.equal(items[0].amountCents, 40_000); // newest on top
     assert.equal(items[1].amountCents, 30_000);
-    assert.equal(items[2].amountCents, 20_000);
+    assert.equal(items[2].amountCents, 25_000);
     assert.ok(items[0].id > items[1].id && items[1].id > items[2].id);
     // running balance reflected in each confirmation SMS
-    assert.match(items[0].mpesa.message, /New M-PESA balance is Ksh900\.00/);
-    assert.match(items[2].mpesa.message, /New M-PESA balance is Ksh200\.00/);
+    assert.match(items[0].mpesa.message, /New M-PESA balance is Ksh950\.00/);
+    assert.match(items[2].mpesa.message, /New M-PESA balance is Ksh250\.00/);
 
     // activity feed: newest withdrawal first
     const activity = await json(await req(api, "GET", "/api/v1/activity?limit=10"));

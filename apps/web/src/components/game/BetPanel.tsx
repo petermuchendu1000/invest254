@@ -17,7 +17,7 @@ import { useHydrated } from '@/lib/useHydrated';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { LivePnl } from '@/components/game/LivePnl';
 
-const CHIP_CENTS = [10000, 20000, 50000, 100000];
+const CHIP_CENTS = [25000, 50000, 100000, 250000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
 
 export function BetPanel() {
@@ -35,7 +35,7 @@ export function BetPanel() {
   const { data: wallet } = useWallet();
   const { status, activePosition, openPosition, sell } = useGameSocket();
 
-  const minStakeCents = config?.minStakeCents ?? 10000;
+  const minStakeCents = config?.minStakeCents ?? 25000;
   const maxStakeCents = config?.maxStakeCents;
   const defaultDurationS = config?.defaultDurationS ?? 10;
 
@@ -45,9 +45,9 @@ export function BetPanel() {
   // "funds added" hint after a deposit settles. It never gates or re-fires the trade.
   const [resumeDir, setResumeDir] = useState<Direction | null>(null);
 
-  // Seed the stake with a sensible default (KES 200) once config arrives, never below the minimum.
+  // Seed the stake with a sensible default (KES 250) once config arrives, never below the minimum.
   useEffect(() => {
-    if (stake === '') setStake(String(centsToKes(Math.max(minStakeCents, 20000))));
+    if (stake === '') setStake(String(centsToKes(Math.max(minStakeCents, 25000))));
   }, [minStakeCents, stake]);
   useEffect(() => {
     if (config) setDurationS((d) => (d === 10 && defaultDurationS !== 10 ? defaultDurationS : d));

@@ -64,7 +64,7 @@ test("GameServer: per-user trade-duration override drives the auto-sell timer", 
   repo.set(ov({ userId: "u1", tradeDurationS: 30 }));
   const r = rig((u) => repo.getForUser(u));
   r.repo.seed("u1", 100000);
-  const { position } = await r.gs.openPosition({ userId: "u1", stakeCents: 20000, direction: "buy" });
+  const { position } = await r.gs.openPosition({ userId: "u1", stakeCents: 25000, direction: "buy" });
   assert.equal(position.durationS, 30);
   assert.equal(position.expiresAtMs, position.openedAtMs + 30_000);
 });
@@ -93,11 +93,11 @@ test("GameServer: a higher win-rate override wins where the global settlement lo
   assert.ok(flipT >= 0, "found an entry the override flips from loss to win");
   r.repo.seed("lucky", 100000);
   r.clock.ms = Math.round(flipT * 1000);
-  const { position } = await r.gs.openPosition({ userId: "lucky", stakeCents: 20000, direction: "buy" });
+  const { position } = await r.gs.openPosition({ userId: "lucky", stakeCents: 25000, direction: "buy" });
   assert.equal(position.outcome.result, "win", "override settlement should win where global loses");
 
   // A user with NO override still gets the global outcome (a loss at the same entry).
   r.repo.seed("plain", 100000);
-  const { position: p2 } = await r.gs.openPosition({ userId: "plain", stakeCents: 20000, direction: "buy" });
+  const { position: p2 } = await r.gs.openPosition({ userId: "plain", stakeCents: 25000, direction: "buy" });
   assert.equal(p2.outcome.result, "loss", "non-override user uses the global settlement");
 });

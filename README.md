@@ -38,7 +38,7 @@ administrative back office.
 | Parameter | MVP Value | Notes |
 |-----------|-----------|-------|
 | Currency | KES | Kenyan Shilling |
-| Minimum stake | 50 | Quick chips 50 / 100 / 200 / 500 |
+| Minimum stake | 250 | Quick chips 250 / 500 / 1,000 / 2,500 |
 | Maximum multiplier | ×5.0 | "Win up to ×5.0" |
 | House edge | 75% (RTP 25%) | ⚠️ Business-set; tunable per-game |
 | Default round / trade duration | 10s | Auto-sell timer |

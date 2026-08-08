@@ -64,6 +64,6 @@ The engine's `PgPaymentRepository` calls these; `InMemoryPaymentRepository` mirr
 tests. See docs/08 §6 for the full implementation map.
 
 ## 5. Limits & responsible gaming
-- Min stake 50; min deposit & withdrawal configurable (default 100 / 200).
+- Min stake 250; min deposit & withdrawal configurable (default 200 / 250).
 - Per-user daily deposit limit, daily loss limit, self-exclusion (cooldown) — see Compliance doc.
 - Withdrawals blocked if KYC insufficient or active wagering requirement unmet (bonus funds).
