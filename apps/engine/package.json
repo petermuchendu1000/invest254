@@ -1,0 +1,19 @@
+{
+  "name": "@invest254/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=../../.env --import tsx src/server.ts"
+  },
+  "dependencies": {
+    "@invest254/shared": "0.1.0",
+    "ws": "^8.17.0",
+    "pg": "^8.12.0"
+  }
+}

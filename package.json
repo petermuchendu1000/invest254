@@ -1,0 +1,31 @@
+{
+  "name": "invest254",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Invest254 \u2014 authoritative real-money trade-prediction game engine (monorepo)",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc -b && tsc -p apps/web/tsconfig.json --noEmit",
+    "test": "node --import tsx --test",
+    "engine": "tsx apps/engine/src/server.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.20.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "jose": "^6.2.3",
+    "pg": "^8.21.0",
+    "ws": "^8.21.0"
+  }
+}

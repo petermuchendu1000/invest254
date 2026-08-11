@@ -1,0 +1,10 @@
+# Cloudflare Pages project configuration (read at build/deploy time).
+# Placed at the repo root because the Pages project's Root directory is "/".
+# This applies the Node.js compat flag to BOTH production and preview, which
+# avoids the dashboard "unknown error" when saving compatibility flags by hand.
+name = "invest254"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# next-on-pages output, relative to the repo root (root directory = "/").
+pages_build_output_dir = "apps/web/.vercel/output/static"

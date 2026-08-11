@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dark-first design tokens. Light theme overrides under .light on <html>. */
+:root {
+  --pp-bg: #07090f;
+  --pp-surface: #11161f;
+  --pp-surface-2: #1c2430;
+  --pp-border: #303945;
+  --pp-fg: #e6edf3;
+  --pp-muted: #8b949e;
+  --pp-up: #3fb950;
+  --pp-down: #e43d3f;
+  --pp-accent: #00a859;
+  --pp-accent-fg: #ffffff;
+  --pp-brand: #43b02a;
+  --pp-warn: #e3b341;
+}
+
+html.light {
+  --pp-bg: #f6f8fa;
+  --pp-surface: #ffffff;
+  --pp-surface-2: #eaeef2;
+  --pp-border: #d0d7de;
+  --pp-fg: #1f2328;
+  --pp-muted: #636c76;
+  --pp-up: #1a7f37;
+  --pp-down: #cf222e;
+  --pp-accent: #00a859;
+  --pp-accent-fg: #ffffff;
+  --pp-brand: #43b02a;
+  --pp-warn: #9a6700;
+}
+
+html, body {
+  height: 100%;
+}
+body {
+  background-color: var(--pp-bg);
+  color: var(--pp-fg);
+  -webkit-font-smoothing: antialiased;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Respect the iOS/Android home-indicator inset for bottom-sticky UI. */
+.pb-safe { padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)); }
+.h-safe-nav { height: calc(4rem + env(safe-area-inset-bottom)); }
+
+/* Horizontal marquee for the decorative asset ticker (duplicate children + -50%). */
+@keyframes pp-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.animate-marquee { animation: pp-marquee 26s linear infinite reverse; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee { animation: none; }
+}
+
+/* Outcome FX: card pop-in, loss shake, and balance-pill reward pulse. */
+@keyframes pp-pop {
+  0%   { transform: scale(0.82); opacity: 0; }
+  60%  { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes pp-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes pp-balance-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(63,185,80,0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(63,185,80,0); }
+  100% { box-shadow: 0 0 0 0 rgba(63,185,80,0); }
+}
+.pp-balance-bump {
+  animation: pp-balance-pulse 700ms ease-out;
+  border-color: var(--pp-up) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-balance-bump { animation: none; }
+}
+
+/* Hide scrollbars on the horizontal chip/ticker rails while keeping them scrollable. */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/*
+ * Autofill: browsers (Chrome/Safari/WebKit) force a light background and dark
+ * text onto autofilled inputs, which turns our transparent dark fields into a
+ * jarring white "pill". Our inputs sit on a `--pp-surface-2` wrapper, so repaint
+ * the autofill background to match via a giant inset shadow and keep the theme
+ * text colour. Uses CSS vars, so it stays correct in both dark and light themes.
+ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--pp-fg);
+  caret-color: var(--pp-fg);
+  -webkit-box-shadow: 0 0 0 1000px var(--pp-surface-2) inset;
+  box-shadow: 0 0 0 1000px var(--pp-surface-2) inset;
+  border-radius: inherit;
+  /* Defer the autofill background animation far into the future so it never flashes. */
+  transition: background-color 600000s 0s, color 600000s 0s;
+}

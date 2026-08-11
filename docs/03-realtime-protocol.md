@@ -1,0 +1,53 @@
+# 03 — Realtime Protocol (WebSocket)
+
+Transport: **WSS**. Auth: client sends Supabase JWT in the connection handshake; engine verifies.
+Message envelope: JSON `{ "type": string, "data": object, "ts": epoch_ms }`.
+
+## 1. Server → Client events
+| type | data | description |
+|------|------|-------------|
+| `hello` | `{ serverTime, gameConfig, serverSeedHash, tradeDate }` | sent on connect (`serverSeedHash`/`tradeDate` = the active UTC day's commitment) |
+| `tick` | `{ t, rate, delta }` | streaming price point (5–10/sec) |
+| `fairness` | `{ serverSeedHash, tradeDate }` | broadcast on UTC-day rotation (new day's commitment) |
+| `tick_batch` | `{ ticks: [...] }` | backfill last N ticks on connect |
+| `online` | `{ count }` | live online player count |
+| `position_opened` | `{ positionId, entryRate, entryT, direction, stake, duration }` | ack of an open |
+| `position_update` | `{ positionId, liveMultiplier, livePnl, secondsLeft }` | per-tick P&L |
+| `position_settled` | `{ positionId, exitRate, multiplier, payout, pnl, result }` | final outcome |
+| `balance` | `{ real, bonus, currency }` | pushed after settle/credit |
+| `activity` | `{ kind, username, amountCents, message, ts }` | live activity feed item (real or simulated) |
+| `activity_batch` | `{ items: [...] }` | recent activity backfill on connect (oldest-first) |
+| `chat` | `{ id, username, message, ts }` | a chat message broadcast to all |
+| `chat_batch` | `{ items: [...] }` | recent chat backfill on connect / `subscribe_chat` (oldest-first) |
+| `error` | `{ code, message, reasons? }` | validation/engine error (`reasons` lists chat sanitization/limit causes) |
+
+## 2. Client → Server events
+| type | data | description |
+|------|------|-------------|
+| `auth` | `{ token }` | authenticate the socket with a Supabase JWT (verified server-side; invalid → `error` `AUTH_INVALID`) |
+| `open_position` | `{ stake, direction, duration }` | place BUY/SELL |
+| `sell` | `{ positionId }` | manual cashout before timer |
+| `subscribe_chat` | `{}` | join chat stream |
+| `send_chat` | `{ message }` | post chat (rate-limited, moderated) |
+| `ping` | `{}` | keep-alive |
+
+## 3. Open → settle sequence
+```
+client            engine
+  │── open_position ─────────▶│  validate stake≥50, balance, single-open rule
+  │                           │  debit stake (atomic), bind server seed
+  │◀── position_opened ───────│
+  │◀── tick / position_update │  (every tick until close)
+  │── sell (optional) ───────▶│  or auto at duration
+  │                           │  compute outcome (RTP-calibrated), credit payout
+  │◀── position_settled ──────│
+  │◀── balance ───────────────│
+```
+
+## 4. Reliability
+- Heartbeat every 15s; disconnect → engine still auto-settles open positions at timer expiry.
+- On reconnect: `hello` + `tick_batch` + any pending `position_settled` replayed.
+- All money-moving events also written to Postgres; WS is a delivery channel, not the source of truth.
+- **Engine restart:** on boot the engine recovers every still-open position from Postgres —
+  settling those past expiry and re-arming in-flight ones — before accepting connections, so a crash
+  never strands an open position (see docs/02 §6).

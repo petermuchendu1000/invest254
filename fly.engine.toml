@@ -1,0 +1,30 @@
+# Fly.io config for the Invest254 WebSocket game engine.
+# Deploy:  fly deploy -c fly.engine.toml
+# URL:     wss://invest254-engine-pm.fly.dev  -> web NEXT_PUBLIC_WS_URL
+
+app = "invest254-engine-pm"
+primary_region = "jnb"   # Johannesburg — Fly's closest region to Kenya
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT     = "8080"
+  NODE_ENV = "production"
+
+[processes]
+  app = "npm -w @invest254/engine start"
+
+[http_service]
+  internal_port       = 8080
+  force_https         = true        # serves wss:// over 443
+  auto_stop_machines  = "off"       # keep the authoritative game loop always warm
+  auto_start_machines = true
+  min_machines_running = 1
+  processes           = ["app"]
+  # The engine is a pure WebSocket server (no GET /health route), so we rely on
+  # Fly's default TCP check that the port is accepting connections.
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "512mb"

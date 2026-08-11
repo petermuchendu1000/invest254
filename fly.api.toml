@@ -1,0 +1,36 @@
+# Fly.io config for the Invest254 REST API.
+# Deploy:  fly deploy -c fly.api.toml
+# URL:     https://invest254-api.fly.dev  -> web NEXT_PUBLIC_API_BASE_URL=.../api/v1
+
+app            = "invest254-api"
+primary_region = "jnb"   # Johannesburg — Fly's closest region to Kenya
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT     = "8081"
+  NODE_ENV = "production"
+
+[processes]
+  app = "npm -w @invest254/api start"
+
+[http_service]
+  internal_port       = 8081
+  force_https         = true
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes           = ["app"]
+
+  # REST API exposes GET /api/v1/health — use it for the platform health check.
+  [[http_service.checks]]
+    interval     = "30s"
+    timeout      = "5s"
+    grace_period = "10s"
+    method       = "GET"
+    path         = "/api/v1/health"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "512mb"
