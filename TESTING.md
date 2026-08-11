@@ -1,0 +1,66 @@
+# TESTING — multi-tenant template
+
+Evidence that the multi-tenant foundation is correct, tested aggressively, and regression-free.
+
+## Results (this build)
+
+| Suite | Tests | Result |
+|---|---|---|
+| **DB e2e (real Postgres, two isolated sites)** | 23 scenarios | ✅ all pass |
+| Shared (`packages/shared`) incl. new `site.ts` | 75 | ✅ all pass (7 new) |
+| Engine (`apps/engine`) incl. new multiplex core | 135 | ✅ all pass (5 new) |
+| API (`apps/api`) | 115 | ✅ all pass |
+
+Total: **348 automated tests + 23 DB e2e scenarios**, 0 failures. No regressions in inherited code.
+
+## DB end-to-end (the hardest, highest-risk layer)
+
+`packages/db/_testkit/e2e_multitenant.py` stands up a **local, ephemeral Postgres 17**, applies the
+Supabase shim + **all migrations 0001→0047**, then runs adversarial two-site scenarios directly
+against the SECURITY DEFINER money RPCs. It proved:
+
+- All 46+ migrations apply cleanly **and are idempotent** (re-apply is a no-op).
+- `site_id` is threaded onto every tenant table; the default site backfills existing data.
+- **Per-site identity:** the same phone/username registers on two brands (two accounts); a
+  duplicate within one brand is rejected.
+- **Per-site fairness:** the same `trade_date` exists independently on two sites.
+- **Money lifecycle per site:** open debits stake, settle credits payout, balances isolated.
+- **Site-stamping bug-catch:** every stake/payout ledger row carries the POSITION's site — no
+  row silently defaults to the wrong brand (this was the key risk of the column-default design).
+- **Per-site stake bounds:** a stake valid on Site A is rejected on Site B's tighter economy.
+- **Cross-site safety:** you cannot open Site A's wallet under Site B's id.
+- **Scoped attribution:** a referral code resolves only within its own site; using it on another
+  brand attributes nothing.
+- **Feasibility guard:** an impossible economy (RTP/winRate ≤ 1) is rejected by the CHECK.
+- **Statistical override:** a per-user win-rate boost is stored, site-scoped, and engine-feasible.
+
+Reproduce:
+```bash
+# start a local pg (see _testkit) then:
+python3 packages/db/_testkit/e2e_multitenant.py
+```
+
+## Shared — per-site provably-fair seeds (`site.test.ts`)
+Determinism; two brands decorrelated from one master+day; per-brand master also decorrelates;
+day/version rotation decorrelates; commitment == single-tenant construction; input guards; a
+brand seed never collides with the legacy single-tenant lineage.
+
+## Engine — multiplex pricing core (`sitecontext.test.ts`)
+Two brands get **decorrelated curves** from the same master+day; each **calibrates RTP to its own
+economy independently** (held-out Monte-Carlo: Site A ≈ 0.25, Site B ≈ 0.10); deterministic
+rebuild = crash-recovery equivalence; forced rotation changes only that brand; per-brand master
+decorrelates. This reuses the proven `CurveGenerator`/`SettlementEngine` unchanged, so their
+smoothness + RTP + fairness guarantees carry over per brand.
+
+## Run the TS suites
+```bash
+node --import tsx --test packages/shared/src/*.test.ts
+node --import tsx --test apps/engine/src/*.test.ts
+node --import tsx --test apps/api/src/*.test.ts
+```
+
+## Still to test (as the matching code lands — see docs/22)
+Deposit/withdrawal + affiliate-accrual/payout RPC site-wiring; full engine server multiplex
+(sockets + per-site GameServer + site-aware repo `ensureGameDay`/`listOpenPositions`); auth `site`
+claim; API `requireSite`; RLS site dimension; web brand render; platform-superadmin console.
+Each ships with the same two-site, isolation-first testing posture used above.

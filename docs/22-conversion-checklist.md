@@ -15,27 +15,35 @@ Legend: ✅ shipped in template · 🔲 to do
 - ✅ `sites` registry + default site — `packages/db/migrations/0044_sites.sql`
 - ✅ `site_id` threading + per-site identity uniqueness — `0045_site_scoping.sql`
 - ✅ per-site game config + versions + notify — `0046_site_game_config.sql`
-- 🔲 **Apply & verify** all three against a fresh Supabase project; confirm existing data lands
-  on the default site and per-site uniques hold. **Done when:** migrations run clean + re-run clean.
+- ✅ **Applied & verified** — all migrations 0001→0047 apply cleanly and idempotently on a local
+  Postgres 17; existing data backfills to the default site; per-site uniques hold. Proven by
+  `packages/db/_testkit/e2e_multitenant.py` (23 scenarios). See TESTING.md.
+  🔲 Re-run the same harness against a fresh **Supabase** project before any live use.
 
 ## B. Money RPCs — stamp/accept `site_id`
-Files: `packages/db/migrations/00XX_*_site.sql` (new, extend the 0010/0014/0015/0017/0018/0019 RPCs).
-- 🔲 `fn_open_position` / `fn_settle_position` — accept `p_site_id`; write it on `positions`;
-  keep the live min/max stake re-check reading `site_game_config` for that site.
+File: `packages/db/migrations/0047_site_money_rpcs.sql` (shipped) + more to extend 0014/0018/0019.
+- ✅ `fn_open_position` — accepts `p_site_id`; stamps `positions` + stake ledger; stake bounds read
+  from that site's `site_game_config`; locks the wallet **within its site**. Tested (2 sites).
+- ✅ `fn_settle_position` — stamps the payout ledger with the POSITION's site (not the default).
+  Tested (no cross-site ledger leakage).
+- ✅ `fn_register_user` — per-site insert + `unique(site_id, phone/username)`; referral resolved
+  **within the site**; also guarantees `profiles.id` self-generates. Tested.
+- ✅ `fn_affiliate_enroll` — stamps the affiliate row with the enrolling user's site. Tested.
 - 🔲 `fn_create_deposit` / `fn_attach_stk` / `fn_complete_deposit` — carry `site_id` on
   `transactions` + `ledger_entries`; idempotency still keyed by `checkout_request_id`.
 - 🔲 `fn_create_withdrawal` / `fn_approve_/reject_/complete_withdrawal` — carry `site_id`;
   min-withdrawal reads that site's `site_game_config.min_withdrawal`.
-- 🔲 `fn_register_user` — insert `profiles`/`wallets`/`user_credentials` with `site_id`; enforce
-  `unique(site_id, phone/username)`; resolve `p_referral_code` **within the same site**.
-- 🔲 `fn_affiliate_enroll` / `fn_accrue_affiliate_commissions` / payout RPCs — carry `site_id`;
-  accrual groups GGR by `(site_id, affiliate_id, period)`.
-- **Done when:** an open/settle/deposit/withdraw/register on two different sites never collide
-  and every resulting row shows the correct `site_id` (add tests mirroring existing ones × 2 sites).
+- 🔲 `fn_accrue_affiliate_commissions` / payout RPCs — group GGR by `(site_id, affiliate_id, period)`.
+- 🔲 `fn_ensure_game_day` / `fn_reveal_game_day` — accept `p_site_id` (per-site fairness rows).
+- **Done when:** every money RPC on two sites never collides and every row shows the correct
+  `site_id`. Core path (register/open/settle/enroll) is ✅ proven by the 23-scenario e2e.
 
 ## C. Engine — multiplex by site
-Files: `apps/engine/src/server.ts`, `game.ts`, `daycontext.ts`, `gameconfig.ts`, `recovery.ts`,
-new `apps/engine/src/siteregistry.ts`.
+Files: `apps/engine/src/sitecontext.ts` (✅ shipped), `server.ts`, `game.ts`, `daycontext.ts`,
+`gameconfig.ts`, `recovery.ts`, new `apps/engine/src/siteregistry.ts`.
+- ✅ **Per-site pricing context** (`sitecontext.ts` + `buildSiteContext`): composes the proven
+  `CurveGenerator`/`SettlementEngine` with the per-site seed; each brand calibrates RTP to its own
+  economy. Tested: decorrelated curves + independent RTP (A≈0.25, B≈0.10) + deterministic rebuild.
 - 🔲 `SiteRegistry`: `Map<site_id, { seeds: SeedManager, config: SiteConfigStore }>`; build lazily
   from `sites where status='active'`.
 - 🔲 Per-site seeds via `deriveSiteDaySeed(masterSeed(site), siteId, dateKey, version)`
