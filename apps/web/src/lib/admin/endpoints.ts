@@ -2,6 +2,9 @@ import { apiFetch } from '@/lib/api/client';
 import type { Paginated } from '@/lib/api/types';
 import type {
   AdjustBalanceResult,
+  ResetBalanceResult,
+  BulkActionInput,
+  BulkActionResult,
   AdminAuditRow,
   AdminNotificationRow,
   NotificationInput,
@@ -87,6 +90,10 @@ export const adminApi = {
     apiFetch<AdjustBalanceResult>(`/admin/wallets/${id}/adjust`, { method: 'POST', token: t, body: { amountCents, reason, kind } }),
   clearBalance: (t: string, id: string, kind: 'real' | 'bonus' | 'both', reason: string) =>
     apiFetch<{ userId: string; realBalanceCents: number; bonusBalanceCents: number }>(`/admin/wallets/${id}/clear`, { method: 'POST', token: t, body: { kind, reason } }),
+  resetBalance: (t: string, id: string, reason: string) =>
+    apiFetch<ResetBalanceResult>(`/admin/users/${id}/reset-balance`, { method: 'POST', token: t, body: { reason } }),
+  bulk: (t: string, body: BulkActionInput) =>
+    apiFetch<BulkActionResult>('/admin/users/bulk', { method: 'POST', token: t, body }),
   userOverrides: (t: string, id: string) =>
     apiFetch<UserOverrideRow>(`/admin/users/${id}/overrides`, { token: t }),
   setUserOverrides: (t: string, id: string, patch: UserOverridePatch) =>

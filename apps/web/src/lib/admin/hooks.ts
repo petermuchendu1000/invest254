@@ -110,6 +110,29 @@ export function useClearBalance() {
     },
   });
 }
+export function useResetBalance() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; reason: string }) => adminApi.resetBalance(t, v.id, v.reason),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'user', v.id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+export function useBulkAction() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: import('@/lib/admin/types').BulkActionInput) => adminApi.bulk(t, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
 export function useUserOverrides(id: string | null) {
   const t = useTok();
   return useQuery({ queryKey: ['admin', 'overrides', id], queryFn: () => adminApi.userOverrides(t, id as string), enabled: !!t && !!id });

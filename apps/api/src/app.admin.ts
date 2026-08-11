@@ -323,6 +323,111 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.admin.clearBalance(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, kind, reason));
   });
 
+  // Reset a user's REAL wallet to their last funded (most recent successful deposit) amount.
+  // For recovering a corrupted balance after a system issue — audited via the 0042 RPC.
+  router.post(`${BASE}/admin/users/:id/reset-balance`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const reason = typeof body.reason === "string" ? body.reason : "";
+    if (reason.trim() === "") throw new ApiError("REASON_REQUIRED", "reason is required", 400);
+    return domain(() => deps.admin.resetBalanceToLastFunded(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, reason.trim()));
+  });
+
+  // Mass admin actions over a set of selected users. Each target is processed independently and
+  // audited via the same domain calls as the single-user routes, so guards (superadmin-protected,
+  // no-self-action) and audit apply per user; partial success is reported per target.
+  router.post(`${BASE}/admin/users/bulk`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const action = typeof body.action === "string" ? body.action : "";
+    const rawIds = Array.isArray(body.userIds) ? body.userIds : [];
+    const userIds = [...new Set(rawIds.filter((x): x is string => typeof x === "string" && x.length > 0))];
+    if (userIds.length === 0) throw new ApiError("VALIDATION", "userIds must be a non-empty array", 400);
+    if (userIds.length > 500) throw new ApiError("VALIDATION", "at most 500 users per bulk action", 400);
+    const actor = ctx.claims!.userId;
+    const actorRole = ctx.claims!.role ?? "player";
+
+    // Build a per-user executor for the requested action (validating shared params up front).
+    let run: (id: string) => Promise<unknown>;
+    switch (action) {
+      case "suspend": case "ban": case "reactivate": {
+        const status = STATUS_ACTION[action]!;
+        const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : null;
+        run = async (id) => {
+          const res = await deps.admin.setUserStatus(actor, actorRole, id, status, reason);
+          try {
+            if (action === "suspend" || action === "ban") {
+              await deps.notifications.resolveByCategory(id, "account_limited");
+              await deps.notifications.create({
+                userId: id, level: "error", dismissible: false, category: "account_limited",
+                title: action === "ban" ? "Your account has been banned" : "Your account is suspended",
+                body: reason ? `Reason: ${reason}. Contact support if you believe this is a mistake.`
+                             : "Some actions are unavailable. Contact support if you believe this is a mistake.",
+                createdBy: actor,
+              });
+            } else {
+              await deps.notifications.resolveByCategory(id, "account_limited");
+              await deps.notifications.create({
+                userId: id, level: "success", dismissible: true, category: "account_reactivated",
+                title: "Your account has been reactivated", body: "Welcome back — full access is restored.", createdBy: actor,
+              });
+            }
+          } catch { /* non-fatal: status change already succeeded */ }
+          return res;
+        };
+        break;
+      }
+      case "reset-balance": {
+        const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+        if (!reason) throw new ApiError("REASON_REQUIRED", "reason is required", 400);
+        run = (id) => deps.admin.resetBalanceToLastFunded(actor, actorRole, id, reason);
+        break;
+      }
+      case "clear-balance": {
+        const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+        if (!reason) throw new ApiError("REASON_REQUIRED", "reason is required", 400);
+        const kind = body.kind === "real" || body.kind === "bonus" || body.kind === "both" ? body.kind : "real";
+        run = (id) => deps.admin.clearBalance(actor, actorRole, id, kind, reason);
+        break;
+      }
+      case "adjust-balance": {
+        const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+        if (!reason) throw new ApiError("REASON_REQUIRED", "reason is required", 400);
+        const raw = body.amountCents ?? body.amount;
+        const mag = typeof raw === "number" ? raw : Number(raw);
+        if (!Number.isInteger(mag) || mag <= 0) throw new ApiError("INVALID_AMOUNT", "amountCents must be a positive integer (cents)", 400);
+        const signed = body.direction === "debit" ? -Math.abs(mag) : Math.abs(mag);
+        const kind = body.kind === "bonus" ? "bonus" : body.kind === "real" ? "real" : undefined;
+        run = (id) => kind
+          ? deps.admin.adjustBalanceKind(actor, actorRole, id, signed, kind, reason)
+          : deps.admin.adjustBalance(actor, actorRole, id, signed, reason);
+        break;
+      }
+      case "notify": {
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        if (!title) throw new ApiError("VALIDATION", "title is required", 400);
+        if (title.length > 120) throw new ApiError("VALIDATION", "title must be <= 120 chars", 400);
+        const level = ["info", "success", "warning", "error"].includes(String(body.level)) ? String(body.level) : "info";
+        const text = typeof body.body === "string" ? body.body.slice(0, 1000) : "";
+        const dismissible = body.dismissible === undefined ? true : Boolean(body.dismissible);
+        const category = typeof body.category === "string" && body.category ? body.category.slice(0, 64) : null;
+        run = async (id) => {
+          const row = await deps.notifications.create({ userId: id, title, body: text, level: level as "info" | "success" | "warning" | "error", dismissible, category, createdBy: actor });
+          await deps.admin.recordAction(actor, actorRole, "notification.create", "user", id, { notificationId: row.id, level, dismissible, category, bulk: true });
+          return { notificationId: row.id };
+        };
+        break;
+      }
+      default:
+        throw new ApiError("VALIDATION", "action must be one of: suspend, ban, reactivate, reset-balance, clear-balance, adjust-balance, notify", 400);
+    }
+
+    const results = await Promise.all(userIds.map(async (id) => {
+      try { return { userId: id, ok: true, result: await run(id) }; }
+      catch (e) { return { userId: id, ok: false, error: (e as { message?: string })?.message ?? "ERROR" }; }
+    }));
+    const okCount = results.filter((r) => r.ok).length;
+    return { action, total: userIds.length, okCount, failCount: results.length - okCount, results };
+  });
+
   // J8: per-user engine overrides (win rate / auto-sell duration / max multiplier / stake bounds).
   router.get(`${BASE}/admin/users/:id/overrides`, auth, admin, async (ctx: Ctx) =>
     (await deps.admin.getUserOverrides(ctx.params.id!)) ?? {

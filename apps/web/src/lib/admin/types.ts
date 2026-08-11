@@ -55,6 +55,7 @@ export interface AdminUserRow {
   depositsCents: Cents;
   withdrawalsCents: Cents;
   netDepositsCents: Cents;
+  lastFundedCents: Cents | null;
   turnoverCents: Cents;
   ggrCents: Cents;
   betCount: number;
@@ -80,6 +81,41 @@ export interface AdjustBalanceResult {
   amountCents: Cents;
   newBalanceCents: Cents;
   direction: 'credit' | 'debit';
+}
+export interface ResetBalanceResult {
+  userId: string;
+  lastFundedCents: Cents;
+  previousBalanceCents: Cents;
+  newBalanceCents: Cents;
+}
+
+/** A single target's outcome in a bulk admin action. */
+export interface BulkActionItem {
+  userId: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+export type BulkAction = 'suspend' | 'ban' | 'reactivate' | 'reset-balance' | 'clear-balance' | 'adjust-balance' | 'notify';
+export interface BulkActionResult {
+  action: BulkAction;
+  total: number;
+  okCount: number;
+  failCount: number;
+  results: BulkActionItem[];
+}
+export interface BulkActionInput {
+  action: BulkAction;
+  userIds: string[];
+  reason?: string;
+  kind?: 'real' | 'bonus' | 'both';
+  amountCents?: number;
+  direction?: 'credit' | 'debit';
+  title?: string;
+  body?: string;
+  level?: NotificationLevel;
+  dismissible?: boolean;
+  category?: string | null;
 }
 
 export type AdminActivityKind = 'deposit' | 'withdrawal' | 'bet';

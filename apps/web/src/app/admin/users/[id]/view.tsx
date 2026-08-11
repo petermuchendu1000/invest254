@@ -13,7 +13,7 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig } from '@/lib/admin/hooks';
+import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel, UserOverridePatch } from '@/lib/admin/types';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
@@ -87,6 +87,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <StatusActions id={id} status={q.data.status} />
               <RoleManage id={id} current={q.data.role} />
               <BalanceAdjust id={id} />
+              <ResetBalance id={id} />
               <OverridesPanel id={id} />
               <NotificationSend id={id} />
               {q.data.role === 'marketer' ? <CommissionRate id={id} /> : null}
@@ -299,6 +300,62 @@ function RoleManage({ id, current }: { id: string; current: string }) {
       <p className="text-xs text-muted">
         Promoting to admin or superadmin grants back-office access. Changes are audited and apply on the user’s next login.
       </p>
+    </Section>
+  );
+}
+
+function ResetBalance({ id }: { id: string }) {
+  const q = useUser(id);
+  const m = useResetBalance();
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const lastFunded = q.data?.lastFundedCents ?? null;
+  const current = q.data?.realBalanceCents ?? 0;
+  const canReset = lastFunded != null;
+
+  function run() {
+    m.mutate(
+      { id, reason: reason.trim() },
+      {
+        onSuccess: (r) => {
+          setReason('');
+          toast.push({ tone: 'success', title: 'Balance reset', description: `Real wallet set to last funded amount.` });
+          void r;
+        },
+        onError: (e) => toast.push({ tone: 'error', title: 'Reset failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+      },
+    );
+  }
+
+  return (
+    <Section title="Reset balance to last funded">
+      <Card className="flex flex-col gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <StatCard label="Current real balance" money={current} />
+          <StatCard label="Last funded amount" money={lastFunded ?? 0} hint={canReset ? 'most recent successful deposit' : 'no successful deposit'} tone={canReset ? 'up' : 'default'} />
+          <StatCard label="Change on reset" money={(lastFunded ?? current) - current} tone={(lastFunded ?? current) - current >= 0 ? 'up' : 'down'} />
+        </div>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason (required, audited) — e.g. settlement bug correction"
+          className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+        />
+        <ConfirmButton
+          label="Reset to last funded"
+          confirmLabel="Confirm reset"
+          variant="down"
+          size="md"
+          busy={m.isPending}
+          disabled={!canReset || reason.trim().length === 0}
+          onConfirm={run}
+        />
+        <p className="text-xs text-muted">
+          Sets the REAL wallet to the amount of the user&apos;s most recent successful deposit (their last funded amount) —
+          use when a system issue corrupted the balance. Writes a reconciling ledger entry and an audit record. The bonus
+          wallet is untouched. {canReset ? '' : 'This user has no successful deposit to reset to.'}
+        </p>
+      </Card>
     </Section>
   );
 }

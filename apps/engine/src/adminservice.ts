@@ -3,7 +3,7 @@ import type {
   AdminRepository, AdminOverview, AdminUserRow, AdminUserDetail, AdminWithdrawalRow, AdminAuditRow,
   AdminUserListQuery, AdminWithdrawalListQuery, AdminTransactionRow, AdminTransactionListQuery,
   SetUserStatusResult, SetCommissionRateResult,
-  AdjustBalanceResult, AdjustBalanceKindResult, ClearBalanceResult, BalanceKind, UserOverrideRow, UserOverridePatch,
+  AdjustBalanceResult, AdjustBalanceKindResult, ClearBalanceResult, ResetBalanceResult, BalanceKind, UserOverrideRow, UserOverridePatch,
   AdminDepositRow, AdminDepositListQuery, AdminDepositsReconcile,
   ReportRange, DailyReportRow, UserReportRow,
   GameConfigRow, GameConfigPatch, RtpMonitor, AdminSeedRow, SeedRotateResult,
@@ -61,6 +61,11 @@ export class AdminService {
   /** Manual wallet credit/debit (J3) — signed cents, mandatory reason; guards + audit live in the repo/RPC. */
   adjustBalance(actorId: string, actorRole: string, targetId: string, amountCents: number, reason: string): Promise<AdjustBalanceResult> {
     return this.repo.adjustBalance(actorId, actorRole, targetId, amountCents, reason);
+  }
+
+  /** Reset a user's real wallet to their most recent successful deposit amount (audited). */
+  resetBalanceToLastFunded(actorId: string, actorRole: string, targetId: string, reason: string): Promise<ResetBalanceResult> {
+    return this.repo.resetBalanceToLastFunded(actorId, actorRole, targetId, reason);
   }
   /** J8: credit/debit either wallet (real|bonus). */
   adjustBalanceKind(actorId: string, actorRole: string, targetId: string, amountCents: number, kind: BalanceKind, reason: string): Promise<AdjustBalanceKindResult> {

@@ -552,3 +552,86 @@ test("admin users: numeric filters (minDepositsCents, minBalanceCents) narrow th
     assert.equal(bad.status, 200, "invalid numeric params ignored");
   } finally { await api.close(); }
 });
+
+async function fundOnce(api: TestApi, uid: string, phone: string, amountCents: number, tag: string) {
+  const dep = await api.payRepo.createDeposit(uid, amountCents, phone);
+  await api.payRepo.attachStk(dep, `m-${tag}`, `chk-${tag}`);
+  await api.payRepo.completeDeposit(`chk-${tag}`, 0, "ok", `RCPT-${tag}`, {});
+}
+
+test("admin reset-balance: restores a user's real wallet to their last funded amount", async () => {
+  const api = await startTestApi();
+  try {
+    const uid = await register(api, "0712300001", "reset_api");
+    api.payRepo.seed(uid, 0);
+    await fundOnce(api, uid, "254712300001", 100_000, "a");
+    await fundOnce(api, uid, "254712300001", 40_000, "b"); // last funded = 40k
+    api.payRepo.adminApplyAdjustment(uid, 500_000); // corrupt the balance
+
+    // requires a reason
+    assert.equal((await req(api, "POST", `/api/v1/admin/users/${uid}/reset-balance`, { token: "adm-1:admin", body: {} })).status, 400);
+
+    const res = await json(await req(api, "POST", `/api/v1/admin/users/${uid}/reset-balance`, { token: "adm-1:admin", body: { reason: "settlement bug" } }));
+    assert.equal(res.lastFundedCents, 40_000);
+    assert.equal(res.newBalanceCents, 40_000);
+
+    const detail = await json(await req(api, "GET", `/api/v1/admin/users/${uid}`, { token: "adm-1:admin" }));
+    assert.equal(detail.realBalanceCents, 40_000);
+    assert.equal(detail.lastFundedCents, 40_000);
+
+    // a player cannot reset balances
+    assert.equal((await req(api, "POST", `/api/v1/admin/users/${uid}/reset-balance`, { token: uid, body: { reason: "x" } })).status, 403);
+  } finally { await api.close(); }
+});
+
+test("admin bulk: mass suspend / notify / reset-balance with per-user partial results", async () => {
+  const api = await startTestApi();
+  try {
+    const a = await register(api, "0712310001", "bulk_a");
+    const b = await register(api, "0712310002", "bulk_b");
+    for (const [uid, phone] of [[a, "254712310001"], [b, "254712310002"]] as [string, string][]) {
+      api.payRepo.seed(uid, 0);
+      await fundOnce(api, uid, phone, 30_000, uid.slice(0, 6));
+      api.payRepo.adminApplyAdjustment(uid, 200_000); // corrupt
+    }
+
+    // bulk suspend both
+    const susp = await json(await req(api, "POST", "/api/v1/admin/users/bulk", { token: "adm-1:admin", body: { action: "suspend", userIds: [a, b], reason: "audit" } }));
+    assert.equal(susp.okCount, 2);
+    assert.equal(susp.failCount, 0);
+    for (const uid of [a, b]) {
+      const d = await json(await req(api, "GET", `/api/v1/admin/users/${uid}`, { token: "adm-1:admin" }));
+      assert.equal(d.status, "suspended");
+    }
+
+    // bulk notify both
+    const notify = await json(await req(api, "POST", "/api/v1/admin/users/bulk", { token: "adm-1:admin", body: { action: "notify", userIds: [a, b], title: "Maintenance", level: "warning" } }));
+    assert.equal(notify.okCount, 2);
+    for (const uid of [a, b]) {
+      const list = await json(await req(api, "GET", `/api/v1/admin/users/${uid}/notifications`, { token: "adm-1:admin" }));
+      assert.ok(list.items.some((n: any) => n.title === "Maintenance"));
+    }
+
+    // bulk reset-balance both -> back to 30k
+    const reset = await json(await req(api, "POST", "/api/v1/admin/users/bulk", { token: "adm-1:admin", body: { action: "reset-balance", userIds: [a, b], reason: "recover" } }));
+    assert.equal(reset.okCount, 2);
+    for (const uid of [a, b]) {
+      const d = await json(await req(api, "GET", `/api/v1/admin/users/${uid}`, { token: "adm-1:admin" }));
+      assert.equal(d.realBalanceCents, 30_000);
+    }
+
+    // partial failure: self-action is rejected for that target only
+    const mixed = await json(await req(api, "POST", "/api/v1/admin/users/bulk", { token: "adm-1:admin", body: { action: "suspend", userIds: [a, "adm-1"], reason: "audit" } }));
+    assert.equal(mixed.okCount, 1);
+    assert.equal(mixed.failCount, 1);
+    assert.ok(mixed.results.find((r: any) => r.userId === "adm-1" && !r.ok));
+
+    // validation
+    assert.equal((await req(api, "POST", "/api/v1/admin/users/bulk", { token: "adm-1:admin", body: { action: "suspend", userIds: [] } })).status, 400);
+    assert.equal((await req(api, "POST", "/api/v1/admin/users/bulk", { token: "adm-1:admin", body: { action: "bogus", userIds: [a] } })).status, 400);
+    assert.equal((await req(api, "POST", "/api/v1/admin/users/bulk", { token: "adm-1:admin", body: { action: "reset-balance", userIds: [a] } })).status, 400); // reason required
+
+    // player forbidden
+    assert.equal((await req(api, "POST", "/api/v1/admin/users/bulk", { token: a, body: { action: "suspend", userIds: [b], reason: "x" } })).status, 403);
+  } finally { await api.close(); }
+});

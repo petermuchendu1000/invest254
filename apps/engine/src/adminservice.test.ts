@@ -365,3 +365,53 @@ test("listUsers: numeric threshold filters (balance range, deposits, bets)", asy
   // balance range window [4000, 6000] → only the minnow
   assert.deepEqual(await names({ minBalanceCents: 4_000, maxBalanceCents: 6_000 }), ["minnow"]);
 });
+
+test("resetBalanceToLastFunded: restores the real wallet to the most recent successful deposit", async () => {
+  const identity = new InMemoryIdentityRepository();
+  let now = 1_000_000;
+  const payRepo = new InMemoryPaymentRepository(() => now);
+  const admin = new AdminService(new InMemoryAdminRepository(identity, payRepo));
+  const uid = (await identity.register("254700000200", "reset_user", HASH)).userId;
+  payRepo.seed(uid, 0);
+
+  // Two successful deposits at distinct times: 100k then 50k (50k is the "last funded").
+  const d1 = await payRepo.createDeposit(uid, 100_000, "254700000200");
+  await payRepo.attachStk(d1, "m1", "chk-r1"); await payRepo.completeDeposit("chk-r1", 0, "ok", "R1", {});
+  now += 5_000;
+  const d2 = await payRepo.createDeposit(uid, 50_000, "254700000200");
+  await payRepo.attachStk(d2, "m2", "chk-r2"); await payRepo.completeDeposit("chk-r2", 0, "ok", "R2", {});
+  assert.equal(await payRepo.getBalance(uid), 150_000);
+
+  // Simulate a system issue corrupting the balance, then reset to last funded.
+  payRepo.adminApplyAdjustment(uid, 900_000); // balance now 1,050,000
+  const res = await admin.resetBalanceToLastFunded("actor", "admin", uid, "settlement bug correction");
+  assert.equal(res.lastFundedCents, 50_000);
+  assert.equal(res.previousBalanceCents, 1_050_000);
+  assert.equal(res.newBalanceCents, 50_000);
+  assert.equal(await payRepo.getBalance(uid), 50_000);
+
+  // detail/list expose the last funded amount so the UI can preview the reset target.
+  const detail = await admin.getUserDetail(uid);
+  assert.equal(detail.lastFundedCents, 50_000);
+
+  // audit trail records the reset.
+  const audit = await admin.listAudit({});
+  assert.ok(audit.items.some((a) => a.action === "balance.reset_last_funded" && a.targetId === uid));
+});
+
+test("resetBalanceToLastFunded: guards (no funding, reason, role, superadmin)", async () => {
+  const { identity, payRepo, admin } = stack();
+  const nofund = (await identity.register("254700000210", "nofund", HASH)).userId;
+  payRepo.seed(nofund, 5_000);
+  await assert.rejects(admin.resetBalanceToLastFunded("actor", "admin", nofund, "x"), /NO_FUNDING/);
+
+  const u = (await identity.register("254700000211", "hasfund", HASH)).userId;
+  payRepo.seed(u, 0);
+  const d = await payRepo.createDeposit(u, 20_000, "254700000211");
+  await payRepo.attachStk(d, "m", "chk-g"); await payRepo.completeDeposit("chk-g", 0, "ok", "RG", {});
+  await assert.rejects(admin.resetBalanceToLastFunded("actor", "admin", u, "   "), /REASON_REQUIRED/);
+  await assert.rejects(admin.resetBalanceToLastFunded("actor", "player", u, "x"), /NOT_AUTHORIZED/);
+
+  const sup = (await identity.register("254700000212", "root2", HASH)).userId; identity.adminSetRole(sup, "superadmin");
+  await assert.rejects(admin.resetBalanceToLastFunded("actor", "admin", sup, "x"), /SUPERADMIN_PROTECTED/);
+});

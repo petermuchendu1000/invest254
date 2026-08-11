@@ -29,6 +29,7 @@ export interface AdminUserRow {
   userId: string; username: string; phone: string; role: string; status: string; createdAtMs: number;
   realBalanceCents: Cents; bonusBalanceCents: Cents;
   depositsCents: Cents; withdrawalsCents: Cents; netDepositsCents: Cents;
+  lastFundedCents: Cents | null;
   turnoverCents: Cents; ggrCents: Cents; betCount: number;
   lastTxAtMs: number | null; lastTxKind: string | null; lastTxAmountCents: Cents | null; lastTxStatus: string | null;
   lastActiveAtMs: number | null;
@@ -62,6 +63,8 @@ export interface SetCommissionRateResult { userId: string; commissionRate: numbe
 export interface SetUserRoleResult { userId: string; role: string; }
 /** Result of a manual wallet balance adjustment (J3). */
 export interface AdjustBalanceResult { userId: string; amountCents: Cents; newBalanceCents: Cents; direction: "credit" | "debit"; }
+/** Result of resetting a wallet to the user's last funded (most recent successful deposit) amount. */
+export interface ResetBalanceResult { userId: string; lastFundedCents: Cents; previousBalanceCents: Cents; newBalanceCents: Cents; }
 // J8 — per-player controls: balance ops on either wallet + clear, and per-user engine overrides.
 export type BalanceKind = "real" | "bonus";
 export interface AdjustBalanceKindResult { userId: string; kind: BalanceKind; amountCents: Cents; newBalanceCents: Cents; direction: "credit" | "debit"; }
@@ -209,6 +212,8 @@ export interface AdminRepository {
   listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>>;
   listAudit(q: PageQuery): Promise<Page<AdminAuditRow>>;
   adjustBalance(actorId: string, actorRole: string, targetId: string, amountCents: Cents, reason: string): Promise<AdjustBalanceResult>;
+  /** Reset a user's real wallet to their most recent successful deposit amount (audited). */
+  resetBalanceToLastFunded(actorId: string, actorRole: string, targetId: string, reason: string): Promise<ResetBalanceResult>;
   // J8 — balance ops on either wallet, one-shot clear, and per-user engine overrides.
   adjustBalanceKind(actorId: string, actorRole: string, targetId: string, amountCents: Cents, kind: BalanceKind, reason: string): Promise<AdjustBalanceKindResult>;
   clearBalance(actorId: string, actorRole: string, targetId: string, kind: "real" | "bonus" | "both", reason: string): Promise<ClearBalanceResult>;
@@ -469,6 +474,7 @@ export class PgAdminRepository implements AdminRepository {
               coalesce(po.ggr,0)          as ggr,
               coalesce(po.bet_count,0)    as bet_count,
               lt.created_at as last_tx_at, lt.kind as last_tx_kind, lt.amount as last_tx_amount, lt.status as last_tx_status,
+              lf.last_funded as last_funded,
               greatest(coalesce(lt.created_at, 'epoch'::timestamptz), coalesce(po.last_bet_at, 'epoch'::timestamptz)) as last_active_at
          from profiles p
          left join wallets w on w.user_id = p.id
@@ -477,6 +483,7 @@ export class PgAdminRepository implements AdminRepository {
          left join lateral (select coalesce(sum(stake),0) as turnover, coalesce(sum(stake - payout),0) as ggr, count(*) as bet_count, max(opened_at) as last_bet_at
                               from positions x where x.user_id = p.id and x.status='settled') po on true
          left join lateral (select created_at, kind, amount, status from transactions t where t.user_id = p.id order by created_at desc, id desc limit 1) lt on true
+         left join lateral (select amount as last_funded from transactions t where t.user_id = p.id and t.kind='deposit' and t.status='success' order by created_at desc, id desc limit 1) lf on true
         where ($1::text is null or p.role = $1)
           and ($2::text is null or p.status = $2)
           and ($3::text is null or p.username ilike '%'||$3||'%' or p.phone ilike '%'||$3||'%')
@@ -506,6 +513,7 @@ export class PgAdminRepository implements AdminRepository {
               coalesce(po.ggr,0)          as ggr,
               coalesce(po.bet_count,0)    as bet_count,
               lt.created_at as last_tx_at, lt.kind as last_tx_kind, lt.amount as last_tx_amount, lt.status as last_tx_status,
+              lf.last_funded as last_funded,
               greatest(coalesce(lt.created_at, 'epoch'::timestamptz), coalesce(po.last_bet_at, 'epoch'::timestamptz)) as last_active_at
          from profiles p
          left join wallets w on w.user_id = p.id
@@ -514,6 +522,7 @@ export class PgAdminRepository implements AdminRepository {
          left join lateral (select coalesce(sum(stake),0) as turnover, coalesce(sum(stake - payout),0) as ggr, count(*) as bet_count, max(opened_at) as last_bet_at
                               from positions x where x.user_id = p.id and x.status='settled') po on true
          left join lateral (select created_at, kind, amount, status from transactions t where t.user_id = p.id order by created_at desc, id desc limit 1) lt on true
+         left join lateral (select amount as last_funded from transactions t where t.user_id = p.id and t.kind='deposit' and t.status='success' order by created_at desc, id desc limit 1) lf on true
         where p.id = $1`,
       [userId]);
     if (!r.rows.length) return null;
@@ -637,6 +646,14 @@ export class PgAdminRepository implements AdminRepository {
       const x = r.rows[0];
       const amt = num(x.amount);
       return { userId: String(x.user_id), amountCents: amt, newBalanceCents: num(x.new_balance), direction: amt >= 0 ? "credit" : "debit" };
+    } catch (e) { mapAdminError(e); }
+  }
+
+  async resetBalanceToLastFunded(actorId: string, actorRole: string, targetId: string, reason: string): Promise<ResetBalanceResult> {
+    try {
+      const r = await this.q.query("select user_id, last_funded, previous_balance, new_balance from fn_admin_reset_balance_to_last_funded($1,$2,$3,$4)", [actorId, actorRole, targetId, reason]);
+      const x = r.rows[0];
+      return { userId: String(x.user_id), lastFundedCents: num(x.last_funded), previousBalanceCents: num(x.previous_balance), newBalanceCents: num(x.new_balance) };
     } catch (e) { mapAdminError(e); }
   }
 
@@ -920,6 +937,7 @@ function mapUserRow(x: any): AdminUserRow {
     role: String(x.role), status: String(x.status), createdAtMs: ms(x.created_at),
     realBalanceCents: num(x.real_balance), bonusBalanceCents: num(x.bonus_balance),
     depositsCents: deposits, withdrawalsCents: withdrawals, netDepositsCents: deposits - withdrawals,
+    lastFundedCents: x.last_funded == null ? null : num(x.last_funded),
     turnoverCents: num(x.turnover), ggrCents: num(x.ggr), betCount: num(x.bet_count),
     lastTxAtMs: x.last_tx_at == null ? null : ms(x.last_tx_at),
     lastTxKind: x.last_tx_kind == null ? null : String(x.last_tx_kind),
@@ -1051,12 +1069,16 @@ export class InMemoryAdminRepository implements AdminRepository {
     const deposits = txs.filter((t) => t.kind === "deposit" && t.status === "success").reduce((s, t) => s + t.amountCents, 0);
     const withdrawals = txs.filter((t) => t.kind === "withdrawal" && t.status === "success").reduce((s, t) => s + t.amountCents, 0);
     const last = txs.slice().sort((a, b) => (b.createdAtMs - a.createdAtMs) || (a.txId < b.txId ? 1 : -1))[0];
+    const lastFundedTx = txs
+      .filter((t) => t.kind === "deposit" && t.status === "success")
+      .sort((a, b) => (b.createdAtMs - a.createdAtMs) || (a.txId < b.txId ? 1 : -1))[0];
     const turnover = plays.reduce((s, p) => s + p.stakeCents, 0);
     const ggr = plays.reduce((s, p) => s + (p.stakeCents - p.payoutCents), 0);
     return {
       userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status, createdAtMs: u.createdAtMs,
       realBalanceCents: await this.payments.getBalance(u.userId), bonusBalanceCents: this.bonusBal.get(u.userId) ?? 0,
       depositsCents: deposits, withdrawalsCents: withdrawals, netDepositsCents: deposits - withdrawals,
+      lastFundedCents: lastFundedTx ? lastFundedTx.amountCents : null,
       turnoverCents: turnover, ggrCents: ggr, betCount: plays.length,
       lastTxAtMs: last ? last.createdAtMs : null, lastTxKind: last ? last.kind : null,
       lastTxAmountCents: last ? last.amountCents : null, lastTxStatus: last ? last.status : null,
@@ -1200,6 +1222,22 @@ export class InMemoryAdminRepository implements AdminRepository {
     const after = this.payments.adminApplyAdjustment(targetId, amountCents);
     this.record(actorId, actorRole, "balance.adjust", "user", targetId, { amount: amountCents, reason, before, after });
     return { userId: targetId, amountCents, newBalanceCents: after, direction: amountCents > 0 ? "credit" : "debit" };
+  }
+
+  async resetBalanceToLastFunded(actorId: string, actorRole: string, targetId: string, reason: string): Promise<ResetBalanceResult> {
+    if (!ADMIN_ROLES.includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    if (!reason || reason.trim() === "") throw new Error("REASON_REQUIRED");
+    const tgt = this.identity.adminUser(targetId);
+    if (!tgt) throw new Error("USER_NOT_FOUND");
+    if (tgt.role === "superadmin") throw new Error("SUPERADMIN_PROTECTED");
+    const lastFunded = this.payments.adminTransactions()
+      .filter((t) => t.userId === targetId && t.kind === "deposit" && t.status === "success")
+      .sort((a, b) => (b.createdAtMs - a.createdAtMs) || (a.txId < b.txId ? 1 : -1))[0];
+    if (!lastFunded) throw new Error("NO_FUNDING");
+    const before = await this.payments.getBalance(targetId);
+    const after = this.payments.adminApplyAdjustment(targetId, lastFunded.amountCents - before);
+    this.record(actorId, actorRole, "balance.reset_last_funded", "user", targetId, { reason, before, after, lastFunded: lastFunded.amountCents });
+    return { userId: targetId, lastFundedCents: lastFunded.amountCents, previousBalanceCents: before, newBalanceCents: after };
   }
 
   async adjustBalanceKind(actorId: string, actorRole: string, targetId: string, amountCents: Cents, kind: BalanceKind, reason: string): Promise<AdjustBalanceKindResult> {
