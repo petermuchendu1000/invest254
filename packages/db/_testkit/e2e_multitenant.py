@@ -144,6 +144,58 @@ def main():
     check("override stored + engine-feasible (RTP/winRate>1)", float(ov[0])==0.90 and 1 < feasible, f"factor={feasible:.3f}")
     check("override scoped to user's site A", str(ov[2])==SITE_A)
 
+    print("\n== Deposits: site-stamped credit + idempotency + cross-site safety ==")
+    import hashlib
+    pda = q1(cur, "select user_id from fn_register_user(%s,%s,%s,null,%s)", ["254720000001","payA","hash_"+"p"*24, SITE_A])[0]
+    pdb = q1(cur, "select user_id from fn_register_user(%s,%s,%s,null,%s)", ["254720000001","payB","hash_"+"p"*24, SITE_B])[0]
+    dep = q1(cur, "select fn_create_deposit(%s,%s,%s,%s)", [pda, 100000, "254720000001", SITE_A])[0]
+    cur.execute("select fn_attach_stk(%s,%s,%s)", [dep, "mr1", "co_A_1"])
+    res = q1(cur, "select applied,status,new_balance from fn_complete_deposit(%s,%s,%s,%s,%s)", ["co_A_1", 0, "ok", "RCPT1", '{}'])
+    check("deposit credits wallet on A", res[1]=="success" and res[2]==100000, f"{res}")
+    site_ok = q1(cur, "select site_id from ledger_entries where ref_id=%s and type='deposit'", [dep])[0]
+    check("deposit ledger stamped site A", str(site_ok)==SITE_A)
+    res2 = q1(cur, "select applied,status,new_balance from fn_complete_deposit(%s,%s,%s,%s,%s)", ["co_A_1", 0, "ok", "RCPT1", '{}'])
+    check("deposit completion is idempotent (no double credit)", res2[0]==False and res2[2]==100000, f"{res2}")
+    expect_error(cur, "select fn_create_deposit(%s,%s,%s,%s)", [pda, 100000, "x", SITE_B], "WALLET_NOT_FOUND",
+                 "cannot create a deposit for user A under site B")
+    # failed deposit never credits
+    dep2 = q1(cur, "select fn_create_deposit(%s,%s,%s,%s)", [pdb, 50000, "254720000001", SITE_B])[0]
+    cur.execute("select fn_attach_stk(%s,%s,%s)", [dep2, "mr2", "co_B_1"])
+    fres = q1(cur, "select applied,status,new_balance from fn_complete_deposit(%s,%s,%s,%s,%s)", ["co_B_1", 1, "cancelled", None, '{}'])
+    check("failed deposit does not credit on B", fres[1]=="failed" and fres[2]==0, f"{fres}")
+
+    print("\n== Withdrawals: hold/approve/complete + reversal, all site-stamped ==")
+    cur.execute("update site_game_config set min_withdrawal=25000 where site_id=%s", [SITE_A])
+    wd = q1(cur, "select tx_id,new_balance from fn_create_withdrawal(%s,%s,%s,%s,%s)", [pda, 40000, "254720000001", 25000, SITE_A])
+    check("withdrawal holds funds on A (debit)", wd[1]==60000, f"bal={wd[1]}")
+    hold_site = q1(cur, "select site_id from ledger_entries where ref_id=%s and type='withdrawal'", [wd[0]])[0]
+    check("withdrawal hold ledger stamped site A", str(hold_site)==SITE_A)
+    cur.execute("select fn_approve_withdrawal(%s,%s)", [wd[0], pda])
+    cres = q1(cur, "select applied,status,new_balance from fn_complete_withdrawal(%s,%s,%s,%s,%s)", [wd[0], 0, "conv1", "WR1", '{}'])
+    check("withdrawal success keeps the debit", cres[1]=="success" and cres[2]==60000, f"{cres}")
+    # failure path reverses with a site-stamped reversal
+    wd2 = q1(cur, "select tx_id,new_balance from fn_create_withdrawal(%s,%s,%s,%s,%s)", [pda, 30000, "254720000001", 25000, SITE_A])
+    cur.execute("select fn_approve_withdrawal(%s,%s)", [wd2[0], pda])
+    fw = q1(cur, "select applied,status,new_balance from fn_complete_withdrawal(%s,%s,%s,%s,%s)", [wd2[0], 1, "conv2", None, '{}'])
+    check("withdrawal failure reverses the hold", fw[1]=="failed" and fw[2]==60000, f"{fw}")
+    rev_site = q1(cur, "select site_id from ledger_entries where ref_id=%s and type='withdrawal_reversal'", [wd2[0]])[0]
+    check("reversal ledger stamped site A", str(rev_site)==SITE_A)
+    expect_error(cur, "select fn_create_withdrawal(%s,%s,%s,%s,%s)", [pda, 1000, "x", 25000, SITE_A], "BELOW_MIN",
+                 "withdrawal below site A min rejected")
+
+    print("\n== Fairness: fn_ensure_game_day per site + reveal scoped to one brand ==")
+    seed = "deadbeef"*8
+    h = hashlib.sha256(seed.encode()).hexdigest()
+    gA = q1(cur, "select fn_ensure_game_day('2020-01-02',%s,%s)", [h, SITE_A])[0]
+    gB = q1(cur, "select fn_ensure_game_day('2020-01-02',%s,%s)", [h, SITE_B])[0]
+    check("same date -> distinct game_day per site (ensure)", gA != gB)
+    gA2 = q1(cur, "select fn_ensure_game_day('2020-01-02',%s,%s)", [h, SITE_A])[0]
+    check("fn_ensure_game_day idempotent per site", gA2 == gA)
+    ok_reveal = q1(cur, "select fn_reveal_game_day('2020-01-02',%s,%s)", [seed, SITE_A])[0]
+    check("reveal past day on A succeeds (hash-verified)", ok_reveal == True)
+    b_revealed = q1(cur, "select revealed_at from game_days where id=%s", [gB])[0]
+    check("revealing A's day did NOT reveal B's same-date day", b_revealed is None)
+
     print("\n== Global ledger integrity: every money row has a valid site ==")
     orphan = q1(cur, "select count(*) from ledger_entries l left join sites s on s.id=l.site_id where s.id is null")[0]
     check("no orphan ledger site_id", orphan == 0)

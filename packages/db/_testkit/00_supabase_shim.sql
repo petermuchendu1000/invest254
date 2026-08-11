@@ -11,6 +11,8 @@ end $$;
 
 -- Supabase auth schema + minimal users table + uid()/jwt helpers used by RLS policies.
 create schema if not exists auth;
+-- pgcrypto provides digest() used by fn_reveal_game_day (Supabase ships it in `extensions`).
+create extension if not exists pgcrypto;
 create table if not exists auth.users (
   id uuid primary key default gen_random_uuid(),
   phone text,

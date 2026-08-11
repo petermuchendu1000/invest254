@@ -29,14 +29,16 @@ File: `packages/db/migrations/0047_site_money_rpcs.sql` (shipped) + more to exte
 - ✅ `fn_register_user` — per-site insert + `unique(site_id, phone/username)`; referral resolved
   **within the site**; also guarantees `profiles.id` self-generates. Tested.
 - ✅ `fn_affiliate_enroll` — stamps the affiliate row with the enrolling user's site. Tested.
-- 🔲 `fn_create_deposit` / `fn_attach_stk` / `fn_complete_deposit` — carry `site_id` on
-  `transactions` + `ledger_entries`; idempotency still keyed by `checkout_request_id`.
-- 🔲 `fn_create_withdrawal` / `fn_approve_/reject_/complete_withdrawal` — carry `site_id`;
-  min-withdrawal reads that site's `site_game_config.min_withdrawal`.
+- ✅ `fn_create_deposit` / `fn_complete_deposit` — deposit stamps `transactions.site_id`; the
+  credit ledger derives the site from the tx row. Tested (credit, idempotency, failed-no-credit,
+  cross-site rejection). File: `0048_site_payment_fairness_rpcs.sql`.
+- ✅ `fn_create_withdrawal` / `fn_reject_withdrawal` / `fn_complete_withdrawal` — hold + reversal
+  stamped with the site; per-site `min` enforced; cross-site wallet blocked. Tested.
+- ✅ `fn_ensure_game_day` / `fn_reveal_game_day` — per-site (`on conflict (site_id, trade_date)`);
+  reveal scoped to one brand. (Also fixes a latent break: 0045 dropped the old trade_date unique.) Tested.
 - 🔲 `fn_accrue_affiliate_commissions` / payout RPCs — group GGR by `(site_id, affiliate_id, period)`.
-- 🔲 `fn_ensure_game_day` / `fn_reveal_game_day` — accept `p_site_id` (per-site fairness rows).
 - **Done when:** every money RPC on two sites never collides and every row shows the correct
-  `site_id`. Core path (register/open/settle/enroll) is ✅ proven by the 23-scenario e2e.
+  `site_id`. Register/open/settle/enroll/deposit/withdraw/game-day are ✅ proven by the 38-scenario e2e.
 
 ## C. Engine — multiplex by site
 Files: `apps/engine/src/sitecontext.ts` (✅ shipped), `server.ts`, `game.ts`, `daycontext.ts`,

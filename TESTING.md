@@ -6,17 +6,17 @@ Evidence that the multi-tenant foundation is correct, tested aggressively, and r
 
 | Suite | Tests | Result |
 |---|---|---|
-| **DB e2e (real Postgres, two isolated sites)** | 23 scenarios | ✅ all pass |
+| **DB e2e (real Postgres, two isolated sites)** | 38 scenarios | ✅ all pass |
 | Shared (`packages/shared`) incl. new `site.ts` | 75 | ✅ all pass (7 new) |
 | Engine (`apps/engine`) incl. new multiplex core | 135 | ✅ all pass (5 new) |
 | API (`apps/api`) | 115 | ✅ all pass |
 
-Total: **348 automated tests + 23 DB e2e scenarios**, 0 failures. No regressions in inherited code.
+Total: **348 automated tests + 38 DB e2e scenarios**, 0 failures. No regressions in inherited code.
 
 ## DB end-to-end (the hardest, highest-risk layer)
 
 `packages/db/_testkit/e2e_multitenant.py` stands up a **local, ephemeral Postgres 17**, applies the
-Supabase shim + **all migrations 0001→0047**, then runs adversarial two-site scenarios directly
+Supabase shim + **all migrations 0001→0048**, then runs adversarial two-site scenarios directly
 against the SECURITY DEFINER money RPCs. It proved:
 
 - All 46+ migrations apply cleanly **and are idempotent** (re-apply is a no-op).
@@ -33,6 +33,12 @@ against the SECURITY DEFINER money RPCs. It proved:
   brand attributes nothing.
 - **Feasibility guard:** an impossible economy (RTP/winRate ≤ 1) is rejected by the CHECK.
 - **Statistical override:** a per-user win-rate boost is stored, site-scoped, and engine-feasible.
+- **Deposits:** credit + idempotent completion (no double credit) + failed-no-credit + cross-site
+  rejection; the deposit ledger derives the correct site from the transaction.
+- **Withdrawals:** hold debits, approve→complete keeps the debit, failure/reject reverses; every
+  hold/reversal ledger row is site-stamped; per-site minimum enforced.
+- **Fairness:** `fn_ensure_game_day` is per-site + idempotent; `fn_reveal_game_day` reveals only the
+  targeted brand's day (a sibling brand's same-date day stays committed).
 
 Reproduce:
 ```bash
