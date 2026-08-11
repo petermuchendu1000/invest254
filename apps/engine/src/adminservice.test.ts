@@ -233,3 +233,101 @@ test("reports: per-day & per-user finance with date-range filtering (J4)", async
   assert.equal(byUser[1]!.username, "bob");
   assert.deepEqual(byUser[1], { userId: b, username: "bob", depositsCents: 60_000, withdrawalsCents: 0, turnoverCents: 5_000, ggrCents: 0 });
 });
+
+test("listUsers: enriched with wallet balance, lifetime cash flow, bets and last transaction", async () => {
+  const { identity, payRepo, admin } = stack();
+  const p = (await identity.register("254700000070", "rich_user", HASH)).userId;
+  payRepo.seed(p, 0);
+
+  // one SUCCESS deposit (+100000) and one still-PENDING deposit (20000, not counted in lifetime)
+  const dep = await payRepo.createDeposit(p, 100_000, "254700000070");
+  await payRepo.attachStk(dep, "m1", "chk-a");
+  await payRepo.completeDeposit("chk-a", 0, "ok", "RCPT-A", {});
+  await payRepo.createDeposit(p, 20_000, "254700000070"); // pending -> excluded from depositsCents
+
+  // one SUCCESS withdrawal (-40000) fully settled
+  const wd = await payRepo.createWithdrawal(p, 40_000, "254700000070", 1_000);
+  await payRepo.approveWithdrawal(wd.txId, "actor");
+  await payRepo.completeWithdrawal(wd.txId, 0, null, "WD-RCPT", {});
+
+  // two settled bets -> turnover 15000, ggr = 15000 - 9000 = 6000
+  identity.recordSettledPlay(p, "2026-06-10", 10_000, 6_000);
+  identity.recordSettledPlay(p, "2026-06-10", 5_000, 3_000);
+
+  const page = await admin.listUsers({ q: "rich_user" });
+  assert.equal(page.items.length, 1);
+  const row = page.items[0]!;
+  assert.equal(row.username, "rich_user");
+  assert.equal(row.realBalanceCents, 60_000); // 100000 dep - 40000 wd
+  assert.equal(row.depositsCents, 100_000); // success only
+  assert.equal(row.withdrawalsCents, 40_000); // success only
+  assert.equal(row.netDepositsCents, 60_000); // deposits - withdrawals
+  assert.equal(row.turnoverCents, 15_000);
+  assert.equal(row.ggrCents, 6_000);
+  assert.equal(row.betCount, 2);
+  assert.ok(row.lastTxAtMs !== null, "lastTxAtMs populated");
+  assert.ok(row.lastTxKind === "deposit" || row.lastTxKind === "withdrawal", "lastTxKind set");
+  assert.ok(row.lastTxAmountCents !== null, "lastTxAmountCents set");
+  assert.ok(row.lastActiveAtMs !== null, "lastActiveAtMs set");
+
+  // getUserDetail returns the same enriched shape + referredBy
+  const detail = await admin.getUserDetail(p);
+  assert.equal(detail.depositsCents, 100_000);
+  assert.equal(detail.withdrawalsCents, 40_000);
+  assert.equal(detail.betCount, 2);
+  assert.equal(detail.referredBy, null);
+});
+
+test("listTransactions: unified deposits+withdrawals with username, filters, search and pagination", async () => {
+  const { identity, payRepo, admin } = stack();
+  const a = (await identity.register("254700000080", "tx_alice", HASH)).userId;
+  const b = (await identity.register("254700000081", "tx_bob", HASH)).userId;
+  payRepo.seed(a, 500_000);
+  payRepo.seed(b, 500_000);
+
+  // alice: 2 deposits (one success, one pending), 1 withdrawal
+  const da = await payRepo.createDeposit(a, 100_000, "254700000080");
+  await payRepo.attachStk(da, "m1", "chk-a1");
+  await payRepo.completeDeposit("chk-a1", 0, "ok", "RCPT-A1", {});
+  await payRepo.createDeposit(a, 30_000, "254700000080"); // pending
+  await payRepo.createWithdrawal(a, 20_000, "254700000080", 1_000); // pending withdrawal
+  // bob: 1 deposit
+  await payRepo.createDeposit(b, 50_000, "254700000081"); // pending
+
+  // unified feed: all 4 transactions, newest-first, username populated
+  const all = await admin.listTransactions({});
+  assert.equal(all.items.length, 4);
+  assert.ok(all.items.every((t) => t.username === "tx_alice" || t.username === "tx_bob"), "usernames joined");
+  assert.ok(all.items.every((t) => t.kind === "deposit" || t.kind === "withdrawal"), "kinds valid");
+  // newest-first ordering by createdAtMs
+  for (let i = 1; i < all.items.length; i++) {
+    assert.ok(all.items[i - 1]!.createdAtMs >= all.items[i]!.createdAtMs, "descending by time");
+  }
+
+  // filter by kind
+  const deps = await admin.listTransactions({ kind: "deposit" });
+  assert.equal(deps.items.length, 3);
+  assert.ok(deps.items.every((t) => t.kind === "deposit"));
+  const wds = await admin.listTransactions({ kind: "withdrawal" });
+  assert.equal(wds.items.length, 1);
+  assert.equal(wds.items[0]!.kind, "withdrawal");
+
+  // filter by status (only the one success deposit)
+  const success = await admin.listTransactions({ status: "success" });
+  assert.equal(success.items.length, 1);
+  assert.equal(success.items[0]!.status, "success");
+  assert.equal(success.items[0]!.mpesaReceipt, "RCPT-A1");
+
+  // search by username substring
+  const bobOnly = await admin.listTransactions({ q: "bob" });
+  assert.equal(bobOnly.items.length, 1);
+  assert.equal(bobOnly.items[0]!.username, "tx_bob");
+
+  // keyset pagination: page of 2 then the rest, no overlap
+  const p1 = await admin.listTransactions({ limit: 2 });
+  assert.equal(p1.items.length, 2);
+  assert.ok(p1.nextCursor, "has nextCursor");
+  const p2 = await admin.listTransactions({ limit: 2, cursor: p1.nextCursor! });
+  const ids1 = new Set(p1.items.map((t) => t.txId));
+  assert.ok(p2.items.every((t) => !ids1.has(t.txId)), "no overlap across pages");
+});

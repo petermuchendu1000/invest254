@@ -481,3 +481,43 @@ test("fly restart: surfaces a per-app error when a machine restart call fails", 
     delete process.env.FLY_APP_NAMES;
   }
 });
+
+test("admin transactions: unified deposits+withdrawals feed with kind filter, search and validation", async () => {
+  const api = await startTestApi();
+  try {
+    const uid = await register(api, "0712009090", "txapi_user");
+    api.payRepo.seed(uid, 500_000);
+    const dep = await api.payRepo.createDeposit(uid, 100_000, "254712009090");
+    await api.payRepo.attachStk(dep, "m1", "chk-tx1");
+    await api.payRepo.completeDeposit("chk-tx1", 0, "ok", "RCPT-TX1", {});
+    await api.payRepo.createWithdrawal(uid, 40_000, "254712009090", 1_000);
+
+    // unified feed: both kinds present, username joined
+    const all = await json(await req(api, "GET", "/api/v1/admin/transactions", { token: "adm-1:admin" }));
+    assert.ok(Array.isArray(all.items) && all.items.length >= 2, "feed returns rows");
+    assert.ok(all.items.some((t: any) => t.kind === "deposit"), "has a deposit");
+    assert.ok(all.items.some((t: any) => t.kind === "withdrawal"), "has a withdrawal");
+    assert.ok(all.items.some((t: any) => t.username === "txapi_user"), "username joined");
+
+    // kind filter
+    const deps = await json(await req(api, "GET", "/api/v1/admin/transactions?kind=deposit", { token: "adm-1:admin" }));
+    assert.ok(deps.items.every((t: any) => t.kind === "deposit"), "kind=deposit filters");
+
+    // status filter (only the completed deposit)
+    const success = await json(await req(api, "GET", "/api/v1/admin/transactions?status=success", { token: "adm-1:admin" }));
+    assert.ok(success.items.every((t: any) => t.status === "success"), "status filter");
+    assert.ok(success.items.some((t: any) => t.mpesaReceipt === "RCPT-TX1"), "receipt surfaced");
+
+    // search by username
+    const searched = await json(await req(api, "GET", "/api/v1/admin/transactions?q=txapi", { token: "adm-1:admin" }));
+    assert.ok(searched.items.length >= 1 && searched.items.every((t: any) => t.username.includes("txapi")), "q search");
+
+    // invalid kind -> 400
+    const bad = await req(api, "GET", "/api/v1/admin/transactions?kind=bogus", { token: "adm-1:admin" });
+    assert.equal(bad.status, 400, "invalid kind rejected");
+
+    // player token -> 403 (role-gated)
+    const forbidden = await req(api, "GET", "/api/v1/admin/transactions", { token: uid });
+    assert.equal(forbidden.status, 403, "player forbidden");
+  } finally { await api.close(); }
+});
