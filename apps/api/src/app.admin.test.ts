@@ -565,6 +565,7 @@ test("admin reset-balance: restores a user's real wallet to their last funded am
     const uid = await register(api, "0712300001", "reset_api");
     api.payRepo.seed(uid, 0);
     await fundOnce(api, uid, "254712300001", 100_000, "a");
+    await new Promise((r) => setTimeout(r, 5)); // ensure a strictly-later timestamp for the last deposit
     await fundOnce(api, uid, "254712300001", 40_000, "b"); // last funded = 40k
     api.payRepo.adminApplyAdjustment(uid, 500_000); // corrupt the balance
 

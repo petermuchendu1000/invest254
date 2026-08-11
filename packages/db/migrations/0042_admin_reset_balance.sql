@@ -41,8 +41,8 @@ begin
 
   if v_delta <> 0 then
     insert into ledger_entries(user_id, type, amount, balance_kind, ref_table, ref_id, meta)
-      values (p_target, 'admin_reset', v_delta, 'real', 'admin_actions', v_action::text,
-              jsonb_build_object('reason', p_reason, 'actor', p_actor, 'lastFunded', v_last));
+      values (p_target, 'adjustment', v_delta, 'real', 'admin_actions', v_action::text,
+              jsonb_build_object('kind', 'reset_last_funded', 'reason', p_reason, 'actor', p_actor, 'lastFunded', v_last));
   end if;
 
   return query select p_target, v_last, v_bal, v_last;
