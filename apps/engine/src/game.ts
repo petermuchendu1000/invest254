@@ -77,7 +77,7 @@ export class GameServer {
   private settlementFor(ctx: ActiveContext, ov: UserOverride | null): SettlementEngine {
     if (!overrideAffectsPricing(ov)) return ctx.settlement;
     const o = ov!;
-    const key = `${ctx.configVersion}:${ctx.gameDayId}:${o.winRate ?? "g"}:${o.maxWinMultiplier ?? "g"}`;
+    const key = `${ctx.configVersion}:${ctx.gameDayId}:${o.winRate ?? "g"}:${o.maxWinMultiplier ?? "g"}:${o.houseEdge ?? "g"}`;
     let s = this.userSettlementCache.get(key);
     if (!s) {
       s = userSettlement(ctx.curve, this.cfg, o) ?? ctx.settlement;

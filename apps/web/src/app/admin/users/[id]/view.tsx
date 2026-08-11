@@ -13,7 +13,7 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides } from '@/lib/admin/hooks';
+import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel, UserOverridePatch } from '@/lib/admin/types';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
@@ -582,6 +582,7 @@ function LabeledInput({ label, value, onChange, placeholder }: { label: string; 
 function OverridesPanel({ id }: { id: string }) {
   const q = useUserOverrides(id);
   const m = useSetOverrides(id);
+  const gc = useGameConfig();
   const toast = useToast();
   const [form, setForm] = useState<Record<string, string>>({});
 
@@ -590,6 +591,7 @@ function OverridesPanel({ id }: { id: string }) {
     if (!o) return;
     setForm({
       winRate: o.winRate != null ? String(o.winRate) : '',
+      houseEdge: o.houseEdge != null ? String(o.houseEdge) : '',
       tradeDurationS: o.tradeDurationS != null ? String(o.tradeDurationS) : '',
       maxWinMultiplier: o.maxWinMultiplier != null ? String(o.maxWinMultiplier) : '',
       minStake: o.minStakeCents != null ? String(o.minStakeCents / 100) : '',
@@ -617,6 +619,7 @@ function OverridesPanel({ id }: { id: string }) {
   function save() {
     const patch: UserOverridePatch = {
       winRate: numOrNull(form.winRate ?? ''),
+      houseEdge: numOrNull(form.houseEdge ?? ''),
       tradeDurationS: intOrNull(form.tradeDurationS ?? ''),
       maxWinMultiplier: numOrNull(form.maxWinMultiplier ?? ''),
       minStakeCents: centsOrNull(form.minStake ?? ''),
@@ -629,17 +632,65 @@ function OverridesPanel({ id }: { id: string }) {
     });
   }
 
+  // Live feasibility preview: fold the form over the global config so the operator sees whether
+  // the per-user pricing is feasible (and thus actually applied) BEFORE saving.
+  const g = gc.data;
+  const fx = (() => {
+    const he = numOrNull(form.houseEdge ?? '') ?? (g ? g.houseEdge : null);
+    const wr = numOrNull(form.winRate ?? '') ?? (g ? g.targetWinRate : null);
+    const mm = numOrNull(form.maxWinMultiplier ?? '') ?? (g ? g.maxMultiplier : null);
+    if (he == null || wr == null || mm == null) return null;
+    const pricing =
+      numOrNull(form.winRate ?? '') != null ||
+      numOrNull(form.houseEdge ?? '') != null ||
+      numOrNull(form.maxWinMultiplier ?? '') != null;
+    const rtp = 1 - he;
+    const required = rtp / wr;
+    const bounded = he >= 0 && he < 1 && wr > 0 && wr <= 1 && mm > 1;
+    const feasible = bounded && required > 1 && required <= mm;
+    return { feasible, rtp, winRate: wr, maxMult: mm, required, pricing };
+  })();
+
   return (
     <Section title="Player overrides">
       <Card className="flex flex-col gap-3">
         <p className="text-xs text-muted">
-          Blank = use the global game setting. Win rate is a fraction (feasible band depends on RTP — e.g. 0.05–0.24 at 25% RTP).
-          Duration is the forced auto-sell time in seconds. Stake bounds and payout cap apply only to this user.
+          Per-player overrides of the global game configuration — blank = use the global value. Pricing fields
+          (win rate, house edge, max win multiplier) rig this user&apos;s outcomes; duration forces their auto-sell
+          timer; stake bounds gate their trades. Feasibility requires <span className="font-mono">(1 − houseEdge) / winRate</span> to
+          land in <span className="font-mono">(1, maxMultiplier]</span> — if it doesn&apos;t, the pricing override is ignored, so raising
+          a win rate above the global RTP also needs a lower house edge.
         </p>
+        {fx ? (
+          <div
+            className={
+              'rounded-xl border px-3 py-2 text-xs ' +
+              (fx.feasible
+                ? 'border-up/40 bg-up/10 text-up'
+                : 'border-down/40 bg-down/10 text-down')
+            }
+          >
+            {fx.feasible ? (
+              <span>
+                ✓ Effective for this player: RTP <b>{(fx.rtp * 100).toFixed(1)}%</b> · win rate{' '}
+                <b>{(fx.winRate * 100).toFixed(1)}%</b> · avg winning multiplier <b>×{fx.required.toFixed(2)}</b> (cap ×
+                {fx.maxMult}). {fx.pricing ? 'Pricing is overridden.' : 'Using global pricing.'}
+              </span>
+            ) : (
+              <span>
+                ⚠ Infeasible pricing — this override will be <b>ignored</b> (falls back to global). RTP{' '}
+                {(fx.rtp * 100).toFixed(1)}% at win rate {(fx.winRate * 100).toFixed(1)}% needs an average winning
+                multiplier of ×{fx.required.toFixed(2)}, which must be in (1, ×{fx.maxMult}]. Lower the house edge (e.g.
+                ≤ {Math.max(0, 1 - fx.winRate * fx.maxMult).toFixed(2)}) or the win rate.
+              </span>
+            )}
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <LabeledInput label="Win rate (fraction)" value={form.winRate ?? ''} onChange={(v) => set('winRate', v)} placeholder="e.g. 0.20" />
+          <LabeledInput label="Win rate (fraction 0–1)" value={form.winRate ?? ''} onChange={(v) => set('winRate', v)} placeholder="e.g. 0.90" />
+          <LabeledInput label="House edge (0–1 · RTP = 1 − this)" value={form.houseEdge ?? ''} onChange={(v) => set('houseEdge', v)} placeholder="e.g. 0.05" />
+          <LabeledInput label="Max win multiplier" value={form.maxWinMultiplier ?? ''} onChange={(v) => set('maxWinMultiplier', v)} placeholder="e.g. 5" />
           <LabeledInput label="Auto-sell duration (s)" value={form.tradeDurationS ?? ''} onChange={(v) => set('tradeDurationS', v)} placeholder="e.g. 30" />
-          <LabeledInput label="Max win multiplier" value={form.maxWinMultiplier ?? ''} onChange={(v) => set('maxWinMultiplier', v)} placeholder="e.g. 4" />
           <LabeledInput label="Min stake (KES)" value={form.minStake ?? ''} onChange={(v) => set('minStake', v)} placeholder="e.g. 250" />
           <LabeledInput label="Max stake (KES)" value={form.maxStake ?? ''} onChange={(v) => set('maxStake', v)} placeholder="e.g. 50000" />
           <LabeledInput label="Notes" value={form.notes ?? ''} onChange={(v) => set('notes', v)} placeholder="optional" />

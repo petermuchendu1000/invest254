@@ -93,3 +93,34 @@ test("admin adjusts the bonus wallet and clears balances", async () => {
     assert.equal(both.bonusBalanceCents, 0);
   } finally { await api.close(); }
 });
+
+test("admin per-user house-edge override: round-trips, validates range, and clears", async () => {
+  const api = await startTestApi();
+  try {
+    const uid = await register(api, "0712500001", "vip_rig");
+
+    // default: house edge unset (use global)
+    const before = await json(await req(api, "GET", `/api/v1/admin/users/${uid}/overrides`, { token: "admin-1:admin" }));
+    assert.equal(before.houseEdge, null);
+
+    // set a low house edge + high win rate (the combination that makes a 90% win rate feasible)
+    const set = await json(await req(api, "POST", `/api/v1/admin/users/${uid}/overrides`, {
+      token: "admin-1:admin",
+      body: { winRate: 0.9, houseEdge: 0.05, maxWinMultiplier: 5 },
+    }));
+    assert.equal(set.houseEdge, 0.05);
+    assert.equal(set.winRate, 0.9);
+
+    const got = await json(await req(api, "GET", `/api/v1/admin/users/${uid}/overrides`, { token: "admin-1:admin" }));
+    assert.equal(got.houseEdge, 0.05);
+
+    // range validation: houseEdge must be in [0,1)
+    assert.equal((await req(api, "POST", `/api/v1/admin/users/${uid}/overrides`, { token: "admin-1:admin", body: { houseEdge: 1 } })).status, 400);
+    assert.equal((await req(api, "POST", `/api/v1/admin/users/${uid}/overrides`, { token: "admin-1:admin", body: { houseEdge: -0.1 } })).status, 400);
+
+    // clear house edge back to global while leaving other fields intact
+    const cleared = await json(await req(api, "POST", `/api/v1/admin/users/${uid}/overrides`, { token: "admin-1:admin", body: { houseEdge: null } }));
+    assert.equal(cleared.houseEdge, null);
+    assert.equal(cleared.winRate, 0.9, "other fields untouched");
+  } finally { await api.close(); }
+});

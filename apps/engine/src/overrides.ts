@@ -5,8 +5,11 @@ import type { Querier } from "./wallet.js";
  * Per-user admin overrides the engine consults at open (migration 0032). Any NULL field means
  * "use the global game_config value". The admin sets these from the user-detail page.
  *
- *  - winRate / maxWinMultiplier  → PRICING overrides: the user's outcomes are computed from a
- *    per-user SettlementEngine calibrated to their win rate / cap (see `userSettlement`).
+ *  - winRate / maxWinMultiplier / houseEdge  → PRICING overrides: the user's outcomes are computed
+ *    from a per-user SettlementEngine calibrated to their win rate / payout cap / RTP (house edge).
+ *    Overriding houseEdge is what makes a high win rate feasible: feasibility requires
+ *    (1 - houseEdge) / winRate ∈ (1, maxMultiplier], so raising a user's win rate above the global
+ *    RTP requires lowering their house edge too (e.g. winRate 0.9 needs houseEdge < 0.1).
  *  - tradeDurationS              → forces the auto-sell duration for the user's new trades.
  *  - minStakeCents/maxStakeCents → per-user stake gates (pre-open only; never affect pricing).
  *
@@ -17,6 +20,7 @@ import type { Querier } from "./wallet.js";
 export interface UserOverride {
   userId: string;
   winRate: number | null;
+  houseEdge: number | null;
   tradeDurationS: number | null;
   maxWinMultiplier: number | null;
   minStakeCents: number | null;
@@ -30,9 +34,9 @@ export interface UserOverridesRepository {
   getForUser(userId: string): Promise<UserOverride | null>;
 }
 
-/** True when the override changes how a round is priced (win rate / payout cap). */
+/** True when the override changes how a round is priced (win rate / payout cap / house edge). */
 export function overrideAffectsPricing(o: UserOverride | null | undefined): boolean {
-  return !!o && (o.winRate != null || o.maxWinMultiplier != null);
+  return !!o && (o.winRate != null || o.maxWinMultiplier != null || o.houseEdge != null);
 }
 
 /**
@@ -44,6 +48,7 @@ export function overrideAffectsPricing(o: UserOverride | null | undefined): bool
 export function userSettlement(curve: CurveGenerator, cfg: GameConfig, o: UserOverride): SettlementEngine | null {
   const effective: GameConfig = {
     ...cfg,
+    houseEdge: o.houseEdge ?? cfg.houseEdge,
     targetWinRate: o.winRate ?? cfg.targetWinRate,
     maxMultiplier: o.maxWinMultiplier ?? cfg.maxMultiplier,
   };
@@ -66,13 +71,14 @@ export class PgUserOverridesRepository implements UserOverridesRepository {
   constructor(private readonly q: Querier) {}
   async getForUser(userId: string): Promise<UserOverride | null> {
     const r = await this.q.query(
-      `select user_id, win_rate, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at
+      `select user_id, win_rate, house_edge, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at
          from user_overrides where user_id = $1`, [userId]);
     if (!r.rows.length) return null;
     const x = r.rows[0];
     return {
       userId: String(x.user_id),
       winRate: num(x.win_rate),
+      houseEdge: num(x.house_edge),
       tradeDurationS: x.trade_duration_s == null ? null : Number(x.trade_duration_s),
       maxWinMultiplier: num(x.max_win_multiplier),
       minStakeCents: x.min_stake == null ? null : Number(x.min_stake),

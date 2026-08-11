@@ -283,6 +283,7 @@ export interface NotificationInput {
 export interface UserOverrideRow {
   userId: string;
   winRate: number | null;
+  houseEdge: number | null;
   tradeDurationS: number | null;
   maxWinMultiplier: number | null;
   minStakeCents: Cents | null;
@@ -293,6 +294,7 @@ export interface UserOverrideRow {
 }
 export interface UserOverridePatch {
   winRate?: number | null;
+  houseEdge?: number | null;
   tradeDurationS?: number | null;
   maxWinMultiplier?: number | null;
   minStakeCents?: Cents | null;

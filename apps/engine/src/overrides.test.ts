@@ -6,7 +6,7 @@ import { GameServer } from "./game.js";
 import { userSettlement, overrideAffectsPricing, InMemoryUserOverridesRepository, type UserOverride } from "./overrides.js";
 
 const ov = (p: Partial<UserOverride>): UserOverride => ({
-  userId: "u", winRate: null, tradeDurationS: null, maxWinMultiplier: null,
+  userId: "u", winRate: null, houseEdge: null, tradeDurationS: null, maxWinMultiplier: null,
   minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: 0, ...p,
 });
 
@@ -25,6 +25,29 @@ test("overrideAffectsPricing: only win rate / max multiplier change pricing", ()
   assert.equal(overrideAffectsPricing(ov({ minStakeCents: 5000 })), false);
   assert.equal(overrideAffectsPricing(ov({ winRate: 0.4 })), true);
   assert.equal(overrideAffectsPricing(ov({ maxWinMultiplier: 3 })), true);
+  assert.equal(overrideAffectsPricing(ov({ houseEdge: 0.1 })), true);
+});
+
+test("userSettlement: a house-edge override makes a HIGH win rate feasible and realized", () => {
+  const curve = new CurveGenerator("engine-day", DEFAULT_CONFIG);
+  // winRate 0.9 is INFEASIBLE at the global 75% house edge (RTP 0.25 -> mean win mult 0.28 <= 1).
+  assert.equal(userSettlement(curve, DEFAULT_CONFIG, ov({ winRate: 0.9 })), null);
+  // Lowering this user's house edge to 0.05 (RTP 0.95) makes mean win mult 0.95/0.9 = 1.056 -> feasible.
+  const rigged = userSettlement(curve, DEFAULT_CONFIG, ov({ winRate: 0.9, houseEdge: 0.05 }));
+  assert.ok(rigged, "house-edge override should make winRate 0.9 feasible");
+  const f = winFraction(rigged!);
+  assert.ok(Math.abs(f - 0.9) < 0.06, `expected realized win fraction ~0.90, got ${f}`);
+});
+
+test("userSettlement: house-edge alone raises RTP (winners paid more) without changing win rate", () => {
+  const curve = new CurveGenerator("engine-day", DEFAULT_CONFIG);
+  // houseEdge 0.5 -> RTP 0.5 (double the global 0.25); win rate stays global 0.125.
+  // Required mean win mult = 0.5/0.125 = 4.0, within the ×5 cap -> feasible.
+  const eng = userSettlement(curve, DEFAULT_CONFIG, ov({ houseEdge: 0.5 }))!;
+  assert.ok(eng, "house-edge-only override should be feasible within the multiplier cap");
+  // Win rate is unchanged (still ~global targetWinRate); only the winning multiplier grows.
+  const f = winFraction(eng);
+  assert.ok(Math.abs(f - DEFAULT_CONFIG.targetWinRate) < 0.06, `win rate stays ~global, got ${f}`);
 });
 
 test("userSettlement: a higher win-rate override actually wins more often", () => {
@@ -78,6 +101,28 @@ test("GameServer: per-user stake bounds gate the open", async () => {
   await assert.rejects(() => r.gs.openPosition({ userId: "u1", stakeCents: 200_000, direction: "buy" }), /STAKE_ABOVE_MAX/);
   const { position } = await r.gs.openPosition({ userId: "u1", stakeCents: 60_000, direction: "buy" });
   assert.equal(position.stakeCents, 60_000);
+});
+
+test("GameServer: a user with WinRate+HouseEdge override wins where a plain user loses (rig applies live)", async () => {
+  const repo = new InMemoryUserOverridesRepository();
+  repo.set(ov({ userId: "rigged", winRate: 0.9, houseEdge: 0.05 }));
+  const r = rig((u) => repo.getForUser(u));
+  const rigEng = userSettlement(r.curve, r.cfg, ov({ winRate: 0.9, houseEdge: 0.05 }))!;
+  assert.ok(rigEng, "rigged settlement is feasible");
+  // Find an entry the GLOBAL engine loses but the rigged (90% win) engine wins.
+  let flipT = -1;
+  for (let t = 0; t < 3600 && flipT < 0; t += 0.05) {
+    if (r.eng.settle(20000, "buy", t).result === "loss" && rigEng.settle(20000, "buy", t).result === "win") flipT = t;
+  }
+  assert.ok(flipT >= 0, "found an entry the rig flips from loss to win");
+  r.clock.ms = Math.round(flipT * 1000);
+  r.repo.seed("rigged", 100000);
+  const { position } = await r.gs.openPosition({ userId: "rigged", stakeCents: 25000, direction: "buy" });
+  assert.equal(position.outcome.result, "win", "rigged user wins where global loses");
+
+  r.repo.seed("plain", 100000);
+  const { position: p2 } = await r.gs.openPosition({ userId: "plain", stakeCents: 25000, direction: "buy" });
+  assert.equal(p2.outcome.result, "loss", "plain user still uses the global settlement (loss)");
 });
 
 test("GameServer: a higher win-rate override wins where the global settlement loses", async () => {

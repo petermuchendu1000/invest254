@@ -137,7 +137,7 @@ function parseGameConfigPatch(ctx: Ctx): GameConfigPatch {
 }
 
 /** Parse a per-user overrides patch (J8). Numeric fields accept a value or null (clear to global). */
-const OVERRIDE_NUM_FIELDS = ["winRate", "tradeDurationS", "maxWinMultiplier", "minStakeCents", "maxStakeCents"] as const;
+const OVERRIDE_NUM_FIELDS = ["winRate", "houseEdge", "tradeDurationS", "maxWinMultiplier", "minStakeCents", "maxStakeCents"] as const;
 function parseOverridePatch(ctx: Ctx): UserOverridePatch {
   const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
   const patch: Record<string, unknown> = {};
@@ -148,6 +148,7 @@ function parseOverridePatch(ctx: Ctx): UserOverridePatch {
     const n = typeof raw === "number" ? raw : Number(raw);
     if (!Number.isFinite(n)) throw new ApiError("VALIDATION", `${key} must be a number or null`, 400);
     if (key === "winRate" && !(n > 0 && n <= 1)) throw new ApiError("VALIDATION", "winRate must be in (0,1]", 400);
+    if (key === "houseEdge" && !(n >= 0 && n < 1)) throw new ApiError("VALIDATION", "houseEdge must be in [0,1)", 400);
     if (key === "maxWinMultiplier" && !(n > 1)) throw new ApiError("VALIDATION", "maxWinMultiplier must be > 1", 400);
     if (key === "tradeDurationS" && (!Number.isInteger(n) || n < 1 || n > 3600)) throw new ApiError("VALIDATION", "tradeDurationS must be an integer in 1..3600", 400);
     if ((key === "minStakeCents" || key === "maxStakeCents") && (!Number.isInteger(n) || n <= 0)) throw new ApiError("VALIDATION", `${key} must be a positive integer (cents)`, 400);
@@ -325,7 +326,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   // J8: per-user engine overrides (win rate / auto-sell duration / max multiplier / stake bounds).
   router.get(`${BASE}/admin/users/:id/overrides`, auth, admin, async (ctx: Ctx) =>
     (await deps.admin.getUserOverrides(ctx.params.id!)) ?? {
-      userId: ctx.params.id!, winRate: null, tradeDurationS: null, maxWinMultiplier: null,
+      userId: ctx.params.id!, winRate: null, houseEdge: null, tradeDurationS: null, maxWinMultiplier: null,
       minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null,
     });
   router.post(`${BASE}/admin/users/:id/overrides`, auth, admin, async (ctx: Ctx) => {

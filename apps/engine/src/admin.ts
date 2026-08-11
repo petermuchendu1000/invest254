@@ -68,12 +68,12 @@ export interface AdjustBalanceKindResult { userId: string; kind: BalanceKind; am
 export interface ClearBalanceResult { userId: string; realBalanceCents: Cents; bonusBalanceCents: Cents; }
 export interface UserOverrideRow {
   userId: string;
-  winRate: number | null; tradeDurationS: number | null; maxWinMultiplier: number | null;
+  winRate: number | null; houseEdge: number | null; tradeDurationS: number | null; maxWinMultiplier: number | null;
   minStakeCents: Cents | null; maxStakeCents: Cents | null; notes: string | null;
   updatedBy: string | null; updatedAtMs: number | null;
 }
 export interface UserOverridePatch {
-  winRate?: number | null; tradeDurationS?: number | null; maxWinMultiplier?: number | null;
+  winRate?: number | null; houseEdge?: number | null; tradeDurationS?: number | null; maxWinMultiplier?: number | null;
   minStakeCents?: Cents | null; maxStakeCents?: Cents | null; notes?: string | null;
 }
 /** A deposit transaction as the admin deposits monitor sees it (J3). */
@@ -396,6 +396,7 @@ function mapOverrideRow(x: any): UserOverrideRow {
   return {
     userId: String(x.user_id),
     winRate: n(x.win_rate),
+    houseEdge: n(x.house_edge),
     tradeDurationS: x.trade_duration_s == null ? null : Number(x.trade_duration_s),
     maxWinMultiplier: n(x.max_win_multiplier),
     minStakeCents: x.min_stake == null ? null : Number(x.min_stake),
@@ -411,6 +412,7 @@ function mapOverrideRow(x: any): UserOverrideRow {
 function buildOverridePatch(patch: UserOverridePatch): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if ("winRate" in patch) out["win_rate"] = patch.winRate ?? null;
+  if ("houseEdge" in patch) out["house_edge"] = patch.houseEdge ?? null;
   if ("tradeDurationS" in patch) out["trade_duration_s"] = patch.tradeDurationS ?? null;
   if ("maxWinMultiplier" in patch) out["max_win_multiplier"] = patch.maxWinMultiplier ?? null;
   if ("minStakeCents" in patch) out["min_stake"] = patch.minStakeCents ?? null;
@@ -657,14 +659,14 @@ export class PgAdminRepository implements AdminRepository {
 
   async getUserOverrides(userId: string): Promise<UserOverrideRow | null> {
     const r = await this.q.query(
-      "select user_id, win_rate, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at from user_overrides where user_id = $1", [userId]);
+      "select user_id, win_rate, house_edge, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at from user_overrides where user_id = $1", [userId]);
     return r.rows.length ? mapOverrideRow(r.rows[0]) : null;
   }
 
   async setUserOverrides(actorId: string, actorRole: string, targetId: string, patch: UserOverridePatch): Promise<UserOverrideRow> {
     try {
       const r = await this.q.query(
-        "select user_id, win_rate, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at from fn_admin_set_user_overrides($1,$2,$3,$4::jsonb)",
+        "select user_id, win_rate, house_edge, trade_duration_s, max_win_multiplier, min_stake, max_stake, notes, updated_by, updated_at from fn_admin_set_user_overrides($1,$2,$3,$4::jsonb)",
         [actorId, actorRole, targetId, JSON.stringify(buildOverridePatch(patch))]);
       return mapOverrideRow(r.rows[0]);
     } catch (e) { mapAdminError(e); }
@@ -1248,11 +1250,12 @@ export class InMemoryAdminRepository implements AdminRepository {
     const tgt = this.identity.adminUser(targetId);
     if (!tgt) throw new Error("USER_NOT_FOUND");
     const cur: UserOverrideRow = this.overrides.get(targetId) ?? {
-      userId: targetId, winRate: null, tradeDurationS: null, maxWinMultiplier: null,
+      userId: targetId, winRate: null, houseEdge: null, tradeDurationS: null, maxWinMultiplier: null,
       minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null,
     };
     const next: UserOverrideRow = { ...cur };
     if ("winRate" in patch) next.winRate = patch.winRate ?? null;
+    if ("houseEdge" in patch) next.houseEdge = patch.houseEdge ?? null;
     if ("tradeDurationS" in patch) next.tradeDurationS = patch.tradeDurationS ?? null;
     if ("maxWinMultiplier" in patch) next.maxWinMultiplier = patch.maxWinMultiplier ?? null;
     if ("minStakeCents" in patch) next.minStakeCents = patch.minStakeCents ?? null;
