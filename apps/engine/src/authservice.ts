@@ -53,7 +53,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 /** A successful authentication: a signed token plus the verified identity. */
-export interface AuthSession { token: string; userId: string; role: string; mfaEnrolmentRequired?: boolean; }
+export interface AuthSession { token: string; userId: string; role: string; site?: string; mfaEnrolmentRequired?: boolean; }
 
 /** Profile view returned by `/me`. */
 export interface Profile {
@@ -106,9 +106,11 @@ export class AuthService {
     this.allowUnverifiedReset = opts.allowUnverifiedPasswordReset ?? false;
   }
 
-  /** Sign an HS256 JWT compatible with makeVerifier (sub = userId, `role` claim). */
-  async issueToken(userId: string, role: string): Promise<string> {
-    let b = new SignJWT({ role }).setProtectedHeader({ alg: "HS256" }).setSubject(userId)
+  /** Sign an HS256 JWT compatible with makeVerifier (sub = userId, `role` + optional `site` claims). */
+  async issueToken(userId: string, role: string, siteId?: string): Promise<string> {
+    const claims: Record<string, unknown> = { role };
+    if (siteId) claims.site = siteId; // multi-tenant: binds the token to a brand
+    let b = new SignJWT(claims).setProtectedHeader({ alg: "HS256" }).setSubject(userId)
       .setIssuedAt().setExpirationTime(`${this.ttl}s`);
     if (this.issuer) b = b.setIssuer(this.issuer);
     if (this.audience) b = b.setAudience(this.audience);
@@ -121,7 +123,7 @@ export class AuthService {
    * and passed through normalized; resolving it to an active affiliate (first-touch attribution)
    * happens atomically inside the register RPC, where an unknown/suspended code is ignored.
    */
-  async register(input: { phone: string; username: string; password: string; referralCode?: string }): Promise<AuthSession> {
+  async register(input: { phone: string; username: string; password: string; referralCode?: string; siteId?: string }): Promise<AuthSession> {
     const pw = validatePassword(input.password);
     if (!pw.ok) throw new Error(`PASSWORD_${pw.reason}`);
     const un = validateUsername(input.username);
@@ -134,9 +136,9 @@ export class AuthService {
       referralCode = rc.code;
     }
     const hash = await hashPassword(input.password);
-    const { userId, role } = await this.repo.register(phone, input.username, hash, referralCode);
-    const token = await this.issueToken(userId, role);
-    return { token, userId, role };
+    const { userId, role } = await this.repo.register(phone, input.username, hash, referralCode, input.siteId);
+    const token = await this.issueToken(userId, role, input.siteId);
+    return { token, userId, role, ...(input.siteId ? { site: input.siteId } : {}) };
   }
 
   /**
@@ -145,10 +147,10 @@ export class AuthService {
    * Privileged roles that have not enrolled yet are still admitted but flagged with
    * `mfaEnrolmentRequired` so enabling MFA can never lock an operator out of their own back office.
    */
-  async login(input: { phone: string; password: string; totp?: string; recoveryCode?: string }): Promise<AuthSession> {
+  async login(input: { phone: string; password: string; totp?: string; recoveryCode?: string; siteId?: string }): Promise<AuthSession> {
     let phone: string;
     try { phone = normalizeMsisdn(input.phone); } catch { throw new Error("INVALID_CREDENTIALS"); }
-    const rec = await this.repo.findByPhone(phone);
+    const rec = await this.repo.findByPhone(phone, input.siteId);
     const ok = await verifyPassword(input.password, rec?.passwordHash ?? (await DUMMY_HASH));
     if (!rec || !ok) throw new Error("INVALID_CREDENTIALS");
     // Account status does NOT gate login. A limited/suspended/banned player can still sign in
@@ -157,11 +159,12 @@ export class AuthService {
     // limited account can top up but cannot open new trades or cash out. Deposits stay open.
     const mfa = await this.repo.getMfa(rec.userId);
     if (mfa?.enabled) await this.assertSecondFactor(rec.userId, mfa, input.totp, input.recoveryCode);
-    const token = await this.issueToken(rec.userId, rec.role);
+    const token = await this.issueToken(rec.userId, rec.role, input.siteId);
     const needsEnrolment = this.mfaRoles.has(rec.role) && !mfa?.enabled;
+    const site = input.siteId ? { site: input.siteId } : {};
     return needsEnrolment
-      ? { token, userId: rec.userId, role: rec.role, mfaEnrolmentRequired: true }
-      : { token, userId: rec.userId, role: rec.role };
+      ? { token, userId: rec.userId, role: rec.role, mfaEnrolmentRequired: true, ...site }
+      : { token, userId: rec.userId, role: rec.role, ...site };
   }
 
   /**

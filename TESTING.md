@@ -8,10 +8,10 @@ Evidence that the multi-tenant foundation is correct, tested aggressively, and r
 |---|---|---|
 | **DB e2e (real Postgres, two isolated sites)** | 38 scenarios | ✅ all pass |
 | Shared (`packages/shared`) incl. new `site.ts` | 75 | ✅ all pass (7 new) |
-| Engine (`apps/engine`) incl. multiplex core + WS integration | 138 | ✅ all pass (8 new) |
+| Engine (`apps/engine`) incl. multiplex + WS integration + auth site-claim | 142 | ✅ all pass (12 new) |
 | API (`apps/api`) | 115 | ✅ all pass |
 
-Total: **328 automated tests + 38 DB e2e scenarios**, 0 failures. No regressions in inherited code.
+Total: **332 automated tests + 38 DB e2e scenarios**, 0 failures. No regressions in inherited code.
 
 ## DB end-to-end (the hardest, highest-risk layer)
 
@@ -65,6 +65,14 @@ A real **two-client WebSocket** integration test (two brands on one engine proce
 - auth → open → auto-settle on Brand A is **never** seen by Brand B (isolated fan-out);
 - **per-brand stake bounds** are enforced independently (a stake valid on A is rejected on B).
 Plus the entrypoint boot was smoke-tested (in-memory → live WS `hello`).
+
+## Auth — per-site token `site` claim (`authservice.site.test.ts`)
+- Register/login issue a JWT whose `site` claim binds the token to a brand (verified via the real verifier).
+- The same phone registers independently on two brands; duplicate-within-a-brand is rejected.
+- Login is **scoped to the brand** (a valid phone/password on Brand A is rejected under Brand B).
+- Single-tenant (no siteId) still works and omits the claim.
+Live-DB verified: `fn_register_user` 4-arg → default site, 5-arg → the given brand; `findByPhone`
+returns exactly the brand's account (and both brands when unscoped).
 
 ## Run the TS suites
 ```bash

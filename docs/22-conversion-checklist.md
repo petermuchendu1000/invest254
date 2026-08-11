@@ -70,11 +70,17 @@ Files: `apps/engine/src/sitecontext.ts` (✅ shipped), `server.ts`, `game.ts`, `
   the one remaining sub-item.)
 
 ## D. Auth — put the site in the token
-Files: `apps/engine/src/authservice.ts`, `auth.ts`, `apps/api/src/server.ts`.
-- 🔲 `issueToken(userId, role, siteId)` adds a `site` claim; `register`/`login` resolve the site
-  from the request host (`/s/<slug>` prefix or `Host` header → `sites`).
-- 🔲 Verifier surfaces `claims.site`.
-- **Done when:** a token minted on Brand A cannot authenticate as Brand A's user on Brand B.
+Files: `apps/engine/src/authservice.ts`, `auth.ts`, `identity.ts`, `apps/api/src/app.auth.ts`.
+- ✅ `issueToken(userId, role, siteId?)` adds a `site` claim; `register`/`login` thread an optional
+  `siteId`; `IdentityRepository.register` (5-arg RPC) + `findByPhone(phone, siteId?)` are per-site
+  (same phone → two brands, duplicate-within-brand rejected). Tested (`authservice.site.test.ts`)
+  + live-DB verified (4-arg→default site, 5-arg→brand; site-scoped login).
+- ✅ Verifier (`auth.ts`) surfaces `claims.site`; the multiplex WS `AUTH_SITE_MISMATCH` guard now
+  runs on real tokens.
+- 🔲 API resolves the brand from the request host (`/s/<slug>` / `Host` → `sites`) and passes it
+  into `register`/`login` — this is Task E (`requireSite`); the engine/auth layer is complete.
+- **Done when:** ✅ a token minted for Brand A carries `site=A` and login is per-brand (proven);
+  wiring the API host→site resolution lands with Task E.
 
 ## E. API — site scoping + public brand route
 Files: `apps/api/src/http.ts`, `app.ts`, all `app.*.ts`.
