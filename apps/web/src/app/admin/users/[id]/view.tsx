@@ -47,7 +47,16 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <StatCard label="Real balance" money={q.data.realBalanceCents} />
               <StatCard label="Bonus balance" money={q.data.bonusBalanceCents} />
               <StatCard label="Turnover" money={q.data.turnoverCents} />
-              <StatCard label="Net revenue (GGR)" money={q.data.ggrCents} tone="up" />
+              <StatCard label="Net revenue (GGR)" money={q.data.ggrCents} tone={q.data.ggrCents >= 0 ? 'up' : 'down'} />
+            </div>
+          </Section>
+
+          <Section title="Lifetime cash flow & activity">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatCard label="Deposits" money={q.data.depositsCents} tone="up" />
+              <StatCard label="Withdrawals" money={q.data.withdrawalsCents} tone="down" />
+              <StatCard label="Net deposits" money={q.data.netDepositsCents} tone={q.data.netDepositsCents >= 0 ? 'up' : 'down'} />
+              <StatCard label="Settled bets" value={q.data.betCount.toLocaleString()} />
             </div>
           </Section>
 
@@ -56,6 +65,8 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <Row label="User ID" value={q.data.userId} mono />
               <Row label="Phone" value={q.data.phone || '—'} />
               <Row label="Referred by" value={q.data.referredBy ? `${q.data.referredBy.slice(0, 8)}…` : '—'} mono />
+              <Row label="Last transaction" value={q.data.lastTxAtMs ? `${q.data.lastTxKind ?? ''} · ${formatDateTime(q.data.lastTxAtMs)}` : '—'} />
+              <Row label="Last active" value={q.data.lastActiveAtMs ? formatDateTime(q.data.lastActiveAtMs) : '—'} />
             </Card>
           </Section>
 

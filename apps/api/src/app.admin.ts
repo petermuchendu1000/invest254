@@ -1,5 +1,5 @@
 import { Router, ApiError, requireAuth, requireRole, rateLimit, type Ctx } from "./http.js";
-import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery, UserOverridePatch } from "@invest254/engine";
+import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, AdminTransactionListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery, UserOverridePatch } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 
 /**
@@ -334,6 +334,22 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/admin/deposits`, auth, admin, async (ctx: Ctx) => {
     const q: AdminDepositListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined };
     return deps.admin.listDeposits(q);
+  });
+
+  // Unified deposits + withdrawals feed for the Finance transactions explorer.
+  // Filterable by kind (deposit|withdrawal), status, and free-text search (username/phone/receipt).
+  router.get(`${BASE}/admin/transactions`, auth, admin, async (ctx: Ctx) => {
+    const kindRaw = ctx.query.get("kind");
+    if (kindRaw !== null && kindRaw !== "deposit" && kindRaw !== "withdrawal") {
+      throw new ApiError("INVALID_KIND", "kind must be 'deposit' or 'withdrawal'", 400);
+    }
+    const q: AdminTransactionListQuery = {
+      ...pageQuery(ctx),
+      kind: kindRaw ?? undefined,
+      status: ctx.query.get("status") ?? undefined,
+      q: ctx.query.get("q") ?? undefined,
+    };
+    return deps.admin.listTransactions(q);
   });
 
   router.get(`${BASE}/admin/reports/daily`, auth, admin, async (ctx: Ctx) => {

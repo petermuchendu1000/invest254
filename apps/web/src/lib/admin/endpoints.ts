@@ -9,6 +9,7 @@ import type {
   UserOverridePatch,
   AdminDepositRow,
   AdminDepositsReconcile,
+  AdminTransactionRow,
   AdminOverview,
   AdminPayoutRow,
   AdminUserActivityRow,
@@ -83,6 +84,14 @@ export const adminApi = {
     }),
   depositsReconcile: (t: string, staleMinutes = 15) =>
     apiFetch<AdminDepositsReconcile>('/admin/deposits/reconcile', { token: t, query: { staleMinutes } }),
+  transactions: (
+    t: string,
+    p: Page & { kind?: string | undefined; status?: string | undefined; q?: string | undefined } = {},
+  ) =>
+    apiFetch<Paginated<AdminTransactionRow>>('/admin/transactions', {
+      token: t,
+      query: { cursor: p.cursor ?? undefined, limit: p.limit, kind: p.kind, status: p.status, q: p.q },
+    }),
 
   // Affiliates
   affiliatePayouts: (t: string, p: Page & { status?: string | undefined } = {}) =>

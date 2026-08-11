@@ -23,12 +23,28 @@ export interface AdminOverview {
   affiliate: { marketers: number; commissionAccruedCents: Cents; commissionPaidCents: Cents; pendingPayouts: number };
   game: { settledPositions: number; turnoverCents: Cents; ggrCents: Cents };
 }
-export interface AdminUserRow { userId: string; username: string; role: string; status: string; createdAtMs: number; }
-export interface AdminUserDetail extends AdminUserRow {
-  phone: string; referredBy: string | null;
-  realBalanceCents: Cents; bonusBalanceCents: Cents; turnoverCents: Cents; ggrCents: Cents;
+/** A user as the admin user-list sees them — enriched with wallet, lifetime cash flow,
+ *  game economics and last-activity so operators get deep info at a glance (no drill-in needed). */
+export interface AdminUserRow {
+  userId: string; username: string; phone: string; role: string; status: string; createdAtMs: number;
+  realBalanceCents: Cents; bonusBalanceCents: Cents;
+  depositsCents: Cents; withdrawalsCents: Cents; netDepositsCents: Cents;
+  turnoverCents: Cents; ggrCents: Cents; betCount: number;
+  lastTxAtMs: number | null; lastTxKind: string | null; lastTxAmountCents: Cents | null; lastTxStatus: string | null;
+  lastActiveAtMs: number | null;
 }
-export interface AdminWithdrawalRow { txId: string; userId: string; amountCents: Cents; status: string; phone: string; createdAtMs: number; }
+export interface AdminUserDetail extends AdminUserRow {
+  referredBy: string | null;
+}
+export interface AdminWithdrawalRow { txId: string; userId: string; username: string; amountCents: Cents; status: string; phone: string; createdAtMs: number; }
+/** A transaction (deposit OR withdrawal) as the unified Finance transactions explorer sees it —
+ *  carries the player identity, exact timestamps, provider, receipt and STK checkout id. */
+export interface AdminTransactionRow {
+  txId: string; userId: string; username: string; kind: string; amountCents: Cents; status: string;
+  provider: string | null; phone: string; mpesaReceipt: string | null; checkoutRequestId: string | null;
+  resultDesc: string | null; createdAtMs: number; updatedAtMs: number | null;
+}
+export interface AdminTransactionListQuery extends PageQuery { kind?: string | undefined; status?: string | undefined; q?: string | undefined; }
 export interface AdminAuditRow {
   id: string; actorId: string; actorRole: string; action: string;
   targetType: string; targetId: string | null; detail: unknown; createdAtMs: number;
@@ -56,7 +72,7 @@ export interface UserOverridePatch {
 }
 /** A deposit transaction as the admin deposits monitor sees it (J3). */
 export interface AdminDepositRow {
-  txId: string; userId: string; amountCents: Cents; status: string; phone: string;
+  txId: string; userId: string; username: string; amountCents: Cents; status: string; phone: string;
   mpesaReceipt: string | null; checkoutRequestId: string | null; createdAtMs: number;
 }
 export interface AdminDepositListQuery extends PageQuery { status?: string | undefined; }
@@ -183,6 +199,8 @@ export interface AdminRepository {
   setCommissionRate(actorId: string, actorRole: string, targetId: string, rate: number): Promise<SetCommissionRateResult>;
   setUserRole(actorId: string, actorRole: string, targetId: string, role: string): Promise<SetUserRoleResult>;
   listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>>;
+  /** Unified deposits + withdrawals feed for the Finance transactions explorer (newest-first, keyset). */
+  listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>>;
   listAudit(q: PageQuery): Promise<Page<AdminAuditRow>>;
   adjustBalance(actorId: string, actorRole: string, targetId: string, amountCents: Cents, reason: string): Promise<AdjustBalanceResult>;
   // J8 — balance ops on either wallet, one-shot clear, and per-user engine overrides.
@@ -434,37 +452,58 @@ export class PgAdminRepository implements AdminRepository {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
-      `select id, username, role, status, created_at from profiles
-        where ($1::text is null or role = $1)
-          and ($2::text is null or status = $2)
-          and ($3::text is null or username ilike '%'||$3||'%' or phone ilike '%'||$3||'%')
-          and ($4::timestamptz is null or (created_at, id) < ($4::timestamptz, $5::uuid))
-        order by created_at desc, id desc
+      `select p.id, p.username, p.phone, p.role, p.status, p.created_at,
+              coalesce(w.real_balance,0)  as real_balance,
+              coalesce(w.bonus_balance,0) as bonus_balance,
+              coalesce(td.deposits,0)     as deposits,
+              coalesce(tw.withdrawals,0)  as withdrawals,
+              coalesce(po.turnover,0)     as turnover,
+              coalesce(po.ggr,0)          as ggr,
+              coalesce(po.bet_count,0)    as bet_count,
+              lt.created_at as last_tx_at, lt.kind as last_tx_kind, lt.amount as last_tx_amount, lt.status as last_tx_status,
+              greatest(coalesce(lt.created_at, 'epoch'::timestamptz), coalesce(po.last_bet_at, 'epoch'::timestamptz)) as last_active_at
+         from profiles p
+         left join wallets w on w.user_id = p.id
+         left join lateral (select coalesce(sum(amount),0) as deposits    from transactions t where t.user_id = p.id and t.kind='deposit'    and t.status='success') td on true
+         left join lateral (select coalesce(sum(amount),0) as withdrawals from transactions t where t.user_id = p.id and t.kind='withdrawal' and t.status='success') tw on true
+         left join lateral (select coalesce(sum(stake),0) as turnover, coalesce(sum(stake - payout),0) as ggr, count(*) as bet_count, max(opened_at) as last_bet_at
+                              from positions x where x.user_id = p.id and x.status='settled') po on true
+         left join lateral (select created_at, kind, amount, status from transactions t where t.user_id = p.id order by created_at desc, id desc limit 1) lt on true
+        where ($1::text is null or p.role = $1)
+          and ($2::text is null or p.status = $2)
+          and ($3::text is null or p.username ilike '%'||$3||'%' or p.phone ilike '%'||$3||'%')
+          and ($4::timestamptz is null or (p.created_at, p.id) < ($4::timestamptz, $5::uuid))
+        order by p.created_at desc, p.id desc
         limit $6`,
       [q.role ?? null, q.status ?? null, q.q ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1]);
-    const rows: AdminUserRow[] = r.rows.map((x) => ({
-      userId: String(x.id), username: String(x.username), role: String(x.role), status: String(x.status), createdAtMs: ms(x.created_at),
-    }));
+    const rows: AdminUserRow[] = r.rows.map(mapUserRow);
     return pageFrom(rows, limit, (u) => `${u.createdAtMs}:${u.userId}`);
   }
 
   async getUserDetail(userId: string): Promise<AdminUserDetail | null> {
     const r = await this.q.query(
       `select p.id, p.username, p.phone, p.role, p.status, p.referred_by, p.created_at,
-              coalesce(w.real_balance,0) as real_balance, coalesce(w.bonus_balance,0) as bonus_balance,
-              coalesce((select sum(stake) from positions po where po.user_id = p.id and po.status='settled'),0) as turnover,
-              coalesce((select sum(stake - payout) from positions po where po.user_id = p.id and po.status='settled'),0) as ggr
-         from profiles p left join wallets w on w.user_id = p.id
+              coalesce(w.real_balance,0)  as real_balance,
+              coalesce(w.bonus_balance,0) as bonus_balance,
+              coalesce(td.deposits,0)     as deposits,
+              coalesce(tw.withdrawals,0)  as withdrawals,
+              coalesce(po.turnover,0)     as turnover,
+              coalesce(po.ggr,0)          as ggr,
+              coalesce(po.bet_count,0)    as bet_count,
+              lt.created_at as last_tx_at, lt.kind as last_tx_kind, lt.amount as last_tx_amount, lt.status as last_tx_status,
+              greatest(coalesce(lt.created_at, 'epoch'::timestamptz), coalesce(po.last_bet_at, 'epoch'::timestamptz)) as last_active_at
+         from profiles p
+         left join wallets w on w.user_id = p.id
+         left join lateral (select coalesce(sum(amount),0) as deposits    from transactions t where t.user_id = p.id and t.kind='deposit'    and t.status='success') td on true
+         left join lateral (select coalesce(sum(amount),0) as withdrawals from transactions t where t.user_id = p.id and t.kind='withdrawal' and t.status='success') tw on true
+         left join lateral (select coalesce(sum(stake),0) as turnover, coalesce(sum(stake - payout),0) as ggr, count(*) as bet_count, max(opened_at) as last_bet_at
+                              from positions x where x.user_id = p.id and x.status='settled') po on true
+         left join lateral (select created_at, kind, amount, status from transactions t where t.user_id = p.id order by created_at desc, id desc limit 1) lt on true
         where p.id = $1`,
       [userId]);
     if (!r.rows.length) return null;
     const x = r.rows[0];
-    return {
-      userId: String(x.id), username: String(x.username), role: String(x.role), status: String(x.status), createdAtMs: ms(x.created_at),
-      phone: String(x.phone),
-      referredBy: x.referred_by == null ? null : String(x.referred_by),
-      realBalanceCents: num(x.real_balance), bonusBalanceCents: num(x.bonus_balance), turnoverCents: num(x.turnover), ggrCents: num(x.ggr),
-    };
+    return { ...mapUserRow(x), referredBy: x.referred_by == null ? null : String(x.referred_by) };
   }
 
   async listUserActivity(userId: string, q: AdminUserActivityQuery): Promise<Page<AdminUserActivityRow>> {
@@ -527,16 +566,37 @@ export class PgAdminRepository implements AdminRepository {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
-      `select id, user_id, amount, status, phone, created_at from transactions
-        where kind = 'withdrawal'
-          and ($1::text is null or status = $1)
-          and ($2::timestamptz is null or (created_at, id) < ($2::timestamptz, $3::uuid))
-        order by created_at desc, id desc
+      `select t.id, t.user_id, t.amount, t.status, t.phone, t.created_at, p.username from transactions t
+         left join profiles p on p.id = t.user_id
+        where t.kind = 'withdrawal'
+          and ($1::text is null or t.status = $1)
+          and ($2::timestamptz is null or (t.created_at, t.id) < ($2::timestamptz, $3::uuid))
+        order by t.created_at desc, t.id desc
         limit $4`,
       [q.status ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1]);
     const rows: AdminWithdrawalRow[] = r.rows.map((x) => ({
-      txId: String(x.id), userId: String(x.user_id), amountCents: num(x.amount), status: String(x.status), phone: String(x.phone), createdAtMs: ms(x.created_at),
+      txId: String(x.id), userId: String(x.user_id), username: x.username == null ? "" : String(x.username),
+      amountCents: num(x.amount), status: String(x.status), phone: String(x.phone), createdAtMs: ms(x.created_at),
     }));
+    return pageFrom(rows, limit, (t) => `${t.createdAtMs}:${t.txId}`);
+  }
+
+  async listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>> {
+    const limit = clampLimit(q.limit);
+    const cur = decodeKeyset(q.cursor);
+    const r = await this.q.query(
+      `select t.id, t.user_id, t.kind, t.amount, t.status, t.provider, t.phone, t.mpesa_receipt,
+              t.checkout_request_id, t.result_desc, t.created_at, t.updated_at, p.username
+         from transactions t
+         left join profiles p on p.id = t.user_id
+        where ($1::text is null or t.kind = $1)
+          and ($2::text is null or t.status = $2)
+          and ($3::text is null or p.username ilike '%'||$3||'%' or t.phone ilike '%'||$3||'%' or t.mpesa_receipt ilike '%'||$3||'%')
+          and ($4::timestamptz is null or (t.created_at, t.id) < ($4::timestamptz, $5::uuid))
+        order by t.created_at desc, t.id desc
+        limit $6`,
+      [q.kind ?? null, q.status ?? null, q.q ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1]);
+    const rows: AdminTransactionRow[] = r.rows.map(mapTransactionRow);
     return pageFrom(rows, limit, (t) => `${t.createdAtMs}:${t.txId}`);
   }
 
@@ -601,11 +661,12 @@ export class PgAdminRepository implements AdminRepository {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
-      `select id, user_id, amount, status, phone, mpesa_receipt, checkout_request_id, created_at from transactions
-        where kind = 'deposit'
-          and ($1::text is null or status = $1)
-          and ($2::timestamptz is null or (created_at, id) < ($2::timestamptz, $3::uuid))
-        order by created_at desc, id desc
+      `select t.id, t.user_id, t.amount, t.status, t.phone, t.mpesa_receipt, t.checkout_request_id, t.created_at, p.username
+         from transactions t left join profiles p on p.id = t.user_id
+        where t.kind = 'deposit'
+          and ($1::text is null or t.status = $1)
+          and ($2::timestamptz is null or (t.created_at, t.id) < ($2::timestamptz, $3::uuid))
+        order by t.created_at desc, t.id desc
         limit $4`,
       [q.status ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1]);
     const rows: AdminDepositRow[] = r.rows.map(mapDepositRow);
@@ -618,10 +679,11 @@ export class PgAdminRepository implements AdminRepository {
          from transactions where kind = 'deposit' group by status order by status`, []);
     const summary: AdminDepositStatusBucket[] = s.rows.map((x) => ({ status: String(x.status), count: num(x.n), amountCents: num(x.amt) }));
     const r = await this.q.query(
-      `select id, user_id, amount, status, phone, mpesa_receipt, checkout_request_id, created_at from transactions
-        where kind = 'deposit' and status in ('pending', 'processing')
-          and created_at < now() - ($1::int * interval '1 minute')
-        order by created_at desc, id desc
+      `select t.id, t.user_id, t.amount, t.status, t.phone, t.mpesa_receipt, t.checkout_request_id, t.created_at, p.username
+         from transactions t left join profiles p on p.id = t.user_id
+        where t.kind = 'deposit' and t.status in ('pending', 'processing')
+          and t.created_at < now() - ($1::int * interval '1 minute')
+        order by t.created_at desc, t.id desc
         limit 100`,
       [Math.max(0, Math.round(staleMinutes))]);
     return { summary, staleMinutes, stale: r.rows.map(mapDepositRow) };
@@ -833,6 +895,25 @@ export class PgAdminRepository implements AdminRepository {
   }
 }
 
+/** Map a raw enriched `profiles` row (joined to wallet + cash-flow + game aggregates) into AdminUserRow. */
+function mapUserRow(x: any): AdminUserRow {
+  const deposits = num(x.deposits);
+  const withdrawals = num(x.withdrawals);
+  const lastActive = x.last_active_at == null ? 0 : ms(x.last_active_at);
+  return {
+    userId: String(x.id), username: String(x.username), phone: x.phone == null ? "" : String(x.phone),
+    role: String(x.role), status: String(x.status), createdAtMs: ms(x.created_at),
+    realBalanceCents: num(x.real_balance), bonusBalanceCents: num(x.bonus_balance),
+    depositsCents: deposits, withdrawalsCents: withdrawals, netDepositsCents: deposits - withdrawals,
+    turnoverCents: num(x.turnover), ggrCents: num(x.ggr), betCount: num(x.bet_count),
+    lastTxAtMs: x.last_tx_at == null ? null : ms(x.last_tx_at),
+    lastTxKind: x.last_tx_kind == null ? null : String(x.last_tx_kind),
+    lastTxAmountCents: x.last_tx_amount == null ? null : num(x.last_tx_amount),
+    lastTxStatus: x.last_tx_status == null ? null : String(x.last_tx_status),
+    lastActiveAtMs: lastActive > 0 ? lastActive : null,
+  };
+}
+
 /** Map a raw deposit `transactions` row into the public AdminDepositRow. */
 function mapActivityRow(x: any): AdminUserActivityRow {
   return {
@@ -853,9 +934,23 @@ function mapActivityRow(x: any): AdminUserActivityRow {
 
 function mapDepositRow(x: any): AdminDepositRow {
   return {
-    txId: String(x.id), userId: String(x.user_id), amountCents: num(x.amount), status: String(x.status), phone: String(x.phone),
+    txId: String(x.id), userId: String(x.user_id), username: x.username == null ? "" : String(x.username),
+    amountCents: num(x.amount), status: String(x.status), phone: String(x.phone),
     mpesaReceipt: x.mpesa_receipt == null ? null : String(x.mpesa_receipt),
     checkoutRequestId: x.checkout_request_id == null ? null : String(x.checkout_request_id), createdAtMs: ms(x.created_at),
+  };
+}
+
+/** Map a raw `transactions` row (joined to profiles) into the unified AdminTransactionRow. */
+function mapTransactionRow(x: any): AdminTransactionRow {
+  return {
+    txId: String(x.id), userId: String(x.user_id), username: x.username == null ? "" : String(x.username),
+    kind: String(x.kind), amountCents: num(x.amount), status: String(x.status),
+    provider: x.provider == null ? null : String(x.provider), phone: x.phone == null ? "" : String(x.phone),
+    mpesaReceipt: x.mpesa_receipt == null ? null : String(x.mpesa_receipt),
+    checkoutRequestId: x.checkout_request_id == null ? null : String(x.checkout_request_id),
+    resultDesc: x.result_desc == null ? null : String(x.result_desc),
+    createdAtMs: ms(x.created_at), updatedAtMs: x.updated_at == null ? null : ms(x.updated_at),
   };
 }
 
@@ -874,8 +969,8 @@ function memKeyset<T extends { _ts: number; _id: string }>(all: T[], q: PageQuer
 interface MemAudit { id: number; actorId: string; actorRole: string; action: string; targetType: string; targetId: string | null; detail: unknown; createdAtMs: number; }
 
 /** Project an admin transaction snapshot into the public AdminDepositRow shape. */
-function memDepositRow(t: { txId: string; userId: string; amountCents: Cents; status: string; phone: string; mpesaReceipt: string | null; checkoutRequestId: string | null; createdAtMs: number }): AdminDepositRow {
-  return { txId: t.txId, userId: t.userId, amountCents: t.amountCents, status: t.status, phone: t.phone, mpesaReceipt: t.mpesaReceipt, checkoutRequestId: t.checkoutRequestId, createdAtMs: t.createdAtMs };
+function memDepositRow(t: { txId: string; userId: string; amountCents: Cents; status: string; phone: string; mpesaReceipt: string | null; checkoutRequestId: string | null; createdAtMs: number }, username = ""): AdminDepositRow {
+  return { txId: t.txId, userId: t.userId, username, amountCents: t.amountCents, status: t.status, phone: t.phone, mpesaReceipt: t.mpesaReceipt, checkoutRequestId: t.checkoutRequestId, createdAtMs: t.createdAtMs };
 }
 
 /**
@@ -934,28 +1029,40 @@ export class InMemoryAdminRepository implements AdminRepository {
     };
   }
 
+  /** Build an enriched AdminUserRow from the in-memory stores (mirrors the Pg lateral aggregates). */
+  private async memUserRow(u: { userId: string; username: string; phone: string; role: string; status: string; createdAtMs: number }): Promise<AdminUserRow> {
+    const txs = this.payments.adminTransactions().filter((t) => t.userId === u.userId);
+    const plays = this.identity.adminPlaysOf(u.userId);
+    const deposits = txs.filter((t) => t.kind === "deposit" && t.status === "success").reduce((s, t) => s + t.amountCents, 0);
+    const withdrawals = txs.filter((t) => t.kind === "withdrawal" && t.status === "success").reduce((s, t) => s + t.amountCents, 0);
+    const last = txs.slice().sort((a, b) => (b.createdAtMs - a.createdAtMs) || (a.txId < b.txId ? 1 : -1))[0];
+    const turnover = plays.reduce((s, p) => s + p.stakeCents, 0);
+    const ggr = plays.reduce((s, p) => s + (p.stakeCents - p.payoutCents), 0);
+    return {
+      userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status, createdAtMs: u.createdAtMs,
+      realBalanceCents: await this.payments.getBalance(u.userId), bonusBalanceCents: this.bonusBal.get(u.userId) ?? 0,
+      depositsCents: deposits, withdrawalsCents: withdrawals, netDepositsCents: deposits - withdrawals,
+      turnoverCents: turnover, ggrCents: ggr, betCount: plays.length,
+      lastTxAtMs: last ? last.createdAtMs : null, lastTxKind: last ? last.kind : null,
+      lastTxAmountCents: last ? last.amountCents : null, lastTxStatus: last ? last.status : null,
+      lastActiveAtMs: last ? last.createdAtMs : null,
+    };
+  }
+
   async listUsers(q: AdminUserListQuery): Promise<Page<AdminUserRow>> {
     const needle = q.q?.toLowerCase();
-    const rows = this.identity.adminUsers()
-      .filter((u) =>
-        (q.role === undefined || u.role === q.role) &&
-        (q.status === undefined || u.status === q.status) &&
-        (needle === undefined || u.username.toLowerCase().includes(needle) || u.phone.includes(needle)))
-      .map((u) => ({ userId: u.userId, username: u.username, role: u.role, status: u.status, createdAtMs: u.createdAtMs, _ts: u.createdAtMs, _id: u.userId }));
+    const matched = this.identity.adminUsers().filter((u) =>
+      (q.role === undefined || u.role === q.role) &&
+      (q.status === undefined || u.status === q.status) &&
+      (needle === undefined || u.username.toLowerCase().includes(needle) || u.phone.includes(needle)));
+    const rows = await Promise.all(matched.map(async (u) => ({ ...(await this.memUserRow(u)), _ts: u.createdAtMs, _id: u.userId })));
     return memKeyset(rows, q);
   }
 
   async getUserDetail(userId: string): Promise<AdminUserDetail | null> {
     const u = this.identity.adminUser(userId);
     if (!u) return null;
-    const own = this.identity.adminPlaysOf(userId);
-    return {
-      userId: u.userId, username: u.username, role: u.role, status: u.status, createdAtMs: u.createdAtMs,
-      phone: u.phone, referredBy: u.referredBy,
-      realBalanceCents: await this.payments.getBalance(userId), bonusBalanceCents: 0,
-      turnoverCents: own.reduce((s, p) => s + p.stakeCents, 0),
-      ggrCents: own.reduce((s, p) => s + (p.stakeCents - p.payoutCents), 0),
-    };
+    return { ...(await this.memUserRow(u)), referredBy: u.referredBy };
   }
 
   async listUserActivity(userId: string, q: AdminUserActivityQuery): Promise<Page<AdminUserActivityRow>> {
@@ -1027,7 +1134,26 @@ export class InMemoryAdminRepository implements AdminRepository {
   async listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>> {
     const rows = this.payments.adminTransactions()
       .filter((t) => t.kind === "withdrawal" && (q.status === undefined || t.status === q.status))
-      .map((t) => ({ txId: t.txId, userId: t.userId, amountCents: t.amountCents, status: t.status, phone: t.phone, createdAtMs: t.createdAtMs, _ts: t.createdAtMs, _id: t.txId }));
+      .map((t) => ({ txId: t.txId, userId: t.userId, username: this.identity.adminUser(t.userId)?.username ?? "", amountCents: t.amountCents, status: t.status, phone: t.phone, createdAtMs: t.createdAtMs, _ts: t.createdAtMs, _id: t.txId }));
+    return memKeyset(rows, q);
+  }
+
+  async listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>> {
+    const needle = q.q?.toLowerCase();
+    const rows = this.payments.adminTransactions()
+      .filter((t) =>
+        (q.kind === undefined || t.kind === q.kind) &&
+        (q.status === undefined || t.status === q.status) &&
+        (needle === undefined ||
+          (this.identity.adminUser(t.userId)?.username ?? "").toLowerCase().includes(needle) ||
+          t.phone.includes(needle) ||
+          (t.mpesaReceipt ?? "").toLowerCase().includes(needle)))
+      .map((t) => ({
+        txId: t.txId, userId: t.userId, username: this.identity.adminUser(t.userId)?.username ?? "",
+        kind: t.kind, amountCents: t.amountCents, status: t.status, provider: null, phone: t.phone,
+        mpesaReceipt: t.mpesaReceipt, checkoutRequestId: t.checkoutRequestId, resultDesc: null,
+        createdAtMs: t.createdAtMs, updatedAtMs: null, _ts: t.createdAtMs, _id: t.txId,
+      }));
     return memKeyset(rows, q);
   }
 
@@ -1122,7 +1248,7 @@ export class InMemoryAdminRepository implements AdminRepository {
   async listDeposits(q: AdminDepositListQuery): Promise<Page<AdminDepositRow>> {
     const rows = this.payments.adminTransactions()
       .filter((t) => t.kind === "deposit" && (q.status === undefined || t.status === q.status))
-      .map((t) => ({ ...memDepositRow(t), _ts: t.createdAtMs, _id: t.txId }));
+      .map((t) => ({ ...memDepositRow(t, this.identity.adminUser(t.userId)?.username ?? ""), _ts: t.createdAtMs, _id: t.txId }));
     return memKeyset(rows, q);
   }
 
@@ -1141,7 +1267,7 @@ export class InMemoryAdminRepository implements AdminRepository {
       .filter((d) => (d.status === "pending" || d.status === "processing") && d.createdAtMs < cutoff)
       .sort((a, b) => (b.createdAtMs - a.createdAtMs) || (a.txId < b.txId ? 1 : a.txId > b.txId ? -1 : 0))
       .slice(0, 100)
-      .map(memDepositRow);
+      .map((d) => memDepositRow(d, this.identity.adminUser(d.userId)?.username ?? ""));
     return { summary, staleMinutes, stale };
   }
 

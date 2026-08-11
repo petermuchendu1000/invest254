@@ -42,20 +42,30 @@ export interface RtpMonitor {
   alert: boolean;
 }
 
+/** Enriched user-list row — wallet, lifetime cash flow, game economics and last activity. */
 export interface AdminUserRow {
   userId: string;
   username: string;
+  phone: string;
   role: string;
   status: string;
   createdAtMs: number;
-}
-export interface AdminUserDetail extends AdminUserRow {
-  phone: string;
-  referredBy: string | null;
   realBalanceCents: Cents;
   bonusBalanceCents: Cents;
+  depositsCents: Cents;
+  withdrawalsCents: Cents;
+  netDepositsCents: Cents;
   turnoverCents: Cents;
   ggrCents: Cents;
+  betCount: number;
+  lastTxAtMs: number | null;
+  lastTxKind: string | null;
+  lastTxAmountCents: Cents | null;
+  lastTxStatus: string | null;
+  lastActiveAtMs: number | null;
+}
+export interface AdminUserDetail extends AdminUserRow {
+  referredBy: string | null;
 }
 export interface SetUserStatusResult {
   userId: string;
@@ -94,6 +104,7 @@ export interface AdminUserActivityRow {
 export interface AdminWithdrawalRow {
   txId: string;
   userId: string;
+  username: string;
   amountCents: Cents;
   status: string;
   phone: string;
@@ -103,12 +114,30 @@ export interface AdminWithdrawalRow {
 export interface AdminDepositRow {
   txId: string;
   userId: string;
+  username: string;
   amountCents: Cents;
   status: string;
   phone: string;
   mpesaReceipt: string | null;
   checkoutRequestId: string | null;
   createdAtMs: number;
+}
+
+/** Unified deposit/withdrawal row for the Finance transactions explorer. */
+export interface AdminTransactionRow {
+  txId: string;
+  userId: string;
+  username: string;
+  kind: string;
+  amountCents: Cents;
+  status: string;
+  provider: string | null;
+  phone: string;
+  mpesaReceipt: string | null;
+  checkoutRequestId: string | null;
+  resultDesc: string | null;
+  createdAtMs: number;
+  updatedAtMs: number | null;
 }
 export interface AdminDepositStatusBucket {
   status: string;

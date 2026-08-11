@@ -1,7 +1,8 @@
 import type { Page, PageQuery } from "./paging.js";
 import type {
   AdminRepository, AdminOverview, AdminUserRow, AdminUserDetail, AdminWithdrawalRow, AdminAuditRow,
-  AdminUserListQuery, AdminWithdrawalListQuery, SetUserStatusResult, SetCommissionRateResult,
+  AdminUserListQuery, AdminWithdrawalListQuery, AdminTransactionRow, AdminTransactionListQuery,
+  SetUserStatusResult, SetCommissionRateResult,
   AdjustBalanceResult, AdjustBalanceKindResult, ClearBalanceResult, BalanceKind, UserOverrideRow, UserOverridePatch,
   AdminDepositRow, AdminDepositListQuery, AdminDepositsReconcile,
   ReportRange, DailyReportRow, UserReportRow,
@@ -51,6 +52,9 @@ export class AdminService {
   }
 
   listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>> { return this.repo.listWithdrawals(q); }
+
+  /** Unified deposits + withdrawals feed for the Finance transactions explorer. */
+  listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>> { return this.repo.listTransactions(q); }
 
   listAudit(q: PageQuery): Promise<Page<AdminAuditRow>> { return this.repo.listAudit(q); }
 

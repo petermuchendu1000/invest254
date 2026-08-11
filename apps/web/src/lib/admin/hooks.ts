@@ -156,6 +156,18 @@ export function useDepositsReconcile(staleMinutes = 15) {
   });
 }
 
+// ── Unified transactions (Finance explorer) ──
+export function useTransactions(filter: { kind?: string; status?: string; q?: string }) {
+  const t = useTok();
+  return useInfiniteQuery({
+    queryKey: ['admin', 'transactions', filter],
+    enabled: !!t,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => adminApi.transactions(t, { cursor: pageParam, ...filter }),
+    getNextPageParam: (l: Paginated<unknown>) => l.nextCursor ?? undefined,
+  });
+}
+
 // ── Affiliates ──
 export function useAffiliatePayouts(status?: string) {
   const t = useTok();
