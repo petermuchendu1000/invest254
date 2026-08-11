@@ -50,8 +50,8 @@ const ADMIN_STATUS: Readonly<Record<string, number>> = {
 };
 
 /** Integer game_config fields (cents/durations) — must be whole numbers; the rest may be fractional. */
-const CONFIG_INT_FIELDS = new Set(["minStakeCents", "maxStakeCents", "defaultDurationS", "tickRateMs"]);
-const CONFIG_FIELDS = ["houseEdge", "maxMultiplier", "minStakeCents", "maxStakeCents", "defaultDurationS", "tickRateMs", "driftBias", "volatility", "targetWinRate"] as const;
+const CONFIG_INT_FIELDS = new Set(["minStakeCents", "maxStakeCents", "minWithdrawalCents", "defaultDurationS", "tickRateMs"]);
+const CONFIG_FIELDS = ["houseEdge", "maxMultiplier", "minStakeCents", "maxStakeCents", "minWithdrawalCents", "defaultDurationS", "tickRateMs", "driftBias", "volatility", "targetWinRate"] as const;
 
 /** suspend/ban/reactivate -> the account status the RPC applies. */
 const STATUS_ACTION: Readonly<Record<string, string>> = { suspend: "suspended", ban: "banned", reactivate: "active" };
