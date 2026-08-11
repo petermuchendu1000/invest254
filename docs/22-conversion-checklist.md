@@ -46,21 +46,28 @@ Files: `apps/engine/src/sitecontext.ts` (✅ shipped), `server.ts`, `game.ts`, `
 - ✅ **Per-site pricing context** (`sitecontext.ts` + `buildSiteContext`): composes the proven
   `CurveGenerator`/`SettlementEngine` with the per-site seed; each brand calibrates RTP to its own
   economy. Tested: decorrelated curves + independent RTP (A≈0.25, B≈0.10) + deterministic rebuild.
-- 🔲 `SiteRegistry`: `Map<site_id, { seeds: SeedManager, config: SiteConfigStore }>`; build lazily
-  from `sites where status='active'`.
-- 🔲 Per-site seeds via `deriveSiteDaySeed(masterSeed(site), siteId, dateKey, version)`
-  (`packages/shared/src/site.ts`, already shipped) — resolve `masterSeed` from
-  `sites.master_seed_ref` else the platform `MASTER_SEED`.
-- 🔲 `SiteGameConfigStore`: like `GameConfigStore` but reads `site_game_config`/`_versions` and
-  LISTENs `site_game_config_changed`, refreshing only the notified `site_id`.
-- 🔲 `GameServer`: hold positions keyed by `(site_id, positionId)`; tick loop iterates active
-  sites; `open_position`/`sell` use the socket's bound site context.
-- 🔲 WS `auth`: read the JWT `site` claim, bind the socket to that site; fan-out `tick/online/
-  fairness/balance/position_*` only to that site's sockets.
-- 🔲 `RecoveryService`: scan open positions across all sites; re-arm/settle each under its site
-  context + `config_version`.
-- **Done when:** two brands with different RTP/curve run simultaneously in one process; a config
-  save on Brand A never disturbs Brand B; recovery replays each site correctly.
+- ✅ `SiteRegistry` (`siteregistry.ts`): lazily builds + caches one `{ seeds: SeedManager, game:
+  GameServer }` per brand; concurrent builds coalesce. Tested.
+- ✅ Per-site seeds: `SeedManager` now takes an optional `siteId` and derives via
+  `deriveSiteDaySeed`, committing/revealing game-day rows per brand; `masterSeedFor` resolves
+  `sites.master_seed_ref` else the platform `MASTER_SEED`. Tested (decorrelated brands).
+- ✅ Site-aware repo methods: `openPosition` (site-stamped, 10-arg RPC), `ensureGameDay` /
+  `revealSeed` / `getSeedVersion` (per-site), `listOpenPositions` returns `siteId`. Tested.
+- ✅ `GameServer` stamps `ctx.siteId` on every open; positions tracked per site (one GameServer
+  per brand via the registry). Tested.
+- ✅ WS layer (`multiengine.ts`): binds each socket to its brand at connect (`resolveSite` from
+  `?site=`/Host), verifies the JWT `site` claim matches (`AUTH_SITE_MISMATCH`), and fans out
+  `tick/online/balance/position_*` **per brand**. Proven by a real two-client integration test
+  (`multiengine.test.ts`): decorrelated ticks, isolated auth/open/settle, per-brand stake bounds.
+- ✅ `RecoveryService` gained a `siteId` filter; `SiteRegistry.recoverAll()` groups open positions
+  by brand and recovers each under its own context. 
+- ✅ `server.ts` rewritten as the multiplexed entrypoint (Pg per-site config + in-memory dev
+  fallback + per-brand UTC rotation); boot smoke-tested (in-memory → WS `hello`).
+- 🔲 `SiteGameConfigStore` — LISTEN `site_game_config_changed` for instant hot-reload (server.ts
+  currently reads a brand's config at first use + per-version for recovery; live push pending).
+- **Done when:** ✅ two brands with different RTP/curve run in one process; per-brand isolation of
+  ticks/balances/settlement/stake-bounds proven; recovery replays each brand. (Live config push =
+  the one remaining sub-item.)
 
 ## D. Auth — put the site in the token
 Files: `apps/engine/src/authservice.ts`, `auth.ts`, `apps/api/src/server.ts`.

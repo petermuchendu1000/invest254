@@ -8,10 +8,10 @@ Evidence that the multi-tenant foundation is correct, tested aggressively, and r
 |---|---|---|
 | **DB e2e (real Postgres, two isolated sites)** | 38 scenarios | ✅ all pass |
 | Shared (`packages/shared`) incl. new `site.ts` | 75 | ✅ all pass (7 new) |
-| Engine (`apps/engine`) incl. new multiplex core | 135 | ✅ all pass (5 new) |
+| Engine (`apps/engine`) incl. multiplex core + WS integration | 138 | ✅ all pass (8 new) |
 | API (`apps/api`) | 115 | ✅ all pass |
 
-Total: **348 automated tests + 38 DB e2e scenarios**, 0 failures. No regressions in inherited code.
+Total: **328 automated tests + 38 DB e2e scenarios**, 0 failures. No regressions in inherited code.
 
 ## DB end-to-end (the hardest, highest-risk layer)
 
@@ -57,6 +57,14 @@ economy independently** (held-out Monte-Carlo: Site A ≈ 0.25, Site B ≈ 0.10)
 rebuild = crash-recovery equivalence; forced rotation changes only that brand; per-brand master
 decorrelates. This reuses the proven `CurveGenerator`/`SettlementEngine` unchanged, so their
 smoothness + RTP + fairness guarantees carry over per brand.
+
+## Engine — multiplexed WS server (`multiengine.test.ts`)
+A real **two-client WebSocket** integration test (two brands on one engine process) proves:
+- each brand commits its **own seed** and streams a **decorrelated** tick sequence;
+- `online` is counted **per brand**;
+- auth → open → auto-settle on Brand A is **never** seen by Brand B (isolated fan-out);
+- **per-brand stake bounds** are enforced independently (a stake valid on A is rejected on B).
+Plus the entrypoint boot was smoke-tested (in-memory → live WS `hello`).
 
 ## Run the TS suites
 ```bash

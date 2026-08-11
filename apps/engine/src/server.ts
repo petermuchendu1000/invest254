@@ -1,194 +1,149 @@
-import { WebSocketServer, type WebSocket } from "ws";
-import { type Direction } from "@invest254/shared";
-import { InMemoryGameRepository, PgGameRepository, type GameRepository, type Querier } from "./wallet.js";
-import { GameConfigStore, StaticConfigProvider, affectsPricing, configDiff, type ConfigProvider, type ListenClient } from "./gameconfig.js";
-import { InMemoryEngagementRepository, PgEngagementRepository, type EngagementRepository } from "./engagement.js";
-import { GameServer } from "./game.js";
-import { SeedManager } from "./daycontext.js";
-import { RecoveryService } from "./recovery.js";
+import { type IncomingMessage } from "node:http";
+import {
+  InMemoryGameRepository, PgGameRepository, type GameRepository, type Querier,
+} from "./wallet.js";
+import { StaticConfigProvider, mapConfigRow, type ConfigProvider } from "./gameconfig.js";
 import { PgUserOverridesRepository, type UserOverridesRepository } from "./overrides.js";
+import { SiteRegistry } from "./siteregistry.js";
+import { startMultiEngine } from "./multiengine.js";
 import { makeVerifier } from "./auth.js";
-import { WalletNotifier, type WalletListenClient, type WalletListenConnector } from "./walletnotify.js";
+import { DEFAULT_VERSIONED_CONFIG } from "@invest254/shared";
 
+/**
+ * Multiplexed engine entrypoint (multi-tenant).
+ *
+ * One process serves every brand: a SiteRegistry builds a per-site SeedManager + GameServer on
+ * demand (see siteregistry.ts), and the WS layer (multiengine.ts) binds each socket to its brand
+ * and fans out per-site. A brand is resolved from the connection's `?site=<slug|id>` (or Host),
+ * and — when a JWT verifier is configured — the token's `site` claim must match.
+ *
+ * Config: each brand prices from its own `site_game_config` row. NOTE: live hot-reload
+ * (LISTEN site_game_config_changed) is the SiteGameConfigStore task in docs/22; this entrypoint
+ * loads each brand's config at first use and re-reads historical versions for recovery.
+ *
+ * Without DATABASE_URL the engine runs fully in-memory for local dev (single default brand).
+ */
 const PORT = Number(process.env.PORT ?? 8080);
 const MASTER_SEED = process.env.MASTER_SEED ?? process.env.SERVER_SEED ?? "dev-master-seed-0001";
-const ONLINE_FLOOR = Number(process.env.ONLINE_FLOOR ?? 0);           // display floor for the online counter
-const CONFIG_POLL_MS = Number(process.env.CONFIG_POLL_MS ?? 15_000);   // LISTEN fallback cadence
+const ONLINE_FLOOR = Number(process.env.ONLINE_FLOOR ?? 0);
+const DEFAULT_SITE = process.env.DEFAULT_SITE_ID ?? "00000000-0000-0000-0000-000000000001";
 
-// Persistence: Postgres in production (atomic RPCs), in-memory for local dev.
-let repo: GameRepository;
-let engage: EngagementRepository;
-let config: ConfigProvider;
-let configStore: GameConfigStore | undefined;
-let overridesRepo: UserOverridesRepository | undefined;
-// Opens a dedicated LISTEN connection for real-time wallet balance pushes (set only with a DB).
-let walletListenConnect: WalletListenConnector | undefined;
 const usingDb = Boolean(process.env.DATABASE_URL);
+const verifier = makeVerifier();
+if (usingDb && !verifier) {
+  throw new Error("AUTH: a JWT verifier is required when DATABASE_URL is set (set SUPABASE_JWT_SECRET or SUPABASE_JWKS_URL)");
+}
+
+let repo: GameRepository;
+let overridesRepo: UserOverridesRepository | undefined;
+let configFor: (siteId: string) => ConfigProvider | Promise<ConfigProvider>;
+let masterSeedFor: ((siteId: string) => string | undefined) | undefined;
+/** host/slug/id -> siteId resolution table, refreshed at boot from `sites`. */
+const siteAliases = new Map<string, string>();
+
 if (usingDb) {
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  repo = new PgGameRepository(pool);
-  engage = new PgEngagementRepository(pool as unknown as Querier);
-  overridesRepo = new PgUserOverridesRepository(pool as unknown as Querier);
-  // Dedicated connection factory for the wallet LISTEN (see migration 0040). Session-mode
-  // pooling on :5432 supports LISTEN; the same pool already backs the game_config LISTEN.
-  walletListenConnect = async () => (await pool.connect()) as unknown as WalletListenClient;
-  // Live configuration: LISTEN for instant pickup, poll as the self-healing fallback.
-  // Until this existed the engine ran on hardcoded defaults and every admin save was inert.
-  configStore = new GameConfigStore(pool as unknown as Querier, {
-    pollMs: CONFIG_POLL_MS,
-    connect: async () => (await pool.connect()) as unknown as ListenClient,
-    onError: (err: Error, ctx: string) => console.error(`[engine] config ${ctx}:`, err.message),
-  });
-  await configStore.init();
-  config = configStore;
-  console.log(`[engine] game_config v${configStore.active().version} loaded from database`);
+  const q = pool as unknown as Querier;
+  repo = new PgGameRepository(q);
+  overridesRepo = new PgUserOverridesRepository(q);
+
+  // Resolve aliases (slug + primary_domain -> id) for active brands so a connection can name its
+  // site by slug or host, not just uuid.
+  const rows = (await q.query(
+    "select id, slug, primary_domain, master_seed_ref from sites where status = 'active'", [])).rows;
+  const masterRefBySite = new Map<string, string>();
+  for (const r of rows) {
+    const id = String(r.id);
+    siteAliases.set(id, id);
+    if (r.slug) siteAliases.set(String(r.slug), id);
+    if (r.primary_domain) siteAliases.set(String(r.primary_domain), id);
+    if (r.master_seed_ref && process.env[String(r.master_seed_ref)]) masterRefBySite.set(id, process.env[String(r.master_seed_ref)]!);
+  }
+  masterSeedFor = (siteId) => masterRefBySite.get(siteId);
+
+  const CONFIG_COLS = "house_edge, max_multiplier, min_stake, max_stake, min_withdrawal, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version";
+  configFor = async (siteId): Promise<ConfigProvider> => {
+    const load = async () => {
+      const r = await q.query(`select ${CONFIG_COLS} from site_game_config where site_id = $1`, [siteId]);
+      if (!r.rows.length) throw new Error(`no site_game_config for site ${siteId}`);
+      return mapConfigRow(r.rows[0] as Record<string, unknown>);
+    };
+    let current = await load();
+    return {
+      active: () => current,
+      // Poll on read is cheap here and keeps the entrypoint dependency-free until the
+      // LISTEN-based SiteGameConfigStore lands (docs/22 Task C).
+      forVersion: async (v) => {
+        if (v === null || v === undefined) return current;
+        const r = await q.query(`select ${CONFIG_COLS} from site_game_config_versions where site_id = $1 and version = $2`, [siteId, v]);
+        return r.rows.length ? mapConfigRow(r.rows[0] as Record<string, unknown>) : current;
+      },
+    };
+  };
+  console.log(`[engine] multi-tenant: ${siteAliases.size} alias(es) for active brands; store=postgres`);
 } else {
-  repo = new InMemoryGameRepository();
-  engage = new InMemoryEngagementRepository();
-  config = new StaticConfigProvider();
-  console.log("[engine] no DATABASE_URL — running on DEFAULT_CONFIG (v0)");
-}
-const cfg = () => config.active();
-
-const verifier = makeVerifier();
-if (usingDb && !verifier) throw new Error("AUTH: a JWT verifier is required when DATABASE_URL is set (set SUPABASE_JWT_SECRET or SUPABASE_JWKS_URL)");
-
-const seeds = new SeedManager(MASTER_SEED, config, repo);
-await seeds.init();
-// J8: per-user admin overrides (win rate / max multiplier / auto-sell duration / stake bounds).
-const loadOverride = overridesRepo ? (uid: string) => overridesRepo!.getForUser(uid) : undefined;
-const game = new GameServer(() => seeds.getActive(), repo, cfg, undefined, loadOverride);
-
-const recovery = new RecoveryService(repo, seeds, game, undefined, loadOverride);
-const recovered = await recovery.recover();
-console.log(`[engine] recovery: scanned=${recovered.scanned} settled=${recovered.settled} rearmed=${recovered.rearmed} noop=${recovered.noop} failed=${recovered.failed}`);
-
-const all = new Set<WebSocket>();
-const byUser = new Map<string, Set<WebSocket>>();
-const userOf = new WeakMap<WebSocket, string>();
-
-const send = (ws: WebSocket, type: string, data: unknown) => ws.readyState === ws.OPEN && ws.send(JSON.stringify({ type, data, ts: Date.now() }));
-const toUser = (userId: string, type: string, data: unknown) => byUser.get(userId)?.forEach((ws) => send(ws, type, data));
-const broadcast = (type: string, data: unknown) => all.forEach((ws) => send(ws, type, data));
-const onlineCount = () => Math.max(all.size, ONLINE_FLOOR);
-
-// Real-time balance push: when ANY wallet row changes (deposit confirm, withdrawal, admin
-// credit/debit, deposit bonus, bonus conversion — all of which UPDATE `wallets`), migration
-// 0040's trigger emits pg_notify('wallet_changed', userId). We re-read that user's wallet and
-// push a fresh `balance` frame to their live sockets, so the on-screen balance updates without
-// a reload. Only does work for users who currently have an open socket.
-if (walletListenConnect) {
-  const notifier = new WalletNotifier({
-    connect: walletListenConnect,
-    reconnectMs: 5_000,
-    onError: (err, ctx) => console.error(`[engine] wallet-notify ${ctx}:`, err.message),
-    onChange: (userId) => {
-      if (!byUser.has(userId)) return; // nobody from this user is connected — nothing to push
-      void repo
-        .getWalletSnapshot(userId)
-        .then((w) => toUser(userId, "balance", { real: w.real, bonus: w.bonus, currency: w.currency }))
-        .catch((err) => console.error("[engine] wallet-notify push:", (err as Error).message));
-    },
-  });
-  await notifier.init();
-  console.log("[engine] wallet balance push armed (LISTEN wallet_changed)");
+  const mem = new InMemoryGameRepository();
+  repo = mem;
+  siteAliases.set(DEFAULT_SITE, DEFAULT_SITE);
+  siteAliases.set("default", DEFAULT_SITE);
+  configFor = () => new StaticConfigProvider(DEFAULT_VERSIONED_CONFIG);
+  console.log("[engine] no DATABASE_URL — in-memory single default brand (dev)");
 }
 
-// Activity feed: simulated generator (flagged) + real-event recorder; both broadcast `activity`.
-
-game.subscribe({
-  onTick: (t) => broadcast("tick", t),
-  onUpdate: (u) => { const p = game.getPosition(u.positionId); if (p) toUser(p.userId, "position_update", u); },
-  onSettled: (e) => {
-    toUser(e.position.userId, "position_settled", {
-      positionId: e.position.id, result: e.position.outcome.result, lockedMultiplier: e.lockedMultiplier,
-      payoutCents: e.payoutCents, pnlCents: e.pnlCents, balance: e.balance, mode: e.mode,
-      presentation: e.presentation,
-    });
-  },
-  onError: (err, ctx) => console.error(`[engine] ${ctx}:`, err.message),
-});
-game.start();
-
-/**
- * Apply an admin configuration change without disturbing money already at risk.
- *
- *  - Pricing knobs (RTP, win rate, multiplier cap, volatility, drift, duration) require a
- *    fresh curve + settlement calibration. `seeds.init()` re-points the ACTIVE context at
- *    the new version; positions already open keep the context they committed to, so the
- *    admin panel's "takes effect on the next round" promise is now literally true.
- *  - Tick rate is a timer period, so the interval is rescheduled in place.
- *  - Stake bounds need no action: they are read per request from the live config.
- */
-configStore?.subscribe((next, prev) => {
-  const changes = configDiff(prev, next);
-  console.log(`[engine] game_config v${prev.version} -> v${next.version}: ${changes.join("; ") || "no field change"}`);
-  if (game.applyTickRate()) console.log(`[engine] tick loop rescheduled to ${next.tickRateMs}ms`);
-  // Push the new limits to every open socket so stake bounds and duration update without a
-  // reload; clients that predate this message simply ignore it.
-  broadcast("game_config", game.onlineConfigSnapshot());
-  if (!affectsPricing(prev, next)) return;
-  void seeds.init()
-    .then((ctx) => console.log(`[engine] pricing context rebuilt for ${ctx.dateKey} @ config v${ctx.configVersion}`))
-    .catch((err) => console.error("[engine] config context rebuild failed:", (err as Error).message));
+const registry = new SiteRegistry({
+  masterSeed: MASTER_SEED,
+  repo,
+  configFor,
+  ...(masterSeedFor ? { masterSeedFor } : {}),
+  ...(overridesRepo ? { loadOverride: (uid: string) => overridesRepo!.getForUser(uid) } : {}),
 });
 
-// Rotate at the UTC day boundary: derive new day, commit its hash, reveal yesterday's seed.
+// Deterministic crash recovery across every brand with open positions, before accepting traffic.
+const recovered = await registry.recoverAll();
+for (const [siteId, rep] of recovered) {
+  console.log(`[engine] recovery ${siteId}: scanned=${rep.scanned} settled=${rep.settled} rearmed=${rep.rearmed} noop=${rep.noop} failed=${rep.failed}`);
+}
+
+/** Resolve a connection's brand from `?site=` (slug|domain|id) then Host, then the default. */
+function resolveSite(req: IncomingMessage): string {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const q = url.searchParams.get("site");
+  if (q && siteAliases.has(q)) return siteAliases.get(q)!;
+  const host = (req.headers["host"] ?? "").toString().split(":")[0]!;
+  if (host && siteAliases.has(host)) return siteAliases.get(host)!;
+  if (!usingDb) return DEFAULT_SITE;
+  throw new Error(`unresolved site (site=${q ?? ""} host=${host})`);
+}
+
+const devSeed = !usingDb && repo instanceof InMemoryGameRepository
+  ? async (_siteId: string, userId: string) => { if ((await repo.getBalance(userId)) === 0) (repo as InMemoryGameRepository).seed(userId, 100000); }
+  : undefined;
+
+const handle = await startMultiEngine({
+  port: PORT,
+  registry,
+  repo,
+  verifier,
+  resolveSite,
+  onlineFloor: ONLINE_FLOOR,
+  ...(devSeed ? { devSeedBalance: devSeed } : {}),
+});
+
+if (!verifier) console.warn("[engine] WARNING: no JWT verifier — DEV auth (trusts client userId). Not for production.");
+console.log(`[engine] multiplexed WS listening on :${PORT}  store=${usingDb ? "postgres" : "in-memory"}  auth=${verifier ? "jwt" : "dev"}  onlineFloor=${ONLINE_FLOOR}`);
+
+// Rotate every brand's seed at the UTC day boundary (reveals yesterday, commits today per brand).
 setInterval(() => {
   void (async () => {
-    try {
-      const before = seeds.getActive().dateKey;
-      const { active, revealed } = await seeds.rotate();
-      if (active.dateKey !== before) {
-        broadcast("fairness", { serverSeedHash: active.seedHash, tradeDate: active.dateKey });
-        console.log(`[engine] rotated to ${active.dateKey}${revealed ? ` (revealed ${revealed})` : ""}`);
-      }
-    } catch (err) { console.error("[engine] rotation:", (err as Error).message); }
+    for (const rt of registry.all()) {
+      try {
+        const before = rt.seeds.getActive().dateKey;
+        const { active, revealed } = await rt.seeds.rotate();
+        if (active.dateKey !== before) console.log(`[engine] ${rt.siteId} rotated to ${active.dateKey}${revealed ? ` (revealed ${revealed})` : ""}`);
+      } catch (err) { console.error(`[engine] ${rt.siteId} rotation:`, (err as Error).message); }
+    }
   })();
 }, 60_000).unref();
 
-const wss = new WebSocketServer({ host: "0.0.0.0", port: PORT });
-wss.on("connection", (ws) => {
-  all.add(ws);
-  send(ws, "hello", { serverTime: Date.now(), serverSeedHash: seeds.getActive().seedHash, tradeDate: seeds.getActive().dateKey, gameConfig: game.onlineConfigSnapshot() });
-  broadcast("online", { count: onlineCount() });
-  ws.on("message", async (raw) => {
-    let msg: any; try { msg = JSON.parse(String(raw)); } catch { return send(ws, "error", { code: "BAD_JSON" }); }
-    try {
-      switch (msg.type) {
-        case "auth": {
-          let userId: string;
-          if (verifier) {
-            try { userId = (await verifier(String(msg.data?.token ?? ""))).userId; }
-            catch { return send(ws, "error", { code: "AUTH_INVALID" }); }
-          } else {
-            userId = String(msg.data?.userId ?? "");
-            if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
-          }
-          userOf.set(ws, userId);
-          (byUser.get(userId) ?? byUser.set(userId, new Set()).get(userId)!).add(ws);
-          if (!usingDb && repo instanceof InMemoryGameRepository && (await repo.getBalance(userId)) === 0) repo.seed(userId, 100000);
-          return send(ws, "balance", { real: await repo.getBalance(userId), currency: "KES" });
-        }
-        case "open_position": {
-          const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
-          const { position: p, balance } = await game.openPosition({ userId, stakeCents: Number(msg.data.stakeCents), direction: msg.data.direction as Direction, durationS: msg.data.durationS });
-          send(ws, "position_opened", { positionId: p.id, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs });
-          return send(ws, "balance", { real: balance, currency: "KES" });
-        }
-        case "sell": {
-          const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
-          await game.sell(String(msg.data.positionId), userId); return;
-        }
-        case "ping": return send(ws, "pong", {});
-        default: return send(ws, "error", { code: "UNKNOWN_TYPE", message: msg.type });
-      }
-    } catch (err: any) { send(ws, "error", { code: "ENGINE_ERROR", message: String(err?.message ?? err) }); }
-  });
-
-  ws.on("close", () => { all.delete(ws); const u = userOf.get(ws); if (u) byUser.get(u)?.delete(ws); broadcast("online", { count: onlineCount() }); });
-});
-
-if (!verifier) console.warn("[engine] WARNING: no JWT verifier configured — DEV auth (trusts client userId). Do NOT use in production.");
-console.log(`[engine] listening on ws://localhost:${PORT}  store=${usingDb ? "postgres" : "in-memory"}  auth=${verifier ? "jwt" : "dev"}  day=${seeds.getActive().dateKey}onlineFloor=${ONLINE_FLOOR}  edge=${(cfg().houseEdge * 100).toFixed(0)}%  cfgV=${cfg().version ?? 0}  tick=${game.currentTickRateMs()}ms`);
+process.on("SIGTERM", () => { void handle.close().then(() => process.exit(0)); });
