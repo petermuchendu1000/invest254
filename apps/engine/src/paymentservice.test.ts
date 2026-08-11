@@ -66,6 +66,39 @@ test("PaymentService: withdrawal validation (min, positive, phone)", async () =>
   await assert.rejects(() => svc.requestWithdrawal("u", 25_000, "bad"), /INVALID_PHONE/);
 });
 
+test("PaymentService: live minWithdrawalProvider gates the amount per-request (admin-editable floor)", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 1_000_000);
+  const daraja = new StubDarajaClient();
+  // Provider is read on every request, so raising the floor takes effect immediately — no reboot.
+  let liveMin = 25_000;
+  const svc = new PaymentService(repo, daraja, { minWithdrawalProvider: () => liveMin });
+
+  // At the default floor, KES 250 is allowed and KES 249.99 is not.
+  assert.equal((await svc.requestWithdrawal("u", 25_000, "0712345678")).newBalance, 975_000);
+  await assert.rejects(() => svc.requestWithdrawal("u", 24_999, "0712345678"), /BELOW_MIN/);
+
+  // Operator raises the minimum to KES 500. A 25_000 request that just succeeded now fails,
+  // and the raised floor (50_000) is what passes — proving the value is live, not boot-time.
+  liveMin = 50_000;
+  await assert.rejects(() => svc.requestWithdrawal("u", 25_000, "0712345678"), /BELOW_MIN/);
+  assert.equal((await svc.requestWithdrawal("u", 50_000, "0712345678")).newBalance, 925_000);
+
+  // Operator lowers it to KES 100 — a previously-rejected small amount now goes through.
+  liveMin = 10_000;
+  assert.equal((await svc.requestWithdrawal("u", 10_000, "0712345678")).newBalance, 915_000);
+});
+
+test("PaymentService: minWithdrawalProvider falls back to the static default on a bad/zero value", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u", 1_000_000);
+  const daraja = new StubDarajaClient();
+  // A transient bad config (0/NaN) must NOT open the floor to any amount; the safe default holds.
+  const svc = new PaymentService(repo, daraja, { minWithdrawalCents: 25_000, minWithdrawalProvider: () => 0 });
+  await assert.rejects(() => svc.requestWithdrawal("u", 24_999, "0712345678"), /BELOW_MIN/);
+  assert.equal((await svc.requestWithdrawal("u", 25_000, "0712345678")).newBalance, 975_000);
+});
+
 test("makeDarajaClient: stub without creds, HttpDarajaClient when configured", () => {
   assert.ok(makeDarajaClient({} as NodeJS.ProcessEnv) instanceof StubDarajaClient);
   const cfgEnv = { MPESA_CONSUMER_KEY: "k", MPESA_CONSUMER_SECRET: "s", MPESA_SHORTCODE: "174379", MPESA_PASSKEY: "p" } as any;

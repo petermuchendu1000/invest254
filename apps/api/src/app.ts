@@ -80,6 +80,7 @@ function gameConfigDto(cfg: GameConfig | VersionedGameConfig) {
     currency: "KES",
     minStakeCents: cfg.minStakeCents,
     maxStakeCents: cfg.maxStakeCents,
+    minWithdrawalCents: cfg.minWithdrawalCents,
     maxMultiplier: cfg.maxMultiplier,
     defaultDurationS: cfg.defaultDurationS,
     tickRateMs: cfg.tickRateMs,

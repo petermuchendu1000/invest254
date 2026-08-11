@@ -1,17 +1,17 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { kesToCents, centsToKes, formatKes } from '@invest254/shared/money';
 import { normalizeMsisdn, MIN_WITHDRAWAL_CENTS } from '@invest254/shared/payments';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { api } from '@/lib/api/endpoints';
 import { useWithdraw, useWallet } from '@/lib/wallet/hooks';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useSession } from '@/lib/auth/session';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
-
-const MIN_KES = centsToKes(MIN_WITHDRAWAL_CENTS);
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
@@ -42,6 +42,16 @@ export function WithdrawForm() {
   const accountPhone = useSession((s) => s.user?.phone ?? null);
   const withdraw = useWithdraw();
 
+  // Live minimum withdrawal from game config (admin-editable). Falls back to the shared
+  // constant so the form still validates sensibly before config loads / if the fetch fails.
+  const { data: config } = useQuery({
+    queryKey: ['gameConfig'],
+    queryFn: api.gameConfig,
+    staleTime: 5 * 60_000,
+  });
+  const minWithdrawalCents = config?.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
+  const minKes = centsToKes(minWithdrawalCents);
+
   const [amount, setAmount] = useState('');
   const [editingPhone, setEditingPhone] = useState(false);
   const [phone, setPhone] = useState('');
@@ -56,7 +66,7 @@ export function WithdrawForm() {
 
   const kes = Number(amount);
   const amountCents = Number.isFinite(kes) ? kesToCents(kes) : 0;
-  const amountValid = Number.isInteger(kes) && kes >= MIN_KES && amountCents <= realCents;
+  const amountValid = Number.isInteger(kes) && kes >= minKes && amountCents <= realCents;
   const destMasked = useMemo(() => {
     try {
       return maskMsisdn(normalizeMsisdn(effectivePhone));
@@ -69,7 +79,7 @@ export function WithdrawForm() {
     e.preventDefault();
     setServerError(null);
     const next: Record<string, string | undefined> = {};
-    if (!Number.isInteger(kes) || kes < MIN_KES) next['amount'] = `Minimum withdrawal is ${formatKes(MIN_WITHDRAWAL_CENTS)}.`;
+    if (!Number.isInteger(kes) || kes < minKes) next['amount'] = `Minimum withdrawal is ${formatKes(minWithdrawalCents)}.`;
     else if (kesToCents(kes) > realCents) next['amount'] = 'Amount exceeds your real balance.';
     try {
       normalizeMsisdn(effectivePhone);
@@ -144,7 +154,7 @@ export function WithdrawForm() {
           />
         </div>
       </div>
-      <p className="-mt-1 text-center text-xs text-muted">Min {formatKes(MIN_WITHDRAWAL_CENTS)}</p>
+      <p className="-mt-1 text-center text-xs text-muted">Min {formatKes(minWithdrawalCents)}</p>
       {errors['amount'] ? <p className="text-center text-xs text-down">{errors['amount']}</p> : null}
 
       {/* Destination */}

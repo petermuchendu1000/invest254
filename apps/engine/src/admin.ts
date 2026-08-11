@@ -102,6 +102,7 @@ export interface UserReportRow { userId: string; username: string; depositsCents
 /** The live game_config singleton as the admin panel sees it (J5). */
 export interface GameConfigRow {
   houseEdge: number; maxMultiplier: number; minStakeCents: Cents; maxStakeCents: Cents;
+  minWithdrawalCents: Cents;          // smallest cash-out a player can request (0043)
   defaultDurationS: number; tickRateMs: number; driftBias: number; volatility: number;
   targetWinRate: number;             // share of positions that win, per direction (0028)
   rtpTarget: number;                 // derived: 1 - house_edge
@@ -114,6 +115,7 @@ export interface GameConfigRow {
 /** Partial game_config edit (J5). Only provided keys change; the rest are left untouched. */
 export interface GameConfigPatch {
   houseEdge?: number; maxMultiplier?: number; minStakeCents?: number; maxStakeCents?: number;
+  minWithdrawalCents?: number;
   defaultDurationS?: number; tickRateMs?: number; driftBias?: number; volatility?: number;
   targetWinRate?: number;
 }
@@ -276,6 +278,7 @@ function mapGameConfigRow(x: any): GameConfigRow {
   const targetWinRate = Number(x.target_win_rate);
   return {
     houseEdge, maxMultiplier: Number(x.max_multiplier), minStakeCents: num(x.min_stake), maxStakeCents: num(x.max_stake),
+    minWithdrawalCents: num(x.min_withdrawal),
     defaultDurationS: Number(x.default_duration_s), tickRateMs: Number(x.tick_rate_ms),
     driftBias: Number(x.drift_bias), volatility: Number(x.volatility), targetWinRate,
     rtpTarget: 1 - houseEdge, version: Number(x.version ?? 0),
@@ -289,6 +292,7 @@ function defaultGameConfigRow(): GameConfigRow {
   const c = DEFAULT_CONFIG;
   return {
     houseEdge: c.houseEdge, maxMultiplier: c.maxMultiplier, minStakeCents: c.minStakeCents, maxStakeCents: c.maxStakeCents,
+    minWithdrawalCents: c.minWithdrawalCents,
     defaultDurationS: c.defaultDurationS, tickRateMs: c.tickRateMs, driftBias: c.driftBias, volatility: c.volatility,
     targetWinRate: c.targetWinRate, rtpTarget: 1 - c.houseEdge, version: 1,
     requiredMeanWinMultiplier: (1 - c.houseEdge) / c.targetWinRate,
@@ -371,7 +375,8 @@ export async function loadDarajaConfigFromDb(q: Querier): Promise<Partial<Daraja
 function validateGameConfig(c: GameConfigRow): void {
   const verdict = checkFeasible({
     houseEdge: c.houseEdge, maxMultiplier: c.maxMultiplier, minStakeCents: c.minStakeCents,
-    maxStakeCents: c.maxStakeCents, defaultDurationS: c.defaultDurationS, tickRateMs: c.tickRateMs,
+    maxStakeCents: c.maxStakeCents, minWithdrawalCents: c.minWithdrawalCents,
+    defaultDurationS: c.defaultDurationS, tickRateMs: c.tickRateMs,
     driftBias: c.driftBias, volatility: c.volatility, targetWinRate: c.targetWinRate,
   });
   if (!verdict.ok) throw new Error("INVALID_CONFIG");
@@ -795,7 +800,7 @@ export class PgAdminRepository implements AdminRepository {
 
   async getGameConfig(): Promise<GameConfigRow> {
     const r = await this.q.query(
-      "select house_edge, max_multiplier, min_stake, max_stake, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version, updated_by, updated_at from game_config where id = 1", []);
+      "select house_edge, max_multiplier, min_stake, max_stake, min_withdrawal, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version, updated_by, updated_at from game_config where id = 1", []);
     if (!r.rows.length) throw new Error("NOT_FOUND");
     return mapGameConfigRow(r.rows[0]);
   }
@@ -803,7 +808,7 @@ export class PgAdminRepository implements AdminRepository {
   async updateGameConfig(actorId: string, actorRole: string, patch: GameConfigPatch): Promise<GameConfigRow> {
     try {
       const r = await this.q.query(
-        "select house_edge, max_multiplier, min_stake, max_stake, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version, updated_by, updated_at from fn_admin_update_game_config($1,$2,$3::jsonb)",
+        "select house_edge, max_multiplier, min_stake, max_stake, min_withdrawal, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version, updated_by, updated_at from fn_admin_update_game_config($1,$2,$3::jsonb)",
         [actorId, actorRole, JSON.stringify(patch)]);
       return mapGameConfigRow(r.rows[0]);
     } catch (e) { mapAdminError(e); }
@@ -1394,6 +1399,7 @@ export class InMemoryAdminRepository implements AdminRepository {
     if (patch.maxMultiplier !== undefined) next.maxMultiplier = patch.maxMultiplier;
     if (patch.minStakeCents !== undefined) next.minStakeCents = patch.minStakeCents;
     if (patch.maxStakeCents !== undefined) next.maxStakeCents = patch.maxStakeCents;
+    if (patch.minWithdrawalCents !== undefined) next.minWithdrawalCents = patch.minWithdrawalCents;
     if (patch.defaultDurationS !== undefined) next.defaultDurationS = patch.defaultDurationS;
     if (patch.tickRateMs !== undefined) next.tickRateMs = patch.tickRateMs;
     if (patch.driftBias !== undefined) next.driftBias = patch.driftBias;

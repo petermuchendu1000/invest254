@@ -11,7 +11,7 @@ import { RecoveryService } from "./recovery.js";
 function row(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
     house_edge: "0.75", max_multiplier: "5.0", min_stake: "5000", max_stake: "5000000",
-    default_duration_s: 10, tick_rate_ms: 150, drift_bias: "0.3", volatility: "1.0",
+    min_withdrawal: "25000", default_duration_s: 10, tick_rate_ms: 150, drift_bias: "0.3", volatility: "1.0",
     target_win_rate: "0.125", version: "1", ...over,
   };
 }
@@ -165,6 +165,16 @@ test("checkFeasible: enforces the operational bounds the DB CHECKs enforce", () 
   assert.match(checkFeasible({ ...DEFAULT_CONFIG, volatility: 0 }).reason!, /volatility/);
   assert.match(checkFeasible({ ...DEFAULT_CONFIG, maxStakeCents: 100 }).reason!, /maxStakeCents/);
   assert.match(checkFeasible({ ...DEFAULT_CONFIG, defaultDurationS: 0 }).reason!, /defaultDurationS/);
+  assert.match(checkFeasible({ ...DEFAULT_CONFIG, minWithdrawalCents: 0 }).reason!, /minWithdrawalCents/);
+  assert.match(checkFeasible({ ...DEFAULT_CONFIG, minWithdrawalCents: -5 }).reason!, /minWithdrawalCents/);
+  assert.match(checkFeasible({ ...DEFAULT_CONFIG, minWithdrawalCents: 250.5 }).reason!, /minWithdrawalCents/);
+  assert.equal(checkFeasible({ ...DEFAULT_CONFIG, minWithdrawalCents: 50_000 }).ok, true);
+});
+
+test("mapConfigRow: parses min_withdrawal into minWithdrawalCents (integer cents)", () => {
+  const cfg = mapConfigRow(row({ min_withdrawal: "50000" }));
+  assert.equal(cfg.minWithdrawalCents, 50_000);
+  assert.ok(Number.isInteger(cfg.minWithdrawalCents));
 });
 
 test("configDiff / affectsPricing classify changes correctly", () => {

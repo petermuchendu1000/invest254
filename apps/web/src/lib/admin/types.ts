@@ -203,6 +203,7 @@ export interface GameConfigRow {
   maxMultiplier: number;
   minStakeCents: Cents;
   maxStakeCents: Cents;
+  minWithdrawalCents: Cents;
   defaultDurationS: number;
   tickRateMs: number;
   driftBias: number;
@@ -221,6 +222,7 @@ export interface GameConfigPatch {
   maxMultiplier?: number;
   minStakeCents?: number;
   maxStakeCents?: number;
+  minWithdrawalCents?: number;
   defaultDurationS?: number;
   tickRateMs?: number;
   driftBias?: number;

@@ -54,6 +54,9 @@ async function buildDeps(): Promise<ApiDeps> {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
     // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
     verifyStkCallbacks: process.env.MPESA_VERIFY_CALLBACKS !== "false",
+    // Live minimum withdrawal: read straight from the same game_config store the engine uses,
+    // so an admin's edit in the panel gates the very next withdrawal with no redeploy.
+    minWithdrawalProvider: () => gameConfig.active().minWithdrawalCents,
     events: {
       onWithdrawalSuccess: ({ userId, amountCents }) => {
         void resolveHandle(userId)

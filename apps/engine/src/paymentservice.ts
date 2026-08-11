@@ -13,16 +13,31 @@ export interface PaymentEvents {
   /** Fired once when a withdrawal is confirmed paid (for the real activity feed). */
   onWithdrawalSuccess?(e: { userId: string; amountCents: Cents }): void;
 }
-export interface PaymentServiceOptions { minDepositCents?: Cents; minWithdrawalCents?: Cents; events?: PaymentEvents; verifyStkCallbacks?: boolean; }
+export interface PaymentServiceOptions {
+  minDepositCents?: Cents;
+  minWithdrawalCents?: Cents;
+  /**
+   * Live minimum-withdrawal source. When provided it is consulted per-request so an admin's
+   * edit to `game_config.min_withdrawal` takes effect on the very next withdrawal without a
+   * redeploy (the API passes `() => gameConfig.active().minWithdrawalCents`). Falls back to
+   * the static `minWithdrawalCents` / `MIN_WITHDRAWAL_CENTS` constant when absent or when it
+   * returns a non-positive value.
+   */
+  minWithdrawalProvider?: () => Cents;
+  events?: PaymentEvents;
+  verifyStkCallbacks?: boolean;
+}
 
 export class PaymentService {
   private readonly minDeposit: Cents;
   private readonly minWithdrawal: Cents;
+  private readonly minWithdrawalProvider?: () => Cents;
   private readonly events: PaymentEvents;
   private readonly verifyStk: boolean;
   constructor(private readonly repo: PaymentRepository, private readonly daraja: DarajaClient, opts: PaymentServiceOptions = {}) {
     this.minDeposit = opts.minDepositCents ?? MIN_DEPOSIT_CENTS;
     this.minWithdrawal = opts.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
+    if (opts.minWithdrawalProvider) this.minWithdrawalProvider = opts.minWithdrawalProvider;
     this.events = opts.events ?? {};
     // Secure by default: a client can POST to the public STK callback URL, so a raw
     // resultCode=0 is NOT trusted — we re-check with Safaricom before crediting. Opt out only
@@ -95,8 +110,9 @@ export class PaymentService {
    *  - Otherwise it validates and HOLDS funds atomically (status pending) for the normal M-Pesa flow.
    */
   async requestWithdrawal(userId: string, amountCents: number, phoneRaw: string): Promise<WithdrawalOutcome> {
+    const minWithdrawal = this.currentMinWithdrawal();
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
-    if (amountCents < this.minWithdrawal) throw new Error("BELOW_MIN");
+    if (amountCents < minWithdrawal) throw new Error("BELOW_MIN");
     // Marketer instant path (game -> mpesa wallet). Phone is resolved from the player's profile.
     const gw = await this.repo.gameWithdraw(userId, amountCents);
     if (gw.isMarketer) {
@@ -107,8 +123,19 @@ export class PaymentService {
     }
     // Normal player: real M-Pesa payout via the pending -> admin approve -> Daraja B2C flow.
     const msisdn = normalizeMsisdn(phoneRaw);
-    const res: CreateWithdrawalResult = await this.repo.createWithdrawal(userId, amountCents, msisdn, this.minWithdrawal);
+    const res: CreateWithdrawalResult = await this.repo.createWithdrawal(userId, amountCents, msisdn, minWithdrawal);
     return { mode: "daraja", txId: res.txId, newBalance: res.newBalance };
+  }
+
+  /**
+   * The minimum withdrawal in force right now. Prefers the live provider (admin-editable
+   * `game_config.min_withdrawal`) and falls back to the boot-time constant if the provider is
+   * absent or returns a non-positive integer — so a transient bad config can never open the
+   * floor below the safe default.
+   */
+  private currentMinWithdrawal(): Cents {
+    const live = this.minWithdrawalProvider?.();
+    return Number.isInteger(live) && (live as number) > 0 ? (live as Cents) : this.minWithdrawal;
   }
   /** Finance admin approves: flips to processing and dispatches the B2C payment. */
   async approveWithdrawal(txId: string, adminId: string): Promise<{ approved: boolean; conversationId?: string }> {

@@ -30,7 +30,7 @@ import type { Querier } from "./wallet.js";
  */
 
 const CONFIG_COLUMNS =
-  "house_edge, max_multiplier, min_stake, max_stake, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version";
+  "house_edge, max_multiplier, min_stake, max_stake, min_withdrawal, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version";
 
 export const CONFIG_CHANNEL = "game_config_changed";
 
@@ -64,6 +64,7 @@ export function mapConfigRow(x: Record<string, unknown>): VersionedGameConfig {
     maxMultiplier: toNum(x.max_multiplier),
     minStakeCents: Math.round(toNum(x.min_stake)),
     maxStakeCents: Math.round(toNum(x.max_stake)),
+    minWithdrawalCents: Math.round(toNum(x.min_withdrawal)),
     defaultDurationS: Math.round(toNum(x.default_duration_s)),
     tickRateMs: Math.round(toNum(x.tick_rate_ms)),
     driftBias: toNum(x.drift_bias),
@@ -249,7 +250,7 @@ export class GameConfigStore implements ConfigProvider {
 /** Which fields changed between two configs — used for operator-visible change logs. */
 export function configDiff(a: GameConfig, b: GameConfig): string[] {
   const keys: (keyof GameConfig)[] = [
-    "houseEdge", "maxMultiplier", "minStakeCents", "maxStakeCents",
+    "houseEdge", "maxMultiplier", "minStakeCents", "maxStakeCents", "minWithdrawalCents",
     "defaultDurationS", "tickRateMs", "driftBias", "volatility", "targetWinRate",
   ];
   return keys.filter((k) => a[k] !== b[k]).map((k) => `${k}: ${a[k]} -> ${b[k]}`);

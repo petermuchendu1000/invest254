@@ -44,6 +44,8 @@ export interface GameConfigDto {
   currency: string;
   minStakeCents: Cents;
   maxStakeCents: Cents;
+  /** Smallest withdrawal a player can request (admin-editable in game config). */
+  minWithdrawalCents: Cents;
   maxMultiplier: number;
   defaultDurationS: number;
   tickRateMs: number;

@@ -26,6 +26,7 @@ test("GET /api/v1/game/config → public config snapshot in cents", async () => 
     assert.equal(body.currency, "KES");
     assert.equal(body.minStakeCents, DEFAULT_CONFIG.minStakeCents);
     assert.equal(body.maxStakeCents, DEFAULT_CONFIG.maxStakeCents);
+    assert.equal(body.minWithdrawalCents, DEFAULT_CONFIG.minWithdrawalCents);
     assert.equal(body.maxMultiplier, DEFAULT_CONFIG.maxMultiplier);
     assert.equal(body.defaultDurationS, DEFAULT_CONFIG.defaultDurationS);
     assert.equal(body.tickRateMs, DEFAULT_CONFIG.tickRateMs);

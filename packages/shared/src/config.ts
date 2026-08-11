@@ -14,6 +14,7 @@ export interface GameConfig {
   maxMultiplier: number;    // 5.0
   minStakeCents: Cents;     // 25000 (KES 250)
   maxStakeCents: Cents;     // 5_000_000
+  minWithdrawalCents: Cents; // 25000 (KES 250) — smallest cash-out an admin allows
   defaultDurationS: number; // 10
   tickRateMs: number;       // 150
   driftBias: number;        // visual green bias (does NOT affect fairness; see settlement)
@@ -50,6 +51,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   maxMultiplier: 5.0,
   minStakeCents: 25000,
   maxStakeCents: 5_000_000,
+  minWithdrawalCents: 25000,
   defaultDurationS: 10,
   tickRateMs: 150,
   driftBias: 0.30,
@@ -109,6 +111,9 @@ export function checkFeasible(cfg: GameConfig): ConfigFeasibility {
   }
   if (!Number.isInteger(cfg.maxStakeCents) || cfg.maxStakeCents < cfg.minStakeCents) {
     return fail(`maxStakeCents must be an integer >= minStakeCents: ${cfg.maxStakeCents}`);
+  }
+  if (!Number.isInteger(cfg.minWithdrawalCents) || cfg.minWithdrawalCents <= 0) {
+    return fail(`minWithdrawalCents must be a positive integer: ${cfg.minWithdrawalCents}`);
   }
   if (!Number.isInteger(cfg.defaultDurationS)
     || cfg.defaultDurationS < CONFIG_BOUNDS.defaultDurationS.min
