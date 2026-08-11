@@ -2,7 +2,7 @@ import { CurveGenerator } from "./curve.js";
 import { SeededRng } from "./prng.js";
 import { type GameConfig, assertFeasible, rtp } from "./config.js";
 import { mulCents } from "./money.js";
-import { variableRatioMultiplier, DEFAULT_WIN_SPREAD, type WinSpread } from "./engagement.js";
+import { winMultiplier, DEFAULT_WIN_SPREAD, type WinSpread } from "./engagement.js";
 import type { Direction, Outcome } from "./types.js";
 
 interface DirParams { tau: number; gain: number; }
@@ -98,7 +98,7 @@ export class SettlementEngine {
    * calibrated mean by construction. `nonce` makes the draw deterministic and
    * auditable per position.
    */
-  settleVariable(stakeCents: number, dir: Direction, entryT: number, nonce: number, serverSeed: string, spread: WinSpread = DEFAULT_WIN_SPREAD): Outcome {
+  settleVariable(stakeCents: number, dir: Direction, entryT: number, nonce: number, serverSeed: string, _spread: WinSpread = DEFAULT_WIN_SPREAD): Outcome {
     const base = this.settle(stakeCents, dir, entryT);
     if (base.result !== "win") return base;
     // Mean winning multiplier is the RTP-pinned target the calibrator solves for:
@@ -110,8 +110,9 @@ export class SettlementEngine {
     // mean to rtp/targetWinRate directly preserves RTP for every feasible config.
     const meanMult = rtp(this.cfg) / this.cfg.targetWinRate;
     const rng = new SeededRng(serverSeed, `engage:${nonce}`);
-    const shaped = variableRatioMultiplier(rng, Math.min(meanMult, this.cfg.maxMultiplier), this.cfg.maxMultiplier, spread);
-    const multiplier = Math.min(shaped, this.cfg.maxMultiplier);
+    // Maximum-entropy draw on (1, maxMultiplier] with mean pinned to meanMult ⇒ RTP exact,
+    // full configured range used (rare wins approach the cap), most-random given the mean.
+    const multiplier = winMultiplier(rng, meanMult, this.cfg.maxMultiplier);
     const payoutCents = mulCents(stakeCents, multiplier);
     return { ...base, multiplier, payoutCents, pnlCents: payoutCents - stakeCents };
   }

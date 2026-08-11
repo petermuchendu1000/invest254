@@ -17,6 +17,56 @@ function measureRtp(eng: SettlementEngine, dir: "buy" | "sell" | "both", seed: s
   return { rtp: payoutSum / stakeSum, winRate: wins / n };
 }
 
+test("settleVariable: live config pays a full-range RANDOM multiplier with exact RTP", () => {
+  // Live config: house edge 0.85 (RTP 0.15), win rate 0.05, cap ×30, 5s rounds ⇒ meanWinMult 3.0.
+  const cfg = { ...DEFAULT_CONFIG, houseEdge: 0.85, targetWinRate: 0.05, maxMultiplier: 30, driftBias: 0, defaultDurationS: 5 };
+  const seed = "settle-variable-live";
+  const curve = new CurveGenerator(seed, cfg);
+  const eng = new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, 3600, 30_000);
+  const meanWinTarget = rtp(cfg) / cfg.targetWinRate; // 3.0
+
+  const rng = new SeededRng(seed, "measure");
+  const stake = 20000;
+  let stakeSum = 0, payoutSum = 0, wins = 0, winMultSum = 0, maxMult = 0;
+  const distinctWinMults = new Set<number>();
+  const N = 60_000;
+  for (let i = 0; i < N; i++) {
+    const d: "buy" | "sell" = rng.next() < 0.5 ? "buy" : "sell";
+    const o = eng.settleVariable(stake, d, rng.range(0, 3600), i, seed);
+    stakeSum += stake; payoutSum += o.payoutCents;
+    if (o.result === "win") {
+      wins++; winMultSum += o.multiplier; maxMult = Math.max(maxMult, o.multiplier);
+      distinctWinMults.add(Math.round(o.multiplier * 100));
+    }
+  }
+  const realizedRtp = payoutSum / stakeSum;
+  const meanWin = winMultSum / wins;
+
+  // RTP lands on target (winRate × meanWinMult), within Monte-Carlo noise.
+  assert.ok(Math.abs(realizedRtp - rtp(cfg)) < 0.02, `realized RTP ${realizedRtp.toFixed(3)} vs ${rtp(cfg)}`);
+  // Winning multiplier mean is the calibrated value (RTP-exact).
+  assert.ok(Math.abs(meanWin - meanWinTarget) / meanWinTarget < 0.06, `mean win ×${meanWin.toFixed(2)} vs ×${meanWinTarget}`);
+  // Payouts are genuinely RANDOM (not a few hardcoded values) and span the configured range.
+  assert.ok(distinctWinMults.size > 200, `expected many distinct win sizes, got ${distinctWinMults.size}`);
+  assert.ok(maxMult > 10, `expected the tail to reach large multipliers, got ×${maxMult.toFixed(2)}`);
+  assert.ok(maxMult <= cfg.maxMultiplier + 1e-9, `never exceeds the cap, got ×${maxMult}`);
+});
+
+test("settleVariable: bigger stake ⇒ proportionally bigger payout at the same multiplier (stake scales linearly)", () => {
+  const cfg = { ...DEFAULT_CONFIG, houseEdge: 0.85, targetWinRate: 0.05, maxMultiplier: 30, driftBias: 0, defaultDurationS: 5 };
+  const seed = "settle-variable-stake";
+  const curve = new CurveGenerator(seed, cfg);
+  const eng = new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, 3600, 30_000);
+  // Find a winning entry, then confirm payout scales with stake at an identical multiplier draw.
+  let t = -1;
+  for (let s = 0; s < 3600 && t < 0; s += 0.05) if (eng.settleVariable(25000, "buy", s, 1, seed).result === "win") t = s;
+  assert.ok(t >= 0, "found a winning entry");
+  const a = eng.settleVariable(25000, "buy", t, 1, seed);
+  const b = eng.settleVariable(100000, "buy", t, 1, seed); // 4× stake, same nonce ⇒ same multiplier
+  assert.equal(a.multiplier, b.multiplier, "same draw ⇒ same multiplier");
+  assert.ok(Math.abs(b.payoutCents - 4 * a.payoutCents) <= 4, "payout scales linearly with stake");
+});
+
 test("REGRESSION: settleVariable wins are not all x1.00 when tau <= 0 (targetWinRate > 0.5)", () => {
   // Repro of the "WIN x1.00 / +KES 0.00" bug: for any targetWinRate above ~0.5 on a
   // near-symmetric curve (driftBias 0) the win threshold tau is NEGATIVE, which used to

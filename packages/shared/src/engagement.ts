@@ -34,37 +34,85 @@ export interface WinSpread {
 export const DEFAULT_WIN_SPREAD: WinSpread = { smallShare: 0.7, smallBand: [0.55, 0.95] };
 
 /**
- * Variable-ratio win sizing. Given the calibrated mean winning multiplier `meanMult`
- * (the value that makes RTP exact), draw a multiplier for THIS position such that the
- * long-run mean is preserved:
+ * Mean of the truncated-exponential density f(x) ∝ e^(-β x) on [a, b].
+ * Monotonically DECREASING in β (β→+∞ ⇒ mean→a, β→-∞ ⇒ mean→b, β=0 ⇒ mean=(a+b)/2).
+ * Closed form: E[X] = a + 1/β − L/(e^(βL) − 1), with L = b − a.
+ */
+function truncExpMean(beta: number, a: number, b: number): number {
+  const L = b - a;
+  if (Math.abs(beta * L) < 1e-9) return (a + b) / 2; // β→0 limit: uniform
+  return a + 1 / beta - L / Math.expm1(beta * L);
+}
+
+/**
+ * Solve for β so the truncated-exponential on [a, b] has mean `mu` (bisection on the
+ * monotone `truncExpMean`). `mu` MUST lie in (a, b); callers guard the degenerate ends.
+ */
+export function solveTruncExpBeta(mu: number, a: number, b: number): number {
+  const L = b - a;
+  const mid = (a + b) / 2;
+  if (Math.abs(mu - mid) < 1e-9 * L) return 0; // exact midpoint ⇒ uniform
+  // β·L is kept within ±700 to avoid overflow; that range already pins the mean to a/b.
+  let lo = -700 / L, hi = 700 / L; // truncExpMean(lo) ≈ b (max), truncExpMean(hi) ≈ a (min)
+  for (let i = 0; i < 200; i++) {
+    const mid2 = (lo + hi) / 2;
+    // mean is DECREASING in β: if the mean here is still above target, push β up.
+    if (truncExpMean(mid2, a, b) > mu) lo = mid2;
+    else hi = mid2;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * Inverse-CDF sample from the truncated-exponential on [a, b] for a uniform u ∈ [0,1).
+ * G(y) = (1 − e^(−βy)) / (1 − e^(−βL)) on y∈[0,L]; invert to y = −ln(1 − u·(1−e^(−βL)))/β.
+ * β = 0 is the uniform limit.
+ */
+function sampleTruncExp(u: number, beta: number, a: number, b: number): number {
+  const L = b - a;
+  if (Math.abs(beta * L) < 1e-9) return a + u * L; // uniform
+  const c = 1 - Math.exp(-beta * L); // (0,1) for β>0; negative for β<0 — both invert correctly
+  const y = -Math.log(1 - u * c) / beta;
+  return a + y;
+}
+
+/**
+ * Maximum-entropy winning multiplier — the optimum payout draw.
  *
- *   with prob smallShare:  uniform in smallBand * meanMult          (frequent small wins)
- *   else:                  sized so the overall mean == meanMult     (rare bigger wins)
- *
- * The big-win mean is solved analytically: bigMean = meanMult * (1 - smallShare*smallMean) / (1 - smallShare),
- * then jittered ±20% (the jitter is symmetric, so it does not shift the mean).
- * Result is clamped to [1.01, maxMultiplier]; clamping is symmetric around the solved
- * distribution in practice because bands sit well inside the cap.
+ * Given the calibrated mean winning multiplier `meanMult = RTP / winRate` and the payout cap
+ * `maxMultiplier`, draw THIS position's multiplier from the MAXIMUM-ENTROPY distribution on
+ * [lo, maxMultiplier] whose mean is exactly `meanMult`. Among all distributions on a bounded
+ * interval with a fixed mean, the max-entropy one is the truncated exponential f(x) ∝ e^(−βx)
+ * (β solved so E[X] = meanMult). Properties, all provable:
+ *   • RTP is EXACT:            E[X] = meanMult ⇒ RTP = winRate · meanMult.
+ *   • Uses the FULL range:     support is [lo, maxMultiplier]; raising the cap adds a genuine
+ *                              heavy tail (rare wins approach the cap) instead of a dead clamp.
+ *   • "Most random":           max entropy = least-assuming payout consistent with the mean.
+ *   • Deterministic & O(1):    one seeded uniform through a closed-form inverse-CDF.
+ * `lo` (default 1.01) keeps a win strictly profitable and matches the legacy floor.
+ */
+export function winMultiplier(rng: SeededRng, meanMult: number, maxMultiplier: number, lo = 1.01): number {
+  const cap = maxMultiplier;
+  if (!(cap > lo) || !(meanMult > lo)) return Math.min(Math.max(meanMult, 1), cap); // degenerate: near break-even
+  if (meanMult >= cap) return cap; // mean pinned to the cap ⇒ point mass at the cap
+  const beta = solveTruncExpBeta(meanMult, lo, cap);
+  const x = sampleTruncExp(rng.next(), beta, lo, cap);
+  return Math.min(Math.max(x, lo), cap);
+}
+
+/**
+ * Variable-ratio win sizing (RTP-preserving). Kept for API compatibility — now delegates to the
+ * maximum-entropy `winMultiplier`, which subsumes the old two-band mixture: it preserves the
+ * calibrated mean, keeps most wins small with a real tail toward the cap, and is deterministic
+ * per (serverSeed, nonce). The `spread` argument is accepted but no longer needed.
  */
 export function variableRatioMultiplier(
   rng: SeededRng,
   meanMult: number,
   maxMultiplier: number,
-  spread: WinSpread = DEFAULT_WIN_SPREAD,
+  _spread: WinSpread = DEFAULT_WIN_SPREAD,
 ): number {
-  if (meanMult <= 1) return meanMult;
-  const smallMean = (spread.smallBand[0] + spread.smallBand[1]) / 2;
-  const bigMean = (meanMult - spread.smallShare * smallMean * meanMult) / (1 - spread.smallShare);
-  let m: number;
-  if (bigMean <= 1 || bigMean <= smallMean * meanMult) {
-    // Degenerate spread (mean too low to split): fall back to ±25% symmetric jitter.
-    m = meanMult * rng.range(0.75, 1.25);
-  } else if (rng.next() < spread.smallShare) {
-    m = meanMult * rng.range(spread.smallBand[0], spread.smallBand[1]);
-  } else {
-    m = bigMean * rng.range(0.8, 1.2);
-  }
-  return Math.min(Math.max(m, 1.01), maxMultiplier);
+  return winMultiplier(rng, meanMult, maxMultiplier);
 }
 
 /**
