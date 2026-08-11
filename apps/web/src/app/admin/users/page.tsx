@@ -8,7 +8,7 @@ import { Money } from '@/components/ui/Money';
 import { StatusBadge } from '@/components/ui/Badge';
 import { formatExact, formatRelativeTime } from '@/lib/format';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUsers, useOverview } from '@/lib/admin/hooks';
+import { useUsers, useOverview, type UsersFilter } from '@/lib/admin/hooks';
 import type { AdminUserRow } from '@/lib/admin/types';
 
 const ROLE_OPTS = [
@@ -25,25 +25,68 @@ const STATUS_OPTS = [
   { value: 'banned', label: 'Banned' },
 ];
 
+const kesToCents = (s: string): number | undefined => {
+  const n = Number(s);
+  return s.trim() !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : undefined;
+};
+const intOrU = (s: string): number | undefined => {
+  const n = Number(s);
+  return s.trim() !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
+};
+
 export default function UsersPage() {
   const [role, setRole] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
-  const [q, setQ] = useState('');
+  const [showAdv, setShowAdv] = useState(false);
 
-  // Debounce the search box so we don't refetch on every keystroke.
+  // Numeric threshold filters, held as raw KES / count strings and debounced into the query.
+  const [minBal, setMinBal] = useState('');
+  const [maxBal, setMaxBal] = useState('');
+  const [minDep, setMinDep] = useState('');
+  const [minWd, setMinWd] = useState('');
+  const [minTurn, setMinTurn] = useState('');
+  const [minBets, setMinBets] = useState('');
+
+  const [applied, setApplied] = useState<UsersFilter>({});
+
   useEffect(() => {
-    const id = setTimeout(() => setQ(search.trim()), 300);
+    const id = setTimeout(() => {
+      const next: UsersFilter = {};
+      if (role) next.role = role;
+      if (status) next.status = status;
+      const qv = search.trim();
+      if (qv) next.q = qv;
+      const mb = kesToCents(minBal); if (mb !== undefined) next.minBalanceCents = mb;
+      const xb = kesToCents(maxBal); if (xb !== undefined) next.maxBalanceCents = xb;
+      const md = kesToCents(minDep); if (md !== undefined) next.minDepositsCents = md;
+      const mw = kesToCents(minWd); if (mw !== undefined) next.minWithdrawalsCents = mw;
+      const mt = kesToCents(minTurn); if (mt !== undefined) next.minTurnoverCents = mt;
+      const mbet = intOrU(minBets); if (mbet !== undefined) next.minBets = mbet;
+      setApplied(next);
+    }, 350);
     return () => clearTimeout(id);
-  }, [search]);
+  }, [role, status, search, minBal, maxBal, minDep, minWd, minTurn, minBets]);
 
-  const filter = useMemo(
-    () => ({ ...(role ? { role } : {}), ...(status ? { status } : {}), ...(q ? { q } : {}) }),
-    [role, status, q],
-  );
-  const query = useUsers(filter);
+  const query = useUsers(applied);
   const overview = useOverview();
   const rows = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
+
+  const advValues = [minBal, maxBal, minDep, minWd, minTurn, minBets];
+  const advCount = advValues.filter((s) => s.trim() !== '').length;
+
+  function clearAll() {
+    setRole('');
+    setStatus('');
+    setSearch('');
+    setMinBal('');
+    setMaxBal('');
+    setMinDep('');
+    setMinWd('');
+    setMinTurn('');
+    setMinBets('');
+  }
+  const anyFilter = advCount > 0 || !!role || !!status || !!search.trim();
 
   const u = overview.data?.users;
 
@@ -51,7 +94,7 @@ export default function UsersPage() {
     <>
       <PageHeader
         title="Users"
-        subtitle="Every account with its wallet balance, lifetime cash flow, game economics and last activity — click any row to manage."
+        subtitle="Every account with its wallet balance, lifetime cash flow, game economics and last activity — filter and click any row to manage."
       />
 
       {/* Population KPIs */}
@@ -70,6 +113,7 @@ export default function UsersPage() {
         )}
       </Section>
 
+      {/* Primary filters */}
       <Toolbar>
         <input
           value={search}
@@ -79,7 +123,32 @@ export default function UsersPage() {
         />
         <FilterSelect value={role} onChange={setRole} options={ROLE_OPTS} />
         <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTS} />
+        <Button variant="outline" size="sm" onClick={() => setShowAdv((v) => !v)}>
+          {showAdv ? 'Hide filters' : 'More filters'}
+          {advCount > 0 ? (
+            <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">
+              {advCount}
+            </span>
+          ) : null}
+        </Button>
+        {anyFilter ? (
+          <Button variant="ghost" size="sm" onClick={clearAll}>
+            Clear
+          </Button>
+        ) : null}
       </Toolbar>
+
+      {/* Advanced numeric filters — balances, cash flow, activity */}
+      {showAdv ? (
+        <div className="grid grid-cols-2 gap-3 rounded-2xl border border-border bg-surface p-3 sm:grid-cols-3 lg:grid-cols-6">
+          <NumberFilter label="Min balance (KES)" value={minBal} onChange={setMinBal} placeholder="e.g. 1000" />
+          <NumberFilter label="Max balance (KES)" value={maxBal} onChange={setMaxBal} placeholder="e.g. 50000" />
+          <NumberFilter label="Min deposits (KES)" value={minDep} onChange={setMinDep} placeholder="e.g. 5000" />
+          <NumberFilter label="Min withdrawals (KES)" value={minWd} onChange={setMinWd} placeholder="e.g. 5000" />
+          <NumberFilter label="Min turnover (KES)" value={minTurn} onChange={setMinTurn} placeholder="e.g. 10000" />
+          <NumberFilter label="Min bets" value={minBets} onChange={setMinBets} placeholder="e.g. 10" />
+        </div>
+      ) : null}
 
       {query.isLoading ? (
         <Skeleton className="h-40 w-full" />
@@ -122,6 +191,31 @@ export default function UsersPage() {
         </>
       )}
     </>
+  );
+}
+
+function NumberFilter({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs text-muted">
+      {label}
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        inputMode="numeric"
+        placeholder={placeholder}
+        className="h-9 w-full rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+      />
+    </label>
   );
 }
 

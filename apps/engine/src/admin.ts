@@ -49,7 +49,13 @@ export interface AdminAuditRow {
   id: string; actorId: string; actorRole: string; action: string;
   targetType: string; targetId: string | null; detail: unknown; createdAtMs: number;
 }
-export interface AdminUserListQuery extends PageQuery { role?: string | undefined; status?: string | undefined; q?: string | undefined; }
+export interface AdminUserListQuery extends PageQuery {
+  role?: string | undefined; status?: string | undefined; q?: string | undefined;
+  // Numeric threshold filters (all in cents / counts; undefined = no bound).
+  minBalanceCents?: number | undefined; maxBalanceCents?: number | undefined;
+  minDepositsCents?: number | undefined; minWithdrawalsCents?: number | undefined;
+  minTurnoverCents?: number | undefined; minBets?: number | undefined;
+}
 export interface AdminWithdrawalListQuery extends PageQuery { status?: string | undefined; }
 export interface SetUserStatusResult { userId: string; status: string; }
 export interface SetCommissionRateResult { userId: string; commissionRate: number; }
@@ -473,9 +479,16 @@ export class PgAdminRepository implements AdminRepository {
           and ($2::text is null or p.status = $2)
           and ($3::text is null or p.username ilike '%'||$3||'%' or p.phone ilike '%'||$3||'%')
           and ($4::timestamptz is null or (p.created_at, p.id) < ($4::timestamptz, $5::uuid))
+          and ($7::bigint  is null or coalesce(w.real_balance,0) >= $7)
+          and ($8::bigint  is null or coalesce(w.real_balance,0) <= $8)
+          and ($9::bigint  is null or coalesce(td.deposits,0)    >= $9)
+          and ($10::bigint is null or coalesce(tw.withdrawals,0) >= $10)
+          and ($11::bigint is null or coalesce(po.turnover,0)    >= $11)
+          and ($12::bigint is null or coalesce(po.bet_count,0)   >= $12)
         order by p.created_at desc, p.id desc
         limit $6`,
-      [q.role ?? null, q.status ?? null, q.q ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1]);
+      [q.role ?? null, q.status ?? null, q.q ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1,
+       q.minBalanceCents ?? null, q.maxBalanceCents ?? null, q.minDepositsCents ?? null, q.minWithdrawalsCents ?? null, q.minTurnoverCents ?? null, q.minBets ?? null]);
     const rows: AdminUserRow[] = r.rows.map(mapUserRow);
     return pageFrom(rows, limit, (u) => `${u.createdAtMs}:${u.userId}`);
   }
@@ -1055,7 +1068,14 @@ export class InMemoryAdminRepository implements AdminRepository {
       (q.role === undefined || u.role === q.role) &&
       (q.status === undefined || u.status === q.status) &&
       (needle === undefined || u.username.toLowerCase().includes(needle) || u.phone.includes(needle)));
-    const rows = await Promise.all(matched.map(async (u) => ({ ...(await this.memUserRow(u)), _ts: u.createdAtMs, _id: u.userId })));
+    const built = await Promise.all(matched.map(async (u) => ({ ...(await this.memUserRow(u)), _ts: u.createdAtMs, _id: u.userId })));
+    const rows = built.filter((r) =>
+      (q.minBalanceCents === undefined || r.realBalanceCents >= q.minBalanceCents) &&
+      (q.maxBalanceCents === undefined || r.realBalanceCents <= q.maxBalanceCents) &&
+      (q.minDepositsCents === undefined || r.depositsCents >= q.minDepositsCents) &&
+      (q.minWithdrawalsCents === undefined || r.withdrawalsCents >= q.minWithdrawalsCents) &&
+      (q.minTurnoverCents === undefined || r.turnoverCents >= q.minTurnoverCents) &&
+      (q.minBets === undefined || r.betCount >= q.minBets));
     return memKeyset(rows, q);
   }
 

@@ -331,3 +331,37 @@ test("listTransactions: unified deposits+withdrawals with username, filters, sea
   const ids1 = new Set(p1.items.map((t) => t.txId));
   assert.ok(p2.items.every((t) => !ids1.has(t.txId)), "no overlap across pages");
 });
+
+test("listUsers: numeric threshold filters (balance range, deposits, bets)", async () => {
+  const { identity, payRepo, admin } = stack();
+  const A = (await identity.register("254700000090", "whale", HASH)).userId;
+  const B = (await identity.register("254700000091", "minnow", HASH)).userId;
+  const C = (await identity.register("254700000092", "lurker", HASH)).userId;
+
+  // A: 100000 deposit (success) + 3 settled bets
+  payRepo.seed(A, 0);
+  const da = await payRepo.createDeposit(A, 100_000, "254700000090");
+  await payRepo.attachStk(da, "m1", "chk-A"); await payRepo.completeDeposit("chk-A", 0, "ok", "R-A", {});
+  identity.recordSettledPlay(A, "2026-06-10", 5_000, 0);
+  identity.recordSettledPlay(A, "2026-06-10", 5_000, 0);
+  identity.recordSettledPlay(A, "2026-06-10", 5_000, 0);
+  // B: 5000 deposit (success), 0 bets
+  payRepo.seed(B, 0);
+  const db = await payRepo.createDeposit(B, 5_000, "254700000091");
+  await payRepo.attachStk(db, "m2", "chk-B"); await payRepo.completeDeposit("chk-B", 0, "ok", "R-B", {});
+  // C: nothing (balance 0, no deposits, no bets)
+  payRepo.seed(C, 0);
+
+  const names = async (q: Parameters<typeof admin.listUsers>[0]) =>
+    (await admin.listUsers(q)).items.map((x) => x.username).sort();
+
+  assert.deepEqual(await names({ minBalanceCents: 10_000 }), ["whale"]);
+  assert.deepEqual(await names({ maxBalanceCents: 6_000 }), ["lurker", "minnow"]);
+  assert.deepEqual(await names({ minDepositsCents: 1 }), ["minnow", "whale"]);
+  assert.deepEqual(await names({ minBets: 1 }), ["whale"]);
+  assert.deepEqual(await names({ minBets: 5 }), []);
+  // combined: depositors with a balance over 10k → only the whale
+  assert.deepEqual(await names({ minDepositsCents: 1, minBalanceCents: 10_000 }), ["whale"]);
+  // balance range window [4000, 6000] → only the minnow
+  assert.deepEqual(await names({ minBalanceCents: 4_000, maxBalanceCents: 6_000 }), ["minnow"]);
+});

@@ -43,10 +43,35 @@ export const adminApi = {
   rtp: (t: string) => apiFetch<RtpMonitor>('/admin/rtp', { token: t }),
 
   // Users
-  users: (t: string, p: Page & { role?: string | undefined; status?: string | undefined; q?: string | undefined } = {}) =>
+  users: (
+    t: string,
+    p: Page & {
+      role?: string | undefined;
+      status?: string | undefined;
+      q?: string | undefined;
+      minBalanceCents?: number | undefined;
+      maxBalanceCents?: number | undefined;
+      minDepositsCents?: number | undefined;
+      minWithdrawalsCents?: number | undefined;
+      minTurnoverCents?: number | undefined;
+      minBets?: number | undefined;
+    } = {},
+  ) =>
     apiFetch<Paginated<AdminUserRow>>('/admin/users', {
       token: t,
-      query: { cursor: p.cursor ?? undefined, limit: p.limit, role: p.role, status: p.status, q: p.q },
+      query: {
+        cursor: p.cursor ?? undefined,
+        limit: p.limit,
+        role: p.role,
+        status: p.status,
+        q: p.q,
+        minBalanceCents: p.minBalanceCents,
+        maxBalanceCents: p.maxBalanceCents,
+        minDepositsCents: p.minDepositsCents,
+        minWithdrawalsCents: p.minWithdrawalsCents,
+        minTurnoverCents: p.minTurnoverCents,
+        minBets: p.minBets,
+      },
     }),
   user: (t: string, id: string) => apiFetch<AdminUserDetail>(`/admin/users/${id}`, { token: t }),
   userActivity: (t: string, id: string, p: Page & { kind?: string | undefined } = {}) =>

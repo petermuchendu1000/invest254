@@ -26,7 +26,18 @@ export function useRtp() {
 }
 
 // ── Users ──
-export function useUsers(filter: { role?: string; status?: string; q?: string }) {
+export interface UsersFilter {
+  role?: string;
+  status?: string;
+  q?: string;
+  minBalanceCents?: number;
+  maxBalanceCents?: number;
+  minDepositsCents?: number;
+  minWithdrawalsCents?: number;
+  minTurnoverCents?: number;
+  minBets?: number;
+}
+export function useUsers(filter: UsersFilter) {
   const t = useTok();
   return useInfiniteQuery({
     queryKey: ['admin', 'users', filter],

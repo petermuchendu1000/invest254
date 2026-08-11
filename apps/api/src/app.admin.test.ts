@@ -521,3 +521,34 @@ test("admin transactions: unified deposits+withdrawals feed with kind filter, se
     assert.equal(forbidden.status, 403, "player forbidden");
   } finally { await api.close(); }
 });
+
+test("admin users: numeric filters (minDepositsCents, minBalanceCents) narrow the list", async () => {
+  const api = await startTestApi();
+  try {
+    const whale = await register(api, "0712009191", "api_whale");
+    const lurker = await register(api, "0712009192", "api_lurker");
+    // whale: 100000 balance + 100000 success deposit
+    api.payRepo.seed(whale, 0);
+    const d = await api.payRepo.createDeposit(whale, 100_000, "254712009191");
+    await api.payRepo.attachStk(d, "m1", "chk-w"); await api.payRepo.completeDeposit("chk-w", 0, "ok", "R-W", {});
+    // lurker: nothing
+    api.payRepo.seed(lurker, 0);
+
+    const all = await json(await req(api, "GET", "/api/v1/admin/users", { token: "adm-1:admin" }));
+    const allNames = all.items.map((x: any) => x.username);
+    assert.ok(allNames.includes("api_whale") && allNames.includes("api_lurker"), "both present unfiltered");
+
+    const rich = await json(await req(api, "GET", "/api/v1/admin/users?minDepositsCents=1", { token: "adm-1:admin" }));
+    const richNames = rich.items.map((x: any) => x.username);
+    assert.ok(richNames.includes("api_whale"), "whale passes minDeposits");
+    assert.ok(!richNames.includes("api_lurker"), "lurker filtered out by minDeposits");
+
+    const bal = await json(await req(api, "GET", "/api/v1/admin/users?minBalanceCents=50000", { token: "adm-1:admin" }));
+    const balNames = bal.items.map((x: any) => x.username);
+    assert.ok(balNames.includes("api_whale") && !balNames.includes("api_lurker"), "minBalance narrows to whale");
+
+    // invalid/negative values are ignored (no crash, returns list)
+    const bad = await req(api, "GET", "/api/v1/admin/users?minDepositsCents=abc&minBets=-3", { token: "adm-1:admin" });
+    assert.equal(bad.status, 200, "invalid numeric params ignored");
+  } finally { await api.close(); }
+});

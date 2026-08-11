@@ -212,11 +212,24 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/admin/overview`, auth, admin, async () => deps.admin.overview());
 
   router.get(`${BASE}/admin/users`, auth, admin, async (ctx: Ctx) => {
+    // Optional non-negative integer (cents/count) query param; ignored when absent or invalid.
+    const numParam = (name: string): number | undefined => {
+      const raw = ctx.query.get(name);
+      if (raw === null || raw === "") return undefined;
+      const n = Number(raw);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
+    };
     const q: AdminUserListQuery = {
       ...pageQuery(ctx),
       role: ctx.query.get("role") ?? undefined,
       status: ctx.query.get("status") ?? undefined,
       q: ctx.query.get("q") ?? undefined,
+      minBalanceCents: numParam("minBalanceCents"),
+      maxBalanceCents: numParam("maxBalanceCents"),
+      minDepositsCents: numParam("minDepositsCents"),
+      minWithdrawalsCents: numParam("minWithdrawalsCents"),
+      minTurnoverCents: numParam("minTurnoverCents"),
+      minBets: numParam("minBets"),
     };
     return deps.admin.listUsers(q);
   });
