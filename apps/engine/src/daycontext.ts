@@ -1,6 +1,6 @@
 import {
   CurveGenerator, SettlementEngine, type VersionedGameConfig,
-  dateKeyUTC, dayStartMs as dayStartMsForKey, deriveDaySeed, commitment,
+  dateKeyUTC, dayStartMs as dayStartMsForKey, deriveDaySeed, deriveSiteDaySeed, commitment,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
 import type { ConfigProvider } from "./gameconfig.js";
@@ -29,6 +29,8 @@ export interface DayContext {
   cfg: VersionedGameConfig;   // the exact parameters baked into curve + settlement below
   curve: CurveGenerator;
   settlement: SettlementEngine;
+  /** Multi-tenant: the brand this context belongs to (undefined in single-tenant mode). */
+  siteId?: string;
 }
 
 export interface SeedManagerOptions {
@@ -61,6 +63,11 @@ export class SeedManager {
     private readonly repo: GameRepository,
     private readonly now: () => number = () => Date.now(),
     private readonly opts: SeedManagerOptions = {},
+    /**
+     * Multi-tenant: when set, seeds are derived per-site (deriveSiteDaySeed) and every game-day
+     * row is committed/revealed under this brand. Omitted = single-tenant (legacy) behaviour.
+     */
+    private readonly siteId?: string,
   ) {
     if (!masterSeed) throw new Error("masterSeed is required");
   }
@@ -71,7 +78,9 @@ export class SeedManager {
 
   /** Pure build (no I/O): derive seed, hash, curve and calibrated settlement for a day at a config. */
   private build(dateKey: string, seedVersion: number, cfg: VersionedGameConfig): DayContext {
-    const seed = deriveDaySeed(this.masterSeed, dateKey, seedVersion);
+    const seed = this.siteId
+      ? deriveSiteDaySeed(this.masterSeed, this.siteId, dateKey, seedVersion)
+      : deriveDaySeed(this.masterSeed, dateKey, seedVersion);
     const seedHash = commitment(seed);
     const curve = new CurveGenerator(seed, cfg);
     const settlement = this.opts.calibrationSamples
@@ -80,6 +89,7 @@ export class SeedManager {
     return {
       gameDayId: null, dateKey, dayStartMs: dayStartMsForKey(dateKey), seedVersion, seed, seedHash,
       configVersion: cfg.version, cfg, curve, settlement,
+      ...(this.siteId !== undefined ? { siteId: this.siteId } : {}),
     };
   }
 
@@ -109,12 +119,12 @@ export class SeedManager {
     const key = SeedManager.cacheKey(dateKey, cfg.version);
     let ctx = this.cache.get(key);
     if (!ctx) {
-      const version = await this.repo.getSeedVersion(dateKey);
+      const version = await this.repo.getSeedVersion(dateKey, this.siteId);
       ctx = this.build(dateKey, version, cfg);
       this.cache.set(key, ctx);
       this.evict();
     }
-    if (ctx.gameDayId === null) ctx.gameDayId = await this.repo.ensureGameDay(dateKey, ctx.seedHash);
+    if (ctx.gameDayId === null) ctx.gameDayId = await this.repo.ensureGameDay(dateKey, ctx.seedHash, this.siteId);
     return ctx;
   }
 
@@ -149,7 +159,7 @@ export class SeedManager {
     const active = await this.init();
     let revealed: string | null = null;
     if (prevKey && prevKey !== active.dateKey && prev) {
-      if (await this.repo.revealSeed(prevKey, prev.seed)) revealed = prevKey;
+      if (await this.repo.revealSeed(prevKey, prev.seed, this.siteId)) revealed = prevKey;
     }
     return { active, revealed };
   }

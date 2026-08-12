@@ -1,7 +1,7 @@
 import { jwtVerify, createRemoteJWKSet, type JWTPayload } from "jose";
 
 /** Verified identity extracted from a trusted JWT. */
-export interface AuthClaims { userId: string; role?: string; raw: JWTPayload; }
+export interface AuthClaims { userId: string; role?: string; site?: string; raw: JWTPayload; }
 export type Verifier = (token: string) => Promise<AuthClaims>;
 
 type KeyInput = Uint8Array | ReturnType<typeof createRemoteJWKSet>;
@@ -18,7 +18,13 @@ export function verifierFromKey(getKey: KeyInput, algorithms: string[], opts: Ve
     });
     const userId = String(payload.sub ?? "");
     if (!userId) throw new Error("TOKEN_MISSING_SUB");
-    return { userId, role: typeof (payload as any).role === "string" ? (payload as any).role : undefined, raw: payload };
+    return {
+      userId,
+      role: typeof (payload as any).role === "string" ? (payload as any).role : undefined,
+      // Multi-tenant: the brand this token was issued for (engine enforces socket↔token match).
+      site: typeof (payload as any).site === "string" ? (payload as any).site : undefined,
+      raw: payload,
+    };
   };
 }
 

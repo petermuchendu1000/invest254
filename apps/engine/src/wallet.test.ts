@@ -41,9 +41,10 @@ test("Pg repo: calls the RPCs with correct params and parses bigint strings", as
   const o = await r.openPosition({ userId: "u", stakeCents: 20000, direction: "buy", entryRate: 0.21, durationS: 10, gameDayId: null, nonce: 7, openedAtMs: 1781778933000 , configVersion: 1});
   assert.deepEqual(o, { positionId: "p-1", newBalance: 80000 });
   assert.ok(calls[0]!.text.includes("fn_open_position"));
-  assert.deepEqual(calls[0]!.params, ["u", 20000, "buy", 0.21, 10, null, 7, new Date(1781778933000).toISOString(), 1]);
+  assert.deepEqual(calls[0]!.params, ["u", 20000, "buy", 0.21, 10, null, 7, new Date(1781778933000).toISOString(), 1, null]);
   assert.ok(calls[0]!.text.includes("$8"), "open RPC must pass opened_at as the 8th arg (migration 0012)");
   assert.ok(calls[0]!.text.includes("$9"), "open RPC must pass config_version as the 9th arg (migration 0028)");
+  assert.ok(calls[0]!.text.includes("$10"), "open RPC must pass site_id as the 10th arg (migration 0047, multi-tenant)");
   const s = await r.settlePosition({ positionId: "p-1", exitRate: 0.25, result: "win", multiplier: 2.5, payoutCents: 50000 });
   assert.deepEqual(s, { settled: true, newBalance: 130000 });
   assert.equal(await r.getBalance("u"), 5000);
@@ -75,7 +76,7 @@ test("InMemory repo: listOpenPositions returns recovery metadata; excludes settl
   const o = await r.openPosition({ userId: "u", stakeCents: 20000, direction: "sell", entryRate: 0.21, durationS: 10, gameDayId: 5, nonce: 3, openedAtMs: 1781778933000 , configVersion: 1});
   let open = await r.listOpenPositions();
   assert.equal(open.length, 1);
-  assert.deepEqual(open[0], { id: o.positionId, userId: "u", stakeCents: 20000, direction: "sell", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 5, nonce: 3, configVersion: 1 });
+  assert.deepEqual(open[0], { id: o.positionId, userId: "u", stakeCents: 20000, direction: "sell", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 5, nonce: 3, configVersion: 1, siteId: null });
   await r.settlePosition({ positionId: o.positionId, exitRate: 0.1, result: "loss", multiplier: 0, payoutCents: 0 });
   open = await r.listOpenPositions();
   assert.equal(open.length, 0); // settled positions are not in the recovery work list
@@ -95,11 +96,11 @@ test("Pg repo: ensureGameDay/revealSeed/listOpenPositions/getFairness map to RPC
   };
   const r = new PgGameRepository(fake);
   assert.equal(await r.ensureGameDay("2026-06-18", "h"), 42);
-  assert.deepEqual(calls.at(-1)!.params, ["2026-06-18", "h"]);
+  assert.deepEqual(calls.at(-1)!.params, ["2026-06-18", "h", null]); // 3rd arg = site_id (0048)
   assert.equal(await r.revealSeed("2026-06-17", "seed"), true);
-  assert.deepEqual(calls.at(-1)!.params, ["2026-06-17", "seed"]);
+  assert.deepEqual(calls.at(-1)!.params, ["2026-06-17", "seed", null]); // 3rd arg = site_id (0048)
   const open = await r.listOpenPositions();
-  assert.deepEqual(open[0], { id: "p-9", userId: "u", stakeCents: 20000, direction: "buy", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 42, nonce: 3, configVersion: 7 });
+  assert.deepEqual(open[0], { id: "p-9", userId: "u", stakeCents: 20000, direction: "buy", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 42, nonce: 3, configVersion: 7, siteId: null });
   const f = await r.getFairness("2026-06-17");
   assert.ok(f && f.serverSeedHash === "h" && f.serverSeed === null && f.revealedAt === null);
 });
