@@ -75,9 +75,9 @@ export interface IdentityRepository {
    * affiliate (first-touch, permanent); an unknown/suspended code is ignored so a stale link
    * never blocks signup. Throws PHONE_TAKEN / USERNAME_TAKEN / REGISTRATION_CONFLICT.
    */
-  register(phone: string, username: string, passwordHash: string, referralCode?: string, siteId?: string): Promise<RegisteredUser>;
-  /** Load credential + account state by (normalized) phone within a brand, or null. `siteId` scopes it (multi-tenant). */
-  findByPhone(phone: string, siteId?: string): Promise<CredentialRecord | null>;
+  register(phone: string, username: string, passwordHash: string, referralCode?: string): Promise<RegisteredUser>;
+  /** Load credential + account state by (normalized) phone, or null if no such account. */
+  findByPhone(phone: string): Promise<CredentialRecord | null>;
   /** Load the profile by user id, or null if not found. */
   getProfile(userId: string): Promise<ProfileRow | null>;
   /** Replace an account's password hash. False when there is no such credential row. */
@@ -148,13 +148,11 @@ function toMs(v: unknown): number {
 /** Postgres-backed identity, calling the 0015/0016 RPCs + profile reads. */
 export class PgIdentityRepository implements IdentityRepository, AffiliateRepository {
   constructor(private readonly q: Querier) {}
-  async register(phone: string, username: string, passwordHash: string, referralCode?: string, siteId?: string): Promise<RegisteredUser> {
+  async register(phone: string, username: string, passwordHash: string, referralCode?: string): Promise<RegisteredUser> {
     try {
-      // When a brand is given, pass it as the 5th arg; otherwise use the 4-arg form so the RPC's
-      // p_site_id DEFAULT (the default site) applies rather than an explicit NULL (NOT NULL column).
-      const r = siteId
-        ? await this.q.query("select user_id, role from fn_register_user($1,$2,$3,$4,$5)", [phone, username, passwordHash, referralCode ?? null, siteId])
-        : await this.q.query("select user_id, role from fn_register_user($1,$2,$3,$4)", [phone, username, passwordHash, referralCode ?? null]);
+      const r = await this.q.query(
+        "select user_id, role from fn_register_user($1,$2,$3,$4)",
+        [phone, username, passwordHash, referralCode ?? null]);
       const x = r.rows[0];
       return { userId: String(x.user_id), role: String(x.role) };
     } catch (e) { mapPgError(e); }
@@ -271,11 +269,11 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
     const page = pageFrom(rows, limit, (t) => `${t.createdAtMs}:${t._id}`);
     return { items: page.items.map(({ _id, ...rest }) => rest), nextCursor: page.nextCursor };
   }
-  async findByPhone(phone: string, siteId?: string): Promise<CredentialRecord | null> {
+  async findByPhone(phone: string): Promise<CredentialRecord | null> {
     const r = await this.q.query(
       `select p.id, p.role, p.status, c.password_hash
          from profiles p join user_credentials c on c.user_id = p.id
-        where p.phone = $1 and ($2::uuid is null or p.site_id = $2)`, [phone, siteId ?? null]);
+        where p.phone = $1`, [phone]);
     if (!r.rows.length) return null;
     const x = r.rows[0];
     return { userId: String(x.id), role: String(x.role), status: String(x.status), passwordHash: String(x.password_hash) };
@@ -331,11 +329,8 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
 
 interface MemUser {
   userId: string; phone: string; username: string; role: string; status: string;
-  passwordHash: string; referredBy: string | null; createdAtMs: number; siteId: string | null;
+  passwordHash: string; referredBy: string | null; createdAtMs: number;
 }
-
-/** Per-site identity key so the same phone/username can exist on different brands. */
-const idKey = (v: string, siteId?: string | null): string => `${siteId ?? ""}:${v}`;
 
 interface MemAffiliate { userId: string; referralCode: string; commissionRate: number; status: string; }
 interface MemPlay { referredUser: string; period: string; stakeCents: number; payoutCents: number; openedAtMs: number; }
@@ -356,19 +351,17 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   private readonly payouts = new Map<string, MemPayout>();              // payoutId -> payout
   private readonly mfa = new Map<string, { secret: string; enabled: boolean; recoveryCodeHashes: string[] }>();
   private seq = 0;
-  async register(phone: string, username: string, passwordHash: string, referralCode?: string, siteId?: string): Promise<RegisteredUser> {
+  async register(phone: string, username: string, passwordHash: string, referralCode?: string): Promise<RegisteredUser> {
     if (phone.length < 8) throw new Error("INVALID_PHONE");
     if (username.length < 3) throw new Error("INVALID_USERNAME");
     if (passwordHash.length < 20) throw new Error("INVALID_HASH");
-    const pkey = idKey(phone, siteId);
-    const ukey = idKey(username, siteId);
-    if (this.byPhone.has(pkey)) throw new Error("PHONE_TAKEN");        // uniqueness is PER SITE
-    if (this.usernames.has(ukey)) throw new Error("USERNAME_TAKEN");
+    if (this.byPhone.has(phone)) throw new Error("PHONE_TAKEN");
+    if (this.usernames.has(username)) throw new Error("USERNAME_TAKEN");
     const u: MemUser = {
       userId: randomUUID(), phone, username, role: "player", status: "active",
-      passwordHash, referredBy: null, createdAtMs: Date.now(), siteId: siteId ?? null,
+      passwordHash, referredBy: null, createdAtMs: Date.now(),
     };
-    this.byPhone.set(pkey, u); this.byId.set(u.userId, u); this.usernames.add(ukey);
+    this.byPhone.set(phone, u); this.byId.set(u.userId, u); this.usernames.add(username);
     // First-touch, permanent attribution: an unknown/suspended code is silently ignored.
     if (referralCode) {
       const affUserId = this.byReferralCode.get(referralCode.toUpperCase());
@@ -380,8 +373,8 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     }
     return { userId: u.userId, role: u.role };
   }
-  async findByPhone(phone: string, siteId?: string): Promise<CredentialRecord | null> {
-    const u = this.byPhone.get(idKey(phone, siteId));
+  async findByPhone(phone: string): Promise<CredentialRecord | null> {
+    const u = this.byPhone.get(phone);
     return u ? { userId: u.userId, role: u.role, status: u.status, passwordHash: u.passwordHash } : null;
   }
   async getMfa(userId: string): Promise<MfaRecord | null> {
@@ -551,7 +544,7 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   }
   /** Test seam: flip an account's status (active | suspended | banned). */
   setStatus(phone: string, status: string): void {
-    const u = this.byPhone.get(idKey(phone));
+    const u = this.byPhone.get(phone);
     if (u) u.status = status;
   }
   /** Test seam: the affiliate a user was attributed to at signup, or null. */

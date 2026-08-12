@@ -37,8 +37,6 @@ export interface ActiveContext {
   seed?: string | null;
   /** The game_config version baked into `curve`/`settlement`; recorded on every position. */
   configVersion: number;
-  /** Multi-tenant: the brand this context prices for. Stamped on every position it opens. */
-  siteId?: string;
 }
 export type ActiveContextProvider = () => ActiveContext;
 
@@ -179,7 +177,7 @@ export class GameServer {
     const { positionId, newBalance } = await this.repo.openPosition({
       userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
       entryRate: outcome.entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
-      configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
+      configVersion: ctx.configVersion,
     });
     const p: Position = { id: positionId, userId: input.userId, stakeCents: input.stakeCents, direction: input.direction, durationS, openedAtMs, expiresAtMs: openedAtMs + durationS * 1000, entryT, outcome, status: "open", sellable: outcome.result === "win", gameDayId: ctx.gameDayId, configVersion: ctx.configVersion };
     this.positions.set(positionId, p);

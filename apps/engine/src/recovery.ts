@@ -36,13 +36,10 @@ export class RecoveryService {
     /** Same per-user override provider the GameServer opens with, so an override position reprices
      *  identically after a crash (see overrides.ts for the mid-flight-change caveat). */
     private readonly loadOverride?: LoadOverride,
-    /** Multi-tenant: recover only this brand's open positions (undefined = all, single-tenant). */
-    private readonly siteId?: string,
   ) {}
 
   async recover(): Promise<RecoveryReport> {
-    const all = await this.repo.listOpenPositions();
-    const open = this.siteId === undefined ? all : all.filter((r) => (r.siteId ?? null) === this.siteId);
+    const open = await this.repo.listOpenPositions();
     const report: RecoveryReport = { scanned: open.length, settled: 0, rearmed: 0, noop: 0, failed: 0 };
     const nowMs = this.now();
 
