@@ -4,7 +4,7 @@
 > the production hosting is wired, the non-obvious gotchas, and how to operate it.
 > **No secret values are in this file** — secrets live in Fly.io / Cloudflare only.
 
-_Last verified: 2026-06-29. All endpoints below were confirmed live._
+_Last verified: 2026-08-12. API redeployed and endpoints confirmed live (`invest254-api` v19)._
 
 ---
 
@@ -15,20 +15,20 @@ This is an **npm-workspaces monorepo** with **three deployables on two platforms
 | Component | Code | Hosted on | Public URL |
 |-----------|------|-----------|------------|
 | Web frontend (Next.js 14) | `apps/web` | **Cloudflare Pages** | `https://invest254.com` (and `https://invest254.pages.dev`) |
-| REST API (Node HTTP) | `apps/api` | **Fly.io** app `invest254` | `https://invest254.fly.dev/api/v1` |
-| WebSocket game engine (Node `ws`) | `apps/engine` | **Fly.io** app `invest254-engine` | `wss://invest254-engine.fly.dev` |
+| REST API (Node HTTP) | `apps/api` | **Fly.io** app `invest254-api` | `https://invest254-api.fly.dev/api/v1` |
+| WebSocket game engine (Node `ws`) | `apps/engine` | **Fly.io** app `invest254-engine-pm` | `wss://invest254-engine-pm.fly.dev` |
 | Postgres database | `packages/db` (migrations) | **Supabase** | pooler host, project ref `yewujhbtfxeirhknckzg` (eu-west-1) |
 
 **The single most important fact (do not break this):**
 - `invest254.com` is **ONLY the frontend** (Cloudflare Pages).
-- The browser calls the **API** at `https://invest254.fly.dev/api/v1` and the **WebSocket** at `wss://invest254-engine.fly.dev`.
+- The browser calls the **API** at `https://invest254-api.fly.dev/api/v1` and the **WebSocket** at `wss://invest254-engine-pm.fly.dev`.
 - ❌ There is **no** `invest254.com/api`. Do **not** repoint the API host to `invest254.com` — that will break logins (it returns 404 because it's the static frontend).
 
 Data flow:
 ```
 Browser (https://invest254.com, Cloudflare Pages)
-   │   REST  → https://invest254.fly.dev/api/v1   (Fly app: invest254)
-   │   WS    → wss://invest254-engine.fly.dev      (Fly app: invest254-engine)
+   │   REST  → https://invest254-api.fly.dev/api/v1   (Fly app: invest254-api)
+   │   WS    → wss://invest254-engine-pm.fly.dev      (Fly app: invest254-engine-pm)
    ▼
 Fly.io apps (Node via tsx)  ──SQL──►  Supabase Postgres (pooler, sslmode=no-verify)
 ```
@@ -47,8 +47,9 @@ invest254/                      # npm workspaces, Node >=20, TypeScript ESM, sou
 │   ├── api/                    # @invest254/api — REST transport over engine services (port 8081)
 │   └── web/                    # @invest254/web — Next.js 14 frontend (→ Cloudflare Pages)
 ├── Dockerfile                  # backend image (engine + api), used by BOTH Fly apps
-├── fly.toml                    # Fly config for the API app  (app = "invest254")
-├── fly.engine.toml             # Fly config for the engine app (app = "invest254-engine")
+├── fly.api.toml                # Fly config for the LIVE API app (app = "invest254-api")
+├── fly.toml                    # DEPRECATED/orphaned old API app "invest254" — NOT used by the frontend; do not deploy
+├── fly.engine.toml             # Fly config for the engine app (app = "invest254-engine-pm")
 ├── wrangler.toml               # Cloudflare Pages config (nodejs_compat, build output dir)
 └── apps/web/wrangler.toml      # local wrangler for `wrangler pages dev` (not used by CF build)
 ```
@@ -63,7 +64,7 @@ app = `node --import tsx src/server.ts`.
 ### 2.1 Two apps, one Docker image
 Both Fly apps build from the **same root `Dockerfile`**. Each app's `fly.*.toml` overrides the
 start command via `[processes]`:
-- `invest254`        → `npm -w @invest254/api start`     (REST, internal port **8081** → 443)
+- `invest254-api`        → `npm -w @invest254/api start`     (REST, internal port **8081** → 443)
 - `invest254-engine` → `npm -w @invest254/engine start`  (WS,   internal port **8080** → 443)
 
 Region: **`jnb`** (Johannesburg — Fly's closest to Kenya). VM: `shared-cpu-1x`, 512 MB.
@@ -78,8 +79,8 @@ API and the WS run on port **443** (different hostnames) over the free shared IP
 On first deploy the prompt *"allocate dedicated ipv4/ipv6?"* was answered **No**, which left the
 API app with **no IP at all** (it was unreachable). Fixed with:
 ```bash
-fly ips allocate-v4 --shared -a invest254   # free shared IPv4 (443 only) — this is enough
-fly ips allocate-v6 -a invest254            # free dedicated IPv6
+fly ips allocate-v4 --shared -a invest254-api   # free shared IPv4 (443 only) — this is enough
+fly ips allocate-v6 -a invest254-api            # free dedicated IPv6
 ```
 Current: `invest254` = shared IPv4 `66.241.124.119` + v6; `invest254-engine` = `66.241.125.119` + v6.
 **Do not buy a dedicated IPv4** — not needed for 443-only traffic.
@@ -103,15 +104,15 @@ new WebSocketServer({ port })     → only runs if the above succeed
 So **any DB connection failure crashes the engine before it listens** (machine shows no listener
 / gets suspended). The API does NOT query the DB on boot (its `/api/v1/health` route is static),
 which is why a broken DB made the API "look healthy" while the engine died. If the engine won't
-stay up, **check the DB connection first** (`fly logs -a invest254-engine`).
+stay up, **check the DB connection first** (`fly logs -a invest254-engine-pm`).
 
 ### 2.6 Common ops
 ```bash
-fly deploy                       # deploy API (uses ./fly.toml)
+fly deploy -c fly.api.toml       # deploy API  (app invest254-api)
 fly deploy -c fly.engine.toml    # deploy engine
-fly secrets set -a invest254 KEY="value"   # set secret (auto-redeploys)
-fly status  -a invest254 ; fly logs -a invest254
-fly status  -a invest254-engine ; fly logs -a invest254-engine
+fly secrets set -a invest254-api KEY="value"   # set secret (auto-redeploys)
+fly status  -a invest254-api ; fly logs -a invest254-api
+fly status  -a invest254-engine-pm ; fly logs -a invest254-engine-pm
 ```
 
 ---
@@ -135,8 +136,8 @@ These are `NEXT_PUBLIC_*` → **inlined at BUILD time**. They must exist *before
 **rebuild is required** after changing them (setting them alone does nothing). If missing, the app
 falls back to `http://localhost:8081` / `ws://localhost:8080` (this happened once and broke login).
 ```
-NEXT_PUBLIC_API_BASE_URL = https://invest254.fly.dev/api/v1
-NEXT_PUBLIC_WS_URL       = wss://invest254-engine.fly.dev
+NEXT_PUBLIC_API_BASE_URL = https://invest254-api.fly.dev/api/v1
+NEXT_PUBLIC_WS_URL       = wss://invest254-engine-pm.fly.dev
 NODE_VERSION             = 20
 ```
 
@@ -219,8 +220,8 @@ is returned. For defence-in-depth you may later set `CORS_ALLOWED_ORIGINS=https:
 ## 7. Current verified status (2026-06-29)
 
 - ✅ `https://invest254.com` serves the frontend (Cloudflare Pages); bundle calls the correct fly.dev URLs.
-- ✅ `https://invest254.fly.dev/api/v1/health` → `200`; CORS allows `invest254.com`; login works against the real API.
-- ✅ `wss://invest254-engine.fly.dev` engine app deployed (region jnb).
+- ✅ `https://invest254-api.fly.dev/api/v1/health` → `200`; CORS allows `invest254.com`; login works against the real API.
+- ✅ `wss://invest254-engine-pm.fly.dev` engine app deployed (region jnb).
 - ✅ Supabase reachable; migrations applied; `fn_admin_adjust_balance` ambiguity fixed (live + in repo).
 
 ### Outstanding / TODO
@@ -238,9 +239,9 @@ is returned. For defence-in-depth you may later set `CORS_ALLOWED_ORIGINS=https:
 | Question | Answer |
 |----------|--------|
 | Where do users go? | `https://invest254.com` (Cloudflare Pages) |
-| Where is the REST API? | `https://invest254.fly.dev/api/v1` (Fly `invest254`) |
-| Where is the WebSocket? | `wss://invest254-engine.fly.dev` (Fly `invest254-engine`) |
+| Where is the REST API? | `https://invest254-api.fly.dev/api/v1` (Fly `invest254-api`) |
+| Where is the WebSocket? | `wss://invest254-engine-pm.fly.dev` (Fly `invest254-engine-pm`) |
 | Where is the DB? | Supabase pooler, ref `yewujhbtfxeirhknckzg`, `?sslmode=no-verify` |
 | How does the frontend know the API URL? | `NEXT_PUBLIC_API_BASE_URL` baked at Cloudflare build time |
 | Why did login fail before? | (a) API had no IP, (b) frontend built with `localhost`, (c) DB used `sslmode=require` |
-| Can I point the API to invest254.com? | **No.** That host is the static frontend; use `invest254.fly.dev`. |
+| Can I point the API to invest254.com? | **No.** That host is the static frontend; use `invest254-api.fly.dev`. |
