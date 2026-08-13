@@ -35,10 +35,10 @@ export class AffiliateService {
     return { ...a, referralPath: `/r/${a.referralCode}` };
   }
 
-  /** Accrue commission for one trading day (`YYYY-MM-DD`). Idempotent. Throws INVALID_PERIOD. */
-  async accrueDaily(period: string): Promise<AffiliateAccrualResult> {
+  /** Accrue commission for one trading day (`YYYY-MM-DD`). `siteId` scopes to one brand (omit = all). Idempotent. Throws INVALID_PERIOD. */
+  async accrueDaily(period: string, siteId?: string): Promise<AffiliateAccrualResult> {
     if (typeof period !== "string" || !PERIOD_RE.test(period)) throw new Error("INVALID_PERIOD");
-    return this.repo.accrueCommissions(period);
+    return this.repo.accrueCommissions(period, siteId);
   }
 
   /** Marketer dashboard summary for the caller. Throws NOT_AFFILIATE if not enrolled. */
@@ -86,5 +86,10 @@ export class AffiliateService {
   /** Finance admin rejects a pre-dispatch payout request (releases the reservation). Idempotent. */
   rejectPayout(payoutId: string, adminId: string): Promise<boolean> {
     return this.repo.rejectPayout(payoutId, adminId);
+  }
+
+  /** Resolve the brand a payout belongs to (null = unknown) — admin write-path scope guard (Task H). */
+  siteOfPayout(payoutId: string): Promise<string | null> {
+    return this.repo.siteOfPayout(payoutId);
   }
 }

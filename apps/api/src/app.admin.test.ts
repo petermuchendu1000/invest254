@@ -185,6 +185,18 @@ test("J5 game config: admin reads; only superadmin edits; validates; audited", a
     assert.equal(u.maxStakeCents, 6_000_000);
     assert.equal(u.minStakeCents, 25000); // untouched key preserved
 
+    // BUG REGRESSION (min-withdrawal config): editing ONLY the min-withdrawal floor must succeed
+    // and persist. Previously `minWithdrawalCents` was missing from the API's CONFIG_FIELDS
+    // allowlist, so this patch was stripped to empty and rejected with "provide at least one
+    // config field to update" — the value could never be saved from the admin panel.
+    const mw = await req(api, "PATCH", "/api/v1/admin/game-config", { token: "root:superadmin", body: { minWithdrawalCents: 50000 } });
+    assert.equal(mw.status, 200, "editing only min withdrawal must be accepted");
+    assert.equal((await json(mw)).minWithdrawalCents, 50000);
+    const reread = await json(await req(api, "GET", "/api/v1/admin/game-config", { token: "admin-1:admin" }));
+    assert.equal(reread.minWithdrawalCents, 50000, "min withdrawal persisted and reads back");
+    // a non-integer cents value for the floor is still rejected
+    assert.equal((await req(api, "PATCH", "/api/v1/admin/game-config", { token: "root:superadmin", body: { minWithdrawalCents: 250.5 } })).status, 400);
+
     // out-of-range value -> 400; non-integer cents -> 400; empty patch -> 400
     assert.equal((await req(api, "PATCH", "/api/v1/admin/game-config", { token: "root:superadmin", body: { houseEdge: 1.5 } })).status, 400);
     assert.equal((await req(api, "PATCH", "/api/v1/admin/game-config", { token: "root:superadmin", body: { minStakeCents: 50.5 } })).status, 400);

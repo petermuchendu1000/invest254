@@ -52,7 +52,7 @@ export interface PayoutCompleteResult { applied: boolean; status: string; }
 /** A user as the admin back office sees it (J2). */
 export interface AdminUserSnapshot {
   userId: string; username: string; phone: string; role: string; status: string;
-  referredBy: string | null; createdAtMs: number;
+  referredBy: string | null; createdAtMs: number; siteId: string | null;
 }
 /** An affiliate's commission terms for admin reads/mutations (J2). */
 export interface AdminAffiliateSnapshot { userId: string; commissionRate: number; status: string; }
@@ -75,9 +75,9 @@ export interface IdentityRepository {
    * affiliate (first-touch, permanent); an unknown/suspended code is ignored so a stale link
    * never blocks signup. Throws PHONE_TAKEN / USERNAME_TAKEN / REGISTRATION_CONFLICT.
    */
-  register(phone: string, username: string, passwordHash: string, referralCode?: string): Promise<RegisteredUser>;
-  /** Load credential + account state by (normalized) phone, or null if no such account. */
-  findByPhone(phone: string): Promise<CredentialRecord | null>;
+  register(phone: string, username: string, passwordHash: string, referralCode?: string, siteId?: string): Promise<RegisteredUser>;
+  /** Load credential + account state by (normalized) phone within a brand, or null. `siteId` scopes it (multi-tenant). */
+  findByPhone(phone: string, siteId?: string): Promise<CredentialRecord | null>;
   /** Load the profile by user id, or null if not found. */
   getProfile(userId: string): Promise<ProfileRow | null>;
   /** Replace an account's password hash. False when there is no such credential row. */
@@ -102,8 +102,8 @@ export interface IdentityRepository {
 export interface AffiliateRepository {
   /** Idempotently enroll the user as an affiliate (marketer) with a stable referral code. Throws USER_NOT_FOUND. */
   enrollAffiliate(userId: string): Promise<AffiliateView>;
-  /** Accrue commission for one trading day (`YYYY-MM-DD`) across all referred players. Idempotent. */
-  accrueCommissions(period: string): Promise<AffiliateAccrualResult>;
+  /** Accrue commission for one trading day (`YYYY-MM-DD`). `siteId` scopes it to one brand (null = all brands). Idempotent. */
+  accrueCommissions(period: string, siteId?: string): Promise<AffiliateAccrualResult>;
   /** Marketer dashboard summary, or null if the user is not an enrolled affiliate. */
   affiliateSummary(userId: string): Promise<AffiliateSummary | null>;
   /** The affiliate's referred players (newest first, cursor-paginated). */
@@ -124,6 +124,11 @@ export interface AffiliateRepository {
   completePayout(payoutId: string, resultCode: number, conversationId: string | null, receipt: string | null, resultDesc: string | null, raw: unknown): Promise<PayoutCompleteResult>;
   /** Admin rejects a pre-dispatch ('requested') payout, releasing its reservation. Idempotent. */
   rejectPayout(payoutId: string, adminId: string): Promise<boolean>;
+  /** Resolve the brand a payout belongs to (admin write-path scope guard, docs/22 Task H). A legacy
+   *  null site normalizes to the default brand; an unknown/untracked payout resolves to null — a
+   *  null never blocks, so the site-aware RPC remains the ultimate guard (the in-memory mirror does
+   *  not track a payout's site and always returns null). */
+  siteOfPayout(payoutId: string): Promise<string | null>;
 }
 
 /** Re-raise the bare error code the RPCs raise instead of the wrapped pg message. */
@@ -148,11 +153,13 @@ function toMs(v: unknown): number {
 /** Postgres-backed identity, calling the 0015/0016 RPCs + profile reads. */
 export class PgIdentityRepository implements IdentityRepository, AffiliateRepository {
   constructor(private readonly q: Querier) {}
-  async register(phone: string, username: string, passwordHash: string, referralCode?: string): Promise<RegisteredUser> {
+  async register(phone: string, username: string, passwordHash: string, referralCode?: string, siteId?: string): Promise<RegisteredUser> {
     try {
-      const r = await this.q.query(
-        "select user_id, role from fn_register_user($1,$2,$3,$4)",
-        [phone, username, passwordHash, referralCode ?? null]);
+      // When a brand is given, pass it as the 5th arg; otherwise use the 4-arg form so the RPC's
+      // p_site_id DEFAULT (the default site) applies rather than an explicit NULL (NOT NULL column).
+      const r = siteId
+        ? await this.q.query("select user_id, role from fn_register_user($1,$2,$3,$4,$5)", [phone, username, passwordHash, referralCode ?? null, siteId])
+        : await this.q.query("select user_id, role from fn_register_user($1,$2,$3,$4)", [phone, username, passwordHash, referralCode ?? null]);
       const x = r.rows[0];
       return { userId: String(x.user_id), role: String(x.role) };
     } catch (e) { mapPgError(e); }
@@ -168,9 +175,9 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
       };
     } catch (e) { mapPgError(e); }
   }
-  async accrueCommissions(period: string): Promise<AffiliateAccrualResult> {
+  async accrueCommissions(period: string, siteId?: string): Promise<AffiliateAccrualResult> {
     const r = await this.q.query(
-      "select buckets, total_commission from fn_accrue_affiliate_commissions($1)", [period]);
+      "select buckets, total_commission from fn_accrue_affiliate_commissions($1,$2)", [period, siteId ?? null]);
     const x = r.rows[0];
     return { buckets: Number(x.buckets), totalCommissionCents: Number(x.total_commission) };
   }
@@ -231,6 +238,10 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
       return Boolean(r.rows[0]?.ok);
     } catch (e) { mapPgError(e); }
   }
+  async siteOfPayout(payoutId: string): Promise<string | null> {
+    const r = await this.q.query("select site_id from affiliate_payouts where id = $1", [payoutId]);
+    return r.rows.length ? String(r.rows[0].site_id ?? "00000000-0000-0000-0000-000000000001") : null;
+  }
   async listReferrals(userId: string, q: PageQuery): Promise<Page<ReferralRecord>> {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
@@ -269,11 +280,11 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
     const page = pageFrom(rows, limit, (t) => `${t.createdAtMs}:${t._id}`);
     return { items: page.items.map(({ _id, ...rest }) => rest), nextCursor: page.nextCursor };
   }
-  async findByPhone(phone: string): Promise<CredentialRecord | null> {
+  async findByPhone(phone: string, siteId?: string): Promise<CredentialRecord | null> {
     const r = await this.q.query(
       `select p.id, p.role, p.status, c.password_hash
          from profiles p join user_credentials c on c.user_id = p.id
-        where p.phone = $1`, [phone]);
+        where p.phone = $1 and ($2::uuid is null or p.site_id = $2)`, [phone, siteId ?? null]);
     if (!r.rows.length) return null;
     const x = r.rows[0];
     return { userId: String(x.id), role: String(x.role), status: String(x.status), passwordHash: String(x.password_hash) };
@@ -329,8 +340,11 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
 
 interface MemUser {
   userId: string; phone: string; username: string; role: string; status: string;
-  passwordHash: string; referredBy: string | null; createdAtMs: number;
+  passwordHash: string; referredBy: string | null; createdAtMs: number; siteId: string | null;
 }
+
+/** Per-site identity key so the same phone/username can exist on different brands. */
+const idKey = (v: string, siteId?: string | null): string => `${siteId ?? ""}:${v}`;
 
 interface MemAffiliate { userId: string; referralCode: string; commissionRate: number; status: string; }
 interface MemPlay { referredUser: string; period: string; stakeCents: number; payoutCents: number; openedAtMs: number; }
@@ -351,17 +365,19 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   private readonly payouts = new Map<string, MemPayout>();              // payoutId -> payout
   private readonly mfa = new Map<string, { secret: string; enabled: boolean; recoveryCodeHashes: string[] }>();
   private seq = 0;
-  async register(phone: string, username: string, passwordHash: string, referralCode?: string): Promise<RegisteredUser> {
+  async register(phone: string, username: string, passwordHash: string, referralCode?: string, siteId?: string): Promise<RegisteredUser> {
     if (phone.length < 8) throw new Error("INVALID_PHONE");
     if (username.length < 3) throw new Error("INVALID_USERNAME");
     if (passwordHash.length < 20) throw new Error("INVALID_HASH");
-    if (this.byPhone.has(phone)) throw new Error("PHONE_TAKEN");
-    if (this.usernames.has(username)) throw new Error("USERNAME_TAKEN");
+    const pkey = idKey(phone, siteId);
+    const ukey = idKey(username, siteId);
+    if (this.byPhone.has(pkey)) throw new Error("PHONE_TAKEN");        // uniqueness is PER SITE
+    if (this.usernames.has(ukey)) throw new Error("USERNAME_TAKEN");
     const u: MemUser = {
       userId: randomUUID(), phone, username, role: "player", status: "active",
-      passwordHash, referredBy: null, createdAtMs: Date.now(),
+      passwordHash, referredBy: null, createdAtMs: Date.now(), siteId: siteId ?? null,
     };
-    this.byPhone.set(phone, u); this.byId.set(u.userId, u); this.usernames.add(username);
+    this.byPhone.set(pkey, u); this.byId.set(u.userId, u); this.usernames.add(ukey);
     // First-touch, permanent attribution: an unknown/suspended code is silently ignored.
     if (referralCode) {
       const affUserId = this.byReferralCode.get(referralCode.toUpperCase());
@@ -373,8 +389,8 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     }
     return { userId: u.userId, role: u.role };
   }
-  async findByPhone(phone: string): Promise<CredentialRecord | null> {
-    const u = this.byPhone.get(phone);
+  async findByPhone(phone: string, siteId?: string): Promise<CredentialRecord | null> {
+    const u = this.byPhone.get(idKey(phone, siteId));
     return u ? { userId: u.userId, role: u.role, status: u.status, passwordHash: u.passwordHash } : null;
   }
   async getMfa(userId: string): Promise<MfaRecord | null> {
@@ -423,7 +439,9 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     }
     return { userId, referralCode: aff.referralCode, commissionRate: aff.commissionRate, status: aff.status, role: u.role };
   }
-  async accrueCommissions(period: string): Promise<AffiliateAccrualResult> {
+  async accrueCommissions(period: string, _siteId?: string): Promise<AffiliateAccrualResult> {
+    // In-memory affiliates are single-brand (one site per affiliate), so the site filter is a
+    // no-op here; per-site correctness is exercised against Postgres in the DB e2e harness.
     let buckets = 0; let total = 0;
     for (const [affUserId, aff] of this.affiliates) {
       const referred = this.referrals.filter((r) => r.affiliateId === affUserId).map((r) => r.referredUser);
@@ -537,6 +555,9 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     for (const c of this.commissions) if (c.payoutId === payoutId && c.status === "accrued") c.payoutId = null; // release
     return true;
   }
+  // The in-memory mirror doesn't track a payout's brand, so it can't resolve one — return null,
+  // which the write-path guard treats as "don't block" (the site-aware RPC is the real guard).
+  async siteOfPayout(_payoutId: string): Promise<string | null> { return null; }
   private toProfile(u: MemUser): ProfileRow {
     return {
       userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status,
@@ -544,7 +565,7 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   }
   /** Test seam: flip an account's status (active | suspended | banned). */
   setStatus(phone: string, status: string): void {
-    const u = this.byPhone.get(phone);
+    const u = this.byPhone.get(idKey(phone));
     if (u) u.status = status;
   }
   /** Test seam: the affiliate a user was attributed to at signup, or null. */
@@ -629,7 +650,7 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   private toAdminUser(u: MemUser): AdminUserSnapshot {
     return {
       userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status,
-      referredBy: u.referredBy, createdAtMs: u.createdAtMs,
+      referredBy: u.referredBy, createdAtMs: u.createdAtMs, siteId: u.siteId ?? null,
     };
   }
 }

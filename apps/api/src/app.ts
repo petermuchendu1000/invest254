@@ -1,14 +1,16 @@
 import { rtp, type GameConfig, type Cents, type VersionedGameConfig } from "@invest254/shared";
 import type {
-  FairnessRecord, PaymentService, AuthService, AffiliateService, AdminService, NotificationService, Verifier,
+  FairnessRecord, PaymentService, AuthService, AffiliateService, AdminService, NotificationService, Verifier, PlatformService,
   Page, PageQuery, LedgerEntry, PositionRecord, PositionDetail, PositionListQuery, TransactionRecord, TxListQuery,
 } from "@invest254/engine";
 import { Router, ApiError, serverFrom, type Ctx } from "./http.js";
 import { registerProtectedRoutes } from "./app.payments.js";
 import { registerHistoryRoutes } from "./app.history.js";
+import { registerSiteRoutes } from "./app.site.js";
 import { registerAuthRoutes } from "./app.auth.js";
 import { registerAffiliateRoutes } from "./app.affiliate.js";
 import { registerAdminRoutes } from "./app.admin.js";
+import { registerPlatformRoutes } from "./app.platform.js";
 import { registerNotificationRoutes } from "./app.notifications.js";
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
 import type { Server } from "node:http";
@@ -23,6 +25,28 @@ import type { Server } from "node:http";
 export interface BonusStatus { bonusId: string; amount: Cents; wageringX: number; wagered: Cents; required: Cents; remaining: Cents; status: string; createdAt: string; }
 export interface WalletBalance { real: Cents; bonus: Cents; currency: string; bonuses?: BonusStatus[]; }
 
+/**
+ * Public brand identity for one site (docs/22 Task E). Served by `GET /site/brand?host=` and
+ * consumed verbatim by the web resolver (`apps/web/src/lib/brand/brand.ts`) to re-skin per brand.
+ * Sourced from the `sites` row (migration 0044); no secrets.
+ */
+export interface Brand {
+  siteId: string;
+  slug: string;
+  name: string;
+  wordmarkText?: string | null;
+  logoUrl?: string | null;
+  faviconUrl?: string | null;
+  colorPrimary: string;
+  colorBg: string;
+  colorAccent: string;
+  theme: "dark" | "light" | "auto";
+  currency: string;
+  locale: string;
+  licenceLine?: string | null;
+  supportEmail?: string | null;
+}
+
 export interface ApiDeps {
   /** JWT verifier for player/admin routes; null → DEV header auth (see requireAuth). */
   verifier: Verifier | null;
@@ -33,14 +57,18 @@ export interface ApiDeps {
   /** Marketer enrollment, commission accrual, dashboard reads (I1/I2/I3) + payouts (I4). */
   affiliate: Pick<AffiliateService,
     "enroll" | "accrueDaily" | "summary" | "listReferrals" | "listCommissions"
-    | "requestPayout" | "approvePayout" | "completePayout" | "rejectPayout">;
+    | "requestPayout" | "approvePayout" | "completePayout" | "rejectPayout" | "siteOfPayout">;
   /** Admin back office (J2): dashboard reads, user status, commission rate, withdrawal queue, audit. */
   admin: Pick<AdminService,
     "overview" | "listUsers" | "getUserDetail" | "listUserActivity" | "setUserStatus" | "setCommissionRate" | "setUserRole" | "listWithdrawals" | "listTransactions" | "listAudit"
     | "adjustBalance" | "resetBalanceToLastFunded" | "listDeposits" | "depositsReconcile" | "reportDaily" | "reportByUser"
     | "getGameConfig" | "updateGameConfig" | "getMpesaConfig" | "updateMpesaConfig" | "rtpMonitor" | "listSeeds" | "rotateSeed"
     | "listAffiliatePayouts" | "recordAction"
-    | "adjustBalanceKind" | "clearBalance" | "getUserOverrides" | "setUserOverrides">;
+    | "adjustBalanceKind" | "clearBalance" | "getUserOverrides" | "setUserOverrides"
+    | "siteOfUser" | "siteOfTransaction">;
+  /** Platform-superadmin console (docs/22 Task H): cross-brand onboarding + economy + KPIs. */
+  platform: Pick<PlatformService, "listSites" | "overview" | "createSite" | "updateSite" | "setSiteConfig"
+    | "marketerRollup" | "createMarketerGlobal" | "linkMarketer">;
   /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
   /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
@@ -54,6 +82,8 @@ export interface ApiDeps {
   config: () => GameConfig | VersionedGameConfig;
   /** Public fairness record for a game-day id (commitment always; seed only after reveal). */
   fairnessById(gameDayId: number): Promise<FairnessRecord | null>;
+  /** Public brand resolution (docs/22 Task E): host (or slug) → the `sites` brand DTO, or null. */
+  brandByHost(host: string): Promise<Brand | null>;
 
   // ── E2: player + payments + admin ──
   /** Deposit/withdrawal orchestration over the atomic 0014 RPCs + Daraja. */
@@ -61,14 +91,14 @@ export interface ApiDeps {
     "initiateDeposit" | "requestWithdrawal" | "handleStkCallback" | "handleB2cResult" | "approveWithdrawal" | "rejectWithdrawal" | "reconcileDeposits">;
   /** Resolve a player's display handle (falls back to a guest handle). */
   resolveHandle(userId: string): Promise<string>;
-  /** Wallet balances (real + bonus) for the authenticated player. */
-  walletBalance(userId: string): Promise<WalletBalance>;
+  /** Wallet balances (real + bonus) for the authenticated player, scoped to their brand. */
+  walletBalance(userId: string, siteId?: string): Promise<WalletBalance>;
 
-  // ── F2: player history reads (each scoped to the caller's own userId) ──
-  ledger(userId: string, q: PageQuery): Promise<Page<LedgerEntry>>;
-  positions(userId: string, q: PositionListQuery): Promise<Page<PositionRecord>>;
-  positionDetail(userId: string, positionId: string): Promise<PositionDetail | null>;
-  transactions(userId: string, q: TxListQuery): Promise<Page<TransactionRecord>>;
+  // ── F2: player history reads (each scoped to the caller's own userId AND site) ──
+  ledger(userId: string, q: PageQuery, siteId?: string): Promise<Page<LedgerEntry>>;
+  positions(userId: string, q: PositionListQuery, siteId?: string): Promise<Page<PositionRecord>>;
+  positionDetail(userId: string, positionId: string, siteId?: string): Promise<PositionDetail | null>;
+  transactions(userId: string, q: TxListQuery, siteId?: string): Promise<Page<TransactionRecord>>;
 }
 
 const BASE = "/api/v1";
@@ -133,9 +163,11 @@ export function registerPublicRoutes(router: Router, deps: ApiDeps): void {
 export function createRouter(deps: ApiDeps): Router {
   const router = new Router();
   registerPublicRoutes(router, deps);
+  registerSiteRoutes(router, deps);
   registerAuthRoutes(router, deps);
   registerAffiliateRoutes(router, deps);
   registerAdminRoutes(router, deps);
+  registerPlatformRoutes(router, deps);
   registerNotificationRoutes(router, deps);
   registerMarketerRoutes(router, deps);
   registerProtectedRoutes(router, deps);

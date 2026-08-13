@@ -34,6 +34,14 @@ Idempotent, dependency-ordered SQL migrations for the Invest254 Supabase Postgre
 | 0019_affiliate_payouts.sql … 0027_admin_mfa.sql | Affiliate payouts, role consolidation, admin actions/balance-adjust audit, admin game-config + M-Pesa config RPCs, superadmin singleton, admin TOTP MFA |
 | 0028_live_game_config.sql | Makes `game_config` the engine's source of truth: adds the missing `target_win_rate` knob and a monotonic `version`, an immutable `game_config_versions` snapshot per change, `positions.config_version` (so crash recovery re-prices a position under the parameters that were live when it opened), a feasibility CHECK mirroring `assertFeasible` (RTP / targetWinRate must lie in (1, maxMultiplier]) plus bounds on `tick_rate_ms`/`drift_bias`/`default_duration_s`, a `pg_notify('game_config_changed')` trigger the engine LISTENs on, `fn_open_position` extended with `p_config_version` (and a live min/max stake re-check), and `fn_admin_update_game_config` extended with `targetWinRate` |
 
+| 0044_sites.sql | **Multi-tenant foundation:** `sites` (brand/tenant) registry holding every brand-diverse variable (name, logo, colours, domain, currency, licence, per-brand M-Pesa + seed refs); seeds a default site so existing data becomes "site #1". See docs/20. |
+| 0045_site_scoping.sql | Threads `site_id` (FK → `sites`, backfilled to default, NOT NULL, indexed) through every tenant table; makes identity unique **per site** (`unique(site_id, phone/username)`) and fairness per site (`unique(site_id, trade_date)`). |
+| 0046_site_game_config.sql | Per-site `site_game_config` (own RTP/stakes/×cap/tick/win-rate) + immutable `site_game_config_versions` + `pg_notify('site_game_config_changed', site_id)` the multiplexed engine LISTENs on; seeds the default site from the old singleton. |
+
+> **Multi-tenant status:** 0044–0046 are the schema FOUNDATION. The money RPCs, engine
+> multiplexing, RLS and UI still need `site_id` wiring — tracked task-by-task in
+> [docs/22 — Conversion Checklist](../../../docs/22-conversion-checklist.md).
+
 ## Applying
 With the Supabase/Postgres connection, apply each file in order. They are safe to re-run.
 
