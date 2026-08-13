@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, rateLimit, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, rateLimit, assertTargetSiteInScope, type Ctx } from "./http.js";
 import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, AdminTransactionListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery, UserOverridePatch } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 
@@ -68,6 +68,17 @@ async function domain<T>(fn: () => Promise<T>): Promise<T> {
     if (status) throw new ApiError(code, message, status);
     throw err;
   }
+}
+
+/**
+ * Admin write-path per-brand enforcement (docs/22 Task H): a site-scoped admin may only mutate a
+ * user in its own brand; a platform admin / platform_superadmin is unrestricted. Resolves the
+ * target's brand via the AdminService then defers to the shared HTTP guard (tolerant of an unknown
+ * target — the site-aware RPC stays the ultimate guard). Throws SITE_SCOPE_FORBIDDEN (403) on a
+ * known cross-brand target.
+ */
+async function ensureUserInScope(deps: ApiDeps, ctx: Ctx, userId: string): Promise<void> {
+  assertTargetSiteInScope(ctx, await deps.admin.siteOfUser(userId));
 }
 
 /** Parse cursor pagination params (limit clamped by the repository). */
@@ -231,6 +242,9 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
       minWithdrawalsCents: numParam("minWithdrawalsCents"),
       minTurnoverCents: numParam("minTurnoverCents"),
       minBets: numParam("minBets"),
+      // Admin site scope: a token minted for a site operator carries a `site` claim -> only that
+      // brand's users; a platform admin token has no claim -> all brands (docs/22 Task E/H).
+      siteId: ctx.claims?.site,
     };
     return deps.admin.listUsers(q);
   });
@@ -254,6 +268,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
       const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
       const reason = typeof body.reason === "string" ? body.reason : null;
       const targetId = ctx.params.id!;
+      await ensureUserInScope(deps, ctx, targetId);
       const result = await domain(() => deps.admin.setUserStatus(ctx.claims!.userId, ctx.claims!.role ?? "player", targetId, STATUS_ACTION[action]!, reason));
       // Blocking, non-dismissible banner while the account is limited; auto-resolve on reactivate.
       // Best-effort so a notification hiccup never fails the status change (the money-safe op).
@@ -288,6 +303,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     if (!["player", "marketer", "admin", "superadmin"].includes(role)) {
       throw new ApiError("VALIDATION", "role must be player|marketer|admin|superadmin", 400);
     }
+    await ensureUserInScope(deps, ctx, ctx.params.id!);
     return domain(() => deps.admin.setUserRole(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, role));
   });
 
@@ -295,6 +311,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
     const rate = typeof body.rate === "number" ? body.rate : Number(body.rate);
     if (!Number.isFinite(rate)) throw new ApiError("VALIDATION", "rate (0..1) is required", 400);
+    await ensureUserInScope(deps, ctx, ctx.params.id!);
     return domain(() => deps.admin.setCommissionRate(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, rate));
   });
 
@@ -310,6 +327,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     const signed = dir === "credit" || dir === "debit" ? Math.abs(magnitude) * (dir === "debit" ? -1 : 1) : magnitude;
     // J8: optional `kind` ('real'|'bonus'); default keeps the legacy real-wallet behaviour.
     const kind = body.kind === "bonus" ? "bonus" : body.kind === "real" ? "real" : undefined;
+    await ensureUserInScope(deps, ctx, ctx.params.id!);
     if (kind) return domain(() => deps.admin.adjustBalanceKind(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, signed, kind, reason));
     return domain(() => deps.admin.adjustBalance(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, signed, reason));
   });
@@ -320,6 +338,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     const reason = typeof body.reason === "string" ? body.reason : "";
     if (reason.trim() === "") throw new ApiError("REASON_REQUIRED", "reason is required", 400);
     const kind = body.kind === "real" || body.kind === "bonus" || body.kind === "both" ? body.kind : "real";
+    await ensureUserInScope(deps, ctx, ctx.params.id!);
     return domain(() => deps.admin.clearBalance(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, kind, reason));
   });
 
@@ -329,6 +348,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
     const reason = typeof body.reason === "string" ? body.reason : "";
     if (reason.trim() === "") throw new ApiError("REASON_REQUIRED", "reason is required", 400);
+    await ensureUserInScope(deps, ctx, ctx.params.id!);
     return domain(() => deps.admin.resetBalanceToLastFunded(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, reason.trim()));
   });
 
@@ -421,7 +441,12 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     }
 
     const results = await Promise.all(userIds.map(async (id) => {
-      try { return { userId: id, ok: true, result: await run(id) }; }
+      try {
+        // Per-brand write-path guard (docs/22 Task H): a site-scoped admin can only touch its own
+        // brand's users. Enforced per target so a cross-brand id fails just that row (partial success).
+        await ensureUserInScope(deps, ctx, id);
+        return { userId: id, ok: true, result: await run(id) };
+      }
       catch (e) { return { userId: id, ok: false, error: (e as { message?: string })?.message ?? "ERROR" }; }
     }));
     const okCount = results.filter((r) => r.ok).length;
@@ -434,13 +459,17 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
       userId: ctx.params.id!, winRate: null, houseEdge: null, tradeDurationS: null, maxWinMultiplier: null,
       minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null,
     });
-  router.post(`${BASE}/admin/users/:id/overrides`, auth, admin, async (ctx: Ctx) => {
+  // Writing a per-user override is a powerful statistical lever → superadmin-gated (docs/22 Task H).
+  // platform_superadmin (rank 5) also satisfies this. The RPC stamps the override with the target's
+  // brand (user_overrides.site_id) and writes an admin_actions audit row.
+  router.post(`${BASE}/admin/users/:id/overrides`, auth, superadmin, async (ctx: Ctx) => {
     const patch = parseOverridePatch(ctx);
+    await ensureUserInScope(deps, ctx, ctx.params.id!);
     return domain(() => deps.admin.setUserOverrides(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
   });
 
   router.get(`${BASE}/admin/withdrawals`, auth, admin, async (ctx: Ctx) => {
-    const q: AdminWithdrawalListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined };
+    const q: AdminWithdrawalListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined, siteId: ctx.claims?.site };
     return deps.admin.listWithdrawals(q);
   });
 
@@ -451,7 +480,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   });
 
   router.get(`${BASE}/admin/deposits`, auth, admin, async (ctx: Ctx) => {
-    const q: AdminDepositListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined };
+    const q: AdminDepositListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined, siteId: ctx.claims?.site };
     return deps.admin.listDeposits(q);
   });
 
@@ -467,6 +496,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
       kind: kindRaw ?? undefined,
       status: ctx.query.get("status") ?? undefined,
       q: ctx.query.get("q") ?? undefined,
+      siteId: ctx.claims?.site,
     };
     return deps.admin.listTransactions(q);
   });

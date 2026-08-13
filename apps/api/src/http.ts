@@ -32,6 +32,8 @@ export interface Ctx {
   body: unknown;
   /** Set by `requireAuth` once a caller is authenticated. */
   claims?: AuthClaims;
+  /** Set by `requireSite`: the brand the request is scoped to (JWT `site` claim, else default). */
+  siteId?: string;
 }
 
 export interface HandlerResult { status?: number; body: unknown; }
@@ -49,6 +51,8 @@ export const ROLE_RANK: Readonly<Record<string, number>> = {
   marketer: 2,
   admin: 3,
   superadmin: 4,
+  // Cross-brand platform owner: outranks a per-brand superadmin and reaches the /platform console.
+  platform_superadmin: 5,
 };
 
 const MAX_BODY_BYTES = 1_000_000; // 1 MB cap on request bodies
@@ -305,6 +309,59 @@ export function requireRole(minRole: keyof typeof ROLE_RANK): Middleware {
     const need = ROLE_RANK[minRole] ?? Number.POSITIVE_INFINITY;
     if (have < need) throw new ApiError("FORBIDDEN", `requires role ${minRole}`, 403);
   };
+}
+
+/** The default (single-tenant) brand, seeded by migration 0044. */
+export const DEFAULT_SITE_ID = "00000000-0000-0000-0000-000000000001";
+
+/**
+ * Site scoping (docs/22 Task E). Runs AFTER `requireAuth`: derives `ctx.siteId` from the token's
+ * `site` claim so every downstream read/mutation can implicitly filter to the caller's brand.
+ * Legacy tokens minted before per-brand auth carry no claim → the default site. A request that
+ * explicitly names a different brand (`?site=`) than its token is rejected (AUTH_SITE_MISMATCH),
+ * closing the cross-brand access hole the JWT claim exists to prevent.
+ */
+export function requireSite(defaultSiteId: string = DEFAULT_SITE_ID): Middleware {
+  return (ctx) => {
+    if (!ctx.claims) throw new ApiError("AUTH_REQUIRED", "authentication required", 401);
+    const siteId = ctx.claims.site ?? defaultSiteId;
+    const named = ctx.query.get("site");
+    if (named && named !== siteId) {
+      throw new ApiError("AUTH_SITE_MISMATCH", "token is not scoped to the requested site", 403);
+    }
+    ctx.siteId = siteId;
+  };
+}
+
+/**
+ * Admin write-path per-brand enforcement (docs/22 Task H). The read side (Task E) already scopes
+ * every admin LIST to the token's optional `site` claim; this is the matching guard for MUTATIONS.
+ *
+ * `adminScopeSite` returns the brand a caller is restricted to when acting, or null for unrestricted:
+ *   - a platform_superadmin (rank 5) is cross-brand -> null (never restricted);
+ *   - a platform admin token carries NO `site` claim -> null (unchanged single-tenant behaviour);
+ *   - a site-scoped admin token carries a `site` claim -> that brand id.
+ */
+export function adminScopeSite(ctx: Ctx): string | null {
+  if (!ctx.claims) throw new ApiError("AUTH_REQUIRED", "authentication required", 401);
+  const platformRank = ROLE_RANK.platform_superadmin ?? Number.POSITIVE_INFINITY;
+  if ((ROLE_RANK[ctx.claims.role ?? "player"] ?? 0) >= platformRank) return null;
+  return ctx.claims.site ?? null;
+}
+
+/**
+ * Reject a site-scoped admin mutating a target in another brand. TOLERANT by design: an unrestricted
+ * caller (null scope) and an unresolved target (null site) both pass — the site-aware DB RPCs remain
+ * the ultimate guard, and some in-memory mirrors can't resolve a target's brand. Only a KNOWN
+ * cross-brand target is refused (SITE_SCOPE_FORBIDDEN, 403).
+ */
+export function assertTargetSiteInScope(ctx: Ctx, targetSite: string | null | undefined): void {
+  const scope = adminScopeSite(ctx);
+  if (scope === null) return;            // platform admin / platform_superadmin -> unrestricted
+  if (targetSite == null) return;        // unknown target -> defer to the RPC's own site guard
+  if (targetSite !== scope) {
+    throw new ApiError("SITE_SCOPE_FORBIDDEN", "SITE_SCOPE_FORBIDDEN: target belongs to another brand", 403);
+  }
 }
 
 /** Convenience: construct the Node server from a configured router. */
