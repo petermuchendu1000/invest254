@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { Providers } from '@/components/Providers';
 import { BrandProvider } from '@/lib/brand/BrandProvider';
 import { resolveBrand, brandRootStyle, brandWordmark, type Brand } from '@/lib/brand/brand';
+import { googleFontsHref } from '@/lib/brand/fonts';
 import { env } from '@/lib/env';
 
 // Cloudflare Pages runs on the edge; per-request per-brand SSR (Task G) makes every route dynamic,
@@ -59,10 +60,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // before paint to avoid a flash. 'auto'/'dark' → dark-first; 'light' → light.
   const brandDefaultTheme = brand.theme === 'light' ? 'light' : 'dark';
   const initialClass = brandDefaultTheme === 'light' ? 'light' : 'dark';
-  const themeInit = `(function(){try{var d=${JSON.stringify(brandDefaultTheme)};var s=localStorage.getItem('pp-theme');var t=s||d;var e=document.documentElement;e.classList.remove('light','dark');e.classList.add(t==='light'?'light':'dark');}catch(e){}})();`;
+  const themeInit = `(function(){try{var d=${JSON.stringify(brandDefaultTheme)};var s=localStorage.getItem('pp-theme');var t=s||d;var e=document.documentElement;e.classList.remove('light','dark');e.classList.add(t==='light'?'light':'dark');var p=localStorage.getItem('pp-pnl');if(p==='classic')e.classList.add('pnl-classic');else e.classList.remove('pnl-classic');}catch(e){}})();`;
+  // Load the brand's title + body faces from Google Fonts (empty when the brand sets no fonts).
+  const fontHref = googleFontsHref([brand.themeTokens?.fontTitle ?? '', brand.themeTokens?.fontBody ?? '']);
 
   return (
     <html lang="en" className={initialClass} data-brand={brand.slug} style={brandRootStyle(brand) as React.CSSProperties}>
+      <head>
+        {fontHref ? (
+          <>
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+            <link rel="stylesheet" href={fontHref} />
+          </>
+        ) : null}
+      </head>
       <body>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
         <BrandProvider brand={brand}>

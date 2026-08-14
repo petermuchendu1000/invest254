@@ -6,6 +6,32 @@
 
 ---
 
+## 0. Automated one-shot onboarding (fastest path)
+
+A superadmin supplies one JSON config and the client is created **instantly**:
+
+```
+DATABASE_URL=... CF_ACCOUNT_ID=... GROQ_API_KEY=... \
+  node --import tsx scripts/onboard_client.ts scripts/onboard.example.json
+```
+
+`scripts/onboard_client.ts` performs Steps 1-2 below in a single, idempotent (by slug) operation:
+it upserts the `sites` row and `site_game_config`, points the brand at its `primaryDomain`, then
+self-verifies that (a) the brand resolves by host and (b) the support-chat pipeline answers for the
+new brand (the shared knowledge base works immediately; per-brand overrides are optional). The
+config accepts `slug, name, primaryDomain, currency, locale, theme, colors, wordmarkText,
+licenceLine, supportEmail, game{...}` and an optional `verify.question`.
+
+The one step outside the database is DNS (Step 4). The script prints it, and can **automate the
+Cloudflare Pages custom-domain attach + CNAME** when the config includes `cloudflare.pagesProject`
+(optionally `zoneId` + `cnameTarget`) and a Pages-scoped `CF_PAGES_API_TOKEN` is set (the
+Workers-AI token cannot attach domains). Secrets (Step 3) and the operator bootstrap (Step 5) remain
+deliberate, security-sensitive actions.
+
+The manual/SQL breakdown of each step follows.
+
+---
+
 ## 1. The 6-step launch
 
 ### Step 1 — Create the `sites` row (the brand)
@@ -52,7 +78,15 @@ The API/engine resolve `sites.master_seed_ref` → `process.env[that_name]`.
   and `…/s/lucky7/withdrawals/mpesa/result/:txId` (the `/s/<slug>` prefix resolves the site).
 
 ### Step 5 — Bootstrap the site's operator
-Register a normal account on `lucky7.co.ke`, then promote it (once) to the brand's admin:
+Register a normal account on `lucky7.co.ke`, then promote it (once) to the brand's admin.
+Fastest path is the reusable script (registers or resets, sets the role, verifies login):
+
+```
+DATABASE_URL=... node --import tsx scripts/make_operator.ts <phone> <password> [role] [siteId]
+# e.g. platform owner:  scripts/make_operator.ts 0798661061 '<pw>' platform_superadmin
+```
+
+Or by SQL:
 
 ```sql
 update public.profiles set role = 'site_superadmin'

@@ -4,4 +4,4 @@ dist/
 .env
 .env.local
 coverage/
-apps/web/vercel.json
+__pycache__/
