@@ -13,6 +13,8 @@ import { registerAdminRoutes } from "./app.admin.js";
 import { registerPlatformRoutes } from "./app.platform.js";
 import { registerNotificationRoutes } from "./app.notifications.js";
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
+import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
+import type { PlatformOnboardDeps } from "./app.platform.js";
 import type { Server } from "node:http";
 
 /**
@@ -45,6 +47,8 @@ export interface Brand {
   locale: string;
   licenceLine?: string | null;
   supportEmail?: string | null;
+  /** Full per-brand design-token palette (docs/22): overrides the fixed --pp-* tokens end-to-end. */
+  themeTokens?: Record<string, string> | null;
 }
 
 export interface ApiDeps {
@@ -68,7 +72,7 @@ export interface ApiDeps {
     | "siteOfUser" | "siteOfTransaction">;
   /** Platform-superadmin console (docs/22 Task H): cross-brand onboarding + economy + KPIs. */
   platform: Pick<PlatformService, "listSites" | "overview" | "createSite" | "updateSite" | "setSiteConfig"
-    | "marketerRollup" | "createMarketerGlobal" | "linkMarketer">;
+    | "marketerRollup" | "createMarketerGlobal" | "linkMarketer" | "setSiteTheme">;
   /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
   /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
@@ -99,6 +103,19 @@ export interface ApiDeps {
   positions(userId: string, q: PositionListQuery, siteId?: string): Promise<Page<PositionRecord>>;
   positionDetail(userId: string, positionId: string, siteId?: string): Promise<PositionDetail | null>;
   transactions(userId: string, q: TxListQuery, siteId?: string): Promise<Page<TransactionRecord>>;
+
+  /**
+   * Support assistant (docs/11, migration 0057). Optional: when present, the RAG chat surface
+   * (`/support/*`) is wired. Grounded-answer logic is `answerSupportQuestion` in
+   * @invest254/shared; recording + retrieval + embedder + LLM are injected here.
+   */
+  support?: SupportDeps;
+
+  /**
+   * Instant client onboarding (docs/21): create a brand + economy and optionally provision its
+   * domain across Cloudflare + Namecheap. Optional; when absent the /platform/onboard route 503s.
+   */
+  platformOnboard?: PlatformOnboardDeps;
 }
 
 const BASE = "/api/v1";
@@ -172,6 +189,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerMarketerRoutes(router, deps);
   registerProtectedRoutes(router, deps);
   registerHistoryRoutes(router, deps);
+  registerSupportRoutes(router, deps);
   return router;
 }
 
