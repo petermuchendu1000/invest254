@@ -69,6 +69,12 @@ Files: `apps/engine/src/sitecontext.ts` (✅ shipped), `server.ts`, `game.ts`, `
   `?site=`/Host), verifies the JWT `site` claim matches (`AUTH_SITE_MISMATCH`), and fans out
   `tick/online/balance/position_*` **per brand**. Proven by a real two-client integration test
   (`multiengine.test.ts`): decorrelated ticks, isolated auth/open/settle, per-brand stake bounds.
+- ✅ Live brand resolution (`siteresolver.ts`, GAP 2): `resolveSite` is async; the boot alias map
+  is the fast path, but a ref unknown at boot (a brand ONBOARDED AFTER the engine started) is looked
+  up live in `sites` (active only, by slug/domain/id), cached, and served with NO restart — a short
+  negative cache + in-flight coalescing protect the DB. Previously such a connection threw
+  `unresolved site` until a redeploy. Tested: `siteresolver.test.ts` (cache/negative-cache/coalesce/
+  add) + `multiengine.test.ts` async-resolver stream + 1008 reject of a truly-unknown brand.
 - ✅ `RecoveryService` gained a `siteId` filter; `SiteRegistry.recoverAll()` groups open positions
   by brand and recovers each under its own context. 
 - ✅ `server.ts` rewritten as the multiplexed entrypoint (Pg per-site config + in-memory dev
@@ -91,8 +97,9 @@ Files: `apps/engine/src/authservice.ts`, `auth.ts`, `identity.ts`, `apps/api/src
   + live-DB verified (4-arg→default site, 5-arg→brand; site-scoped login).
 - ✅ Verifier (`auth.ts`) surfaces `claims.site`; the multiplex WS `AUTH_SITE_MISMATCH` guard now
   runs on real tokens.
-- ✅ API resolves the brand from the request `host` and passes it into `register`/`login`
-  (`resolveSiteId` in `app.auth.ts`); the returned session carries `site`. Landed with Task E.
+- ✅ API resolves the brand from an explicit `site` ref (slug/domain) the web sends — falling back
+  to the request `host` — and passes it into `register`/`login` (`resolveSiteId` in `app.auth.ts`);
+  the returned session carries `site`. Landed with Task E; brand ref made explicit in GAP-1 fix.
 - **Done when:** ✅ a token minted for Brand A carries `site=A` and login is per-brand (proven);
   the API host→site resolution is wired (Task E). **Task D complete.**
 
@@ -103,10 +110,24 @@ Files: `apps/api/src/http.ts`, `app.ts`, `app.site.ts`, `app.auth.ts`, `server.t
   `AUTH_SITE_MISMATCH`). Surfaced by `GET /site/me`. Tested (`app.site.test.ts`).
 - ✅ `GET /site/brand?host=` (public, `app.site.ts`): host/slug → the `sites` brand DTO the web
   resolver (`apps/web/src/lib/brand/brand.ts`) renders — Pg query in `server.ts`, in-memory in
-  `testutil.ts`. Tested (host, slug case-insensitive, 400 missing, 404 unknown).
-- ✅ Brand-scoped auth: `register`/`login` resolve the brand from the request `host` and pass
-  `site_id`, returning the session's `site`; identity is isolated per brand. Tested (two-brand
-  register + login isolation).
+  `testutil.ts`. Host normalization is centralized in `normalizeHost` (`packages/shared/src/site.ts`)
+  and folds `www.<apex>` → `<apex>` (+ case/port/scheme), so both the apex and `www.` resolve the
+  same brand instead of `www.` silently falling back to the default (GAP 4); `brandByHost` also
+  matches a www-stored `primary_domain`. Tested (host, slug case-insensitive, www apex+mixed-case,
+  400 missing, 404 unknown; `normalizeHost` unit-tested in `site.test.ts`).
+- ✅ Multi-tenant CORS (GAP 3, `http.ts` + `cors.ts`): the shared API serves many brand domains,
+  so a static `CORS_ALLOWED_ORIGINS` can't keep up. When that list is restricted (not `*`), the
+  router also consults a `corsAllowOrigin` predicate backed by `BrandOriginAllowlist` — an in-memory,
+  periodically-refreshed set of ACTIVE brand domains from `sites` — so every onboarded client's
+  origin (apex + `www.`) is allowed without a redeploy, unknown origins stay blocked, and the
+  preflight decision stays synchronous. Tested: `cors.test.ts` (pure `isOriginAllowed` matrix +
+  allowlist refresh/add/fail-safe/www-fold).
+- ✅ Brand-scoped auth: `register`/`login` resolve the brand from the explicit `site` ref the web
+  sends (`useAuthActions` → `useBrand().slug`), with `host` as a backward-compatible fallback, and
+  pass `site_id`, returning the session's `site`; identity is isolated per brand. Without this the
+  shared API host cannot infer a caller's brand, so every brand's players pooled into site #1 (GAP
+  1). Tested end-to-end (`app.auth.site.e2e.test.ts`): slug/domain/case-insensitive resolution,
+  claim stamping, per-site identity, wrong-brand login rejection, unknown-ref fallback, host compat.
 - ✅ Thread `ctx.siteId` into every service/repository call. **Player money core:** history reads
   (`/wallet/ledger`, `/positions`, `/positions/:id`, `/transactions`) + wallet/deposits/withdrawals
   run under `requireSite` and pass `ctx.siteId` into the site-aware RPCs + site-filtered wallet
@@ -169,7 +190,11 @@ Files: `apps/web/src/lib/brand/*`, `app/layout.tsx`, `app/globals.css`, `lib/gam
   before paint. `generateMetadata`/`generateViewport` derive title/description/icons/theme-colour
   from the brand, and a `BrandProvider` (`lib/brand/BrandProvider.tsx`) hands the brand to every
   client component. `Logo` renders the brand logo/wordmark; `Footer` renders the brand name +
-  licence line + support email.
+  licence line + support email. Fallback is now OBSERVABLE (GAP 5): when the API is unreachable or
+  the host has no active brand, `resolveBrand` still returns the default so the app renders, but
+  marks `resolved:false`, logs a warning with the host (SSR logs/monitoring), and the layout emits
+  `data-brand-resolved="false"` on `<html>` — so a misconfigured client domain no longer silently
+  serves the default brand unnoticed.
 - ✅ WS carries the site: `GameSocketProvider` connects to `wsUrlForSite(env.wsUrl, brand.siteId)`
   (`?site=<siteId>`), so the multiplexed engine binds the socket to the brand at connect (before the
   token) and the post-auth JWT `site` claim must then match. REST carries the site implicitly via the
@@ -178,7 +203,7 @@ Files: `apps/web/src/lib/brand/*`, `app/layout.tsx`, `app/globals.css`, `lib/gam
   `--pp-brand` and `--brand-accent` → `--pp-accent` (both themes, with default fallbacks), so the
   whole design system re-skins per brand from the vars the layout sets.
 - ✅ Tested: `lib/brand/brand.test.ts` (wsUrlForSite query composition, brandCssVars/rootStyle,
-  brandWordmark fallback, resolveBrand fetch-merge + non-ok/network fallback). `next build` green
+  brandWordmark fallback, resolveBrand fetch-merge + non-ok/network fallback + resolved flag/warning). `next build` green
   (all routes SSR per-request for per-brand rendering; server/client boundaries valid).
 - **Done when:** ✅ two domains on one deployment render two distinct brands (colours, logo/wordmark,
   title/favicon/theme-colour, licence) with no rebuild — brand is DB data served by `/site/brand`.

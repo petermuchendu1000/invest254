@@ -31,6 +31,12 @@ export interface Brand {
   supportEmail?: string | null;
   /** Full per-brand design-token palette; maps to every --pp-* token (docs/22). */
   themeTokens?: Record<string, string> | null;
+  /**
+   * Whether this brand came from the API (true) or is the safety fallback (false) — the API was
+   * unreachable, or the host has no ACTIVE brand. The app still renders on a fallback, but callers
+   * (layout, monitoring) can surface it instead of silently serving the default brand (GAP 5).
+   */
+  resolved?: boolean;
 }
 
 /** Last-resort brand so the UI always renders (used only if the API is unreachable). */
@@ -50,16 +56,17 @@ export const DEFAULT_BRAND: Brand = {
   licenceLine: "Operated under licence.",
   supportEmail: null,
   themeTokens: {
-    // Minimal palette: ONE brand hue + a brand-tinted neutral ramp. Depth comes from
-    // lightness/chroma/opacity, not extra hues. Graph gain = vivid brand, loss = muted neutral
-    // of the same hue (differentiated by chroma + position + sign). warn/info are sparse signals.
-    bg: "#0c100d", surface: "#161d18", surface2: "#212c25", border: "#36453b",
-    fg: "#f1f3f2", muted: "#94a89c", brand: "#2cdd6d", brandHover: "#1fbd59",
-    accent: "#67e997", accentFg: "#0b0f14", up: "#2cdd6d", down: "#8fa396",
-    warn: "#f6b128", info: "#5199ec",
+    // Two-layer model (docs/22): NEUTRAL near-black chrome + FIXED semantic colours (brand-agnostic,
+    // so gain/rising is always green and loss/falling always red), plus the brand's own identity hue
+    // for logo/CTAs/accent only. Semantic pair = CoinMarketCap (#16C784 / #EA3943).
+    bg: "#0B0E11", surface: "#151A21", surface2: "#1E252E", border: "#2A323D",
+    fg: "#EEF2F6", muted: "#8B97A7", brand: "#2CDD6D", brandHover: "#1FBD59",
+    accent: "#67E997", accentFg: "#0B0F14", up: "#16C784", down: "#EA3943",
+    warn: "#F0B90B", info: "#3B82F6",
     // Typography: heading + body faces (free Google families). Applied via --pp-font-*.
     fontTitle: "Space Grotesk", fontBody: "Inter",
   },
+  resolved: false,
 };
 
 /** Resolve the brand for a host by asking the API. Falls back to DEFAULT_BRAND on any error. */
@@ -69,11 +76,20 @@ export async function resolveBrand(apiBaseUrl: string, host: string): Promise<Br
       // Brand rarely changes; let the platform CDN cache it briefly.
       headers: { accept: "application/json" },
     });
-    if (!res.ok) return DEFAULT_BRAND;
+    if (!res.ok) {
+      // A 404 means this host has no ACTIVE brand — a real misconfiguration for a live client
+      // domain (DNS points here but the sites row is missing/paused/typo'd). We still render so a
+      // transient blip never hard-fails the app, but we surface it loudly (GAP 5): the brand carries
+      // resolved:false and we warn with the host, so it shows up in SSR logs / synthetic monitoring
+      // instead of silently serving the default brand on someone else's domain.
+      console.warn(`[brand] no brand resolved for host "${host}" (HTTP ${res.status}); serving fallback "${DEFAULT_BRAND.slug}"`);
+      return { ...DEFAULT_BRAND, resolved: false };
+    }
     const b = (await res.json()) as Partial<Brand>;
-    return { ...DEFAULT_BRAND, ...b } as Brand;
-  } catch {
-    return DEFAULT_BRAND;
+    return { ...DEFAULT_BRAND, ...b, resolved: true };
+  } catch (err) {
+    console.warn(`[brand] brand resolution failed for host "${host}" (${(err as Error)?.message ?? "error"}); serving fallback "${DEFAULT_BRAND.slug}"`);
+    return { ...DEFAULT_BRAND, resolved: false };
   }
 }
 
