@@ -25,12 +25,6 @@ const KIND_OPTIONS = [
   { value: 'withdrawal', label: 'Withdrawals only' },
 ];
 
-const STALE_OPTIONS = [
-  { value: '15', label: 'Stale > 15 min' },
-  { value: '30', label: 'Stale > 30 min' },
-  { value: '60', label: 'Stale > 60 min' },
-];
-
 /** Per-status tone for reconciliation tiles. */
 function bucketTone(status: string): 'default' | 'up' | 'down' | 'warn' {
   const s = status.toLowerCase();
@@ -73,13 +67,12 @@ function TimeCell({ ms }: { ms: number }) {
 }
 
 export default function FinancePage() {
-  const [staleMinutes, setStaleMinutes] = useState('15');
   const [txKind, setTxKind] = useState('');
   const [txStatus, setTxStatus] = useState('');
   const [depStatus, setDepStatus] = useState('');
 
   const overview = useOverview();
-  const recon = useDepositsReconcile(Number(staleMinutes));
+  const recon = useDepositsReconcile();
   const txns = useTransactions({ ...(txKind ? { kind: txKind } : {}), ...(txStatus ? { status: txStatus } : {}) });
   const deposits = useDeposits(depStatus || undefined);
 
@@ -87,7 +80,6 @@ export default function FinancePage() {
   const depRows = useMemo(() => deposits.data?.pages.flatMap((p) => p.items) ?? [], [deposits.data]);
 
   const summary = recon.data?.summary ?? [];
-  const stale = recon.data?.stale ?? [];
 
   const fin = overview.data?.finance;
   const netCents = fin ? fin.depositsCents - fin.withdrawalsCents : 0;
@@ -116,9 +108,6 @@ export default function FinancePage() {
 
       {/* Reconciliation summary — deposits grouped by status */}
       <Section title="Deposit reconciliation">
-        <Toolbar>
-          <FilterSelect label="Window" value={staleMinutes} onChange={setStaleMinutes} options={STALE_OPTIONS} />
-        </Toolbar>
         {recon.isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : recon.isError ? (
@@ -136,35 +125,6 @@ export default function FinancePage() {
                 tone={bucketTone(b.status)}
               />
             ))}
-          </div>
-        )}
-      </Section>
-
-      {/* Stale non-terminal deposits — the reconcile worklist */}
-      <Section title={`Stale deposits${stale.length ? ` (${stale.length})` : ''}`}>
-        {recon.isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : stale.length === 0 ? (
-          <Empty title="No stale deposits" description={`No pending or processing STK pushes older than ${staleMinutes} minutes.`} />
-        ) : (
-          <div className="overflow-hidden rounded-2xl border border-warn">
-            <TableWrap>
-              <thead>
-                <tr className="border-b border-border">
-                  <Th>Player</Th>
-                  <Th className="text-right">Amount</Th>
-                  <Th>Phone</Th>
-                  <Th>Status</Th>
-                  <Th>Checkout ID</Th>
-                  <Th className="text-right">Age</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {stale.map((r) => (
-                  <DepositRow key={r.txId} r={r} highlightAge />
-                ))}
-              </tbody>
-            </TableWrap>
           </div>
         )}
       </Section>
@@ -291,7 +251,7 @@ function TxRow({ r }: { r: AdminTransactionRow }) {
   );
 }
 
-function DepositRow({ r, highlightAge }: { r: AdminDepositRow; highlightAge?: boolean }) {
+function DepositRow({ r }: { r: AdminDepositRow }) {
   return (
     <tr className="border-b border-border last:border-0 hover:bg-surface-2/50">
       <Td>
@@ -306,17 +266,9 @@ function DepositRow({ r, highlightAge }: { r: AdminDepositRow; highlightAge?: bo
       <Td>
         <StatusBadge status={r.status} />
       </Td>
-      {highlightAge ? (
-        <Td className="font-mono text-[11px] text-muted">{r.checkoutRequestId ?? '—'}</Td>
-      ) : (
-        <Td className="font-mono text-[11px] text-muted">{r.mpesaReceipt ?? '—'}</Td>
-      )}
+      <Td className="font-mono text-[11px] text-muted">{r.mpesaReceipt ?? '—'}</Td>
       <Td className="text-right">
-        {highlightAge ? (
-          <span className="whitespace-nowrap text-xs font-medium text-warn">{formatRelativeTime(r.createdAtMs)} ago</span>
-        ) : (
-          <TimeCell ms={r.createdAtMs} />
-        )}
+        <TimeCell ms={r.createdAtMs} />
       </Td>
     </tr>
   );
