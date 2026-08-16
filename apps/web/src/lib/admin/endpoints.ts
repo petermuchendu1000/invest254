@@ -111,6 +111,11 @@ export const adminApi = {
     apiFetch<unknown>(`/admin/withdrawals/${id}/approve`, { method: 'POST', token: t }),
   rejectWithdrawal: (t: string, id: string) =>
     apiFetch<unknown>(`/admin/withdrawals/${id}/reject`, { method: 'POST', token: t }),
+  // 0067 — per-brand withdrawal kill switch (owner/admin override).
+  withdrawalsEnabled: (t: string) =>
+    apiFetch<{ enabled: boolean }>('/admin/withdrawals-enabled', { token: t }),
+  setWithdrawalsEnabled: (t: string, enabled: boolean) =>
+    apiFetch<{ enabled: boolean }>('/admin/withdrawals-enabled', { method: 'PUT', token: t, body: { enabled } }),
   deposits: (t: string, p: Page & { status?: string | undefined } = {}) =>
     apiFetch<Paginated<AdminDepositRow>>('/admin/deposits', {
       token: t,

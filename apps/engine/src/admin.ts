@@ -294,6 +294,9 @@ export interface AdminRepository {
   setWithdrawalPool(actorId: string, actorRole: string, siteId: string, tradeDay: string, amountCents: Cents): Promise<WithdrawalPoolRow>;
   /** docs/25 (0064) — set the brand's recurring default that auto-seeds each new EAT day. */
   setDefaultPool(actorId: string, actorRole: string, siteId: string, tradeDay: string, amountCents: Cents): Promise<WithdrawalPoolRow>;
+  // 0067 — per-brand withdrawal kill switch. Read + admin/owner toggle (audited).
+  getWithdrawalsEnabled(siteId: string): Promise<boolean>;
+  setWithdrawalsEnabled(actorId: string, actorRole: string, siteId: string, enabled: boolean): Promise<boolean>;
   getMpesaConfig(): Promise<MpesaConfigRow>;
   updateMpesaConfig(actorId: string, actorRole: string, patch: MpesaConfigPatch): Promise<MpesaConfigRow>;
   rtpMonitor(): Promise<RtpMonitor>;
@@ -1058,6 +1061,17 @@ export class PgAdminRepository implements AdminRepository {
     return this.getWithdrawalPool(siteId, tradeDay);
   }
 
+  async getWithdrawalsEnabled(siteId: string): Promise<boolean> {
+    const r = await this.q.query("select withdrawals_enabled from sites where id = $1::uuid", [siteId]);
+    // Fail-open (enabled) when the brand row is missing, matching the DB column default.
+    return r.rows.length ? (r.rows[0] as Record<string, unknown>).withdrawals_enabled !== false : true;
+  }
+  async setWithdrawalsEnabled(actorId: string, actorRole: string, siteId: string, enabled: boolean): Promise<boolean> {
+    try { await this.q.query("select fn_admin_set_withdrawals_enabled($1,$2,$3::uuid,$4)", [actorId, actorRole, siteId, enabled]); }
+    catch (e) { mapAdminError(e); }
+    return this.getWithdrawalsEnabled(siteId);
+  }
+
   async getMpesaConfig(): Promise<MpesaConfigRow> {
     const r = await this.q.query(
       `select environment, shortcode, stk_callback_url, b2c_initiator, b2c_result_url, b2c_timeout_url,
@@ -1269,6 +1283,7 @@ export class InMemoryAdminRepository implements AdminRepository {
   /** Per-(site, EAT day) withdrawal-pool mirror for the test harness (docs/25 Phase 1). */
   private readonly pools = new Map<string, WithdrawalPoolRow>();
   private readonly poolDefaults = new Map<string, number>();  // siteId -> default daily budget (0064)
+  private readonly withdrawalsEnabledBySite = new Map<string, boolean>(); // siteId -> kill switch (0067); absent = enabled
   private mpesa: MpesaInternal = defaultMpesaInternal();
   private readonly seedRows = new Map<string, AdminSeedRow>();
   // J8 in-memory stores (bonus wallet + per-user overrides) for the test harness.
@@ -1763,6 +1778,16 @@ export class InMemoryAdminRepository implements AdminRepository {
     this.poolDefaults.set(siteId, amountCents);
     this.record(actorId, actorRole, "pool.default.set", "site", siteId, { defaultDailyPoolCents: amountCents });
     return this.getWithdrawalPool(siteId, tradeDay);
+  }
+
+  async getWithdrawalsEnabled(siteId: string): Promise<boolean> {
+    return this.withdrawalsEnabledBySite.get(siteId) !== false; // absent => enabled (matches DB default)
+  }
+  async setWithdrawalsEnabled(actorId: string, actorRole: string, siteId: string, enabled: boolean): Promise<boolean> {
+    if (!["admin", "superadmin", "platform_admin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    this.withdrawalsEnabledBySite.set(siteId, enabled);
+    this.record(actorId, actorRole, "withdrawals.toggle", "site", siteId, { withdrawals_enabled: enabled });
+    return enabled;
   }
 
   async getMpesaConfig(): Promise<MpesaConfigRow> { return maskMpesaInternal(this.mpesa); }

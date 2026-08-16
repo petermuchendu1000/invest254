@@ -307,7 +307,14 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const resolveHandle = async (userId: string): Promise<string> =>
     (await engage.getUsername(userId)) ?? `guest_${userId.slice(0, 6)}`;
 
+  // Late-bound so the withdrawal kill switch reads the SAME in-memory admin repo the toggle route
+  // writes to (the admin repo is created below, after PaymentService). Resolver runs at request time.
+  let adminRepoRef: InMemoryAdminRepository | undefined;
+  const TU_DEFAULT_SITE_ID = "00000000-0000-0000-0000-000000000001";
+
   const payments = new PaymentService(payRepo, daraja, {
+    withdrawalsEnabledForSite: async (siteId) =>
+      adminRepoRef ? adminRepoRef.getWithdrawalsEnabled(siteId ?? TU_DEFAULT_SITE_ID) : true,
     events: {
       onWithdrawalSuccess: (e) => {
         withdrawalSuccesses.push(e);
@@ -325,7 +332,9 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const identity = new InMemoryIdentityRepository();
   const auth = new AuthService(identity, { jwtSecret: "test-secret-which-is-long-enough-123456", jwtTtlSeconds: 3600 });
   const affiliate = new AffiliateService(identity, daraja);
-  const admin = new AdminService(new InMemoryAdminRepository(identity, payRepo, engage, gameRepo));
+  const adminRepo = new InMemoryAdminRepository(identity, payRepo, engage, gameRepo);
+  adminRepoRef = adminRepo;
+  const admin = new AdminService(adminRepo);
   const platformRepo = new InMemoryPlatformRepository();
   const platform = new PlatformService(platformRepo);
   const notifications = new NotificationService(new InMemoryNotificationRepository());

@@ -117,6 +117,10 @@ export class AdminService {
   setDefaultPool(actorId: string, actorRole: string, siteId: string, tradeDay: string, amountCents: number): Promise<WithdrawalPoolRow> {
     return this.repo.setDefaultPool(actorId, actorRole, siteId, tradeDay, amountCents);
   }
+  getWithdrawalsEnabled(siteId: string): Promise<boolean> { return this.repo.getWithdrawalsEnabled(siteId); }
+  setWithdrawalsEnabled(actorId: string, actorRole: string, siteId: string, enabled: boolean): Promise<boolean> {
+    return this.repo.setWithdrawalsEnabled(actorId, actorRole, siteId, enabled);
+  }
 
   /** Admin-visible M-Pesa config (secrets masked). */
   getMpesaConfig(): Promise<MpesaConfigRow> { return this.repo.getMpesaConfig(); }

@@ -163,6 +163,39 @@ test("PaymentService: marketer withdrawal still honours the site-aware minimum, 
   assert.equal(pl.mode, "daraja");
 });
 
+test("PaymentService: withdrawalsEnabledForSite kill switch refuses ALL withdrawals (player + marketer) when off", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("p", 1_000_000);
+  repo.seed("m", 1_000_000);
+  repo.setPhone("m", "0712345678");
+  repo.markAsMarketer("0712345678", "mk-1");
+  const daraja = new StubDarajaClient();
+  let enabled = true;
+  const svc = new PaymentService(repo, daraja, { withdrawalsEnabledForSite: () => enabled });
+
+  // Enabled -> both the normal player (daraja) and the marketer (instant) paths work.
+  assert.equal((await svc.requestWithdrawal("p", 30_000, "0712345678", "site-a")).mode, "daraja");
+  assert.equal((await svc.requestWithdrawal("m", 30_000, "0712345678", "site-a")).mode, "marketer");
+
+  // Disabled -> BOTH are refused BEFORE any money moves (single entry-point enforcement).
+  enabled = false;
+  await assert.rejects(() => svc.requestWithdrawal("p", 30_000, "0712345678", "site-a"), /WITHDRAWALS_DISABLED/);
+  await assert.rejects(() => svc.requestWithdrawal("m", 30_000, "0712345678", "site-a"), /WITHDRAWALS_DISABLED/);
+
+  // Re-enabled -> works again (the switch is live per-request).
+  enabled = true;
+  assert.equal((await svc.requestWithdrawal("p", 30_000, "0712345678", "site-a")).mode, "daraja");
+});
+
+test("PaymentService: a throwing/absent withdrawalsEnabledForSite fails OPEN (never blocks legitimate payouts)", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("p", 1_000_000);
+  const daraja = new StubDarajaClient();
+  const svc = new PaymentService(repo, daraja, { withdrawalsEnabledForSite: () => { throw new Error("db down"); } });
+  // Resolver throws -> treated as enabled, so the withdrawal still goes through.
+  assert.equal((await svc.requestWithdrawal("p", 30_000, "0712345678", "site-a")).mode, "daraja");
+});
+
 test("makeDarajaClient: stub without creds, HttpDarajaClient when configured", () => {
   assert.ok(makeDarajaClient({} as NodeJS.ProcessEnv) instanceof StubDarajaClient);
   const cfgEnv = { MPESA_CONSUMER_KEY: "k", MPESA_CONSUMER_SECRET: "s", MPESA_SHORTCODE: "174379", MPESA_PASSKEY: "p" } as any;

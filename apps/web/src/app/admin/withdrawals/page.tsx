@@ -10,7 +10,7 @@ import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { formatExact, formatRelativeTime } from '@/lib/format';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty, Toolbar, FilterSelect, ConfirmButton } from '@/components/admin/ui';
-import { useWithdrawals, useWithdrawalAction } from '@/lib/admin/hooks';
+import { useWithdrawals, useWithdrawalAction, useWithdrawalsEnabled, useSetWithdrawalsEnabled } from '@/lib/admin/hooks';
 import type { AdminWithdrawalRow } from '@/lib/admin/types';
 
 const STATUS_OPTIONS = [
@@ -91,6 +91,8 @@ export default function WithdrawalsPage() {
         }
       />
 
+      <WithdrawalsSwitch />
+
       {q.isLoading ? (
         <Skeleton className="h-40 w-full" />
       ) : q.isError ? (
@@ -137,6 +139,53 @@ export default function WithdrawalsPage() {
         </>
       )}
     </>
+  );
+}
+
+/** Owner/admin kill switch: halt or resume ALL withdrawals for this brand (override). */
+function WithdrawalsSwitch() {
+  const q = useWithdrawalsEnabled();
+  const setEnabled = useSetWithdrawalsEnabled();
+  const toast = useToast();
+  const enabled = q.data?.enabled ?? true;
+
+  if (q.isLoading) return <div className="mb-4"><Skeleton className="h-16 w-full" /></div>;
+
+  const flip = () =>
+    setEnabled.mutate(!enabled, {
+      onSuccess: (r) =>
+        toast.push({
+          tone: r.enabled ? 'success' : 'error',
+          title: r.enabled ? 'Withdrawals enabled' : 'Withdrawals DISABLED',
+          description: r.enabled ? 'Payouts resume for this brand.' : 'All new withdrawals (players + marketers) are halted.',
+        }),
+      onError: (e) => toast.push({ tone: 'error', title: "Couldn't change setting", description: e instanceof ApiError ? e.message : 'Try again.' }),
+    });
+
+  return (
+    <div className={`mb-4 flex items-center justify-between gap-3 rounded-2xl border p-4 ${enabled ? 'border-up/30 bg-up/5' : 'border-down/40 bg-down/10'}`}>
+      <div className="flex flex-col">
+        <span className="flex items-center gap-2 text-sm font-semibold text-fg">
+          <span className={`inline-flex h-2.5 w-2.5 rounded-full ${enabled ? 'bg-up' : 'bg-down'}`} />
+          {enabled ? 'Withdrawals are ENABLED' : 'Withdrawals are DISABLED'}
+        </span>
+        <span className="mt-0.5 max-w-2xl text-xs text-muted">
+          {enabled
+            ? 'Payouts are processing normally. Turn OFF to immediately halt ALL withdrawals for this brand — player requests and marketer instant transfers — to override a malfunction or prevent payouts beyond the pool.'
+            : 'All new withdrawals are refused for this brand (players + marketers). Existing pending requests can still be reviewed manually. Turn ON to resume payouts.'}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={flip}
+        disabled={setEnabled.isPending}
+        aria-pressed={enabled}
+        aria-label={enabled ? 'Disable withdrawals' : 'Enable withdrawals'}
+        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition disabled:opacity-50 ${enabled ? 'bg-up' : 'bg-down'}`}
+      >
+        <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+      </button>
+    </div>
   );
 }
 

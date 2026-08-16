@@ -232,6 +232,37 @@ test("admin withdrawals queue carries full player context (balance + lifetime de
   } finally { await api.close(); }
 });
 
+test("admin withdrawals kill switch: role-gated toggle that blocks new withdrawals when off", async () => {
+  const api = await startTestApi();
+  try {
+    const uid = await register(api, "0712009292", "kswuser");
+    api.payRepo.seed(uid, 0);
+    const dep = await api.payRepo.createDeposit(uid, 100_000, "0712009292");
+    await api.payRepo.attachStk(dep, "m", "chk-ksw");
+    await api.payRepo.completeDeposit("chk-ksw", 0, "ok", "R-KSW", {});
+
+    // Default: enabled. Player cannot read or toggle.
+    assert.equal((await json(await req(api, "GET", "/api/v1/admin/withdrawals-enabled", { token: "admin-1:admin" }))).enabled, true);
+    assert.equal((await req(api, "GET", "/api/v1/admin/withdrawals-enabled", { token: uid })).status, 403);
+    assert.equal((await req(api, "PUT", "/api/v1/admin/withdrawals-enabled", { token: uid, body: { enabled: false } })).status, 403);
+    // Missing/invalid body -> 400.
+    assert.equal((await req(api, "PUT", "/api/v1/admin/withdrawals-enabled", { token: "admin-1:admin", body: {} })).status, 400);
+
+    // Admin disables -> a player withdrawal request is refused (403 WITHDRAWALS_DISABLED).
+    const off = await req(api, "PUT", "/api/v1/admin/withdrawals-enabled", { token: "admin-1:admin", body: { enabled: false } });
+    assert.equal(off.status, 200);
+    assert.equal((await json(off)).enabled, false);
+    const blocked = await req(api, "POST", "/api/v1/withdrawals", { token: uid, body: { amount: 30_000, phone: "0712009292" } });
+    assert.equal(blocked.status, 403);
+    assert.equal((await json(blocked)).error.code, "WITHDRAWALS_DISABLED");
+
+    // Re-enable -> the same request now succeeds (202 pending).
+    await req(api, "PUT", "/api/v1/admin/withdrawals-enabled", { token: "admin-1:admin", body: { enabled: true } });
+    const okRes = await req(api, "POST", "/api/v1/withdrawals", { token: uid, body: { amount: 30_000, phone: "0712009292" } });
+    assert.equal(okRes.status, 202);
+  } finally { await api.close(); }
+});
+
 test("J5 game config: admin reads; only superadmin edits; validates; audited", async () => {
   const api = await startTestApi();
   try {

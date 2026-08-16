@@ -34,6 +34,15 @@ export interface PaymentServiceOptions {
    * a transient bad per-brand value can never open the floor below the safe default.
    */
   minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
+  /**
+   * Per-brand withdrawal kill switch (owner/admin override, migration 0067). Consulted at the top of
+   * every withdrawal initiation: when it resolves to `false`, the request is refused with
+   * WITHDRAWALS_DISABLED before any money moves — covering BOTH the marketer instant game->mpesa
+   * transfer and the normal player pending->approve->B2C request. Lets an operator halt payouts
+   * instantly during a malfunction or when the daily pool would be exceeded. Absent/throws => treated
+   * as enabled (fail-open to current behaviour), so a missing resolver never blocks legitimate payouts.
+   */
+  withdrawalsEnabledForSite?: (siteId: string | undefined) => boolean | Promise<boolean>;
   events?: PaymentEvents;
   verifyStkCallbacks?: boolean;
 }
@@ -43,6 +52,7 @@ export class PaymentService {
   private readonly minWithdrawal: Cents;
   private readonly minWithdrawalProvider?: () => Cents;
   private readonly minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
+  private readonly withdrawalsEnabledForSite?: (siteId: string | undefined) => boolean | Promise<boolean>;
   private readonly events: PaymentEvents;
   private readonly verifyStk: boolean;
   constructor(private readonly repo: PaymentRepository, private readonly daraja: DarajaClient, opts: PaymentServiceOptions = {}) {
@@ -50,6 +60,7 @@ export class PaymentService {
     this.minWithdrawal = opts.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
     if (opts.minWithdrawalProvider) this.minWithdrawalProvider = opts.minWithdrawalProvider;
     if (opts.minWithdrawalForSite) this.minWithdrawalForSite = opts.minWithdrawalForSite;
+    if (opts.withdrawalsEnabledForSite) this.withdrawalsEnabledForSite = opts.withdrawalsEnabledForSite;
     this.events = opts.events ?? {};
     // Secure by default: a client can POST to the public STK callback URL, so a raw
     // resultCode=0 is NOT trusted — we re-check with Safaricom before crediting. Opt out only
@@ -122,6 +133,14 @@ export class PaymentService {
    *  - Otherwise it validates and HOLDS funds atomically (status pending) for the normal M-Pesa flow.
    */
   async requestWithdrawal(userId: string, amountCents: number, phoneRaw: string, siteId?: string): Promise<WithdrawalOutcome> {
+    // Kill switch first: if withdrawals are disabled for this brand, refuse before any money moves —
+    // this halts BOTH the marketer instant transfer and the player pending request. Fail-open on a
+    // missing/throwing resolver so a config glitch never blocks legitimate payouts.
+    if (this.withdrawalsEnabledForSite) {
+      let enabled = true;
+      try { enabled = (await this.withdrawalsEnabledForSite(siteId)) !== false; } catch { enabled = true; }
+      if (!enabled) throw new Error("WITHDRAWALS_DISABLED");
+    }
     const minWithdrawal = await this.currentMinWithdrawal(siteId);
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
     if (amountCents < minWithdrawal) throw new Error("BELOW_MIN");

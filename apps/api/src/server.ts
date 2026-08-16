@@ -84,12 +84,28 @@ async function buildDeps(): Promise<ApiDeps> {
     return fallback;
   };
 
+  // Per-brand withdrawal kill switch (0067). Read live from `sites.withdrawals_enabled` so an
+  // owner/admin toggle in the panel halts payouts on the very next request with no redeploy.
+  // Fail-open (enabled) on a missing row or a transient error, so a glitch never blocks payouts.
+  const siteWithdrawalsEnabled = async (siteId: string | undefined): Promise<boolean> => {
+    if (!siteId) return true;
+    try {
+      const r = await q.query("select withdrawals_enabled from sites where id = $1::uuid", [siteId]);
+      if (r.rows.length) return (r.rows[0] as Record<string, unknown>).withdrawals_enabled !== false;
+    } catch (err) {
+      console.error(`[api] withdrawals_enabled lookup failed for ${siteId}:`, (err as Error).message);
+    }
+    return true;
+  };
+
   const payments = new PaymentService(payRepo, daraja, {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
     // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
     verifyStkCallbacks: process.env.MPESA_VERIFY_CALLBACKS !== "false",
     // Per-brand withdrawal floor: enforce the withdrawing site's own min so client and server agree.
     minWithdrawalForSite: (siteId) => siteMinWithdrawalCents(siteId),
+    // Per-brand withdrawal kill switch: refuse ALL withdrawal initiations for a site when disabled.
+    withdrawalsEnabledForSite: (siteId) => siteWithdrawalsEnabled(siteId),
     // Process-wide fallback (single-tenant / default brand, and if the per-site lookup yields nothing):
     // the platform-default game_config, read live so an admin edit gates the next withdrawal with no redeploy.
     minWithdrawalProvider: () => gameConfig.active().minWithdrawalCents,

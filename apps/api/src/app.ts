@@ -67,7 +67,7 @@ export interface ApiDeps {
     "overview" | "listUsers" | "getUserDetail" | "listUserActivity" | "setUserStatus" | "setCommissionRate" | "setUserRole" | "listWithdrawals" | "listTransactions" | "listAudit"
     | "adjustBalance" | "resetBalanceToLastFunded" | "listDeposits" | "depositsReconcile" | "reportDaily" | "reportByUser" | "reportDay"
     | "getGameConfig" | "updateGameConfig" | "getMpesaConfig" | "updateMpesaConfig" | "rtpMonitor" | "listSeeds" | "rotateSeed"
-    | "getWithdrawalPool" | "setWithdrawalPool" | "setDefaultPool"
+    | "getWithdrawalPool" | "setWithdrawalPool" | "setDefaultPool" | "getWithdrawalsEnabled" | "setWithdrawalsEnabled"
     | "listAffiliatePayouts" | "recordAction"
     | "adjustBalanceKind" | "clearBalance" | "getUserOverrides" | "setUserOverrides"
     | "siteOfUser" | "siteOfTransaction">;

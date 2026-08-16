@@ -581,9 +581,21 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     });
   });
 
-  router.get(`${BASE}/admin/rtp`, auth, admin, async () => deps.admin.rtpMonitor());
+  // 0067 — per-brand withdrawal kill switch. Read + toggle for admin/superadmin. Site resolved like
+  // the pool routes: a site-scoped admin only sees/flips its own brand; platform admins are unrestricted.
+  // Distinct path (not under /admin/withdrawals/:id) so it can never collide with the moderation routes.
+  router.get(`${BASE}/admin/withdrawals-enabled`, auth, admin, async (ctx: Ctx) => {
+    return { enabled: await deps.admin.getWithdrawalsEnabled(configSiteId(ctx)) };
+  });
 
-  // ── M-Pesa configuration (admin reads masked; superadmin edits; secrets write-only) ──────────
+  router.put(`${BASE}/admin/withdrawals-enabled`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    if (typeof body.enabled !== "boolean") throw new ApiError("VALIDATION", "enabled must be a boolean", 400);
+    const actor = ctx.claims!.userId, role = ctx.claims!.role ?? "player", site = configSiteId(ctx);
+    return domain(async () => ({ enabled: await deps.admin.setWithdrawalsEnabled(actor, role, site, body.enabled as boolean) }));
+  });
+
+  router.get(`${BASE}/admin/rtp`, auth, admin, async () => deps.admin.rtpMonitor());  // ── M-Pesa configuration (admin reads masked; superadmin edits; secrets write-only) ──────────
   router.get(`${BASE}/admin/mpesa-config`, auth, admin, async () => domain(() => deps.admin.getMpesaConfig()));
 
   router.patch(`${BASE}/admin/mpesa-config`, auth, superadmin, async (ctx: Ctx) => {

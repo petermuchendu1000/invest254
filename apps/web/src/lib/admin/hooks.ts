@@ -170,6 +170,27 @@ export function useWithdrawalAction() {
   });
 }
 
+/** Per-brand withdrawal kill switch (0067): read the current state. */
+export function useWithdrawalsEnabled() {
+  const t = useTok();
+  return useQuery({
+    queryKey: ['admin', 'withdrawals-enabled'],
+    enabled: !!t,
+    queryFn: () => adminApi.withdrawalsEnabled(t),
+  });
+}
+/** Toggle the per-brand withdrawal kill switch (admin/superadmin). */
+export function useSetWithdrawalsEnabled() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => adminApi.setWithdrawalsEnabled(t, enabled),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'withdrawals-enabled'] });
+    },
+  });
+}
+
 // ── Deposits ──
 export function useDeposits(status?: string) {
   const t = useTok();
