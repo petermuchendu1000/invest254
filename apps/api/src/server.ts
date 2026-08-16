@@ -7,7 +7,7 @@ import {
   type Querier, type FairnessRecord, type ListenClient,
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
-import { normalizeHost, type VersionedGameConfig } from "@invest254/shared";
+import { normalizeHost, type VersionedGameConfig, type Cents } from "@invest254/shared";
 import { BrandOriginAllowlist } from "./cors.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
@@ -58,12 +58,40 @@ async function buildDeps(): Promise<ApiDeps> {
 
   // M-Pesa config is admin-managed in the DB (table 0024); fall back to env per field.
   const daraja = makeDarajaClientFromConfig(await loadDarajaConfigFromDb(q));
+
+  // Site-aware minimum withdrawal (multi-tenant). GET /game/config serves each brand its own
+  // `site_game_config.min_withdrawal` (via gameConfigForSite below), so the browser validates
+  // against the brand's floor. This resolver reads that SAME per-brand row — keyed by the
+  // withdrawing request's `siteId` — so the server enforces the identical floor and never rejects
+  // a client-valid amount as BELOW_MIN. Falls back to the platform-default `game_config` (exactly
+  // GET /game/config's own fallback) when the site has no row or the value is unusable, so a
+  // missing/bad per-brand value can never open the floor below the safe default.
+  const siteMinWithdrawalCents = async (siteId: string | undefined): Promise<Cents> => {
+    const fallback = gameConfig.active().minWithdrawalCents;
+    if (!siteId) return fallback;
+    try {
+      const r = await q.query(
+        "select min_withdrawal from site_game_config where site_id = $1::uuid limit 1",
+        [siteId],
+      );
+      if (r.rows.length) {
+        const v = Math.round(Number((r.rows[0] as Record<string, unknown>).min_withdrawal));
+        if (Number.isInteger(v) && v > 0) return v as Cents;
+      }
+    } catch (err) {
+      console.error(`[api] site min_withdrawal lookup failed for ${siteId}:`, (err as Error).message);
+    }
+    return fallback;
+  };
+
   const payments = new PaymentService(payRepo, daraja, {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
     // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
     verifyStkCallbacks: process.env.MPESA_VERIFY_CALLBACKS !== "false",
-    // Live minimum withdrawal: read straight from the same game_config store the engine uses,
-    // so an admin's edit in the panel gates the very next withdrawal with no redeploy.
+    // Per-brand withdrawal floor: enforce the withdrawing site's own min so client and server agree.
+    minWithdrawalForSite: (siteId) => siteMinWithdrawalCents(siteId),
+    // Process-wide fallback (single-tenant / default brand, and if the per-site lookup yields nothing):
+    // the platform-default game_config, read live so an admin edit gates the next withdrawal with no redeploy.
     minWithdrawalProvider: () => gameConfig.active().minWithdrawalCents,
     events: {
       onWithdrawalSuccess: ({ userId, amountCents }) => {

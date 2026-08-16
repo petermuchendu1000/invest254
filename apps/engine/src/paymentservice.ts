@@ -24,6 +24,16 @@ export interface PaymentServiceOptions {
    * returns a non-positive value.
    */
   minWithdrawalProvider?: () => Cents;
+  /**
+   * Site-aware live minimum-withdrawal source (multi-tenant). Consulted per-request with the
+   * withdrawing brand's `siteId` so the server enforces the SAME floor the player's client
+   * validated against (each brand's `site_game_config.min_withdrawal`). This closes the divergence
+   * where a brand's minimum differs from the platform default and the client accepts an amount the
+   * server then rejects as BELOW_MIN. Takes precedence over `minWithdrawalProvider`; a non-positive
+   * / non-integer result (or a throw) defers to `minWithdrawalProvider` then the static constant, so
+   * a transient bad per-brand value can never open the floor below the safe default.
+   */
+  minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   events?: PaymentEvents;
   verifyStkCallbacks?: boolean;
 }
@@ -32,12 +42,14 @@ export class PaymentService {
   private readonly minDeposit: Cents;
   private readonly minWithdrawal: Cents;
   private readonly minWithdrawalProvider?: () => Cents;
+  private readonly minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   private readonly events: PaymentEvents;
   private readonly verifyStk: boolean;
   constructor(private readonly repo: PaymentRepository, private readonly daraja: DarajaClient, opts: PaymentServiceOptions = {}) {
     this.minDeposit = opts.minDepositCents ?? MIN_DEPOSIT_CENTS;
     this.minWithdrawal = opts.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
     if (opts.minWithdrawalProvider) this.minWithdrawalProvider = opts.minWithdrawalProvider;
+    if (opts.minWithdrawalForSite) this.minWithdrawalForSite = opts.minWithdrawalForSite;
     this.events = opts.events ?? {};
     // Secure by default: a client can POST to the public STK callback URL, so a raw
     // resultCode=0 is NOT trusted — we re-check with Safaricom before crediting. Opt out only
@@ -110,7 +122,7 @@ export class PaymentService {
    *  - Otherwise it validates and HOLDS funds atomically (status pending) for the normal M-Pesa flow.
    */
   async requestWithdrawal(userId: string, amountCents: number, phoneRaw: string, siteId?: string): Promise<WithdrawalOutcome> {
-    const minWithdrawal = this.currentMinWithdrawal();
+    const minWithdrawal = await this.currentMinWithdrawal(siteId);
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
     if (amountCents < minWithdrawal) throw new Error("BELOW_MIN");
     // Marketer instant path (game -> mpesa wallet). Phone is resolved from the player's profile.
@@ -128,12 +140,24 @@ export class PaymentService {
   }
 
   /**
-   * The minimum withdrawal in force right now. Prefers the live provider (admin-editable
-   * `game_config.min_withdrawal`) and falls back to the boot-time constant if the provider is
-   * absent or returns a non-positive integer — so a transient bad config can never open the
-   * floor below the safe default.
+   * The minimum withdrawal in force for THIS request. Resolution order (multi-tenant safe):
+   *   1. `minWithdrawalForSite(siteId)` — the withdrawing brand's own `site_game_config.min_withdrawal`,
+   *      i.e. exactly the floor the player's client validated against (kills the client/server BELOW_MIN
+   *      divergence for brands whose minimum differs from the platform default);
+   *   2. `minWithdrawalProvider()` — the process-wide live default (admin-editable `game_config.min_withdrawal`);
+   *   3. the boot-time constant.
+   * Any source that is absent, throws, or yields a non-positive / non-integer value is skipped, so a
+   * transient bad config can never open the floor below the safe default.
    */
-  private currentMinWithdrawal(): Cents {
+  private async currentMinWithdrawal(siteId?: string): Promise<Cents> {
+    if (this.minWithdrawalForSite) {
+      try {
+        const perSite = await this.minWithdrawalForSite(siteId);
+        if (Number.isInteger(perSite) && (perSite as number) > 0) return perSite as Cents;
+      } catch {
+        // fall through to the process-wide provider / static default
+      }
+    }
     const live = this.minWithdrawalProvider?.();
     return Number.isInteger(live) && (live as number) > 0 ? (live as Cents) : this.minWithdrawal;
   }
