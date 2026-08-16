@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, requireSite, assertTargetSiteInScope, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, requireSite, assertTargetSiteInScope, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 import { parseB2cResult } from "./app.payments.js";
@@ -84,6 +84,14 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/affiliate/commissions`, auth, site, marketer, async (ctx: Ctx) =>
     domain(() => deps.affiliate.listCommissions(ctx.claims!.userId, pageQuery(ctx))));
 
+  // Transparency (0068): the marketer sees every expense an admin has logged against them
+  // (TikTok promo, data bundles, advances, …). Read-only; own records only.
+  router.get(`${BASE}/affiliate/expenses`, auth, site, marketer, async (ctx: Ctx) => {
+    const limit = Number(ctx.query.get("limit")) || 100;
+    const items = await domain(() => deps.marketerExpenses.list(ctx.claims!.userId, limit));
+    return { items, totalCents: items.reduce((s, e) => s + e.amountCents, 0) };
+  });
+
   // ── Payouts (I4): marketer request → admin approve/reject → M-Pesa B2C result ──
   router.post(`${BASE}/affiliate/payouts`, auth, site, marketer, async (ctx: Ctx) =>
     domain(async () => {
@@ -116,6 +124,28 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     const r = parseB2cResult(ctx.body);
     await domain(() => deps.affiliate.completePayout(ctx.params.payoutId!, r.resultCode, r.conversationId, r.receipt, null, ctx.body));
     return DARAJA_ACK;
+  });
+
+  // ── Marketer expenses (0068): admin logs a cost against a marketer; both admin and the marketer see it ──
+  router.post(`${BASE}/admin/affiliate/expenses`, auth, admin, async (ctx: Ctx) => {
+    const b = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const marketerUserId = typeof b.marketerUserId === "string" && b.marketerUserId.trim() ? b.marketerUserId.trim() : "";
+    if (!marketerUserId) throw new ApiError("VALIDATION", "marketerUserId is required", 400);
+    const category = typeof b.category === "string" && b.category.trim() ? b.category.trim() : "";
+    if (!category) throw new ApiError("VALIDATION", "category is required", 400);
+    const amountCents = typeof b.amountCents === "number" ? b.amountCents : Number(b.amountCents);
+    if (!Number.isInteger(amountCents) || amountCents <= 0) throw new ApiError("VALIDATION", "amountCents must be a positive integer (cents)", 400);
+    const note = typeof b.note === "string" && b.note.trim() ? b.note.trim() : null;
+    const siteId = ctx.claims?.site ?? DEFAULT_SITE_ID;
+    return domain(() => deps.marketerExpenses.add(ctx.claims!.userId, ctx.claims!.role ?? "player", siteId, marketerUserId, category, amountCents, note));
+  });
+
+  router.get(`${BASE}/admin/affiliate/expenses`, auth, admin, async (ctx: Ctx) => {
+    const marketerUserId = ctx.query.get("marketerUserId");
+    if (!marketerUserId) throw new ApiError("VALIDATION", "marketerUserId query param is required", 400);
+    const limit = Number(ctx.query.get("limit")) || 100;
+    const items = await domain(() => deps.marketerExpenses.list(marketerUserId, limit));
+    return { items, totalCents: items.reduce((s, e) => s + e.amountCents, 0) };
   });
 
   // Operational: run the daily revenue-share accrual for a trading day (idempotent). In

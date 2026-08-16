@@ -185,6 +185,21 @@ export interface PayoutRequestResult {
   amountCents: Cents;
 }
 
+/** One admin-logged marketer expense (transparency, migration 0068). */
+export interface MarketerExpenseRow {
+  id: string;
+  category: string;
+  amountCents: Cents;
+  note: string | null;
+  createdAtMs: number;
+  createdBy: string | null;
+}
+/** GET /affiliate/expenses (and admin variant) — the marketer's expense ledger + total. */
+export interface MarketerExpensesResponse {
+  items: MarketerExpenseRow[];
+  totalCents: Cents;
+}
+
 /** A sticky notification shown to the player (J7). */
 export interface NotificationDto {
   id: number;

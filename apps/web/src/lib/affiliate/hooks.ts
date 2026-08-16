@@ -17,8 +17,7 @@ export function useAffiliateSummary(enabled: boolean) {
 }
 
 /** Realtime marketer performance — same summary, but polled every 5s while the live HUD is open. */
-export function useMarketerLiveSummary(enabled: boolean) {
-  const token = useSession((s) => s.token);
+export function useMarketerLiveSummary(enabled: boolean) {  const token = useSession((s) => s.token);
   return useQuery({
     queryKey: ['affiliate', 'summary', 'live'],
     queryFn: () => api.affiliateSummary(token as string),
@@ -77,5 +76,17 @@ export function useAffiliatePayout() {
       void qc.invalidateQueries({ queryKey: ['affiliate', 'summary'] });
       void qc.invalidateQueries({ queryKey: ['affiliate', 'commissions'] });
     },
+  });
+}
+
+/** Admin-logged expenses attributed to the marketer (transparency). Polled with the live HUD. */
+export function useAffiliateExpenses(enabled: boolean) {
+  const token = useSession((s) => s.token);
+  return useQuery({
+    queryKey: ['affiliate', 'expenses'],
+    queryFn: () => api.affiliateExpenses(token as string),
+    enabled: !!token && enabled,
+    retry: false,
+    refetchInterval: enabled ? 15000 : false,
   });
 }

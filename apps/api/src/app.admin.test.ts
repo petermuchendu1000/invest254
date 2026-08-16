@@ -263,6 +263,33 @@ test("admin withdrawals kill switch: role-gated toggle that blocks new withdrawa
   } finally { await api.close(); }
 });
 
+test("marketer expenses (0068): admin logs an expense; the marketer sees it (transparency); role-gated", async () => {
+  const api = await startTestApi();
+  try {
+    const uid = await register(api, "0712009393", "expmkt");
+    // Admin logs two expenses against this marketer.
+    const e1 = await req(api, "POST", "/api/v1/admin/affiliate/expenses", { token: "admin-1:admin", body: { marketerUserId: uid, category: "tiktok_promo", amountCents: 5_000, note: "Boost" } });
+    assert.equal(e1.status, 200);
+    assert.equal((await json(e1)).category, "tiktok_promo");
+    await req(api, "POST", "/api/v1/admin/affiliate/expenses", { token: "admin-1:admin", body: { marketerUserId: uid, category: "advance", amountCents: 20_000 } });
+
+    // Admin can list them (newest-first, with a total).
+    const adminList = await json(await req(api, "GET", `/api/v1/admin/affiliate/expenses?marketerUserId=${uid}`, { token: "admin-1:admin" }));
+    assert.equal(adminList.items.length, 2);
+    assert.equal(adminList.totalCents, 25_000);
+
+    // The marketer sees their OWN expenses (transparency).
+    const mine = await json(await req(api, "GET", "/api/v1/affiliate/expenses", { token: `${uid}:marketer` }));
+    assert.equal(mine.items.length, 2);
+    assert.equal(mine.totalCents, 25_000);
+
+    // Player token cannot add (admin-gated) and missing fields -> 400.
+    assert.equal((await req(api, "POST", "/api/v1/admin/affiliate/expenses", { token: uid, body: { marketerUserId: uid, category: "other", amountCents: 100 } })).status, 403);
+    assert.equal((await req(api, "POST", "/api/v1/admin/affiliate/expenses", { token: "admin-1:admin", body: { marketerUserId: uid, amountCents: 100 } })).status, 400);
+    assert.equal((await req(api, "POST", "/api/v1/admin/affiliate/expenses", { token: "admin-1:admin", body: { marketerUserId: uid, category: "other", amountCents: -5 } })).status, 400);
+  } finally { await api.close(); }
+});
+
 test("J5 game config: admin reads; only superadmin edits; validates; audited", async () => {
   const api = await startTestApi();
   try {

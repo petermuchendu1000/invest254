@@ -375,6 +375,24 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     platform,
     notifications,
     marketers: makeInMemoryMarketerRepo(),
+    marketerExpenses: (() => {
+      const rows: Array<{ id: string; marketerUserId: string; category: string; amountCents: number; note: string | null; createdBy: string | null; createdAtMs: number }> = [];
+      let seq = 0;
+      return {
+        async add(actorId: string, actorRole: string, _siteId: string, marketerUserId: string, category: string, amountCents: number, note: string | null) {
+          if (!["admin", "superadmin", "platform_admin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+          if (!category.trim()) throw new Error("CATEGORY_REQUIRED");
+          if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
+          const row = { id: `exp-${++seq}`, marketerUserId, category: category.trim(), amountCents, note: note && note.trim() ? note.trim() : null, createdBy: actorId, createdAtMs: Date.now() };
+          rows.unshift(row);
+          return { id: row.id, category: row.category, amountCents: row.amountCents, note: row.note, createdAtMs: row.createdAtMs, createdBy: row.createdBy };
+        },
+        async list(marketerUserId: string, limit: number) {
+          return rows.filter((r) => r.marketerUserId === marketerUserId).slice(0, limit)
+            .map((r) => ({ id: r.id, category: r.category, amountCents: r.amountCents, note: r.note, createdAtMs: r.createdAtMs, createdBy: r.createdBy }));
+        },
+      };
+    })(),
     config: () => DEFAULT_CONFIG,
     // Brand-aware config for tests: resolve a ref (slug|id) to a TEST brand and return a DISTINCT
     // economy per brand (different maxMultiplier) so tests can prove the response is site-scoped.

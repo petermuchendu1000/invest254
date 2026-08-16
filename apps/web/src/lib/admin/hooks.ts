@@ -191,6 +191,25 @@ export function useSetWithdrawalsEnabled() {
   });
 }
 
+/** 0068 — marketer expenses (transparency): list + add. */
+export function useMarketerExpenses(marketerUserId: string) {
+  const t = useTok();
+  return useQuery({
+    queryKey: ['admin', 'marketer-expenses', marketerUserId],
+    enabled: !!t && !!marketerUserId,
+    queryFn: () => adminApi.marketerExpenses(t, marketerUserId),
+  });
+}
+export function useAddMarketerExpense(marketerUserId: string) {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { category: string; amountCents: number; note?: string }) =>
+      adminApi.addMarketerExpense(t, { marketerUserId, ...body }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'marketer-expenses', marketerUserId] }); },
+  });
+}
+
 // ── Deposits ──
 export function useDeposits(status?: string) {
   const t = useTok();

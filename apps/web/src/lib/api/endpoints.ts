@@ -11,6 +11,7 @@ import type {
   NotificationDto,
   Paginated,
   PayoutRequestResult,
+  MarketerExpensesResponse,
   PositionDetailDto,
   PositionDto,
   ReferralRecord,
@@ -114,6 +115,8 @@ export const api = {
     }),
   affiliateRequestPayout: (token: string) =>
     apiFetch<PayoutRequestResult>('/affiliate/payouts', { method: 'POST', token }),
+  affiliateExpenses: (token: string) =>
+    apiFetch<MarketerExpensesResponse>('/affiliate/expenses', { token }),
 
   // Sticky notifications (J7)
   notifications: (token: string) => apiFetch<{ items: NotificationDto[] }>('/notifications', { token }),

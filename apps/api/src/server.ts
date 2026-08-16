@@ -24,6 +24,19 @@ import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.pla
  */
 const PORT = Number(process.env.PORT ?? 8081);
 
+/** Map a marketer_expenses row (from the 0068 RPCs) to the MarketerExpenseRow DTO. */
+function mapExpenseRow(x: Record<string, unknown>) {
+  const created = x.created_at;
+  return {
+    id: String(x.id),
+    category: String(x.category),
+    amountCents: Number(x.amount_cents) || 0,
+    note: x.note == null ? null : String(x.note),
+    createdAtMs: created instanceof Date ? created.getTime() : new Date(String(created)).getTime(),
+    createdBy: x.created_by == null ? null : String(x.created_by),
+  };
+}
+
 async function buildDeps(): Promise<ApiDeps> {
   const verifier = makeVerifier();
   const usingDb = Boolean(process.env.DATABASE_URL);
@@ -218,6 +231,20 @@ async function buildDeps(): Promise<ApiDeps> {
     notifications,
     corsAllowOrigin: (origin: string) => brandCors.allows(origin),
     marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
+    marketerExpenses: {
+      async add(actorId, actorRole, siteId, marketerUserId, category, amountCents, note) {
+        const r = await q.query(
+          "select id, category, amount_cents, note, created_at, created_by from fn_admin_add_marketer_expense($1,$2,$3::uuid,$4::uuid,$5,$6,$7)",
+          [actorId, actorRole, siteId, marketerUserId, category, amountCents, note]);
+        return mapExpenseRow(r.rows[0]);
+      },
+      async list(marketerUserId, limit) {
+        const r = await q.query(
+          "select id, category, amount_cents, note, created_at, created_by from fn_marketer_expenses($1::uuid,$2)",
+          [marketerUserId, limit]);
+        return r.rows.map(mapExpenseRow);
+      },
+    },
     config: () => gameConfig.active(),
     // Brand-aware public config: resolve a site ref (slug|domain|id) -> that brand's live
     // site_game_config (the row the engine prices from), so GET /game/config matches the engine's

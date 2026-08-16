@@ -1,5 +1,5 @@
 import { apiFetch } from '@/lib/api/client';
-import type { Paginated } from '@/lib/api/types';
+import type { Paginated, MarketerExpensesResponse, MarketerExpenseRow } from '@/lib/api/types';
 import type {
   AdjustBalanceResult,
   ResetBalanceResult,
@@ -144,6 +144,11 @@ export const adminApi = {
     apiFetch<unknown>(`/admin/affiliate/payouts/${id}/reject`, { method: 'POST', token: t }),
   setCommissionRate: (t: string, id: string, rate: number) =>
     apiFetch<unknown>(`/admin/affiliates/${id}/rate`, { method: 'PATCH', token: t, body: { rate } }),
+  // 0068 — marketer expenses (transparency): log a cost against a marketer, and list them.
+  addMarketerExpense: (t: string, body: { marketerUserId: string; category: string; amountCents: number; note?: string }) =>
+    apiFetch<MarketerExpenseRow>('/admin/affiliate/expenses', { method: 'POST', token: t, body }),
+  marketerExpenses: (t: string, marketerUserId: string) =>
+    apiFetch<MarketerExpensesResponse>('/admin/affiliate/expenses', { token: t, query: { marketerUserId } }),
 
   // Game config / RTP / seeds
   gameConfig: (t: string) => apiFetch<GameConfigRow>('/admin/game-config', { token: t }),

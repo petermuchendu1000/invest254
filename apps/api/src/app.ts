@@ -51,6 +51,21 @@ export interface Brand {
   themeTokens?: Record<string, string> | null;
 }
 
+/** One admin-logged marketer expense (transparency ledger, migration 0068). */
+export interface MarketerExpenseRow {
+  id: string;
+  category: string;
+  amountCents: number;
+  note: string | null;
+  createdAtMs: number;
+  createdBy: string | null;
+}
+/** Marketer-expenses persistence (add is admin-authorized; list is used by admin + the marketer's own dashboard). */
+export interface MarketerExpensesDeps {
+  add(actorId: string, actorRole: string, siteId: string, marketerUserId: string, category: string, amountCents: number, note: string | null): Promise<MarketerExpenseRow>;
+  list(marketerUserId: string, limit: number): Promise<MarketerExpenseRow[]>;
+}
+
 export interface ApiDeps {
   /** JWT verifier for player/admin routes; null → DEV header auth (see requireAuth). */
   verifier: Verifier | null;
@@ -78,6 +93,8 @@ export interface ApiDeps {
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
   /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
   marketers: MarketerRepo;
+  /** Admin-logged marketer expenses (transparency, migration 0068). */
+  marketerExpenses: MarketerExpensesDeps;
   /**
    * Public game configuration source. A PROVIDER, not a value: config is edited live in the
    * admin panel, so a snapshot captured at boot would serve stale limits forever (the exact

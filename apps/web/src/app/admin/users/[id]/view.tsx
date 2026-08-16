@@ -13,7 +13,7 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig } from '@/lib/admin/hooks';
+import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig, useMarketerExpenses, useAddMarketerExpense } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel, UserOverridePatch } from '@/lib/admin/types';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
@@ -91,6 +91,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <OverridesPanel id={id} />
               <NotificationSend id={id} />
               {q.data.role === 'marketer' ? <CommissionRate id={id} /> : null}
+              {q.data.role === 'marketer' ? <MarketerExpenses id={id} /> : null}
             </>
           )}
         </>
@@ -760,6 +761,85 @@ function OverridesPanel({ id }: { id: string }) {
           </p>
         ) : null}
       </Card>
+    </Section>
+  );
+}
+
+const EXPENSE_CATEGORIES = [
+  { value: 'tiktok_promo', label: 'TikTok promo' },
+  { value: 'data_bundles', label: 'Data bundles' },
+  { value: 'advance', label: 'Advance payment' },
+  { value: 'airtime', label: 'Airtime' },
+  { value: 'transport', label: 'Transport' },
+  { value: 'other', label: 'Other' },
+];
+
+/** Admin-logged marketer expenses (transparency, 0068). Everything logged here is visible to the
+ *  marketer in their hidden dashboard, so payouts and advances are never a black box. */
+function MarketerExpenses({ id }: { id: string }) {
+  const q = useMarketerExpenses(id);
+  const add = useAddMarketerExpense(id);
+  const toast = useToast();
+  const [category, setCategory] = useState('tiktok_promo');
+  const [amountKes, setAmountKes] = useState('');
+  const [note, setNote] = useState('');
+
+  const rows = q.data?.items ?? [];
+  const total = q.data?.totalCents ?? 0;
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const kes = Number(amountKes);
+    if (!Number.isFinite(kes) || kes <= 0) { toast.push({ tone: 'error', title: 'Enter a valid amount' }); return; }
+    const body: { category: string; amountCents: number; note?: string } = { category, amountCents: Math.round(kes * 100) };
+    const trimmed = note.trim();
+    if (trimmed) body.note = trimmed;
+    add.mutate(
+      body,
+      {
+        onSuccess: () => { setAmountKes(''); setNote(''); toast.push({ tone: 'success', title: 'Expense logged', description: 'Visible to the marketer immediately.' }); },
+        onError: (err) => toast.push({ tone: 'error', title: 'Could not log expense', description: err instanceof ApiError ? err.message : 'Try again.' }),
+      },
+    );
+  }
+
+  return (
+    <Section title="Marketer expenses & advances">
+      <form onSubmit={submit} className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent">
+          {EXPENSE_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+        <input value={amountKes} onChange={(e) => setAmountKes(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="Amount (KES)" className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent" />
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent" />
+        <Button type="submit" disabled={add.isPending}>{add.isPending ? 'Adding…' : 'Add expense'}</Button>
+      </form>
+      {q.isLoading ? (
+        <Skeleton className="h-20 w-full" />
+      ) : rows.length === 0 ? (
+        <Empty title="No expenses logged" description="Log promo spend, data bundles or advances — the marketer sees them for full transparency." />
+      ) : (
+        <TableWrap>
+          <thead>
+            <tr className="border-b border-border">
+              <Th>Category</Th>
+              <Th>Note</Th>
+              <Th className="text-right">Amount</Th>
+              <Th className="text-right">When</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((e) => (
+              <tr key={e.id} className="border-b border-border last:border-0">
+                <Td className="capitalize">{e.category.replace(/_/g, ' ')}</Td>
+                <Td className="text-muted">{e.note ?? '—'}</Td>
+                <Td className="text-right font-medium tabular-nums text-down">−<Money cents={e.amountCents} /></Td>
+                <Td className="text-right text-xs text-muted">{formatRelativeTime(e.createdAtMs)} ago</Td>
+              </tr>
+            ))}
+          </tbody>
+        </TableWrap>
+      )}
+      <p className="mt-2 text-right text-sm">Total logged: <span className="font-bold tabular-nums text-down"><Money cents={total} /></span></p>
     </Section>
   );
 }
