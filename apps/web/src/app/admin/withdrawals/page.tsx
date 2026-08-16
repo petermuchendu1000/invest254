@@ -13,16 +13,20 @@ import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty, Toolbar, Filte
 import { useWithdrawals, useWithdrawalAction, useWithdrawalsEnabled, useSetWithdrawalsEnabled } from '@/lib/admin/hooks';
 import type { AdminWithdrawalRow } from '@/lib/admin/types';
 
+// Filter values are the ACTUAL transaction statuses in the DB (a withdrawal is created 'pending',
+// becomes 'processing' on approval/B2C dispatch, 'success' when paid, 'reversed' when rejected,
+// 'failed' if the B2C fails). The labels are the operator-facing names.
 const STATUS_OPTIONS = [
-  { value: 'requested', label: 'Requested' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'paid', label: 'Paid' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'pending', label: 'Requested' },
+  { value: 'processing', label: 'Approved (paying out)' },
+  { value: 'success', label: 'Paid' },
+  { value: 'reversed', label: 'Rejected' },
+  { value: 'failed', label: 'Failed' },
   { value: '', label: 'All' },
 ];
 
 // A withdrawal is actionable (approve / reject) only while it is still awaiting moderation.
-const ACTIONABLE = new Set(['requested', 'pending']);
+const ACTIONABLE = new Set(['pending', 'requested']);
 
 /** Clickable player identity → user detail page. */
 function UserCell({ userId, username }: { userId: string; username: string }) {
@@ -67,7 +71,7 @@ function StackCell({ cents, hint, tone }: { cents: number; hint: string; tone?: 
 }
 
 export default function WithdrawalsPage() {
-  const [status, setStatus] = useState('requested');
+  const [status, setStatus] = useState('pending');
   const q = useWithdrawals(status || undefined);
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
 
@@ -98,7 +102,7 @@ export default function WithdrawalsPage() {
       ) : q.isError ? (
         <Empty title="Couldn't load withdrawals" description="Try again shortly." />
       ) : rows.length === 0 ? (
-        <Empty title="Nothing here" description={status === 'requested' ? 'No withdrawals awaiting review.' : 'No withdrawals match this filter.'} />
+        <Empty title="Nothing here" description={status === 'pending' ? 'No withdrawals awaiting review.' : 'No withdrawals match this filter.'} />
       ) : (
         <>
           <Section title="Loaded on this page">

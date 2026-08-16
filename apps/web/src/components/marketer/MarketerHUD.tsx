@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { formatKes } from '@invest254/shared/money';
 import { useSession } from '@/lib/auth/session';
 import {
@@ -25,32 +25,21 @@ import {
 export function MarketerHUD() {
   const role = useSession((s) => s.user?.role);
   const [open, setOpen] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMarketer = role === 'marketer';
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   if (!isMarketer) return null;
-
-  const startPress = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setOpen(true), 650);
-  };
-  const cancelPress = () => {
-    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
-  };
 
   return (
     <>
-      {/* Invisible long-press hotspot — top-left corner, above the header. No visual footprint. */}
-      <div
-        onPointerDown={startPress}
-        onPointerUp={cancelPress}
-        onPointerLeave={cancelPress}
-        onPointerCancel={cancelPress}
+      {/* Invisible click hotspot over the top-left logo. A single TAP opens the dashboard — no
+          long-press, which on mobile browsers triggers the native context menu (new tab, copy link,
+          …). Renders only for marketers, so a player on their own device has no entry point. */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
         onContextMenu={(e) => e.preventDefault()}
-        aria-hidden
-        className="fixed left-0 top-0 z-[60] h-11 w-11"
-        style={{ WebkitTapHighlightColor: 'transparent', touchAction: 'none' }}
+        aria-label="Open marketer dashboard"
+        className="fixed left-0 top-0 z-[60] h-11 w-11 cursor-default border-0 bg-transparent p-0"
+        style={{ WebkitTapHighlightColor: 'transparent' }}
       />
       {open ? <MarketerDashboard onClose={() => setOpen(false)} /> : null}
     </>

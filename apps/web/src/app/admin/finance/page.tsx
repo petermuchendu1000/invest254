@@ -8,8 +8,8 @@ import { Money } from '@/components/ui/Money';
 import { StatusBadge } from '@/components/ui/Badge';
 import { formatExact, formatRelativeTime } from '@/lib/format';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useDeposits, useDepositsReconcile, useTransactions, useOverview } from '@/lib/admin/hooks';
-import type { AdminDepositRow, AdminTransactionRow } from '@/lib/admin/types';
+import { useDepositsReconcile, useTransactions, useOverview } from '@/lib/admin/hooks';
+import type { AdminTransactionRow } from '@/lib/admin/types';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -69,15 +69,12 @@ function TimeCell({ ms }: { ms: number }) {
 export default function FinancePage() {
   const [txKind, setTxKind] = useState('');
   const [txStatus, setTxStatus] = useState('');
-  const [depStatus, setDepStatus] = useState('');
 
   const overview = useOverview();
   const recon = useDepositsReconcile();
   const txns = useTransactions({ ...(txKind ? { kind: txKind } : {}), ...(txStatus ? { status: txStatus } : {}) });
-  const deposits = useDeposits(depStatus || undefined);
 
   const txRows = useMemo(() => txns.data?.pages.flatMap((p) => p.items) ?? [], [txns.data]);
-  const depRows = useMemo(() => deposits.data?.pages.flatMap((p) => p.items) ?? [], [deposits.data]);
 
   const summary = recon.data?.summary ?? [];
 
@@ -170,45 +167,6 @@ export default function FinancePage() {
           </>
         )}
       </Section>
-
-      {/* Deposit-only explorer (STK detail: receipt + checkout id) */}
-      <Section title="Deposits (M-Pesa detail)">
-        <Toolbar>
-          <FilterSelect label="Status" value={depStatus} onChange={setDepStatus} options={STATUS_OPTIONS} />
-        </Toolbar>
-        {deposits.isLoading ? (
-          <Skeleton className="h-40 w-full" />
-        ) : deposits.isError ? (
-          <Empty title="Couldn't load deposits" description="Try again shortly." />
-        ) : depRows.length === 0 ? (
-          <Empty title="No deposits" description="No deposits match this filter." />
-        ) : (
-          <>
-            <TableWrap>
-              <thead>
-                <tr className="border-b border-border">
-                  <Th>Player</Th>
-                  <Th className="text-right">Amount</Th>
-                  <Th>Phone</Th>
-                  <Th>Status</Th>
-                  <Th>M-Pesa receipt</Th>
-                  <Th className="text-right">Time</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {depRows.map((r) => (
-                  <DepositRow key={r.txId} r={r} />
-                ))}
-              </tbody>
-            </TableWrap>
-            {deposits.hasNextPage ? (
-              <Button variant="outline" size="sm" onClick={() => deposits.fetchNextPage()} disabled={deposits.isFetchingNextPage}>
-                {deposits.isFetchingNextPage ? 'Loading…' : 'Load more'}
-              </Button>
-            ) : null}
-          </>
-        )}
-      </Section>
     </>
   );
 }
@@ -251,25 +209,3 @@ function TxRow({ r }: { r: AdminTransactionRow }) {
   );
 }
 
-function DepositRow({ r }: { r: AdminDepositRow }) {
-  return (
-    <tr className="border-b border-border last:border-0 hover:bg-surface-2/50">
-      <Td>
-        <UserCell userId={r.userId} username={r.username} />
-      </Td>
-      <Td className="text-right font-medium tabular-nums">
-        <Money cents={r.amountCents} />
-      </Td>
-      <Td>
-        <PhoneCell phone={r.phone} />
-      </Td>
-      <Td>
-        <StatusBadge status={r.status} />
-      </Td>
-      <Td className="font-mono text-[11px] text-muted">{r.mpesaReceipt ?? '—'}</Td>
-      <Td className="text-right">
-        <TimeCell ms={r.createdAtMs} />
-      </Td>
-    </tr>
-  );
-}

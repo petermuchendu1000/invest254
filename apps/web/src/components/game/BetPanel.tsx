@@ -170,10 +170,11 @@ export function BetPanel() {
   return (
     <Card className="flex flex-col gap-2.5 rounded-xl p-3">
       {/* Stake input with KES prefix + quick steppers */}
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3">
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 transition focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
         <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">KES</span>
         <input
           inputMode="decimal"
+          autoFocus
           value={stake}
           onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, ''))}
           placeholder="0"
