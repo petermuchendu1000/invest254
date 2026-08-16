@@ -141,10 +141,19 @@ export interface AdminWithdrawalRow {
   txId: string;
   userId: string;
   username: string;
+  phone: string;
   amountCents: Cents;
   status: string;
-  phone: string;
+  provider: string | null;
+  mpesaReceipt: string | null;
   createdAtMs: number;
+  updatedAtMs: number | null;
+  balanceCents: Cents;
+  totalDepositsCents: Cents;
+  depositCount: number;
+  totalWithdrawalsCents: Cents;
+  withdrawalCount: number;
+  firstDepositAtMs: number | null;
 }
 
 export interface AdminDepositRow {

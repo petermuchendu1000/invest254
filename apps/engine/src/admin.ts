@@ -37,7 +37,30 @@ export interface AdminUserRow {
 export interface AdminUserDetail extends AdminUserRow {
   referredBy: string | null;
 }
-export interface AdminWithdrawalRow { txId: string; userId: string; username: string; amountCents: Cents; status: string; phone: string; createdAtMs: number; }
+/**
+ * A withdrawal as the admin moderation queue sees it. Beyond the transaction itself it carries the
+ * player's identity and lifetime money context (same brand as the withdrawal) so a reviewer can
+ * judge a payout without leaving the page: current balance, lifetime deposits/withdrawals (count +
+ * value) and when the player first funded. Fields map to clickable links in the UI.
+ */
+export interface AdminWithdrawalRow {
+  txId: string;
+  userId: string;
+  username: string;
+  phone: string;
+  amountCents: Cents;
+  status: string;
+  provider: string | null;
+  mpesaReceipt: string | null;
+  createdAtMs: number;
+  updatedAtMs: number | null;
+  balanceCents: Cents;             // player's current real balance (this brand)
+  totalDepositsCents: Cents;       // lifetime successful deposits (this brand)
+  depositCount: number;
+  totalWithdrawalsCents: Cents;    // lifetime successful (paid) withdrawals (this brand)
+  withdrawalCount: number;
+  firstDepositAtMs: number | null; // first successful deposit (funding age); null if never funded
+}
 /** A transaction (deposit OR withdrawal) as the unified Finance transactions explorer sees it —
  *  carries the player identity, exact timestamps, provider, receipt and STK checkout id. */
 export interface AdminTransactionRow {
@@ -675,9 +698,32 @@ export class PgAdminRepository implements AdminRepository {
   async listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>> {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
+    // Enrich each withdrawal with the player's identity, current balance and lifetime deposit/
+    // withdrawal totals (scoped to the SAME brand as the withdrawal) via a lateral aggregate, so the
+    // moderation queue shows everything a reviewer needs without an extra round-trip per row.
     const r = await this.q.query(
-      `select t.id, t.user_id, t.amount, t.status, t.phone, t.created_at, p.username from transactions t
+      `select t.id, t.user_id, t.amount, t.status, t.phone, t.provider, t.mpesa_receipt,
+              t.created_at, t.updated_at, p.username,
+              coalesce(w.real_balance, 0) as balance,
+              coalesce(agg.dep_c, 0) as total_deposits, coalesce(agg.dep_n, 0) as deposit_count,
+              coalesce(agg.wd_c, 0)  as total_withdrawals, coalesce(agg.wd_n, 0) as withdrawal_count,
+              agg.first_dep
+         from transactions t
          left join profiles p on p.id = t.user_id
+         left join wallets w on w.user_id = t.user_id
+              and w.site_id = coalesce(t.site_id, '00000000-0000-0000-0000-000000000001'::uuid)
+         left join lateral (
+           select
+             count(*) filter (where t2.kind='deposit'    and t2.status='success') as dep_n,
+             coalesce(sum(t2.amount) filter (where t2.kind='deposit'    and t2.status='success'),0) as dep_c,
+             count(*) filter (where t2.kind='withdrawal' and t2.status='success') as wd_n,
+             coalesce(sum(t2.amount) filter (where t2.kind='withdrawal' and t2.status='success'),0) as wd_c,
+             min(t2.created_at) filter (where t2.kind='deposit' and t2.status='success') as first_dep
+           from transactions t2
+           where t2.user_id = t.user_id
+             and coalesce(t2.site_id, '00000000-0000-0000-0000-000000000001'::uuid)
+               = coalesce(t.site_id,  '00000000-0000-0000-0000-000000000001'::uuid)
+         ) agg on true
         where t.kind = 'withdrawal'
           and ($1::text is null or t.status = $1)
           and ($5::uuid is null or t.site_id = $5)
@@ -687,7 +733,14 @@ export class PgAdminRepository implements AdminRepository {
       [q.status ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1, q.siteId ?? null]);
     const rows: AdminWithdrawalRow[] = r.rows.map((x) => ({
       txId: String(x.id), userId: String(x.user_id), username: x.username == null ? "" : String(x.username),
-      amountCents: num(x.amount), status: String(x.status), phone: String(x.phone), createdAtMs: ms(x.created_at),
+      phone: String(x.phone), amountCents: num(x.amount), status: String(x.status),
+      provider: x.provider == null ? null : String(x.provider),
+      mpesaReceipt: x.mpesa_receipt == null ? null : String(x.mpesa_receipt),
+      createdAtMs: ms(x.created_at), updatedAtMs: x.updated_at == null ? null : ms(x.updated_at),
+      balanceCents: num(x.balance),
+      totalDepositsCents: num(x.total_deposits), depositCount: num(x.deposit_count),
+      totalWithdrawalsCents: num(x.total_withdrawals), withdrawalCount: num(x.withdrawal_count),
+      firstDepositAtMs: x.first_dep == null ? null : ms(x.first_dep),
     }));
     return pageFrom(rows, limit, (t) => `${t.createdAtMs}:${t.txId}`);
   }
@@ -1389,9 +1442,29 @@ export class InMemoryAdminRepository implements AdminRepository {
   }
 
   async listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>> {
-    const rows = this.payments.adminTransactions()
-      .filter((t) => t.kind === "withdrawal" && (q.status === undefined || t.status === q.status) && siteMatches(t.siteId, q.siteId))
-      .map((t) => ({ txId: t.txId, userId: t.userId, username: this.identity.adminUser(t.userId)?.username ?? "", amountCents: t.amountCents, status: t.status, phone: t.phone, createdAtMs: t.createdAtMs, _ts: t.createdAtMs, _id: t.txId }));
+    const DEF = "00000000-0000-0000-0000-000000000001";
+    const site = (s?: string | null): string => s ?? DEF;
+    const all = this.payments.adminTransactions();
+    const matched = all.filter((t) => t.kind === "withdrawal" && (q.status === undefined || t.status === q.status) && siteMatches(t.siteId, q.siteId));
+    // Enrich with the player's balance + lifetime deposit/withdrawal totals (same brand), mirroring
+    // the Pg lateral aggregate so the moderation queue is identical under test and in production.
+    const rows = await Promise.all(matched.map(async (t) => {
+      const mine = all.filter((x) => x.userId === t.userId && site(x.siteId) === site(t.siteId));
+      const dep = mine.filter((x) => x.kind === "deposit" && x.status === "success");
+      const wd = mine.filter((x) => x.kind === "withdrawal" && x.status === "success");
+      const firstDep = dep.length ? Math.min(...dep.map((x) => x.createdAtMs)) : null;
+      return {
+        txId: t.txId, userId: t.userId, username: this.identity.adminUser(t.userId)?.username ?? "",
+        phone: t.phone, amountCents: t.amountCents, status: t.status,
+        provider: null, mpesaReceipt: t.mpesaReceipt ?? null,
+        createdAtMs: t.createdAtMs, updatedAtMs: null,
+        balanceCents: await this.payments.getBalance(t.userId),
+        totalDepositsCents: dep.reduce((s, x) => s + x.amountCents, 0), depositCount: dep.length,
+        totalWithdrawalsCents: wd.reduce((s, x) => s + x.amountCents, 0), withdrawalCount: wd.length,
+        firstDepositAtMs: firstDep,
+        _ts: t.createdAtMs, _id: t.txId,
+      };
+    }));
     return memKeyset(rows, q);
   }
 
