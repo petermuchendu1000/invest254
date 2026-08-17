@@ -195,4 +195,31 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     assertTargetSiteInScope(ctx, await deps.admin.siteOfTransaction(ctx.params.id!));
     return domain(() => deps.payments.rejectWithdrawal(ctx.params.id!, ctx.claims!.userId));
   });
+
+  // Bulk moderation: apply approve/reject to many withdrawals in one call. Each row is brand-guarded
+  // and executed independently, so one failure (wrong state, cross-brand, B2C error) fails ONLY that
+  // row (partial success) — mirrors /admin/users/bulk. Approval dispatches the M-Pesa B2C per row;
+  // the underlying RPCs are idempotent, so a re-run over already-actioned rows is safe.
+  router.post(`${BASE}/admin/withdrawals/bulk`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const action = body.action === "approve" || body.action === "reject" ? body.action : "";
+    if (!action) throw new ApiError("VALIDATION", "action must be 'approve' or 'reject'", 400);
+    const raw = Array.isArray(body.txIds) ? body.txIds : [];
+    const txIds = [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0))];
+    if (txIds.length === 0) throw new ApiError("VALIDATION", "txIds must be a non-empty array", 400);
+    if (txIds.length > 200) throw new ApiError("VALIDATION", "at most 200 withdrawals per bulk action", 400);
+    const results = await Promise.all(txIds.map(async (id) => {
+      try {
+        assertTargetSiteInScope(ctx, await deps.admin.siteOfTransaction(id));
+        const result = action === "approve"
+          ? await deps.payments.approveWithdrawal(id, ctx.claims!.userId)
+          : await deps.payments.rejectWithdrawal(id, ctx.claims!.userId);
+        return { id, ok: true, result };
+      } catch (e) {
+        return { id, ok: false, error: (e as { message?: string })?.message ?? "ERROR" };
+      }
+    }));
+    const okCount = results.filter((r) => r.ok).length;
+    return { action, total: txIds.length, okCount, failCount: results.length - okCount, results };
+  });
 }

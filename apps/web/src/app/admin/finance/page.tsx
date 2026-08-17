@@ -8,6 +8,8 @@ import { Money } from '@/components/ui/Money';
 import { StatusBadge } from '@/components/ui/Badge';
 import { formatExact, formatRelativeTime } from '@/lib/format';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty, Toolbar, FilterSelect } from '@/components/admin/ui';
+import { useRowSelection, SelectAllCheckbox, RowCheckbox, BulkBar, downloadCsv, copyText } from '@/components/admin/BulkSelect';
+import { useToast } from '@/lib/toast/ToastProvider';
 import { useDepositsReconcile, useTransactions, useOverview } from '@/lib/admin/hooks';
 import type { AdminTransactionRow } from '@/lib/admin/types';
 
@@ -76,6 +78,33 @@ export default function FinancePage() {
 
   const txRows = useMemo(() => txns.data?.pages.flatMap((p) => p.items) ?? [], [txns.data]);
 
+  const sel = useRowSelection(txRows, (r) => r.txId);
+  const toast = useToast();
+  const selInfo = useMemo(() => {
+    let deposits = 0, withdrawals = 0, depN = 0, wdN = 0;
+    for (const r of sel.selectedRows) {
+      if (r.kind === 'deposit') { deposits += r.amountCents; depN += 1; } else { withdrawals += r.amountCents; wdN += 1; }
+    }
+    return { deposits, withdrawals, depN, wdN };
+  }, [sel.selectedRows]);
+  async function copyPhones() {
+    const phones = [...new Set(sel.selectedRows.map((r) => r.phone).filter((p): p is string => !!p))];
+    const ok = await copyText(phones.join('\n'));
+    toast.push({ tone: ok ? 'success' : 'error', title: ok ? 'Phone numbers copied' : 'Copy failed', description: `${phones.length} unique number(s)` });
+  }
+  function exportCsv() {
+    downloadCsv(
+      `transactions-${new Date().toISOString().slice(0, 10)}.csv`,
+      sel.selectedRows.map((r) => ({
+        txId: r.txId, username: r.username, kind: r.kind,
+        amountKES: (r.amountCents / 100).toFixed(2), status: r.status,
+        phone: r.phone ?? '', provider: r.provider ?? '',
+        receipt: r.mpesaReceipt ?? r.checkoutRequestId ?? '',
+        time: r.createdAtMs ? new Date(r.createdAtMs).toISOString() : '',
+      })),
+    );
+  }
+
   const summary = recon.data?.summary ?? [];
 
   const fin = overview.data?.finance;
@@ -143,6 +172,7 @@ export default function FinancePage() {
             <TableWrap>
               <thead>
                 <tr className="border-b border-border">
+                  <Th className="w-8"><SelectAllCheckbox allSelected={sel.allSelected} someSelected={sel.someSelected} onChange={sel.setAll} /></Th>
                   <Th>Player</Th>
                   <Th>Type</Th>
                   <Th className="text-right">Amount</Th>
@@ -155,7 +185,7 @@ export default function FinancePage() {
               </thead>
               <tbody>
                 {txRows.map((r) => (
-                  <TxRow key={r.txId} r={r} />
+                  <TxRow key={r.txId} r={r} checked={sel.isSelected(r.txId)} onToggle={() => sel.toggle(r.txId)} />
                 ))}
               </tbody>
             </TableWrap>
@@ -164,6 +194,14 @@ export default function FinancePage() {
                 {txns.isFetchingNextPage ? 'Loading…' : 'Load more'}
               </Button>
             ) : null}
+            <BulkBar
+              count={sel.count}
+              onClear={sel.clear}
+              summary={<>{selInfo.depN} dep <Money cents={selInfo.deposits} /> · {selInfo.wdN} wd <Money cents={selInfo.withdrawals} /></>}
+            >
+              <Button size="sm" variant="outline" onClick={copyPhones}>Copy phones</Button>
+              <Button size="sm" variant="outline" onClick={exportCsv}>Export CSV</Button>
+            </BulkBar>
           </>
         )}
       </Section>
@@ -171,10 +209,11 @@ export default function FinancePage() {
   );
 }
 
-function TxRow({ r }: { r: AdminTransactionRow }) {
+function TxRow({ r, checked, onToggle }: { r: AdminTransactionRow; checked: boolean; onToggle: () => void }) {
   const isDeposit = r.kind === 'deposit';
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-surface-2/50">
+    <tr className={`border-b border-border last:border-0 hover:bg-surface-2/50 ${checked ? 'bg-accent/5' : ''}`}>
+      <Td><RowCheckbox checked={checked} onChange={onToggle} label={`Select ${r.username}`} /></Td>
       <Td>
         <UserCell userId={r.userId} username={r.username} />
       </Td>

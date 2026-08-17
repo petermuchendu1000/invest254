@@ -5,6 +5,7 @@ import type {
   ResetBalanceResult,
   BulkActionInput,
   BulkActionResult,
+  AdminBulkResult,
   AdminAuditRow,
   AdminNotificationRow,
   NotificationInput,
@@ -111,6 +112,9 @@ export const adminApi = {
     apiFetch<unknown>(`/admin/withdrawals/${id}/approve`, { method: 'POST', token: t }),
   rejectWithdrawal: (t: string, id: string) =>
     apiFetch<unknown>(`/admin/withdrawals/${id}/reject`, { method: 'POST', token: t }),
+  // Bulk withdrawal moderation (partial success per row; approve dispatches M-Pesa B2C each).
+  bulkWithdrawals: (t: string, body: { action: 'approve' | 'reject'; txIds: string[] }) =>
+    apiFetch<AdminBulkResult>('/admin/withdrawals/bulk', { method: 'POST', token: t, body }),
   // 0067 — per-brand withdrawal kill switch (owner/admin override).
   withdrawalsEnabled: (t: string) =>
     apiFetch<{ enabled: boolean }>('/admin/withdrawals-enabled', { token: t }),
@@ -142,6 +146,9 @@ export const adminApi = {
     apiFetch<unknown>(`/admin/affiliate/payouts/${id}/approve`, { method: 'POST', token: t }),
   rejectPayout: (t: string, id: string) =>
     apiFetch<unknown>(`/admin/affiliate/payouts/${id}/reject`, { method: 'POST', token: t }),
+  // Bulk payout moderation (partial success per row; approve dispatches M-Pesa B2C each).
+  bulkPayouts: (t: string, body: { action: 'approve' | 'reject'; payoutIds: string[] }) =>
+    apiFetch<AdminBulkResult>('/admin/affiliate/payouts/bulk', { method: 'POST', token: t, body }),
   setCommissionRate: (t: string, id: string, rate: number) =>
     apiFetch<unknown>(`/admin/affiliates/${id}/rate`, { method: 'PATCH', token: t, body: { rate } }),
   // 0068 — marketer expenses (transparency): log a cost against a marketer, and list them.
@@ -206,6 +213,11 @@ export const adminApi = {
     apiFetch<{ ok: boolean }>(`/admin/marketers/${id}/pin`, { method: 'POST', token: t, body: { pin } }),
   setMarketerStatus: (t: string, id: string, status: 'active' | 'suspended' | 'disabled') =>
     apiFetch<{ status: string }>(`/admin/marketers/${id}/status`, { method: 'PATCH', token: t, body: { status } }),
+  // Bulk marketer actions: status change (activate|suspend|disable) or a flat credit to many.
+  bulkMarketers: (
+    t: string,
+    body: { action: 'activate' | 'suspend' | 'disable' | 'credit'; marketerIds: string[]; amountCents?: number; ref?: string },
+  ) => apiFetch<AdminBulkResult>('/admin/marketers/bulk', { method: 'POST', token: t, body }),
 
   // User notifications (J7) — raise a sticky banner for a player; list + resolve.
   userNotifications: (t: string, id: string) =>

@@ -10,7 +10,8 @@ import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { formatExact, formatRelativeTime } from '@/lib/format';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty, Toolbar, FilterSelect, ConfirmButton } from '@/components/admin/ui';
-import { useWithdrawals, useWithdrawalAction, useWithdrawalsEnabled, useSetWithdrawalsEnabled } from '@/lib/admin/hooks';
+import { useRowSelection, SelectAllCheckbox, RowCheckbox, BulkBar, downloadCsv, copyText } from '@/components/admin/BulkSelect';
+import { useWithdrawals, useWithdrawalAction, useWithdrawalsEnabled, useSetWithdrawalsEnabled, useBulkWithdrawals } from '@/lib/admin/hooks';
 import type { AdminWithdrawalRow } from '@/lib/admin/types';
 
 // Filter values are the ACTUAL transaction statuses in the DB (a withdrawal is created 'pending',
@@ -74,6 +75,9 @@ export default function WithdrawalsPage() {
   const [status, setStatus] = useState('pending');
   const q = useWithdrawals(status || undefined);
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+  const sel = useRowSelection(rows, (r) => r.txId);
+  const bulk = useBulkWithdrawals();
+  const toast = useToast();
 
   // Summary over the rows loaded so far (labelled "loaded" so partial pages aren't mistaken for totals).
   const totals = useMemo(() => {
@@ -83,11 +87,58 @@ export default function WithdrawalsPage() {
     return { count: rows.length, amount, awaitingCount: awaiting.length, awaitingAmount };
   }, [rows]);
 
+  // Live insight into the current SELECTION (drives the bulk bar + guards the money actions).
+  const selInfo = useMemo(() => {
+    const amount = sel.selectedRows.reduce((s, r) => s + r.amountCents, 0);
+    const actionable = sel.selectedRows.filter((r) => ACTIONABLE.has(r.status.toLowerCase()));
+    return { amount, actionableIds: actionable.map((r) => r.txId), actionableAmount: actionable.reduce((s, r) => s + r.amountCents, 0) };
+  }, [sel.selectedRows]);
+
+  function runBulk(action: 'approve' | 'reject') {
+    const txIds = selInfo.actionableIds;
+    if (txIds.length === 0) {
+      toast.push({ tone: 'error', title: 'Nothing actionable', description: 'Selected withdrawals are already processed.' });
+      return;
+    }
+    bulk.mutate(
+      { action, txIds },
+      {
+        onSuccess: (res) => {
+          toast.push({
+            tone: res.failCount ? 'error' : 'success',
+            title: `${res.okCount}/${res.total} ${action === 'approve' ? 'approved' : 'rejected'}`,
+            description: res.failCount ? `${res.failCount} could not be actioned.` : action === 'approve' ? 'M-Pesa payouts dispatched.' : 'Funds returned to players.',
+          });
+          sel.clear();
+        },
+        onError: (e) => toast.push({ tone: 'error', title: 'Bulk action failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+      },
+    );
+  }
+
+  async function copyPhones() {
+    const ok = await copyText(sel.selectedRows.map((r) => r.phone).join('\n'));
+    toast.push({ tone: ok ? 'success' : 'error', title: ok ? 'Phone numbers copied' : 'Copy failed', description: `${sel.count} number(s)` });
+  }
+  function exportCsv() {
+    downloadCsv(
+      `withdrawals-${status || 'all'}-${new Date().toISOString().slice(0, 10)}.csv`,
+      sel.selectedRows.map((r) => ({
+        txId: r.txId, username: r.username, phone: r.phone,
+        amountKES: (r.amountCents / 100).toFixed(2), status: r.status,
+        balanceKES: (r.balanceCents / 100).toFixed(2),
+        lifetimeDepositsKES: (r.totalDepositsCents / 100).toFixed(2),
+        lifetimeWithdrawalsKES: (r.totalWithdrawalsCents / 100).toFixed(2),
+        requestedAt: r.createdAtMs ? new Date(r.createdAtMs).toISOString() : '',
+      })),
+    );
+  }
+
   return (
     <>
       <PageHeader
         title="Withdrawals"
-        subtitle="Review and action player withdrawal requests with full context — identity, balance and lifetime deposit/withdrawal history. Approval dispatches the M-Pesa B2C payout; rejection reverses the hold."
+        subtitle="Review and action player withdrawal requests with full context — identity, balance and lifetime deposit/withdrawal history. Approval dispatches the M-Pesa B2C payout; rejection reverses the hold. Select rows for bulk approve/reject, copy or export."
         actions={
           <Toolbar>
             <FilterSelect label="Status" value={status} onChange={setStatus} options={STATUS_OPTIONS} />
@@ -115,31 +166,43 @@ export default function WithdrawalsPage() {
           </Section>
 
           <TableWrap>
-              <thead>
-                <tr className="border-b border-border">
-                  <Th>Player</Th>
-                  <Th className="text-right">Amount</Th>
-                  <Th>M-Pesa</Th>
-                  <Th>Status</Th>
-                  <Th className="text-right">Balance</Th>
-                  <Th className="text-right">Deposits</Th>
-                  <Th className="text-right">Withdrawals</Th>
-                  <Th className="text-right">Net cash</Th>
-                  <Th>Requested</Th>
-                  <Th className="text-right">Action</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <Row key={r.txId} r={r} />
-                ))}
-              </tbody>
-            </TableWrap>
+            <thead>
+              <tr className="border-b border-border">
+                <Th className="w-8"><SelectAllCheckbox allSelected={sel.allSelected} someSelected={sel.someSelected} onChange={sel.setAll} /></Th>
+                <Th>Player</Th>
+                <Th className="text-right">Amount</Th>
+                <Th>M-Pesa</Th>
+                <Th>Status</Th>
+                <Th className="text-right">Balance</Th>
+                <Th className="text-right">Deposits</Th>
+                <Th className="text-right">Withdrawals</Th>
+                <Th className="text-right">Net cash</Th>
+                <Th>Requested</Th>
+                <Th className="text-right">Action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <Row key={r.txId} r={r} checked={sel.isSelected(r.txId)} onToggle={() => sel.toggle(r.txId)} />
+              ))}
+            </tbody>
+          </TableWrap>
           {q.hasNextPage ? (
             <Button variant="outline" size="sm" onClick={() => q.fetchNextPage()} disabled={q.isFetchingNextPage}>
               {q.isFetchingNextPage ? 'Loading…' : 'Load more'}
             </Button>
           ) : null}
+
+          <BulkBar
+            count={sel.count}
+            onClear={sel.clear}
+            summary={<>Total <Money cents={selInfo.amount} /> · {selInfo.actionableIds.length} actionable (<Money cents={selInfo.actionableAmount} />)</>}
+          >
+            <ConfirmButton label={`Approve ${selInfo.actionableIds.length}`} confirmLabel="Pay out all" variant="primary" busy={bulk.isPending} disabled={selInfo.actionableIds.length === 0} onConfirm={() => runBulk('approve')} />
+            <ConfirmButton label={`Reject ${selInfo.actionableIds.length}`} confirmLabel="Reject all" variant="outline" busy={bulk.isPending} disabled={selInfo.actionableIds.length === 0} onConfirm={() => runBulk('reject')} />
+            <Button size="sm" variant="outline" onClick={copyPhones}>Copy phones</Button>
+            <Button size="sm" variant="outline" onClick={exportCsv}>Export CSV</Button>
+          </BulkBar>
         </>
       )}
     </>
@@ -193,7 +256,7 @@ function WithdrawalsSwitch() {
   );
 }
 
-function Row({ r }: { r: AdminWithdrawalRow }) {
+function Row({ r, checked, onToggle }: { r: AdminWithdrawalRow; checked: boolean; onToggle: () => void }) {
   const action = useWithdrawalAction();
   const toast = useToast();
   const canAct = ACTIONABLE.has(r.status.toLowerCase());
@@ -217,7 +280,8 @@ function Row({ r }: { r: AdminWithdrawalRow }) {
   }
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-surface-2/50">
+    <tr className={`border-b border-border last:border-0 hover:bg-surface-2/50 ${checked ? 'bg-accent/5' : ''}`}>
+      <Td><RowCheckbox checked={checked} onChange={onToggle} label={`Select ${r.username}`} /></Td>
       <Td><UserCell userId={r.userId} username={r.username} /></Td>
       <Td className="text-right font-semibold tabular-nums"><Money cents={r.amountCents} /></Td>
       <Td><PhoneCell phone={r.phone} receipt={r.mpesaReceipt} /></Td>

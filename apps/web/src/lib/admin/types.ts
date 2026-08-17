@@ -426,3 +426,20 @@ export interface MarketerWithdrawResult {
   withdrawal_id?: string;
   ledger_id: number;
 }
+
+// ── Generic bulk-action result for the finance/affiliate/marketer bulk endpoints ──────────────
+/** One row's outcome in a bulk action (keyed by the item id: txId / payoutId / marketerId). */
+export interface AdminBulkResultRow {
+  id: string;
+  ok: boolean;
+  error?: string;
+  result?: unknown;
+}
+/** Aggregate result of a bulk action: total attempted + per-row outcomes (partial success). */
+export interface AdminBulkResult {
+  action: string;
+  total: number;
+  okCount: number;
+  failCount: number;
+  results: AdminBulkResultRow[];
+}

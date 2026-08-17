@@ -335,4 +335,35 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const status = await domain(() => deps.marketers.setStatus(idOf(ctx), reqStr(bodyObj(ctx), "status")));
     return { status };
   });
+
+  // Bulk: apply a status change (activate|suspend|disable) or a flat credit to many marketers at
+  // once. Each row maps to the same idempotent single-marketer RPC and runs independently (partial
+  // success). For 'credit', a batch `ref` yields a per-marketer idempotency key (`<ref>:<id>`) so a
+  // re-run never double-credits.
+  router.post(`${BASE}/admin/marketers/bulk`, auth, admin, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const action = typeof b.action === "string" ? b.action : "";
+    const raw = Array.isArray(b.marketerIds) ? b.marketerIds : [];
+    const ids = [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0))];
+    if (ids.length === 0) throw new ApiError("VALIDATION", "marketerIds must be a non-empty array", 400);
+    if (ids.length > 200) throw new ApiError("VALIDATION", "at most 200 marketers per bulk action", 400);
+    const STATUS: Record<string, string> = { activate: "active", suspend: "suspended", disable: "disabled" };
+    let run: (id: string) => Promise<unknown>;
+    if (action in STATUS) {
+      const status = STATUS[action]!;
+      run = async (id) => ({ status: await deps.marketers.setStatus(id, status) });
+    } else if (action === "credit") {
+      const amountCents = reqPositiveCents(b);
+      const batchRef = optStr(b, "ref");
+      run = async (id) => ({ balanceCents: await deps.marketers.credit(id, amountCents, batchRef ? `${batchRef}:${id}` : null, b.meta ?? {}) });
+    } else {
+      throw new ApiError("VALIDATION", "action must be one of: activate, suspend, disable, credit", 400);
+    }
+    const results = await Promise.all(ids.map(async (id) => {
+      try { return { id, ok: true, result: await run(id) }; }
+      catch (e) { return { id, ok: false, error: (e as { message?: string })?.message ?? "ERROR" }; }
+    }));
+    const okCount = results.filter((r) => r.ok).length;
+    return { action, total: ids.length, okCount, failCount: results.length - okCount, results };
+  });
 }

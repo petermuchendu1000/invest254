@@ -119,6 +119,39 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
       return { rejected };
     }));
 
+  // Bulk: approve/reject many payout requests in one call. Each row is brand-guarded, audited, and
+  // executed independently (partial success). Approval dispatches the M-Pesa B2C per row; the RPCs
+  // are idempotent so a re-run over already-decided payouts is a safe no-op.
+  router.post(`${BASE}/admin/affiliate/payouts/bulk`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const action = body.action === "approve" || body.action === "reject" ? body.action : "";
+    if (!action) throw new ApiError("VALIDATION", "action must be 'approve' or 'reject'", 400);
+    const raw = Array.isArray(body.payoutIds) ? body.payoutIds : [];
+    const payoutIds = [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0))];
+    if (payoutIds.length === 0) throw new ApiError("VALIDATION", "payoutIds must be a non-empty array", 400);
+    if (payoutIds.length > 200) throw new ApiError("VALIDATION", "at most 200 payouts per bulk action", 400);
+    const actorId = ctx.claims!.userId;
+    const actorRole = ctx.claims!.role ?? "player";
+    const results = await Promise.all(payoutIds.map(async (id) => {
+      try {
+        assertTargetSiteInScope(ctx, await deps.affiliate.siteOfPayout(id));
+        if (action === "approve") {
+          const res = await deps.affiliate.approvePayout(id, actorId);
+          await deps.admin.recordAction(actorId, actorRole, "affiliate.payout.approve", "affiliate_payout", id, res);
+          return { id, ok: true, result: res };
+        }
+        const rejected = await deps.affiliate.rejectPayout(id, actorId);
+        await deps.admin.recordAction(actorId, actorRole, "affiliate.payout.reject", "affiliate_payout", id, { rejected });
+        return { id, ok: true, result: { rejected } };
+      } catch (e) {
+        const code = e instanceof ApiError ? e.code : (e as { message?: string })?.message ?? "ERROR";
+        return { id, ok: false, error: code };
+      }
+    }));
+    const okCount = results.filter((r) => r.ok).length;
+    return { action, total: payoutIds.length, okCount, failCount: results.length - okCount, results };
+  });
+
   // Public: Daraja B2C result for a payout (network-allowlisted at the edge). Always acks.
   router.post(`${BASE}/affiliate/payouts/mpesa/result/:payoutId`, async (ctx: Ctx) => {
     const r = parseB2cResult(ctx.body);

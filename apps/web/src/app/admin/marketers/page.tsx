@@ -22,7 +22,9 @@ import {
   useMarketerAirtime,
   useMarketerPin,
   useMarketerStatus,
+  useBulkMarketers,
 } from '@/lib/admin/hooks';
+import { useRowSelection, SelectAllCheckbox, RowCheckbox, BulkBar, downloadCsv, copyText } from '@/components/admin/BulkSelect';
 import type { AdminMarketerRow } from '@/lib/admin/types';
 
 const STATUS_OPTIONS = [
@@ -77,6 +79,41 @@ export default function MarketersPage() {
     [rows],
   );
 
+  const sel = useRowSelection(rows, (m) => m.id);
+  const bulk = useBulkMarketers();
+  const toast = useToast();
+  const [crediting, setCrediting] = useState(false);
+  const selBalance = useMemo(() => sel.selectedRows.reduce((s, m) => s + m.balance_cents, 0), [sel.selectedRows]);
+
+  function runStatus(action: 'activate' | 'suspend' | 'disable') {
+    const marketerIds = sel.selectedRows.map((m) => m.id);
+    bulk.mutate(
+      { action, marketerIds },
+      {
+        onSuccess: (res) => {
+          toast.push({ tone: res.failCount ? 'error' : 'success', title: `${res.okCount}/${res.total} updated`, description: res.failCount ? `${res.failCount} could not be updated.` : `Marketers set to ${action === 'activate' ? 'active' : action === 'suspend' ? 'suspended' : 'disabled'}.` });
+          sel.clear();
+        },
+        onError: (e) => toast.push({ tone: 'error', title: 'Bulk action failed', description: errMsg(e) }),
+      },
+    );
+  }
+  async function copyPhones() {
+    const ok = await copyText(sel.selectedRows.map((m) => m.phone).join('\n'));
+    toast.push({ tone: ok ? 'success' : 'error', title: ok ? 'Phone numbers copied' : 'Copy failed', description: `${sel.count} number(s)` });
+  }
+  function exportCsv() {
+    downloadCsv(
+      `marketers-${status || 'all'}-${new Date().toISOString().slice(0, 10)}.csv`,
+      sel.selectedRows.map((m) => ({
+        id: m.id, name: m.name, phone: m.phone, status: m.status,
+        balanceKES: (m.balance_cents / 100).toFixed(2),
+        fulizaKES: (m.available_fuliza_cents / 100).toFixed(2),
+        airtimeKES: (m.airtime_balance_cents / 100).toFixed(2),
+      })),
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -105,9 +142,11 @@ export default function MarketersPage() {
       ) : rows.length === 0 ? (
         <Empty title="No marketers yet" description="Create one to start paying marketers." />
       ) : (
+        <>
         <TableWrap>
           <thead>
             <tr className="border-b border-border">
+              <Th className="w-8"><SelectAllCheckbox allSelected={sel.allSelected} someSelected={sel.someSelected} onChange={sel.setAll} /></Th>
               <Th>Name</Th>
               <Th>Phone</Th>
               <Th>Balance</Th>
@@ -119,7 +158,8 @@ export default function MarketersPage() {
           </thead>
           <tbody>
             {rows.map((m) => (
-              <tr key={m.id} className="border-b border-border last:border-0">
+              <tr key={m.id} className={`border-b border-border last:border-0 ${sel.isSelected(m.id) ? 'bg-accent/5' : ''}`}>
+                <Td><RowCheckbox checked={sel.isSelected(m.id)} onChange={() => sel.toggle(m.id)} label={`Select ${m.name}`} /></Td>
                 <Td>
                   <span className="flex items-center gap-2">
                     <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold">
@@ -150,8 +190,18 @@ export default function MarketersPage() {
             ))}
           </tbody>
         </TableWrap>
+        <BulkBar count={sel.count} onClear={sel.clear} summary={<>Balance <Money cents={selBalance} /></>}>
+          <ConfirmButton label="Activate" confirmLabel="Activate all" variant="up" busy={bulk.isPending} onConfirm={() => runStatus('activate')} />
+          <ConfirmButton label="Suspend" confirmLabel="Suspend all" variant="outline" busy={bulk.isPending} onConfirm={() => runStatus('suspend')} />
+          <ConfirmButton label="Disable" confirmLabel="Disable all" variant="down" busy={bulk.isPending} onConfirm={() => runStatus('disable')} />
+          <Button size="sm" variant="secondary" onClick={() => setCrediting(true)}>Credit…</Button>
+          <Button size="sm" variant="outline" onClick={copyPhones}>Copy phones</Button>
+          <Button size="sm" variant="outline" onClick={exportCsv}>Export CSV</Button>
+        </BulkBar>
+        </>
       )}
 
+      <BulkCreditModal open={crediting} marketerIds={sel.selectedRows.map((m) => m.id)} onClose={() => setCrediting(false)} onDone={sel.clear} />
       <CreateMarketerModal open={creating} onClose={() => setCreating(false)} />
       <ManageMarketerModal id={selected} onClose={() => setSelected(null)} />
     </>
@@ -475,5 +525,52 @@ function Statement({ id }: { id: string }) {
         </TableWrap>
       )}
     </Section>
+  );
+}
+
+// ── Bulk credit (many marketers, one flat amount) ──
+function BulkCreditModal({ open, marketerIds, onClose, onDone }: { open: boolean; marketerIds: string[]; onClose: () => void; onDone: () => void }) {
+  const bulk = useBulkMarketers();
+  const toast = useToast();
+  const [amount, setAmount] = useState('');
+  const [ref, setRef] = useState('');
+  const cents = kesToCents(amount);
+
+  function submit() {
+    if (!cents) return;
+    bulk.mutate(
+      { action: 'credit', marketerIds, amountCents: cents, ...(ref.trim() ? { ref: ref.trim() } : {}) },
+      {
+        onSuccess: (res) => {
+          toast.push({
+            tone: res.failCount ? 'error' : 'success',
+            title: `Credited ${res.okCount}/${res.total}`,
+            description: res.failCount ? `${res.failCount} failed.` : `KES ${(cents / 100).toLocaleString()} to each marketer.`,
+          });
+          setAmount('');
+          setRef('');
+          onDone();
+          onClose();
+        },
+        onError: (e) => toast.push({ tone: 'error', title: 'Bulk credit failed', description: errMsg(e) }),
+      },
+    );
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Bulk credit">
+      <div className="flex flex-col gap-4 p-5">
+        <h2 className="text-lg font-semibold tracking-tight">Credit {marketerIds.length} marketer{marketerIds.length === 1 ? '' : 's'}</h2>
+        <p className="text-xs text-muted">Each selected marketer is credited the SAME amount. A reference makes it idempotent (safe to retry) — each marketer gets a distinct <span className="font-mono">{'{ref}:{id}'}</span> key.</p>
+        <Input label="Amount each (KES)" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required />
+        <Input label="Reference" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. AUG-BONUS" optional />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={bulk.isPending}>Cancel</Button>
+          <Button onClick={submit} disabled={bulk.isPending || !cents || marketerIds.length === 0}>
+            {bulk.isPending ? 'Crediting…' : `Credit ${cents ? `KES ${(cents / 100).toLocaleString()}` : ''} each`}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

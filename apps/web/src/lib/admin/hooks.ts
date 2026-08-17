@@ -490,3 +490,44 @@ export function useFlyRestart() {
     mutationFn: () => adminApi.flyRestart(t),
   });
 }
+
+// ── Bulk actions (finance / affiliate / marketer) ────────────────────────────────────────────
+/** Bulk approve/reject withdrawals. Invalidates the withdrawals queue + overview KPIs. */
+export function useBulkWithdrawals() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { action: 'approve' | 'reject'; txIds: string[] }) => adminApi.bulkWithdrawals(t, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'withdrawals'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
+/** Bulk approve/reject affiliate payouts. Invalidates the payouts queue + overview KPIs. */
+export function useBulkPayouts() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { action: 'approve' | 'reject'; payoutIds: string[] }) => adminApi.bulkPayouts(t, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'payouts'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
+/** Bulk marketer status change or flat credit. Invalidates the marketers list. */
+export function useBulkMarketers() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { action: 'activate' | 'suspend' | 'disable' | 'credit'; marketerIds: string[]; amountCents?: number; ref?: string }) =>
+      adminApi.bulkMarketers(t, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
