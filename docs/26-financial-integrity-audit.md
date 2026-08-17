@@ -65,9 +65,10 @@ not a cash‑loss signal, on pool‑mode brands.
 ## 5. Recommendations / open decisions
 1. **Audit & remove dangerous `user_overrides`.** ✅ DONE (2026‑08‑17): backed up + cleared; migration
    `0074` guards against favourable (better‑than‑house) overrides going forward.
-2. **Guard config thrashing.** Tighten the feasibility check to warn when `target_win_rate` is so low that
-   a modest win‑rate drift would push RTP > 100% at the configured `max_multiplier`; add an audit trail /
-   change review for economy edits.
+2. **Guard config thrashing.** ✅ DONE (2026‑08‑17): migration `0075` adds a **minimum house‑edge
+   floor (0.02, RTP ≤ 98%)** to the `site_cfg_feasible` CHECK so no economy edit can set a
+   non‑profitable book; admin + platform paths surface it as a clean 422. Config edits remain
+   version‑audited (`site_game_config_versions`, `updated_by`). Follow‑up: a change‑review/alerting UI.
 3. **Confirm pool‑controller coverage.** Ensure the controller actually governs every non‑marketer trade
    on pool‑mode brands (it now boots with `pool_mode` read from `sites`), and monitor `position_decision`
    coverage → 100% of new pool‑mode trades.
