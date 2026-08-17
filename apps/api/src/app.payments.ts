@@ -52,10 +52,18 @@ function asObject(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>;
 }
 
+// M-Pesa caps a single STK push / B2C at ~KES 150,000. We reject anything above KES 250,000
+// (25,000,000 cents) as an impossible/junk amount so it never pollutes the ledger or finance
+// reconciliation (an unbounded amount previously let a KES 55.8M "deposit" attempt through).
+const MAX_AMOUNT_CENTS = 25_000_000;
+
 function requireIntAmount(body: Record<string, unknown>): number {
   const amount = body.amount;
   if (typeof amount !== "number" || !Number.isInteger(amount) || amount <= 0) {
     throw new ApiError("VALIDATION", "amount must be a positive integer (cents)", 400);
+  }
+  if (amount > MAX_AMOUNT_CENTS) {
+    throw new ApiError("VALIDATION", "amount exceeds the maximum allowed (KES 250,000)", 400);
   }
   return amount;
 }

@@ -775,6 +775,7 @@ export class PgAdminRepository implements AdminRepository {
          left join profiles p on p.id = t.user_id
         where ($1::text is null or t.kind = $1)
           and ($2::text is null or t.status = $2)
+          and t.provider is distinct from 'internal'
           and ($7::uuid is null or t.site_id = $7)
           and ($3::text is null or p.username ilike '%'||$3||'%' or t.phone ilike '%'||$3||'%' or t.mpesa_receipt ilike '%'||$3||'%')
           and ($4::timestamptz is null or (t.created_at, t.id) < ($4::timestamptz, $5::uuid))
@@ -871,12 +872,13 @@ export class PgAdminRepository implements AdminRepository {
   async depositsReconcile(staleMinutes: number): Promise<AdminDepositsReconcile> {
     const s = await this.q.query(
       `select status, count(*)::bigint as n, coalesce(sum(amount),0)::bigint as amt
-         from transactions where kind = 'deposit' group by status order by status`, []);
+         from transactions where kind = 'deposit' and user_id not in (select user_id from marketer_account_ids) group by status order by status`, []);
     const summary: AdminDepositStatusBucket[] = s.rows.map((x) => ({ status: String(x.status), count: num(x.n), amountCents: num(x.amt) }));
     const r = await this.q.query(
       `select t.id, t.user_id, t.amount, t.status, t.phone, t.mpesa_receipt, t.checkout_request_id, t.created_at, p.username
          from transactions t left join profiles p on p.id = t.user_id
         where t.kind = 'deposit' and t.status in ('pending', 'processing')
+          and t.user_id not in (select user_id from marketer_account_ids)
           and t.created_at < now() - ($1::int * interval '1 minute')
         order by t.created_at desc, t.id desc
         limit 100`,
