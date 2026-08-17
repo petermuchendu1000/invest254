@@ -14,7 +14,10 @@ export interface AdminOverview {
   };
   finance: {
     depositsCents: Cents;
+    /** Real cash out (M-Pesa B2C) only — excludes internal marketer transfers. */
     withdrawalsCents: Cents;
+    /** Marketer game-winnings moved into the companion marketer wallet (provider='internal'). Not cash out. */
+    internalTransfersCents: Cents;
     pendingWithdrawals: number;
     walletLiabilityCents: Cents;
   };

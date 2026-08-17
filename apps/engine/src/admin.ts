@@ -19,7 +19,11 @@ import type { DarajaConfig } from "./daraja.js";
 
 export interface AdminOverview {
   users: { total: number; active: number; suspended: number; banned: number; players: number; marketers: number; admins: number };
-  finance: { depositsCents: Cents; withdrawalsCents: Cents; pendingWithdrawals: number; walletLiabilityCents: Cents };
+  // `withdrawalsCents` is REAL cash out (M-Pesa B2C) only. Marketer game-winnings "withdrawals"
+  // are internal book transfers into the companion marketer wallet (transactions.provider='internal',
+  // migration 0036) — no cash leaves the business — so they are EXCLUDED from every real-money figure
+  // and surfaced separately as `internalTransfersCents` for transparency.
+  finance: { depositsCents: Cents; withdrawalsCents: Cents; internalTransfersCents: Cents; pendingWithdrawals: number; walletLiabilityCents: Cents };
   affiliate: { marketers: number; commissionAccruedCents: Cents; commissionPaidCents: Cents; pendingPayouts: number };
   game: { settledPositions: number; turnoverCents: Cents; ggrCents: Cents };
 }
@@ -540,8 +544,9 @@ export class PgAdminRepository implements AdminRepository {
          (select count(*) from profiles where role = 'marketer') as u_marketers,
          (select count(*) from profiles where role in ('admin','superadmin')) as u_admins,
          (select coalesce(sum(amount),0) from transactions where kind='deposit' and status='success') as f_dep,
-         (select coalesce(sum(amount),0) from transactions where kind='withdrawal' and status='success') as f_wd,
-         (select count(*) from transactions where kind='withdrawal' and status='pending') as f_pending,
+         (select coalesce(sum(amount),0) from transactions where kind='withdrawal' and status='success' and provider is distinct from 'internal') as f_wd,
+         (select coalesce(sum(amount),0) from transactions where kind='withdrawal' and status='success' and provider = 'internal') as f_internal,
+         (select count(*) from transactions where kind='withdrawal' and status='pending' and provider is distinct from 'internal') as f_pending,
          (select coalesce(sum(real_balance + bonus_balance),0) from wallets) as f_liab,
          (select count(*) from affiliates) as a_marketers,
          (select coalesce(sum(commission),0) from affiliate_commissions where status='accrued') as a_accrued,
@@ -555,7 +560,7 @@ export class PgAdminRepository implements AdminRepository {
     return {
       users: { total: num(x.u_total), active: num(x.u_active), suspended: num(x.u_suspended), banned: num(x.u_banned),
         players: num(x.u_players), marketers: num(x.u_marketers), admins: num(x.u_admins) },
-      finance: { depositsCents: num(x.f_dep), withdrawalsCents: num(x.f_wd), pendingWithdrawals: num(x.f_pending), walletLiabilityCents: num(x.f_liab) },
+      finance: { depositsCents: num(x.f_dep), withdrawalsCents: num(x.f_wd), internalTransfersCents: num(x.f_internal), pendingWithdrawals: num(x.f_pending), walletLiabilityCents: num(x.f_liab) },
       affiliate: { marketers: num(x.a_marketers), commissionAccruedCents: num(x.a_accrued), commissionPaidCents: num(x.a_paid), pendingPayouts: num(x.a_pending) },
       game: { settledPositions: num(x.g_settled), turnoverCents: num(x.g_turnover), ggrCents: num(x.g_ggr) },
     };
@@ -579,7 +584,7 @@ export class PgAdminRepository implements AdminRepository {
          from profiles p
          left join wallets w on w.user_id = p.id
          left join lateral (select coalesce(sum(amount),0) as deposits    from transactions t where t.user_id = p.id and t.kind='deposit'    and t.status='success') td on true
-         left join lateral (select coalesce(sum(amount),0) as withdrawals from transactions t where t.user_id = p.id and t.kind='withdrawal' and t.status='success') tw on true
+         left join lateral (select coalesce(sum(amount),0) as withdrawals from transactions t where t.user_id = p.id and t.kind='withdrawal' and t.status='success' and t.provider is distinct from 'internal') tw on true
          left join lateral (select coalesce(sum(stake),0) as turnover, coalesce(sum(stake - payout),0) as ggr, count(*) as bet_count, max(opened_at) as last_bet_at
                               from positions x where x.user_id = p.id and x.status='settled') po on true
          left join lateral (select created_at, kind, amount, status from transactions t where t.user_id = p.id order by created_at desc, id desc limit 1) lt on true
@@ -619,7 +624,7 @@ export class PgAdminRepository implements AdminRepository {
          from profiles p
          left join wallets w on w.user_id = p.id
          left join lateral (select coalesce(sum(amount),0) as deposits    from transactions t where t.user_id = p.id and t.kind='deposit'    and t.status='success') td on true
-         left join lateral (select coalesce(sum(amount),0) as withdrawals from transactions t where t.user_id = p.id and t.kind='withdrawal' and t.status='success') tw on true
+         left join lateral (select coalesce(sum(amount),0) as withdrawals from transactions t where t.user_id = p.id and t.kind='withdrawal' and t.status='success' and t.provider is distinct from 'internal') tw on true
          left join lateral (select coalesce(sum(stake),0) as turnover, coalesce(sum(stake - payout),0) as ggr, count(*) as bet_count, max(opened_at) as last_bet_at
                               from positions x where x.user_id = p.id and x.status='settled') po on true
          left join lateral (select created_at, kind, amount, status from transactions t where t.user_id = p.id order by created_at desc, id desc limit 1) lt on true
@@ -719,8 +724,8 @@ export class PgAdminRepository implements AdminRepository {
            select
              count(*) filter (where t2.kind='deposit'    and t2.status='success') as dep_n,
              coalesce(sum(t2.amount) filter (where t2.kind='deposit'    and t2.status='success'),0) as dep_c,
-             count(*) filter (where t2.kind='withdrawal' and t2.status='success') as wd_n,
-             coalesce(sum(t2.amount) filter (where t2.kind='withdrawal' and t2.status='success'),0) as wd_c,
+             count(*) filter (where t2.kind='withdrawal' and t2.status='success' and t2.provider is distinct from 'internal') as wd_n,
+             coalesce(sum(t2.amount) filter (where t2.kind='withdrawal' and t2.status='success' and t2.provider is distinct from 'internal'),0) as wd_c,
              min(t2.created_at) filter (where t2.kind='deposit' and t2.status='success') as first_dep
            from transactions t2
            where t2.user_id = t.user_id
@@ -728,6 +733,7 @@ export class PgAdminRepository implements AdminRepository {
                = coalesce(t.site_id,  '00000000-0000-0000-0000-000000000001'::uuid)
          ) agg on true
         where t.kind = 'withdrawal'
+          and t.provider is distinct from 'internal'
           and ($1::text is null or t.status = $1)
           and ($5::uuid is null or t.site_id = $5)
           and ($2::timestamptz is null or (t.created_at, t.id) < ($2::timestamptz, $3::uuid))
@@ -872,7 +878,7 @@ export class PgAdminRepository implements AdminRepository {
       `with t as (
          select created_at::date as d,
                 coalesce(sum(amount) filter (where kind='deposit'), 0)    as dep,
-                coalesce(sum(amount) filter (where kind='withdrawal'), 0)  as wd
+                coalesce(sum(amount) filter (where kind='withdrawal' and provider is distinct from 'internal'), 0)  as wd
            from transactions
           where status = 'success'
             and ($1::date is null or created_at::date >= $1::date)
@@ -905,7 +911,7 @@ export class PgAdminRepository implements AdminRepository {
       `with t as (
          select user_id,
                 coalesce(sum(amount) filter (where kind='deposit'), 0)    as dep,
-                coalesce(sum(amount) filter (where kind='withdrawal'), 0)  as wd
+                coalesce(sum(amount) filter (where kind='withdrawal' and provider is distinct from 'internal'), 0)  as wd
            from transactions
           where status = 'success'
             and ($1::date is null or created_at::date >= $1::date)
@@ -950,10 +956,10 @@ export class PgAdminRepository implements AdminRepository {
          select
            count(*) filter (where kind='deposit'    and status='success')            as dep_n,
            coalesce(sum(amount) filter (where kind='deposit'    and status='success'),0) as dep_c,
-           count(*) filter (where kind='withdrawal' and status='success')            as wd_n,
-           coalesce(sum(amount) filter (where kind='withdrawal' and status='success'),0) as wd_c,
-           count(*) filter (where kind='withdrawal' and status in ('pending','processing')) as pend_n,
-           coalesce(sum(amount) filter (where kind='withdrawal' and status in ('pending','processing')),0) as pend_c,
+           count(*) filter (where kind='withdrawal' and status='success' and provider is distinct from 'internal')            as wd_n,
+           coalesce(sum(amount) filter (where kind='withdrawal' and status='success' and provider is distinct from 'internal'),0) as wd_c,
+           count(*) filter (where kind='withdrawal' and status in ('pending','processing') and provider is distinct from 'internal') as pend_n,
+           coalesce(sum(amount) filter (where kind='withdrawal' and status in ('pending','processing') and provider is distinct from 'internal'),0) as pend_c,
            count(distinct user_id) filter (where kind='deposit' and status='success') as depositors
          from transactions where created_at::date = $1::date
        ),
@@ -1314,6 +1320,9 @@ export class InMemoryAdminRepository implements AdminRepository {
       finance: {
         depositsCents: txs.filter((t) => t.kind === "deposit" && t.status === "success").reduce((s, t) => s + t.amountCents, 0),
         withdrawalsCents: txs.filter((t) => t.kind === "withdrawal" && t.status === "success").reduce((s, t) => s + t.amountCents, 0),
+        // In-memory transactions never carry an 'internal' provider (the marketer game-withdraw rail
+        // is a Pg-only RPC), so there are no internal transfers to isolate in the test harness.
+        internalTransfersCents: 0,
         pendingWithdrawals: txs.filter((t) => t.kind === "withdrawal" && t.status === "pending").length,
         walletLiabilityCents: this.payments.adminWalletLiabilityCents(),
       },

@@ -93,10 +93,11 @@ export default function FinancePage() {
         {overview.isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <StatCard label="Deposits (success)" money={fin?.depositsCents ?? 0} tone="up" />
-            <StatCard label="Withdrawals (success)" money={fin?.withdrawalsCents ?? 0} tone="down" />
-            <StatCard label="Net cash in" money={netCents} tone={netCents >= 0 ? 'up' : 'down'} />
+            <StatCard label="Withdrawals (M-Pesa)" money={fin?.withdrawalsCents ?? 0} tone="down" hint="real cash out" />
+            <StatCard label="Net cash in" money={netCents} tone={netCents >= 0 ? 'up' : 'down'} hint="deposits − real withdrawals" />
+            <StatCard label="Internal transfers" money={fin?.internalTransfersCents ?? 0} hint="marketer wallet · not cash" />
             <StatCard label="Pending withdrawals" value={fin?.pendingWithdrawals ?? 0} tone="warn" hint="awaiting moderation" />
             <StatCard label="Wallet liability" money={fin?.walletLiabilityCents ?? 0} hint="owed to players" />
           </div>
@@ -173,6 +174,10 @@ export default function FinancePage() {
 
 function TxRow({ r }: { r: AdminTransactionRow }) {
   const isDeposit = r.kind === 'deposit';
+  // A marketer game-winnings "withdrawal" is an internal transfer into the companion marketer
+  // wallet (provider='internal', migration 0036) — not real cash out. Label it distinctly so the
+  // transactions feed never reads as a real M-Pesa payout.
+  const isInternal = !isDeposit && r.provider === 'internal';
   return (
     <tr className="border-b border-border last:border-0 hover:bg-surface-2/50">
       <Td>
@@ -182,10 +187,11 @@ function TxRow({ r }: { r: AdminTransactionRow }) {
         <span
           className={
             'inline-flex rounded-md px-2 py-0.5 text-xs font-medium ' +
-            (isDeposit ? 'bg-up/10 text-up' : 'bg-down/10 text-down')
+            (isDeposit ? 'bg-up/10 text-up' : isInternal ? 'bg-muted/15 text-muted' : 'bg-down/10 text-down')
           }
+          title={isInternal ? 'Internal transfer to marketer wallet — not real cash out' : undefined}
         >
-          {isDeposit ? 'Deposit' : 'Withdrawal'}
+          {isDeposit ? 'Deposit' : isInternal ? 'Internal transfer' : 'Withdrawal'}
         </span>
       </Td>
       <Td className="text-right font-medium tabular-nums">
