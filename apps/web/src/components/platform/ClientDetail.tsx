@@ -241,10 +241,6 @@ function PaletteEditor({ site }: { site: SiteWithConfig }) {
   );
 }
 
-const StatusPill = ({ status }: { status: string }) => (
-  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${status === 'active' ? 'bg-up/20 text-up' : status === 'paused' ? 'bg-warn/20 text-warn' : 'bg-surface-2 text-muted'}`}>{status}</span>
-);
-
 const kes = (c: number) => `KES ${(c / 100).toLocaleString()}`;
 
 /** Players in a brand — searchable table + an actions panel for the selected player. */
@@ -431,41 +427,53 @@ function LegalSection({ site }: { site: SiteWithConfig }) {
   );
 }
 
-/** The full per-client management surface — expandable sections, each an independent form. */
+/** The full per-client management surface — a tabbed, consolidated detail (operator console). */
+const DETAIL_TABS = [
+  { id: 'identity', label: 'Identity' },
+  { id: 'branding', label: 'Branding' },
+  { id: 'economy', label: 'Economy' },
+  { id: 'payments', label: 'Payments' },
+  { id: 'legal', label: 'Legal' },
+  { id: 'players', label: 'Players' },
+  { id: 'audit', label: 'Audit' },
+] as const;
+type DetailTab = (typeof DETAIL_TABS)[number]['id'];
+
 export function ClientDetail({ site }: { site: SiteWithConfig }) {
+  const [tab, setTab] = useState<DetailTab>('identity');
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-bold text-fg">{site.name}</h3>
-          <p className="text-xs text-muted">{site.slug} · {site.primaryDomain ?? 'no domain'} · economy v{site.config.version}</p>
+    <div className="flex flex-col gap-4">
+      {/* Tab bar */}
+      <div className="table-wrapper overflow-x-auto">
+        <div className="flex min-w-max gap-1 border-b border-border">
+          {DETAIL_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              aria-current={tab === t.id ? 'page' : undefined}
+              className={`shrink-0 border-b-2 px-3.5 py-2 text-sm font-medium transition ${tab === t.id ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
-        <StatusPill status={site.status} />
       </div>
-      <Expandable title="Identity & status" subtitle="Name, status, domain, locale, legal" defaultOpen>
-        <IdentitySection site={site} />
-      </Expandable>
-      <Expandable title="Branding & theme" subtitle="56 mirror themes + custom palette (theme-aware logo/favicon)">
-        <div className="flex flex-col gap-4">
-          <ThemeGallery site={site} />
-          <div className="border-t border-border pt-3"><PaletteEditor site={site} /></div>
-        </div>
-      </Expandable>
-      <Expandable title="Economy" subtitle="Win rate, house edge, stakes, payouts — feasibility enforced">
-        <EconomySection site={site} />
-      </Expandable>
-      <Expandable title="Payments · M-Pesa" subtitle="Per-brand M-Pesa config (non-secret) + credential status">
-        <PaymentsSection site={site} />
-      </Expandable>
-      <Expandable title="Legal" subtitle="Terms, privacy, responsible gaming, about — per brand">
-        <LegalSection site={site} />
-      </Expandable>
-      <Expandable title="Players" subtitle="Search, status, role and balance — for this brand's users">
-        <PlayersSection site={site} />
-      </Expandable>
-      <Expandable title="Audit trail" subtitle="Recent admin actions on this brand">
-        <AuditSection site={site} />
-      </Expandable>
+
+      <div className="rounded-2xl border border-border bg-surface p-4">
+        {tab === 'identity' ? <IdentitySection site={site} /> : null}
+        {tab === 'branding' ? (
+          <div className="flex flex-col gap-4">
+            <ThemeGallery site={site} />
+            <div className="border-t border-border pt-3"><PaletteEditor site={site} /></div>
+          </div>
+        ) : null}
+        {tab === 'economy' ? <EconomySection site={site} /> : null}
+        {tab === 'payments' ? <PaymentsSection site={site} /> : null}
+        {tab === 'legal' ? <LegalSection site={site} /> : null}
+        {tab === 'players' ? <PlayersSection site={site} /> : null}
+        {tab === 'audit' ? <AuditSection site={site} /> : null}
+      </div>
     </div>
   );
 }
