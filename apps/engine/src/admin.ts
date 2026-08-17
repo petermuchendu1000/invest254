@@ -889,25 +889,24 @@ export class PgAdminRepository implements AdminRepository {
   async reportDaily(range: ReportRange): Promise<DailyReportRow[]> {
     const r = await this.q.query(
       `with t as (
-         select created_at::date as d,
+         select (created_at at time zone 'Africa/Nairobi')::date as d,
                 coalesce(sum(amount) filter (where kind='deposit'), 0)    as dep,
                 coalesce(sum(amount) filter (where kind='withdrawal' and provider is distinct from 'internal'), 0)  as wd
            from transactions
           where status = 'success'
             and user_id not in (select user_id from marketer_account_ids)
-            and ($1::date is null or created_at::date >= $1::date)
-            and ($2::date is null or created_at::date <= $2::date)
+            and ($1::date is null or (created_at at time zone 'Africa/Nairobi')::date >= $1::date)
+            and ($2::date is null or (created_at at time zone 'Africa/Nairobi')::date <= $2::date)
           group by 1),
        g as (
-         select coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) as d,
+         select (coalesce(po.settled_at, po.opened_at) at time zone 'Africa/Nairobi')::date as d,
                 coalesce(sum(po.stake), 0)              as turnover,
                 coalesce(sum(po.stake - po.payout), 0)  as ggr
            from positions po
-           left join game_days gd on gd.id = po.game_day_id
           where po.status = 'settled'
             and po.user_id not in (select user_id from marketer_account_ids)
-            and ($1::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) >= $1::date)
-            and ($2::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) <= $2::date)
+            and ($1::date is null or (coalesce(po.settled_at, po.opened_at) at time zone 'Africa/Nairobi')::date >= $1::date)
+            and ($2::date is null or (coalesce(po.settled_at, po.opened_at) at time zone 'Africa/Nairobi')::date <= $2::date)
           group by 1)
        select coalesce(t.d, g.d) as day,
               coalesce(t.dep, 0) as deposits, coalesce(t.wd, 0) as withdrawals,
@@ -930,19 +929,18 @@ export class PgAdminRepository implements AdminRepository {
            from transactions
           where status = 'success'
             and user_id not in (select user_id from marketer_account_ids)
-            and ($1::date is null or created_at::date >= $1::date)
-            and ($2::date is null or created_at::date <= $2::date)
+            and ($1::date is null or (created_at at time zone 'Africa/Nairobi')::date >= $1::date)
+            and ($2::date is null or (created_at at time zone 'Africa/Nairobi')::date <= $2::date)
           group by 1),
        g as (
          select po.user_id,
                 coalesce(sum(po.stake), 0)              as turnover,
                 coalesce(sum(po.stake - po.payout), 0)  as ggr
            from positions po
-           left join game_days gd on gd.id = po.game_day_id
           where po.status = 'settled'
             and po.user_id not in (select user_id from marketer_account_ids)
-            and ($1::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) >= $1::date)
-            and ($2::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) <= $2::date)
+            and ($1::date is null or (coalesce(po.settled_at, po.opened_at) at time zone 'Africa/Nairobi')::date >= $1::date)
+            and ($2::date is null or (coalesce(po.settled_at, po.opened_at) at time zone 'Africa/Nairobi')::date <= $2::date)
           group by 1)
        select p.id as user_id, p.username,
               coalesce(t.dep, 0) as deposits, coalesce(t.wd, 0) as withdrawals,
@@ -967,7 +965,7 @@ export class PgAdminRepository implements AdminRepository {
          select
            count(*) filter (where role = 'player')   as new_players,
            count(*) filter (where role = 'marketer')  as new_marketers
-         from profiles where created_at::date = $1::date
+         from profiles where (created_at at time zone 'Africa/Nairobi')::date = $1::date
        ),
        tx as (
          select
@@ -978,11 +976,11 @@ export class PgAdminRepository implements AdminRepository {
            count(*) filter (where kind='withdrawal' and status in ('pending','processing') and provider is distinct from 'internal') as pend_n,
            coalesce(sum(amount) filter (where kind='withdrawal' and status in ('pending','processing') and provider is distinct from 'internal'),0) as pend_c,
            count(distinct user_id) filter (where kind='deposit' and status='success') as depositors
-         from transactions where created_at::date = $1::date and user_id not in (select user_id from marketer_account_ids)
+         from transactions where (created_at at time zone 'Africa/Nairobi')::date = $1::date and user_id not in (select user_id from marketer_account_ids)
        ),
        ftd as (
          select count(*) as n from (
-           select user_id, min(created_at::date) as first_dep
+           select user_id, min((created_at at time zone 'Africa/Nairobi')::date) as first_dep
              from transactions where kind='deposit' and status='success' and user_id not in (select user_id from marketer_account_ids) group by user_id
          ) f where f.first_dep = $1::date
        ),
@@ -995,10 +993,9 @@ export class PgAdminRepository implements AdminRepository {
            coalesce(sum(po.stake - po.payout),0)      as ggr,
            count(distinct po.user_id)                 as active_players
          from positions po
-         left join game_days gd on gd.id = po.game_day_id
          where po.status='settled'
            and po.user_id not in (select user_id from marketer_account_ids)
-           and coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) = $1::date
+           and (coalesce(po.settled_at, po.opened_at) at time zone 'Africa/Nairobi')::date = $1::date
        ),
        comm as (
          select coalesce(sum(commission),0) as accrued from affiliate_commissions where period = $1::date
