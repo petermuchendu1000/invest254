@@ -239,7 +239,7 @@ export interface AdminChatModRow { id: number; userId: string | null; username: 
  *  deposit/withdrawal amount or the bet stake; `createdAtMs` is the transaction time or the
  *  position's opened-at — the single sort/keyset key across both sources. */
 export interface AdminUserActivityRow {
-  kind: "deposit" | "withdrawal" | "bet";
+  kind: "deposit" | "withdrawal" | "bet" | "adjustment";
   id: string;
   createdAtMs: number;
   status: string;
@@ -681,6 +681,15 @@ export class PgAdminRepository implements AdminRepository {
                 null::text as phone, null::text as mpesa_receipt
            from positions p
           where p.user_id = $1 and ($2::text is null or $2 = 'bet')
+          union all
+          select l.id::text as id, 'adjustment' as kind, l.created_at as created_at, 'posted' as status,
+                 l.amount::bigint as amount_cents,
+                 null::text as direction, null::bigint as payout_cents, null::bigint as pnl_cents,
+                 null::double precision as multiplier, null::text as result,
+                 null::timestamptz as settled_at, null::bigint as game_day_id,
+                 null::text as phone, null::text as mpesa_receipt
+            from ledger_entries l
+           where l.user_id = $1 and l.type = 'adjustment' and ($2::text is null or $2 = 'adjustment')
        ) a
        where ($3::timestamptz is null or (a.created_at, a.id) < ($3::timestamptz, $4::text))
        order by a.created_at desc, a.id desc

@@ -130,7 +130,7 @@ export interface BulkActionInput {
   category?: string | null;
 }
 
-export type AdminActivityKind = 'deposit' | 'withdrawal' | 'bet';
+export type AdminActivityKind = 'deposit' | 'withdrawal' | 'bet' | 'adjustment';
 /** One event in a user's unified activity timeline (mirrors engine AdminUserActivityRow). */
 export interface AdminUserActivityRow {
   kind: AdminActivityKind;

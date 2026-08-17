@@ -106,7 +106,7 @@ const ACTIVITY_KINDS = [
   { value: 'withdrawal', label: 'Withdrawals' },
   { value: 'bet', label: 'Bets' },
 ];
-const KIND_LABEL: Record<string, string> = { deposit: 'Deposit', withdrawal: 'Withdrawal', bet: 'Bet' };
+const KIND_LABEL: Record<string, string> = { deposit: 'Deposit', withdrawal: 'Withdrawal', bet: 'Bet', adjustment: 'Manual adjustment' };
 
 function ActivityTimeline({ id }: { id: string }) {
   const [kind, setKind] = useState('');
@@ -171,7 +171,9 @@ function ActivityRow({ r }: { r: AdminUserActivityRow }) {
               ? 'bg-up/10 text-up'
               : r.kind === 'withdrawal'
                 ? 'bg-down/10 text-down'
-                : 'bg-surface-2 text-fg',
+                : r.kind === 'adjustment'
+                  ? 'bg-warn/10 text-warn'
+                  : 'bg-surface-2 text-fg',
           )}
         >
           {KIND_LABEL[r.kind]}

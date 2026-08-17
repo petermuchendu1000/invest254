@@ -69,8 +69,11 @@ not a cash‑loss signal, on pool‑mode brands.
    floor (0.02, RTP ≤ 98%)** to the `site_cfg_feasible` CHECK so no economy edit can set a
    non‑profitable book; admin + platform paths surface it as a clean 422. Config edits remain
    version‑audited (`site_game_config_versions`, `updated_by`). Follow‑up: a change‑review/alerting UI.
-3. **Confirm pool‑controller coverage.** Ensure the controller actually governs every non‑marketer trade
-   on pool‑mode brands (it now boots with `pool_mode` read from `sites`), and monitor `position_decision`
+3. **Confirm pool‑controller coverage.** ✅ CONFIRMED LIVE (2026‑08‑17): after the engine redeploy,
+   new non‑marketer trades on pool‑mode brands are pool‑decided (verified: today's real trade has a
+   `position_decision`). Wins are now capped at the daily `withdrawal_pool`. Monitor `position_decision`
    coverage → 100% of new pool‑mode trades.
-4. **Stop masking via manual clawbacks/reversals** once the above are in place; surface any remaining
-   manual adjustments/reversals per player in the admin UI for auditability.
+4. **Surface manual clawbacks/reversals.** ✅ DONE (2026‑08‑17): `listUserActivity` now unions
+   `ledger_entries type='adjustment'` (signed), so every manual admin credit/debit shows in the player
+   activity timeline (labelled "Manual adjustment", warn‑styled). Reversed withdrawals already show as
+   `withdrawal` rows with `status='reversed'`. Manual balance changes are no longer invisible.
