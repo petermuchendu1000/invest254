@@ -297,22 +297,31 @@ function ReferralLinkCard({ summary }: { summary: AffiliateSummary }) {
 }
 
 function Funnel({ summary }: { summary: AffiliateSummary }) {
+  const clicks = summary.clicks;
   const reg = summary.totalReferrals;
+  const ftd = summary.ftdCount;
   const active = summary.activePlayers30d;
-  const conv = reg > 0 ? Math.round((active / reg) * 100) : 0;
+  const regConv = clicks > 0 ? `${Math.round((reg / clicks) * 100)}% of clicks` : undefined;
+  const ftdConv = reg > 0 ? `${Math.round((ftd / reg) * 100)}% of signups` : undefined;
+  const activeConv = reg > 0 ? `${Math.round((active / reg) * 100)}% of signups` : undefined;
   return (
     <Card className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Your funnel</h2>
-        <span className="text-xs text-muted">last 30 days active</span>
+        <span className="text-xs text-muted">clicks all-time · active last 30d</span>
       </div>
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <FunnelStage label="Registrations" value={String(reg)} />
-        <FunnelStage label="Active players" value={String(active)} sub={`${conv}% of signups`} />
-        <FunnelStage label="Net revenue" money={summary.ggrCents} sub="you earn 20%" />
+      <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+        <FunnelStage label="Clicks" value={String(clicks)} sub={`${summary.clicksToday} today`} />
+        <FunnelStage label="Registrations" value={String(reg)} {...(regConv ? { sub: regConv } : {})} />
+        <FunnelStage label="First deposits" value={String(ftd)} {...(ftdConv ? { sub: ftdConv } : {})} />
+        <FunnelStage label="Active players" value={String(active)} {...(activeConv ? { sub: activeConv } : {})} />
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm">
+        <span className="text-muted">Net revenue (NGR) you earn 20% of</span>
+        <span className="font-semibold tabular-nums text-fg"><Money cents={summary.ggrCents} /></span>
       </div>
       <p className="text-[11px] leading-relaxed text-muted">
-        Link clicks and first-deposit conversion are coming soon — see the affiliate roadmap. Net
+        Clicks count visits to your link; first deposits are referred players who funded once. Net
         revenue (NGR) is aggregate; per-player figures stay private to players.
       </p>
     </Card>

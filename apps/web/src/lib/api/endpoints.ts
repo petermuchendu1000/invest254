@@ -103,6 +103,9 @@ export const api = {
   affiliateEnroll: (token: string) =>
     apiFetch<AffiliateEnrollment>('/affiliate/enroll', { method: 'POST', token }),
   affiliateSummary: (token: string) => apiFetch<AffiliateSummary>('/affiliate/summary', { token }),
+  // Public: record a referral-link click from the /r/<code> landing page (fire-and-forget, no auth).
+  recordAffiliateClick: (code: string, site?: string) =>
+    apiFetch<{ recorded: boolean }>('/affiliate/click', { method: 'POST', body: site ? { code, site } : { code } }),
   affiliateReferrals: (token: string, p: PageParams = {}) =>
     apiFetch<Paginated<ReferralRecord>>('/affiliate/referrals', {
       token,

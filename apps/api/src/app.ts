@@ -76,7 +76,7 @@ export interface ApiDeps {
   /** Marketer enrollment, commission accrual, dashboard reads (I1/I2/I3) + payouts (I4). */
   affiliate: Pick<AffiliateService,
     "enroll" | "accrueDaily" | "summary" | "listReferrals" | "listCommissions"
-    | "requestPayout" | "approvePayout" | "completePayout" | "rejectPayout" | "siteOfPayout">;
+    | "requestPayout" | "approvePayout" | "completePayout" | "rejectPayout" | "siteOfPayout" | "recordClick">;
   /** Admin back office (J2): dashboard reads, user status, commission rate, withdrawal queue, audit. */
   admin: Pick<AdminService,
     "overview" | "listUsers" | "getUserDetail" | "listUserActivity" | "setUserStatus" | "setCommissionRate" | "setUserRole" | "listWithdrawals" | "listTransactions" | "listAudit"

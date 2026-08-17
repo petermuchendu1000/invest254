@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, requireSite, assertTargetSiteInScope, DEFAULT_SITE_ID, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, requireSite, assertTargetSiteInScope, rateLimit, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 import { parseB2cResult } from "./app.payments.js";
@@ -57,6 +57,22 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
   // Marketer-facing routes run under requireSite: a marketer's identity is brand-bound, so this
   // both makes ctx.siteId available and rejects a token that names a different brand (?site=).
   const site = requireSite();
+
+  // Public referral-link click tracking (funnel stage 0, docs/19). Fire-and-forget from the
+  // /r/<code> landing page BEFORE signup, so no auth. Tolerant: an unknown/inactive code is a
+  // silent no-op (recorded:false) and never errors. IP rate-limited to blunt click-spam.
+  const clickLimit = rateLimit({ name: "aff-click", by: "ip", limit: Number(process.env.RATE_LIMIT_AFF_CLICK_PER_MIN) || 60, windowMs: 60_000 });
+  router.post(`${BASE}/affiliate/click`, clickLimit, async (ctx: Ctx) => {
+    const b = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const code = typeof b.code === "string" ? b.code : "";
+    if (!code.trim()) throw new ApiError("VALIDATION", "code is required", 400);
+    // Optional brand: accept a site uuid directly, else resolve a slug/host to its brand.
+    let siteId: string | undefined;
+    const ref = typeof b.site === "string" && b.site.trim() ? b.site.trim() : undefined;
+    if (ref) siteId = /^[0-9a-f-]{36}$/i.test(ref) ? ref : (await deps.brandByHost(ref.toLowerCase()))?.siteId;
+    const recorded = await domain(() => deps.affiliate.recordClick(code.trim(), siteId));
+    return { recorded };
+  });
 
   router.post(`${BASE}/affiliate/enroll`, auth, site, async (ctx: Ctx) => {
     const e = await domain(() => deps.affiliate.enroll(ctx.claims!.userId));

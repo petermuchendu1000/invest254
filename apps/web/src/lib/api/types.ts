@@ -161,6 +161,10 @@ export interface AffiliateSummary {
   referralsToday: number;
   activePlayersToday: number;
   commissionTodayCents: Cents;
+  /** Funnel: referral-link clicks and first-time-depositors (docs/19). */
+  clicks: number;
+  clicksToday: number;
+  ftdCount: number;
 }
 
 /** GET /affiliate/referrals item — one referred player. */
