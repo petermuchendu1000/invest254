@@ -9,6 +9,7 @@ import { makePgPools } from "./pgpools.js";
 import { SiteRegistry } from "./siteregistry.js";
 import { SiteResolver, type SiteLookup } from "./siteresolver.js";
 import { startMultiEngine } from "./multiengine.js";
+import { DepositNotifier, type DepositListenClient } from "./platformlive.js";
 import { makeVerifier } from "./auth.js";
 import { DEFAULT_VERSIONED_CONFIG } from "@invest254/shared";
 
@@ -46,6 +47,8 @@ let poolController: PoolController | undefined;
 const poolModeBySite = new Map<string, boolean>();
 /** host/slug/id -> siteId resolution table, seeded at boot from `sites`. */
 const siteAliases = new Map<string, string>();
+/** Opens a dedicated LISTEN connection (session pooler) for the platform live deposit feed. */
+let listenConnect: (() => Promise<DepositListenClient>) | undefined;
 /** Brand resolver: fast alias cache + (with a DB) a live lookup so brands onboarded AFTER boot
  *  resolve without a restart (GAP 2). Assigned in both the Pg and in-memory branches below. */
 let resolver: SiteResolver;
@@ -56,6 +59,7 @@ if (usingDb) {
   // per-brand LISTEN connections via the SESSION pooler (:5432, required for NOTIFY). This stops the
   // engine from starving the scarce session pool under load while keeping live config hot-reload.
   const { queryPool, listenPool } = makePgPools(Pool, (m) => console.log(`[engine] ${m}`));
+  listenConnect = () => listenPool.connect() as unknown as Promise<DepositListenClient>;
   const pool = queryPool;
   const q = pool as unknown as Querier;
   repo = new PgGameRepository(q);
@@ -165,6 +169,18 @@ const handle = await startMultiEngine({
 
 if (!verifier) console.warn("[engine] WARNING: no JWT verifier — DEV auth (trusts client userId). Not for production.");
 console.log(`[engine] multiplexed WS listening on :${PORT}  store=${usingDb ? "postgres" : "in-memory"}  auth=${verifier ? "jwt" : "dev"}  onlineFloor=${ONLINE_FLOOR}`);
+
+// docs/24: platform live deposit feed. LISTEN `deposit_confirmed` (migration 0071) and fan each
+// confirmed deposit out to connected platform_superadmin sockets. DB mode only.
+if (listenConnect) {
+  const depositNotifier = new DepositNotifier({
+    connect: listenConnect,
+    onDeposit: (dep) => handle.emitPlatformDeposit(dep),
+    onError: (err, ctx) => console.error(`[engine] deposit-notify ${ctx}:`, err.message),
+  });
+  await depositNotifier.init();
+  console.log("[engine] platform live deposit feed armed (LISTEN deposit_confirmed)");
+}
 
 // Rotate every brand's seed at the UTC day boundary (reveals yesterday, commits today per brand).
 setInterval(() => {

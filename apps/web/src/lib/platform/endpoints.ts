@@ -22,6 +22,13 @@ export interface SiteKpis {
 }
 export interface CreateSiteBody { slug: string; name: string; currency?: string | undefined; primaryDomain?: string | undefined }
 
+/** Per-brand performance over a time window (docs/24 performance filters). */
+export interface SitePerformance {
+  siteId: string; slug: string; name: string; status: string;
+  depositsCents: number; withdrawalsCents: number; ggrCents: number; bets: number; stakedCents: number; newPlayers: number;
+}
+export interface PerformanceResult { fromMs: number; toMs: number; sites: SitePerformance[] }
+
 /** One brand's slice of a marketer's cross-brand rollup (docs/22 Task R). */
 export interface MarketerRollupSite {
   affiliateUserId: string; siteId: string; siteSlug: string; siteName: string;
@@ -62,6 +69,8 @@ export interface AuditRow {
 
 export const platformApi = {
   overview: (t: string) => apiFetch<{ sites: SiteKpis[] }>('/platform/overview', { token: t }),
+  performance: (t: string, fromMs: number, toMs: number) =>
+    apiFetch<PerformanceResult>('/platform/performance', { token: t, query: { from: fromMs, to: toMs } }),
   sites: (t: string) => apiFetch<{ sites: SiteWithConfig[] }>('/platform/sites', { token: t }),
   createSite: (t: string, body: CreateSiteBody) =>
     apiFetch<{ siteId: string }>('/platform/sites', { method: 'POST', token: t, body }),
