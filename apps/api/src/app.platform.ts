@@ -43,6 +43,7 @@ const PLATFORM_STATUS: Readonly<Record<string, number>> = {
   NOT_AUTHORIZED: 403,
   INVALID_BRAND: 400,
   INVALID_PATCH: 400,
+  INVALID_RANGE: 400,
   SLUG_TAKEN: 409,
   SITE_NOT_FOUND: 404,
   site_cfg_feasible: 422, // the economy-feasibility CHECK (RTP/win-rate) rejected the tuning
@@ -146,6 +147,22 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
 
   router.get(`${BASE}/platform/overview`, auth, platform, async (ctx: Ctx) =>
     ({ sites: await domain(() => deps.platform.overview(ctx.claims!.role ?? "player")) }));
+
+  // Per-brand performance within a [from, to) window (docs/24 performance filters). `from`/`to` are
+  // epoch-ms (or ISO); defaults to the last 24h when omitted. Read-only; platform_superadmin-gated.
+  router.get(`${BASE}/platform/performance`, auth, platform, async (ctx: Ctx) => {
+    const parse = (raw: string | null): number | null => {
+      if (!raw || !raw.trim()) return null;
+      const n = Number(raw);
+      const ms = Number.isFinite(n) ? n : Date.parse(raw);
+      return Number.isFinite(ms) ? ms : null;
+    };
+    const now = Date.now();
+    const toMs = parse(ctx.query.get("to")) ?? now;
+    const fromMs = parse(ctx.query.get("from")) ?? toMs - 24 * 60 * 60 * 1000;
+    if (toMs <= fromMs) throw new ApiError("VALIDATION", "`to` must be after `from`", 400);
+    return { fromMs, toMs, sites: await domain(() => deps.platform.performance(fromMs, toMs)) };
+  });
 
   router.get(`${BASE}/platform/sites`, auth, platform, async () =>
     ({ sites: await deps.platform.listSites() }));

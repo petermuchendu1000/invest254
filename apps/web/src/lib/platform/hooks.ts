@@ -20,6 +20,17 @@ export function usePlatformSites() {
   return useQuery({ queryKey: ['platform', 'sites'], queryFn: () => platformApi.sites(t), enabled: !!t });
 }
 
+/** Per-brand performance over a [fromMs, toMs) window (docs/24 performance filters). Disabled until
+ *  a range is active; the query key includes the range so changing dates refetches. */
+export function usePlatformPerformance(fromMs: number | null, toMs: number | null) {
+  const t = useTok();
+  return useQuery({
+    queryKey: ['platform', 'performance', fromMs, toMs],
+    queryFn: () => platformApi.performance(t, fromMs as number, toMs as number),
+    enabled: !!t && fromMs != null && toMs != null && toMs > fromMs,
+  });
+}
+
 /** Cross-brand marketer rollup (docs/22 Task R): per marketer -> per-site clients/GGR/commission + totals. */
 export function usePlatformMarketerRollup() {
   const t = useTok();
