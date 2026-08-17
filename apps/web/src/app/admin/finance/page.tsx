@@ -79,6 +79,7 @@ export default function FinancePage() {
   const summary = recon.data?.summary ?? [];
 
   const fin = overview.data?.finance;
+  const mk = overview.data?.marketer;
   const netCents = fin ? fin.depositsCents - fin.withdrawalsCents : 0;
 
   return (
@@ -100,6 +101,23 @@ export default function FinancePage() {
             <StatCard label="Internal transfers" money={fin?.internalTransfersCents ?? 0} hint="marketer wallet · not cash" />
             <StatCard label="Pending withdrawals" value={fin?.pendingWithdrawals ?? 0} tone="warn" hint="awaiting moderation" />
             <StatCard label="Wallet liability" money={fin?.walletLiabilityCents ?? 0} hint="owed to players" />
+          </div>
+        )}
+      </Section>
+
+      {/* Marketer (internal) cohort — isolated from the real cash + game figures above. These
+          accounts are credited internally and play/cash out on funny money, so they are EXCLUDED
+          from every real-money and game stat and shown here on their own. */}
+      <Section title="Marketer activity (internal — excluded from real stats)">
+        {overview.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <StatCard label="Marketer accounts" value={mk?.accounts ?? 0} hint="internal (by phone)" />
+            <StatCard label="Internal credits" money={mk?.creditedCents ?? 0} hint="funny-money funding" />
+            <StatCard label="Internal transfers out" money={fin?.internalTransfersCents ?? 0} hint="game→marketer wallet" />
+            <StatCard label="Marketer turnover" money={mk?.turnoverCents ?? 0} hint="excluded from game stats" />
+            <StatCard label="Marketer wallet balance" money={mk?.walletLiabilityCents ?? 0} hint="not a real liability" />
           </div>
         )}
       </Section>

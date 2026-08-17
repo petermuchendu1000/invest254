@@ -26,6 +26,11 @@ export interface AdminOverview {
   finance: { depositsCents: Cents; withdrawalsCents: Cents; internalTransfersCents: Cents; pendingWithdrawals: number; walletLiabilityCents: Cents };
   affiliate: { marketers: number; commissionAccruedCents: Cents; commissionPaidCents: Cents; pendingPayouts: number };
   game: { settledPositions: number; turnoverCents: Cents; ggrCents: Cents };
+  // Marketer (internal) cohort, isolated from every REAL figure above. Marketer accounts (migration
+  // 0033, matched by phone) are credited internally (ledger adjustments, not real deposits), play on
+  // that funny money and cash out internally — so their deposits/turnover/GGR/liability are excluded
+  // from the real-player stats and reported here separately for transparency.
+  marketer: { accounts: number; creditedCents: Cents; turnoverCents: Cents; ggrCents: Cents; walletLiabilityCents: Cents };
 }
 /** A user as the admin user-list sees them — enriched with wallet, lifetime cash flow,
  *  game economics and last-activity so operators get deep info at a glance (no drill-in needed). */
@@ -543,18 +548,23 @@ export class PgAdminRepository implements AdminRepository {
          (select count(*) from profiles where role = 'player') as u_players,
          (select count(*) from profiles where role = 'marketer') as u_marketers,
          (select count(*) from profiles where role in ('admin','superadmin')) as u_admins,
-         (select coalesce(sum(amount),0) from transactions where kind='deposit' and status='success') as f_dep,
-         (select coalesce(sum(amount),0) from transactions where kind='withdrawal' and status='success' and provider is distinct from 'internal') as f_wd,
+         (select coalesce(sum(amount),0) from transactions where kind='deposit' and status='success' and user_id not in (select user_id from marketer_account_ids)) as f_dep,
+         (select coalesce(sum(amount),0) from transactions where kind='withdrawal' and status='success' and provider is distinct from 'internal' and user_id not in (select user_id from marketer_account_ids)) as f_wd,
          (select coalesce(sum(amount),0) from transactions where kind='withdrawal' and status='success' and provider = 'internal') as f_internal,
-         (select count(*) from transactions where kind='withdrawal' and status='pending' and provider is distinct from 'internal') as f_pending,
-         (select coalesce(sum(real_balance + bonus_balance),0) from wallets) as f_liab,
+         (select count(*) from transactions where kind='withdrawal' and status='pending' and provider is distinct from 'internal' and user_id not in (select user_id from marketer_account_ids)) as f_pending,
+         (select coalesce(sum(real_balance + bonus_balance),0) from wallets where user_id not in (select user_id from marketer_account_ids)) as f_liab,
          (select count(*) from affiliates) as a_marketers,
          (select coalesce(sum(commission),0) from affiliate_commissions where status='accrued') as a_accrued,
          (select coalesce(sum(commission),0) from affiliate_commissions where status='paid') as a_paid,
          (select count(*) from affiliate_payouts where status in ('requested','approved')) as a_pending,
-         (select count(*) from positions where status='settled') as g_settled,
-         (select coalesce(sum(stake),0) from positions where status='settled') as g_turnover,
-         (select coalesce(sum(stake - payout),0) from positions where status='settled') as g_ggr`,
+         (select count(*) from positions where status='settled' and user_id not in (select user_id from marketer_account_ids)) as g_settled,
+         (select coalesce(sum(stake),0) from positions where status='settled' and user_id not in (select user_id from marketer_account_ids)) as g_turnover,
+         (select coalesce(sum(stake - payout),0) from positions where status='settled' and user_id not in (select user_id from marketer_account_ids)) as g_ggr,
+         (select count(*) from marketer_account_ids) as m_accounts,
+         (select coalesce(sum(amount),0) from ledger_entries where type='adjustment' and user_id in (select user_id from marketer_account_ids)) as m_credited,
+         (select coalesce(sum(stake),0) from positions where status='settled' and user_id in (select user_id from marketer_account_ids)) as m_turnover,
+         (select coalesce(sum(stake - payout),0) from positions where status='settled' and user_id in (select user_id from marketer_account_ids)) as m_ggr,
+         (select coalesce(sum(real_balance + bonus_balance),0) from wallets where user_id in (select user_id from marketer_account_ids)) as m_liab`,
       []);
     const x = r.rows[0];
     return {
@@ -563,6 +573,7 @@ export class PgAdminRepository implements AdminRepository {
       finance: { depositsCents: num(x.f_dep), withdrawalsCents: num(x.f_wd), internalTransfersCents: num(x.f_internal), pendingWithdrawals: num(x.f_pending), walletLiabilityCents: num(x.f_liab) },
       affiliate: { marketers: num(x.a_marketers), commissionAccruedCents: num(x.a_accrued), commissionPaidCents: num(x.a_paid), pendingPayouts: num(x.a_pending) },
       game: { settledPositions: num(x.g_settled), turnoverCents: num(x.g_turnover), ggrCents: num(x.g_ggr) },
+      marketer: { accounts: num(x.m_accounts), creditedCents: num(x.m_credited), turnoverCents: num(x.m_turnover), ggrCents: num(x.m_ggr), walletLiabilityCents: num(x.m_liab) },
     };
   }
 
@@ -881,6 +892,7 @@ export class PgAdminRepository implements AdminRepository {
                 coalesce(sum(amount) filter (where kind='withdrawal' and provider is distinct from 'internal'), 0)  as wd
            from transactions
           where status = 'success'
+            and user_id not in (select user_id from marketer_account_ids)
             and ($1::date is null or created_at::date >= $1::date)
             and ($2::date is null or created_at::date <= $2::date)
           group by 1),
@@ -891,6 +903,7 @@ export class PgAdminRepository implements AdminRepository {
            from positions po
            left join game_days gd on gd.id = po.game_day_id
           where po.status = 'settled'
+            and po.user_id not in (select user_id from marketer_account_ids)
             and ($1::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) >= $1::date)
             and ($2::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) <= $2::date)
           group by 1)
@@ -914,6 +927,7 @@ export class PgAdminRepository implements AdminRepository {
                 coalesce(sum(amount) filter (where kind='withdrawal' and provider is distinct from 'internal'), 0)  as wd
            from transactions
           where status = 'success'
+            and user_id not in (select user_id from marketer_account_ids)
             and ($1::date is null or created_at::date >= $1::date)
             and ($2::date is null or created_at::date <= $2::date)
           group by 1),
@@ -924,6 +938,7 @@ export class PgAdminRepository implements AdminRepository {
            from positions po
            left join game_days gd on gd.id = po.game_day_id
           where po.status = 'settled'
+            and po.user_id not in (select user_id from marketer_account_ids)
             and ($1::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) >= $1::date)
             and ($2::date is null or coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) <= $2::date)
           group by 1)
@@ -961,12 +976,12 @@ export class PgAdminRepository implements AdminRepository {
            count(*) filter (where kind='withdrawal' and status in ('pending','processing') and provider is distinct from 'internal') as pend_n,
            coalesce(sum(amount) filter (where kind='withdrawal' and status in ('pending','processing') and provider is distinct from 'internal'),0) as pend_c,
            count(distinct user_id) filter (where kind='deposit' and status='success') as depositors
-         from transactions where created_at::date = $1::date
+         from transactions where created_at::date = $1::date and user_id not in (select user_id from marketer_account_ids)
        ),
        ftd as (
          select count(*) as n from (
            select user_id, min(created_at::date) as first_dep
-             from transactions where kind='deposit' and status='success' group by user_id
+             from transactions where kind='deposit' and status='success' and user_id not in (select user_id from marketer_account_ids) group by user_id
          ) f where f.first_dep = $1::date
        ),
        g as (
@@ -980,6 +995,7 @@ export class PgAdminRepository implements AdminRepository {
          from positions po
          left join game_days gd on gd.id = po.game_day_id
          where po.status='settled'
+           and po.user_id not in (select user_id from marketer_account_ids)
            and coalesce(gd.trade_date, po.settled_at::date, po.opened_at::date) = $1::date
        ),
        comm as (
@@ -1110,7 +1126,7 @@ export class PgAdminRepository implements AdminRepository {
          coalesce(sum(stake)  filter (where settled_at >= now() - interval '30 days'), 0) as t30,
          coalesce(sum(payout) filter (where settled_at >= now() - interval '30 days'), 0) as p30,
          count(*) as na, coalesce(sum(stake), 0) as ta, coalesce(sum(payout), 0) as pa
-       from positions where status = 'settled'`, []);
+       from positions where status = 'settled' and user_id not in (select user_id from marketer_account_ids)`, []);
     const x = r.rows[0];
     const windows = [
       rtpWindowRow("7d", num(x.n7), num(x.t7), num(x.p7)),
@@ -1337,6 +1353,8 @@ export class InMemoryAdminRepository implements AdminRepository {
         turnoverCents: plays.reduce((s, p) => s + p.stakeCents, 0),
         ggrCents: plays.reduce((s, p) => s + (p.stakeCents - p.payoutCents), 0),
       },
+      // The test harness has no `marketers` table cohort, so nothing to isolate here.
+      marketer: { accounts: 0, creditedCents: 0, turnoverCents: 0, ggrCents: 0, walletLiabilityCents: 0 },
     };
   }
 

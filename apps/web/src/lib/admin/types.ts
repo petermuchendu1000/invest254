@@ -28,6 +28,15 @@ export interface AdminOverview {
     pendingPayouts: number;
   };
   game: { settledPositions: number; turnoverCents: Cents; ggrCents: Cents };
+  /** Internal marketer cohort (migration 0033/0036) — isolated from every real figure above. */
+  marketer: {
+    accounts: number;
+    /** Internal funding into marketer player wallets (ledger adjustments) — not real deposits. */
+    creditedCents: Cents;
+    turnoverCents: Cents;
+    ggrCents: Cents;
+    walletLiabilityCents: Cents;
+  };
 }
 
 export interface RtpWindowRow {
