@@ -44,6 +44,8 @@ const PLATFORM_STATUS: Readonly<Record<string, number>> = {
   INVALID_BRAND: 400,
   INVALID_PATCH: 400,
   INVALID_RANGE: 400,
+  OVERRIDE_FAVORS_PLAYER: 422,
+  INVALID_OVERRIDE: 400,
   SLUG_TAKEN: 409,
   SITE_NOT_FOUND: 404,
   site_cfg_feasible: 422, // the economy-feasibility CHECK (RTP/win-rate) rejected the tuning

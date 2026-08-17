@@ -29,8 +29,13 @@ The 137% is the aggregate of **three operational causes**, not a code bug:
    0.05↔0.98, target_win_rate 0.01↔0.8, mean win multiplier up to ~4x). Because
    `RTP = (realisedWinRate/targetWinRate)×(1−houseEdge)`, a low target_win_rate paired with a high
    multiplier makes RTP explode whenever the realised win rate drifts above the (tiny) target.
-2. **Per‑user overrides.** `user_overrides` on 10 accounts (e.g. win_rate 0.6) dominate turnover
-   (overridden users: 7.8M turnover at **167% RTP**). These bypass the standard calibration.
+2. **Per‑user overrides.** `user_overrides` on 10 accounts. Most were **punitive band‑aids** applied
+   *after* the config‑thrash losses (implied RTP = `1 − house_edge`: e.g. Ali 2%, deemcqen 55%, joy254
+   61%), plus a few RTP‑neutral win‑frequency tweaks; only one (a marketer) was favourable. They still
+   represent an **arbitrary per‑user RTP lever** (fairness/regulatory anti‑pattern). **RESOLVED (2026‑08‑17):**
+   all overrides backed up (`user_overrides_backup_2026-08-17.csv` + restore SQL) and cleared, and migration
+   `0074` now **rejects any override that grants better‑than‑house RTP** (per‑user `house_edge` below the
+   site’s) plus range validation. Note: in pool mode overrides were already ignored for pool‑eligible players.
 3. **Pool controller inactive for history.** Although `pool_mode=true` for invest254/tamutraders,
    only **77 of 9,116 positions** (0.8%) were ever pool‑decided — the rest settled statistically with
    **no daily cap**. The pool (docs/25) only reserves wins when the controller runs.
@@ -58,8 +63,8 @@ not a cash‑loss signal, on pool‑mode brands.
   explanation + losers/winners toggle.
 
 ## 5. Recommendations / open decisions
-1. **Audit & remove dangerous `user_overrides`.** They are the single biggest RTP distorter. Consider a
-   policy: overrides ignored for pool‑eligible players in pool mode (docs/25 Decision E).
+1. **Audit & remove dangerous `user_overrides`.** ✅ DONE (2026‑08‑17): backed up + cleared; migration
+   `0074` guards against favourable (better‑than‑house) overrides going forward.
 2. **Guard config thrashing.** Tighten the feasibility check to warn when `target_win_rate` is so low that
    a modest win‑rate drift would push RTP > 100% at the configured `max_multiplier`; add an audit trail /
    change review for economy edits.
