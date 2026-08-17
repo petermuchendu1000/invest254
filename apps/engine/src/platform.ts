@@ -132,19 +132,28 @@ export class PgPlatformRepository implements PlatformRepository {
       `with dep as (
          select site_id,
                 coalesce(sum(amount) filter (where kind='deposit'    and status='success'), 0) as deposits_cents,
-                coalesce(sum(amount) filter (where kind='withdrawal' and status='success'), 0) as withdrawals_cents
-           from transactions where created_at >= $1 and created_at < $2 group by site_id
+                coalesce(sum(amount) filter (where kind='withdrawal' and status='success' and provider is distinct from 'internal'), 0) as withdrawals_cents
+           from transactions
+          where created_at >= $1 and created_at < $2
+            and user_id not in (select user_id from marketer_account_ids)
+          group by site_id
        ),
        pos as (
          select site_id,
                 count(*) filter (where status='settled')                       as bets,
                 coalesce(sum(stake), 0)                                         as staked_cents,
                 coalesce(sum(stake - payout) filter (where status='settled'),0) as ggr_cents
-           from positions where opened_at >= $1 and opened_at < $2 group by site_id
+           from positions
+          where opened_at >= $1 and opened_at < $2
+            and user_id not in (select user_id from marketer_account_ids)
+          group by site_id
        ),
        np as (
          select site_id, count(*) as new_players
-           from profiles where created_at >= $1 and created_at < $2 group by site_id
+           from profiles
+          where created_at >= $1 and created_at < $2
+            and id not in (select user_id from marketer_account_ids)
+          group by site_id
        )
        select s.id as site_id, s.slug, s.name, s.status,
               coalesce(dep.deposits_cents, 0)    as deposits_cents,

@@ -37,6 +37,12 @@ export function usePlatformMarketerRollup() {
   return useQuery({ queryKey: ['platform', 'marketers'], queryFn: () => platformApi.marketerRollup(t), enabled: !!t });
 }
 
+/** Mint a brand-scoped superadmin token so the platform owner can enter a client's admin console. */
+export function useImpersonate() {
+  const t = useTok();
+  return useMutation({ mutationFn: (siteId: string) => platformApi.impersonate(t, siteId) });
+}
+
 /** Invalidate both platform reads after any mutation so the console reflects the change. */
 function useInvalidate() {
   const qc = useQueryClient();

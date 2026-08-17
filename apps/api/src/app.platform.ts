@@ -167,6 +167,28 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/platform/sites`, auth, platform, async () =>
     ({ sites: await deps.platform.listSites() }));
 
+  // Impersonation (docs/24 §370): the platform owner "logs into" any client's admin console AS its
+  // superadmin — no signup, no per-brand credential. We mint a superadmin JWT whose SUBJECT stays the
+  // platform admin (so every admin_actions row is audited to the real actor) but whose `role` is
+  // 'superadmin' and `site` claim is the TARGET brand — so requireSite + adminScopeSite scope every
+  // read and write to that brand only (a superadmin, rank 4, is site-restricted; the platform owner,
+  // rank 5, is not — minting 'superadmin' deliberately fences the session to one brand). The action
+  // itself is platform_superadmin-gated and audited.
+  router.post(`${BASE}/platform/sites/:id/impersonate`, auth, platform, async (ctx: Ctx) => {
+    const siteId = ctx.params.id!;
+    const brand = (await deps.platform.listSites()).find((s) => s.siteId === siteId);
+    if (!brand) throw new ApiError("SITE_NOT_FOUND", "brand not found", 404);
+    const token = await deps.auth.issueToken(ctx.claims!.userId, "superadmin", siteId);
+    await deps.admin.recordAction(
+      ctx.claims!.userId, ctx.claims!.role ?? "player",
+      "platform.impersonate", "site", siteId, { slug: brand.slug, name: brand.name },
+    );
+    return {
+      token, role: "superadmin", site: siteId,
+      brand: { siteId: brand.siteId, slug: brand.slug, name: brand.name, primaryDomain: brand.primaryDomain },
+    };
+  });
+
   router.post(`${BASE}/platform/sites`, auth, platform, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const slug = body.slug, name = body.name;

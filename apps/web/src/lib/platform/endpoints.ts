@@ -29,6 +29,12 @@ export interface SitePerformance {
 }
 export interface PerformanceResult { fromMs: number; toMs: number; sites: SitePerformance[] }
 
+/** Result of minting a brand-scoped superadmin token for the platform owner (docs/24 impersonation). */
+export interface ImpersonateResult {
+  token: string; role: string; site: string;
+  brand: { siteId: string; slug: string; name: string; primaryDomain: string | null };
+}
+
 /** One brand's slice of a marketer's cross-brand rollup (docs/22 Task R). */
 export interface MarketerRollupSite {
   affiliateUserId: string; siteId: string; siteSlug: string; siteName: string;
@@ -71,6 +77,8 @@ export const platformApi = {
   overview: (t: string) => apiFetch<{ sites: SiteKpis[] }>('/platform/overview', { token: t }),
   performance: (t: string, fromMs: number, toMs: number) =>
     apiFetch<PerformanceResult>('/platform/performance', { token: t, query: { from: fromMs, to: toMs } }),
+  impersonate: (t: string, siteId: string) =>
+    apiFetch<ImpersonateResult>(`/platform/sites/${siteId}/impersonate`, { method: 'POST', token: t }),
   sites: (t: string) => apiFetch<{ sites: SiteWithConfig[] }>('/platform/sites', { token: t }),
   createSite: (t: string, body: CreateSiteBody) =>
     apiFetch<{ siteId: string }>('/platform/sites', { method: 'POST', token: t, body }),
