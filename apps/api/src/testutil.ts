@@ -8,10 +8,68 @@ import {
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance, type Brand } from "./app.js";
 import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
+import type { ReferralRepo, CommissionPayoutRow, AdminCommissionPayoutRow } from "./app.referral.js";
 import type { SupportDeps, SupportStore, SupportConversation, SupportMessageRow } from "./app.support.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.platform.js";
 import type { EmbedFn, KbHit, LlmFn, LlmMessage, SupportBrandInfo } from "@invest254/shared";
 import { createHash } from "node:crypto";
+
+/** In-memory ReferralRepo mirroring the 0078/0079 payout lifecycle (min KES 500, one pending
+ *  request, approve->paid->reject) for API route tests. `_seedCommission` seeds a marketer balance. */
+export type InMemoryReferralRepo = ReferralRepo & {
+  _seedCommission(userId: string, cents: number, siteId?: string): void;
+  _setCode(userId: string, code: string): void;
+};
+export function makeInMemoryReferralRepo(): InMemoryReferralRepo {
+  const MIN = 50000;
+  const accrued = new Map<string, number>();          // userId -> accrued marketer commission cents
+  const codes = new Map<string, string>();            // userId -> referral code
+  const siteOf = new Map<string, string>();           // userId -> siteId
+  const payouts = new Map<string, AdminCommissionPayoutRow>();
+  const bal = (u: string) => {
+    const earned = accrued.get(u) ?? 0;
+    let held = 0, paid = 0;
+    for (const p of payouts.values()) if (p.beneficiaryUser === u) {
+      if (p.status === "requested" || p.status === "approved") held += p.amountCents;
+      else if (p.status === "paid") paid += p.amountCents;
+    }
+    return { earned, held, paid, available: earned - held - paid };
+  };
+  const asRow = (p: AdminCommissionPayoutRow): CommissionPayoutRow => ({
+    id: p.id, amountCents: p.amountCents, status: p.status, requestedAtMs: p.requestedAtMs,
+    approvedAtMs: p.approvedAtMs, paidAtMs: p.paidAtMs, paidRef: p.paidRef, note: p.note,
+  });
+  return {
+    _seedCommission(userId, cents, siteId = "00000000-0000-0000-0000-000000000001") {
+      accrued.set(userId, (accrued.get(userId) ?? 0) + cents); siteOf.set(userId, siteId);
+    },
+    _setCode(userId, code) { codes.set(userId, code); },
+    async myReferral(userId) {
+      const b = bal(userId); const code = codes.get(userId) ?? null;
+      return { referralCode: code, referralPath: code ? `/r/${code}` : null, isMarketer: (accrued.get(userId) ?? 0) > 0,
+        totalReferrals: 0, earnedCents: b.earned, heldCents: b.held, paidCents: b.paid, availableCents: b.available, minPayoutCents: MIN };
+    },
+    async listMyCommissions() { return []; },
+    async requestPayout(userId) {
+      for (const p of payouts.values()) if (p.beneficiaryUser === userId && (p.status === "requested" || p.status === "approved")) throw new Error("PAYOUT_PENDING");
+      const b = bal(userId);
+      if (b.available < MIN) throw new Error("BELOW_MIN");
+      const id = `cp-${payouts.size + 1}`;
+      const row: AdminCommissionPayoutRow = { id, amountCents: b.available, status: "requested", requestedAtMs: Date.now(),
+        approvedAtMs: null, paidAtMs: null, paidRef: null, note: null,
+        beneficiaryUser: userId, username: null, phone: null, siteId: siteOf.get(userId) ?? "00000000-0000-0000-0000-000000000001" };
+      payouts.set(id, row); return asRow(row);
+    },
+    async listMyPayouts(userId) { return [...payouts.values()].filter((p) => p.beneficiaryUser === userId).map(asRow); },
+    async listPayouts(siteId, status) {
+      return [...payouts.values()].filter((p) => (!siteId || p.siteId === siteId) && (!status || p.status === status));
+    },
+    async siteOfPayout(id) { return payouts.get(id)?.siteId ?? null; },
+    async approvePayout(id) { const p = payouts.get(id); if (!p || p.status !== "requested") throw new Error("INVALID_STATE"); p.status = "approved"; p.approvedAtMs = Date.now(); return asRow(p); },
+    async markPaid(id, _admin, ref) { const p = payouts.get(id); if (!p || (p.status !== "requested" && p.status !== "approved")) throw new Error("INVALID_STATE"); p.status = "paid"; p.paidAtMs = Date.now(); p.paidRef = ref; return asRow(p); },
+    async rejectPayout(id, _admin, reason) { const p = payouts.get(id); if (!p || (p.status !== "requested" && p.status !== "approved")) throw new Error("INVALID_STATE"); p.status = "rejected"; p.note = reason; return asRow(p); },
+  };
+}
 
 /** In-memory MarketerRepo mirroring the SQL RPCs (0033): overdraw guard, idempotency, initials. */
 export function makeInMemoryMarketerRepo(): MarketerRepo {
@@ -282,6 +340,7 @@ export interface TestApi {
   withdrawalSuccesses: Array<{ userId: string; amountCents: Cents }>;
   notifications: NotificationService;
   marketers: MarketerRepo;
+  referral: InMemoryReferralRepo;
   /** The in-memory platform repo, so tests can seed brands + marketer rollup rows (Task R). */
   platformRepo: InMemoryPlatformRepository;
   /** Support-chat fakes (seed KB, swap LLM, inspect recorded conversations/messages). */
@@ -367,6 +426,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     },
   };
 
+  const referralRepo = makeInMemoryReferralRepo();
   const deps: ApiDeps = {
     verifier: stubVerifier(),
     auth,
@@ -375,6 +435,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     platform,
     notifications,
     marketers: makeInMemoryMarketerRepo(),
+    referral: referralRepo,
     marketerExpenses: (() => {
       const rows: Array<{ id: string; marketerUserId: string; category: string; amountCents: number; note: string | null; createdBy: string | null; createdAtMs: number }> = [];
       let seq = 0;
@@ -427,6 +488,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     deps, identity, engage, payRepo, gameRepo, daraja, fairness, bonus, withdrawalSuccesses,
     notifications,
     marketers: deps.marketers,
+    referral: referralRepo,
     platformRepo,
     support,
     onboard: { calls: onboardCalls, deps: onboardDeps },

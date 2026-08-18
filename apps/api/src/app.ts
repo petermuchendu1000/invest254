@@ -13,6 +13,7 @@ import { registerAdminRoutes } from "./app.admin.js";
 import { registerPlatformRoutes } from "./app.platform.js";
 import { registerNotificationRoutes } from "./app.notifications.js";
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
+import { registerReferralRoutes, type ReferralRepo } from "./app.referral.js";
 import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
 import type { PlatformOnboardDeps } from "./app.platform.js";
 import type { Server } from "node:http";
@@ -93,6 +94,8 @@ export interface ApiDeps {
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory">;
   /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
   marketers: MarketerRepo;
+  /** Deposit-based referral commissions + separate commission-payout queue (0078/0079). */
+  referral: ReferralRepo;
   /** Admin-logged marketer expenses (transparency, migration 0068). */
   marketerExpenses: MarketerExpensesDeps;
   /**
@@ -232,6 +235,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerSiteRoutes(router, deps);
   registerAuthRoutes(router, deps);
   registerAffiliateRoutes(router, deps);
+  registerReferralRoutes(router, deps);
   registerAdminRoutes(router, deps);
   registerPlatformRoutes(router, deps);
   registerNotificationRoutes(router, deps);

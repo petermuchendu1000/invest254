@@ -10,6 +10,7 @@ import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Bra
 import { normalizeHost, type VersionedGameConfig, type Cents } from "@invest254/shared";
 import { BrandOriginAllowlist } from "./cors.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
+import { makePgReferralRepo } from "./referral.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
 import { makeDomainProvisioner } from "./domains.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.platform.js";
@@ -231,6 +232,7 @@ async function buildDeps(): Promise<ApiDeps> {
     notifications,
     corsAllowOrigin: (origin: string) => brandCors.allows(origin),
     marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
+    referral: makePgReferralRepo((sql, params) => q.query(sql, params ?? [])),
     marketerExpenses: {
       async add(actorId, actorRole, siteId, marketerUserId, category, amountCents, note) {
         const r = await q.query(
