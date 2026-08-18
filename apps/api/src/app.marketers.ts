@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, rateLimit, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, rateLimit, adminScopeSite, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
 
@@ -89,11 +89,13 @@ export function ledgerToTxDto(r: MarketerLedgerRow): MarketerTxDto {
 
 /** Persistence contract for the marketer module (Postgres impl in marketers.pg.ts). */
 export interface MarketerRepo {
-  create(name: string, phone: string): Promise<MarketerRow>;
-  list(limit: number): Promise<MarketerProfile[]>;
+  /** Create (or upsert) a marketer within a brand. `siteId` stamps the brand; undefined => default site. */
+  create(name: string, phone: string, siteId?: string): Promise<MarketerRow>;
+  /** List marketers. `siteId` scopes to one brand (undefined => all brands, for platform admins). */
+  list(limit: number, siteId?: string): Promise<MarketerProfile[]>;
   profile(id: string): Promise<MarketerProfile | null>;
-  /** Look up a marketer by phone (the identity shared with the invest254 website account). */
-  profileByPhone(phone: string): Promise<MarketerProfile | null>;
+  /** Look up a marketer by phone (the identity shared with the invest254 website account). `siteId` scopes it. */
+  profileByPhone(phone: string, siteId?: string): Promise<MarketerProfile | null>;
   credit(id: string, amountCents: number, ref: string | null, meta: unknown): Promise<number>;
   withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, method: string): Promise<WithdrawResult>;
   setFuliza(id: string, amountCents: number): Promise<number>;
@@ -101,8 +103,8 @@ export interface MarketerRepo {
   statement(id: string, limit: number): Promise<MarketerLedgerRow[]>;
   // ── auth / lifecycle ──
   setPin(id: string, pin: string): Promise<void>;
-  /** Returns the marketer id on success, or null on ANY failure (no enumeration). */
-  login(phone: string, pin: string): Promise<string | null>;
+  /** Returns the marketer id on success, or null on ANY failure (no enumeration). `siteId` scopes the brand. */
+  login(phone: string, pin: string, siteId?: string): Promise<string | null>;
   changePin(id: string, currentPin: string, newPin: string): Promise<void>;
   setStatus(id: string, status: string): Promise<string>;
 }
@@ -215,13 +217,14 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   // Create / upsert a marketer (by phone) + provision wallet.
   router.post(`${BASE}/admin/marketers`, auth, admin, async (ctx: Ctx) => {
     const b = bodyObj(ctx);
-    const m = await domain(() => deps.marketers.create(reqStr(b, "name"), reqStr(b, "phone")));
+    const m = await domain(() => deps.marketers.create(reqStr(b, "name"), reqStr(b, "phone"), adminScopeSite(ctx) ?? undefined));
     return { status: 201, body: m };
   });
 
   // List marketer profiles (incl. derived first_name + initials and balances).
+  // Brand-scoped admins see ONLY their brand's marketers; a platform admin sees all.
   router.get(`${BASE}/admin/marketers`, auth, admin, async (ctx: Ctx) =>
-    domain(() => deps.marketers.list(limitOf(ctx))));
+    domain(() => deps.marketers.list(limitOf(ctx), adminScopeSite(ctx) ?? undefined)));
 
   // Single marketer profile.
   router.get(`${BASE}/admin/marketers/:id`, auth, admin, async (ctx: Ctx) => {
