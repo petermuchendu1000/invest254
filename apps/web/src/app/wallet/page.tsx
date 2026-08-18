@@ -5,7 +5,6 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { WalletWidget } from '@/components/wallet/WalletWidget';
 import { HistoryTabs } from '@/components/wallet/HistoryTabs';
-import { ReferralInviteCard } from '@/components/wallet/ReferralInviteCard';
 import { useSession } from '@/lib/auth/session';
 import { useAuthUi } from '@/lib/auth/ui';
 import { useDepositUi } from '@/lib/wallet/depositUi';
@@ -40,8 +39,6 @@ export default function WalletPage() {
         <Button size="lg" onClick={() => openDeposit()}>Deposit</Button>
         <Button size="lg" variant="secondary" onClick={openWithdraw}>Withdraw</Button>
       </div>
-
-      <ReferralInviteCard />
 
       <h2 className="mt-2 text-base font-semibold">History</h2>
       <HistoryTabs />
