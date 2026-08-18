@@ -7,10 +7,11 @@ import { ApiError } from '@/lib/api/client';
 import {
   useMarketerLiveSummary,
   useAffiliateReferrals,
-  useAffiliateCommissions,
   useAffiliateExpenses,
-  useAffiliatePayout,
   useAffiliateEnroll,
+  useReferral,
+  useMyCommissions,
+  useRequestCommissionPayout,
 } from '@/lib/affiliate/hooks';
 
 /**
@@ -27,12 +28,14 @@ import {
 export function MarketerDashboardView() {
   const q = useMarketerLiveSummary(true);
   const referrals = useAffiliateReferrals(true);
-  const commissions = useAffiliateCommissions(true);
+  const commissions = useMyCommissions(true);       // deposit-based commission line items
   const expenses = useAffiliateExpenses(true);
-  const payout = useAffiliatePayout();
+  const payout = useRequestCommissionPayout();       // separate commission-payout stream
   const enroll = useAffiliateEnroll();
+  const ref = useReferral(true);                     // deposit-commission balance + code/link
   const healAttempted = useRef(false);
   const [payoutMsg, setPayoutMsg] = useState<{ tone: 'up' | 'down'; text: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const s = q.data;
   const isNotAffiliate = q.error instanceof ApiError && q.error.code === 'NOT_AFFILIATE';
@@ -49,11 +52,15 @@ export function MarketerDashboardView() {
   const healing = enroll.isPending || (isNotAffiliate && !enroll.isError && !s);
 
   const refRows = referrals.data?.pages.flatMap((p) => p.items) ?? [];
-  const commRows = commissions.data?.pages.flatMap((p) => p.items) ?? [];
+  const commRows = commissions.data?.items ?? [];
   const expRows = expenses.data?.items ?? [];
   const expTotal = expenses.data?.totalCents ?? 0;
 
-  const earnedAllTime = s ? s.commissionAccruedCents + s.commissionPaidCents : 0;
+  // Money comes from the deposit-commission model (/me/referral), NOT the legacy GGR summary.
+  const availableCents = ref.data?.availableCents ?? 0;
+  const earnedAllTime = ref.data?.earnedCents ?? 0;
+  const paidOutCents = ref.data?.paidCents ?? 0;
+  const minPayoutCents = ref.data?.minPayoutCents ?? 50000;
   const netAfterExpenses = earnedAllTime - expTotal;
 
   const requestPayout = () => {
@@ -61,15 +68,27 @@ export function MarketerDashboardView() {
     payout.mutate(undefined, {
       onSuccess: (r) => setPayoutMsg({ tone: 'up', text: `Payout of ${formatKes(r.amountCents)} requested — pending admin approval.` }),
       onError: (e) => {
-        const code = e instanceof Error ? e.message : '';
-        const text = /NO_AVAILABLE_COMMISSION/.test(code)
-          ? 'Nothing available to withdraw yet.'
-          : /PAYOUT_PENDING/.test(code)
+        const code = e instanceof ApiError ? e.code : '';
+        const text = code === 'BELOW_MIN'
+          ? `You need at least ${formatKes(minPayoutCents)} to request a payout.`
+          : code === 'PAYOUT_PENDING'
             ? 'You already have a payout awaiting approval.'
             : 'Could not request payout. Try again shortly.';
         setPayoutMsg({ tone: 'down', text });
       },
     });
+  };
+
+  const referralCode = ref.data?.referralCode ?? s?.referralCode ?? '';
+  const referralLink = typeof window !== 'undefined' && ref.data?.referralPath
+    ? `${window.location.origin}${ref.data.referralPath}` : (ref.data?.referralPath ?? '');
+  const copyLink = async () => {
+    if (!referralLink) return;
+    try {
+      await navigator.clipboard.writeText(referralLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
   };
 
   const retry = () => {
@@ -90,7 +109,7 @@ export function MarketerDashboardView() {
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold tracking-tight text-fg">Marketer dashboard</h1>
             <p className="truncate text-[11px] text-muted">
-              {s ? <>Code <span className="font-mono text-fg">{s.referralCode}</span> · {(s.commissionRate * 100).toFixed(0)}% share · <span className="capitalize">{s.status}</span></> : 'Live'}
+              {referralCode ? <>Code <span className="font-mono text-fg">{referralCode}</span> · Marketer{s ? <> · <span className="capitalize">{s.status}</span></> : null}</> : 'Live'}
             </p>
           </div>
         </div>
@@ -115,13 +134,28 @@ export function MarketerDashboardView() {
         </div>
       ) : (
         <div className="flex flex-col gap-5">
-          {/* Hero: available to withdraw + payout request */}
+          {/* Share your link (link-first — easiest to share) */}
+          {referralLink ? (
+            <section className="rounded-2xl border border-accent/30 bg-accent/5 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Your referral link</p>
+              <p className="mt-1 truncate text-sm text-fg">{referralLink}</p>
+              <div className="mt-3 flex gap-2">
+                <button onClick={copyLink} className="flex-1 rounded-xl bg-accent py-2.5 text-sm font-bold text-black transition hover:brightness-105">
+                  {copied ? 'Copied!' : 'Copy link'}
+                </button>
+                <span className="grid place-items-center rounded-xl border border-border px-3 font-mono text-xs text-muted">{referralCode}</span>
+              </div>
+              <p className="mt-2 text-[11px] text-muted">Earn 25% of every deposit from players you refer (20%/17% deeper in your team).</p>
+            </section>
+          ) : null}
+
+          {/* Hero: available to withdraw + payout request (deposit-commission balance) */}
           <section className="rounded-2xl border border-up/30 bg-gradient-to-br from-up/10 to-transparent p-4">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Available to withdraw</p>
-            <p className="mt-1 text-3xl font-black tabular-nums text-up">{formatKes(s.availableCents)}</p>
+            <p className="mt-1 text-3xl font-black tabular-nums text-up">{formatKes(availableCents)}</p>
             <button
               onClick={requestPayout}
-              disabled={payout.isPending || s.availableCents <= 0}
+              disabled={payout.isPending || availableCents < minPayoutCents}
               className="mt-3 w-full rounded-xl bg-up py-2.5 text-sm font-bold text-black transition hover:brightness-105 disabled:opacity-50 sm:w-auto sm:px-8"
             >
               {payout.isPending ? 'Requesting…' : 'Request payout'}
@@ -129,7 +163,7 @@ export function MarketerDashboardView() {
             {payoutMsg ? (
               <p className={`mt-2 text-xs ${payoutMsg.tone === 'up' ? 'text-up' : 'text-down'}`}>{payoutMsg.text}</p>
             ) : (
-              <p className="mt-2 text-[11px] text-muted">Paid to M-Pesa after admin approval.</p>
+              <p className="mt-2 text-[11px] text-muted">Paid to M-Pesa after admin approval · min {formatKes(minPayoutCents)}.</p>
             )}
           </section>
 
@@ -137,14 +171,14 @@ export function MarketerDashboardView() {
           <section>
             <SectionTitle>Performance</SectionTitle>
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-              <Kpi label="Earnings today" value={formatKes(s.commissionTodayCents)} tone="up" />
+              <Kpi label="Available" value={formatKes(availableCents)} tone="up" />
               <Kpi label="Earned all-time" value={formatKes(earnedAllTime)} />
-              <Kpi label="Paid out" value={formatKes(s.commissionPaidCents)} />
-              <Kpi label="Accrued (unpaid)" value={formatKes(s.commissionAccruedCents)} />
-              <Kpi label="Total referrals" value={String(s.totalReferrals)} />
+              <Kpi label="Paid out" value={formatKes(paidOutCents)} />
+              <Kpi label="Total referrals" value={String(ref.data?.totalReferrals ?? s.totalReferrals)} />
               <Kpi label="Active (7d)" value={String(s.activePlayers7d)} />
               <Kpi label="New today" value={String(s.referralsToday)} />
               <Kpi label="Active today" value={String(s.activePlayersToday)} />
+              <Kpi label="Clicks" value={String(s.clicks)} />
             </div>
           </section>
 
@@ -189,10 +223,10 @@ export function MarketerDashboardView() {
             ) : (
               <ul className="flex flex-col gap-1.5">
                 {commRows.slice(0, 8).map((c) => (
-                  <li key={`${c.period}-${c.createdAtMs}`} className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3 py-2">
+                  <li key={c.id} className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3 py-2">
                     <span className="flex flex-col leading-tight">
-                      <span className="text-sm font-medium text-fg">{c.period}</span>
-                      <span className="text-[11px] text-muted capitalize">{c.status} · GGR {formatKes(c.ggrCents)}</span>
+                      <span className="text-sm font-medium text-fg">{c.referredUsername ?? 'Referred deposit'}</span>
+                      <span className="text-[11px] text-muted">{Math.round(c.rate * 100)}% of {formatKes(c.depositAmountCents)} deposit · {new Date(c.createdAtMs).toLocaleDateString('en-KE')}</span>
                     </span>
                     <span className="text-sm font-semibold tabular-nums text-up">+{formatKes(c.commissionCents)}</span>
                   </li>
@@ -219,7 +253,9 @@ export function MarketerDashboardView() {
                         <span className="text-[11px] text-muted">Joined {new Date(r.joinedAtMs).toLocaleDateString('en-KE')}</span>
                       </span>
                     </span>
-                    <span className="shrink-0 text-[11px] text-muted">GGR {formatKes(r.lifetimeGgrCents)}</span>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${r.lifetimeGgrCents > 0 ? 'bg-up/15 text-up' : 'bg-surface-2 text-muted'}`}>
+                      {r.lifetimeGgrCents > 0 ? 'Active' : 'New'}
+                    </span>
                   </li>
                 ))}
               </ul>
