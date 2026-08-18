@@ -232,7 +232,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   const admin = requireRole("admin");
   const superadmin = requireRole("superadmin");
 
-  router.get(`${BASE}/admin/overview`, auth, admin, async () => deps.admin.overview());
+  router.get(`${BASE}/admin/overview`, auth, admin, async (ctx: Ctx) => deps.admin.overview(adminScopeSite(ctx) ?? undefined));
 
   router.get(`${BASE}/admin/users`, auth, admin, async (ctx: Ctx) => {
     // Optional non-negative integer (cents/count) query param; ignored when absent or invalid.
@@ -513,7 +513,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   });
 
   router.get(`${BASE}/admin/reports/daily`, auth, admin, async (ctx: Ctx) => {
-    const rows = await deps.admin.reportDaily(reportRange(ctx));
+    const rows = await deps.admin.reportDaily(reportRange(ctx), adminScopeSite(ctx) ?? undefined);
     if (wantsCsv(ctx)) {
       return sendCsv(ctx, "report-daily.csv",
         ["date", "deposits_cents", "withdrawals_cents", "turnover_cents", "ggr_cents"],
@@ -523,7 +523,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   });
 
   router.get(`${BASE}/admin/reports/users`, auth, admin, async (ctx: Ctx) => {
-    const rows = await deps.admin.reportByUser(reportRange(ctx));
+    const rows = await deps.admin.reportByUser(reportRange(ctx), adminScopeSite(ctx) ?? undefined);
     if (wantsCsv(ctx)) {
       return sendCsv(ctx, "report-users.csv",
         ["user_id", "username", "deposits_cents", "withdrawals_cents", "turnover_cents", "ggr_cents"],
@@ -536,7 +536,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/admin/reports/day`, auth, admin, async (ctx: Ctx) => {
     const date = ctx.query.get("date") ?? new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Nairobi" });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError("VALIDATION", "date must be YYYY-MM-DD", 400);
-    return deps.admin.reportDay(date);
+    return deps.admin.reportDay(date, adminScopeSite(ctx) ?? undefined);
   });
 
   router.get(`${BASE}/admin/audit`, auth, admin, async (ctx: Ctx) => deps.admin.listAudit(pageQuery(ctx)));
@@ -600,7 +600,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     return domain(async () => ({ enabled: await deps.admin.setWithdrawalsEnabled(actor, role, site, body.enabled as boolean) }));
   });
 
-  router.get(`${BASE}/admin/rtp`, auth, admin, async () => deps.admin.rtpMonitor());  // ── M-Pesa configuration (admin reads masked; superadmin edits; secrets write-only) ──────────
+  router.get(`${BASE}/admin/rtp`, auth, admin, async (ctx: Ctx) => deps.admin.rtpMonitor(adminScopeSite(ctx) ?? undefined));  // ── M-Pesa configuration (admin reads masked; superadmin edits; secrets write-only) ──────────
   router.get(`${BASE}/admin/mpesa-config`, auth, admin, async () => domain(() => deps.admin.getMpesaConfig()));
 
   router.patch(`${BASE}/admin/mpesa-config`, auth, superadmin, async (ctx: Ctx) => {
@@ -608,7 +608,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.admin.updateMpesaConfig(ctx.claims!.userId, ctx.claims!.role ?? "player", patch));
   });
 
-  router.get(`${BASE}/admin/seeds`, auth, admin, async (ctx: Ctx) => ({ items: await deps.admin.listSeeds(listLimit(ctx, 30)) }));
+  router.get(`${BASE}/admin/seeds`, auth, admin, async (ctx: Ctx) => ({ items: await deps.admin.listSeeds(listLimit(ctx, 30), adminScopeSite(ctx) ?? undefined) }));
 
   router.post(`${BASE}/admin/seeds/rotate`, auth, superadmin, async (ctx: Ctx) =>
     domain(() => deps.admin.rotateSeed(ctx.claims!.userId, ctx.claims!.role ?? "player", bodyTradeDate(ctx))));
@@ -617,7 +617,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   // The approve/reject *actions* already ship in app.affiliate.ts (I4) at
   // /admin/affiliate/payouts/:id/{approve,reject} (now audited). J6 adds the queue the UI lists from.
   router.get(`${BASE}/admin/affiliate/payouts`, auth, admin, async (ctx: Ctx) => {
-    const q: AdminPayoutListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined };
+    const q: AdminPayoutListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined, siteId: adminScopeSite(ctx) ?? undefined };
     return deps.admin.listAffiliatePayouts(q);
   });
 
