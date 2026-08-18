@@ -13,7 +13,7 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig, useMarketerExpenses, useAddMarketerExpense } from '@/lib/admin/hooks';
+import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useUpdateUserDetails, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig, useMarketerExpenses, useAddMarketerExpense } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel, UserOverridePatch } from '@/lib/admin/types';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
@@ -85,6 +85,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
           ) : (
             <>
               <StatusActions id={id} status={q.data.status} />
+              <EditDetails id={id} phone={q.data.phone} username={q.data.username} />
               <RoleManage id={id} current={q.data.role} />
               <BalanceAdjust id={id} />
               <ResetBalance id={id} />
@@ -254,15 +255,65 @@ function StatusActions({ id, status }: { id: string; status: string }) {
   );
 }
 
+function EditDetails({ id, phone, username }: { id: string; phone: string; username: string }) {
+  const m = useUpdateUserDetails();
+  const toast = useToast();
+  const myRole = useSession((s) => s.user?.role);
+  const [ph, setPh] = useState(phone ?? '');
+  const [un, setUn] = useState(username ?? '');
+
+  // Admin+ may edit contact details (the API also confines a plain admin to non-admin targets).
+  if (myRole !== 'admin' && myRole !== 'superadmin' && myRole !== 'platform_superadmin') return null;
+
+  function run() {
+    const body: { id: string; phone?: string; username?: string } = { id };
+    if (ph.trim() && ph.trim() !== (phone ?? '')) body.phone = ph.trim();
+    if (un.trim() && un.trim() !== (username ?? '')) body.username = un.trim();
+    if (body.phone === undefined && body.username === undefined) {
+      toast.push({ tone: 'info', title: 'No changes', description: 'Edit the phone or name first.' });
+      return;
+    }
+    m.mutate(body, {
+      onSuccess: () => toast.push({ tone: 'success', title: 'Details updated', description: 'Phone/name saved.' }),
+      onError: (e) => toast.push({ tone: 'error', title: 'Update failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+    });
+  }
+
+  return (
+    <Section title="Edit details">
+      <Card className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <label className="flex flex-1 flex-col gap-1 text-sm">
+          <span className="text-muted">Phone</span>
+          <input value={ph} onChange={(e) => setPh(e.target.value)} inputMode="tel" placeholder="07XXXXXXXX"
+            className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent" />
+        </label>
+        <label className="flex flex-1 flex-col gap-1 text-sm">
+          <span className="text-muted">Username</span>
+          <input value={un} onChange={(e) => setUn(e.target.value)}
+            className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent" />
+        </label>
+        <Button onClick={run} disabled={m.isPending} className="whitespace-nowrap">
+          {m.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </Card>
+    </Section>
+  );
+}
+
 function RoleManage({ id, current }: { id: string; current: string }) {
   const m = useSetUserRole();
   const toast = useToast();
   const myRole = useSession((s) => s.user?.role);
   const [role, setRole] = useState(current);
 
-  // Role changes are sensitive — owner-tier only (the API enforces this too). platform_superadmin
-  // outranks superadmin, so it must pass this gate rather than be excluded by a strict ===.
-  if (myRole !== 'superadmin' && myRole !== 'platform_superadmin') return null;
+  // Owner-tier can set any role; a plain admin may promote/demote player<->marketer only (the API
+  // enforces this too). platform_superadmin outranks superadmin.
+  const isOwnerTier = myRole === 'superadmin' || myRole === 'platform_superadmin';
+  const isAdmin = myRole === 'admin';
+  if (!isOwnerTier && !isAdmin) return null;
+  // An admin can only act on player/marketer accounts, and only choose player/marketer.
+  if (isAdmin && current !== 'player' && current !== 'marketer') return null;
+  const roleOptions = isOwnerTier ? ROLES : ['player', 'marketer'];
 
   function run() {
     m.mutate(
@@ -284,7 +335,7 @@ function RoleManage({ id, current }: { id: string; current: string }) {
             onChange={(e) => setRole(e.target.value)}
             className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
           >
-            {ROLES.map((r) => (
+            {roleOptions.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>

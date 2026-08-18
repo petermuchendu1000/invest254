@@ -86,6 +86,22 @@ export function useSetUserRole() {
     },
   });
 }
+export function useUpdateUserDetails() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; phone?: string; username?: string }) => {
+      const body: { phone?: string; username?: string } = {};
+      if (v.phone !== undefined) body.phone = v.phone;
+      if (v.username !== undefined) body.username = v.username;
+      return adminApi.updateUserDetails(t, v.id, body);
+    },
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'user', v.id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+  });
+}
 export function useAdjustBalance() {
   const t = useTok();
   const qc = useQueryClient();

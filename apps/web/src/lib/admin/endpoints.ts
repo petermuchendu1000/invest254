@@ -89,6 +89,8 @@ export const adminApi = {
     apiFetch<SetUserStatusResult>(`/admin/users/${id}/${action}`, { method: 'POST', token: t, body: { reason } }),
   setUserRole: (t: string, id: string, role: string) =>
     apiFetch<SetUserRoleResult>(`/admin/users/${id}/role`, { method: 'POST', token: t, body: { role } }),
+  updateUserDetails: (t: string, id: string, body: { phone?: string; username?: string }) =>
+    apiFetch<{ userId: string; phone: string; username: string }>(`/admin/users/${id}/details`, { method: 'POST', token: t, body }),
   adjustBalance: (t: string, id: string, amountCents: number, reason: string, kind?: 'real' | 'bonus') =>
     apiFetch<AdjustBalanceResult>(`/admin/wallets/${id}/adjust`, { method: 'POST', token: t, body: { amountCents, reason, kind } }),
   clearBalance: (t: string, id: string, kind: 'real' | 'bonus' | 'both', reason: string) =>
