@@ -285,8 +285,6 @@ export function BetPanel() {
         </p>
       ) : !token ? (
         <p className="text-center text-[11px] text-muted">Deposit to buy or sell.</p>
-      ) : overBalance ? (
-        <p className="text-center text-[11px] text-warn">Not enough balance — tap BUY or SELL to add money and trade.</p>
       ) : null}
     </Card>
   );
