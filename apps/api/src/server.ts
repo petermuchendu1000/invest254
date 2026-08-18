@@ -112,10 +112,28 @@ async function buildDeps(): Promise<ApiDeps> {
     return true;
   };
 
+  // Per-brand STK AccountReference: the prompt shows the DEPOSITING brand's account (its name),
+  // not a hardcoded "Invest254". Cached per site (brand names are effectively static at runtime).
+  const brandRefCache = new Map<string, string>();
+  const siteAccountRef = async (siteId?: string): Promise<string> => {
+    const id = siteId ?? "00000000-0000-0000-0000-000000000001";
+    const cached = brandRefCache.get(id);
+    if (cached) return cached;
+    try {
+      const r = await q.query("select name, slug from sites where id = $1", [id]);
+      const row = r.rows[0] as { name?: string; slug?: string } | undefined;
+      const ref = (row?.name || row?.slug || "Invest254");
+      brandRefCache.set(id, ref);
+      return ref;
+    } catch { return "Invest254"; }
+  };
+
   const payments = new PaymentService(payRepo, daraja, {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
     // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
     verifyStkCallbacks: process.env.MPESA_VERIFY_CALLBACKS !== "false",
+    // Site-aware STK AccountReference (multi-tenant): "Account no. <Brand>" per depositing brand.
+    accountRefForSite: (siteId) => siteAccountRef(siteId),
     // Per-brand withdrawal floor: enforce the withdrawing site's own min so client and server agree.
     minWithdrawalForSite: (siteId) => siteMinWithdrawalCents(siteId),
     // Per-brand withdrawal kill switch: refuse ALL withdrawal initiations for a site when disabled.

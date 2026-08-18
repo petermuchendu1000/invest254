@@ -43,6 +43,22 @@ export interface PaymentServiceOptions {
    * as enabled (fail-open to current behaviour), so a missing resolver never blocks legitimate payouts.
    */
   withdrawalsEnabledForSite?: (siteId: string | undefined) => boolean | Promise<boolean>;
+  /**
+   * Site-aware M-Pesa AccountReference source (multi-tenant). Consulted per-deposit with the brand's
+   * `siteId` so the STK-push prompt shows THAT brand's account ("Account no. <Brand>") instead of a
+   * hardcoded one. Falls back to `defaultAccountRef` (then "Invest254") when absent / empty / throws.
+   */
+  accountRefForSite?: (siteId: string | undefined) => string | Promise<string>;
+  /** Fallback AccountReference when no per-site value resolves (default "Invest254"). */
+  defaultAccountRef?: string;
+  /**
+   * Per-brand Daraja client resolver (multi-tenant M-Pesa routing). Consulted per-deposit with the
+   * brand's `siteId`: when a brand has registered its OWN Safaricom shortcode/credentials it returns
+   * a brand-specific client (so the deposit routes to that brand's paybill and shows its business
+   * name); returns undefined/throws => fall back to the shared platform client. Dormant until a brand
+   * is configured, so it never changes behaviour for brands on the shared paybill.
+   */
+  darajaForSite?: (siteId: string | undefined) => DarajaClient | undefined | Promise<DarajaClient | undefined>;
   events?: PaymentEvents;
   verifyStkCallbacks?: boolean;
 }
@@ -53,6 +69,9 @@ export class PaymentService {
   private readonly minWithdrawalProvider?: () => Cents;
   private readonly minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   private readonly withdrawalsEnabledForSite?: (siteId: string | undefined) => boolean | Promise<boolean>;
+  private readonly accountRefForSite?: (siteId: string | undefined) => string | Promise<string>;
+  private readonly defaultAccountRef: string;
+  private readonly darajaForSite?: (siteId: string | undefined) => DarajaClient | undefined | Promise<DarajaClient | undefined>;
   private readonly events: PaymentEvents;
   private readonly verifyStk: boolean;
   constructor(private readonly repo: PaymentRepository, private readonly daraja: DarajaClient, opts: PaymentServiceOptions = {}) {
@@ -61,6 +80,9 @@ export class PaymentService {
     if (opts.minWithdrawalProvider) this.minWithdrawalProvider = opts.minWithdrawalProvider;
     if (opts.minWithdrawalForSite) this.minWithdrawalForSite = opts.minWithdrawalForSite;
     if (opts.withdrawalsEnabledForSite) this.withdrawalsEnabledForSite = opts.withdrawalsEnabledForSite;
+    if (opts.accountRefForSite) this.accountRefForSite = opts.accountRefForSite;
+    this.defaultAccountRef = opts.defaultAccountRef ?? "Invest254";
+    if (opts.darajaForSite) this.darajaForSite = opts.darajaForSite;
     this.events = opts.events ?? {};
     // Secure by default: a client can POST to the public STK callback URL, so a raw
     // resultCode=0 is NOT trusted — we re-check with Safaricom before crediting. Opt out only
@@ -74,9 +96,37 @@ export class PaymentService {
     if (amountCents < this.minDeposit) throw new Error("BELOW_MIN");
     const msisdn = normalizeMsisdn(phoneRaw);
     const txId = await this.repo.createDeposit(userId, amountCents, msisdn, siteId);
-    const stk = await this.daraja.stkPush({ amountCents, msisdn, accountRef: "Invest254", desc: "Deposit" });
+    // Site-aware AccountReference: show the depositing brand's account, not a hardcoded one. And
+    // route through the brand's OWN Daraja client when it has registered its own paybill (else shared).
+    const accountRef = await this.resolveAccountRef(siteId);
+    const client = await this.resolveDaraja(siteId);
+    const stk = await client.stkPush({ amountCents, msisdn, accountRef, desc: "Deposit" });
     await this.repo.attachStk(txId, stk.merchantRequestId, stk.checkoutRequestId);
     return { txId, checkoutRequestId: stk.checkoutRequestId };
+  }
+
+  /** Resolve the brand's STK AccountReference, sanitised for Daraja (alphanumeric, <=12). */
+  private async resolveAccountRef(siteId?: string): Promise<string> {
+    let ref = this.defaultAccountRef;
+    if (this.accountRefForSite) {
+      try {
+        const v = await this.accountRefForSite(siteId);
+        if (typeof v === "string" && v.trim().length > 0) ref = v.trim();
+      } catch { /* fall back to default */ }
+    }
+    const clean = ref.replace(/[^A-Za-z0-9]/g, "").slice(0, 12);
+    return clean.length > 0 ? clean : "Invest254";
+  }
+
+  /** Resolve the brand's Daraja client (own paybill) or fall back to the shared platform client. */
+  private async resolveDaraja(siteId?: string): Promise<DarajaClient> {
+    if (this.darajaForSite) {
+      try {
+        const c = await this.darajaForSite(siteId);
+        if (c) return c;
+      } catch { /* fall back to shared client */ }
+    }
+    return this.daraja;
   }
   /**
    * Daraja STK callback handler (idempotent). A success (resultCode 0) is verified against
