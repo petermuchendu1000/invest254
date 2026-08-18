@@ -201,6 +201,8 @@ export const adminApi = {
   marketer: (t: string, id: string) => apiFetch<AdminMarketerRow>(`/admin/marketers/${id}`, { token: t }),
   createMarketer: (t: string, body: { name: string; phone: string }) =>
     apiFetch<AdminMarketerRow>('/admin/marketers', { method: 'POST', token: t, body }),
+  updateMarketer: (t: string, id: string, body: { name?: string; phone?: string }) =>
+    apiFetch<AdminMarketerRow>(`/admin/marketers/${id}`, { method: 'PATCH', token: t, body }),
   creditMarketer: (t: string, id: string, amountCents: number, ref?: string) =>
     apiFetch<{ balanceCents: number }>(`/admin/marketers/${id}/credit`, { method: 'POST', token: t, body: { amountCents, ref } }),
   withdrawMarketer: (t: string, id: string, amountCents: number, ref?: string, method?: string) =>

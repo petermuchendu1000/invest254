@@ -34,6 +34,11 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
       return rows[0] as MarketerRow;
     },
 
+    async update(id, name, phone): Promise<MarketerRow> {
+      const { rows } = await query("SELECT * FROM public.fn_marketer_update($1, $2, $3)", [id, name ?? null, phone ?? null]);
+      return rows[0] as MarketerRow;
+    },
+
     async list(limit, siteId): Promise<MarketerProfile[]> {
       const { rows } = await query(
         "SELECT * FROM public.marketer_profiles WHERE ($2::uuid IS NULL OR site_id = $2) ORDER BY created_at DESC LIMIT $1",

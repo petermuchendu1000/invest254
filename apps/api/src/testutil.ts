@@ -99,6 +99,17 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
       byId.set(id, m); byPhone.set(phone, id); ledgers.set(id, []);
       return { id, name, phone, status: "active", created_at: ts, updated_at: ts };
     },
+    async update(id: string, name: string | null, phone: string | null): Promise<MarketerRow> {
+      const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
+      if (phone && phone.trim() && phone.trim() !== m.phone) {
+        const other = byPhone.get(phone.trim());
+        if (other && other !== id) throw new Error("PHONE_TAKEN");
+        byPhone.delete(m.phone); m.phone = phone.trim(); byPhone.set(m.phone, id);
+      }
+      if (name && name.trim()) m.name = name.trim();
+      m.updated_at = now();
+      return { id: m.id, name: m.name, phone: m.phone, status: m.status, created_at: m.created_at, updated_at: m.updated_at };
+    },
     async list(limit: number): Promise<MarketerProfile[]> {
       return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit).map(profileOf);
     },

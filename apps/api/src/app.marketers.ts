@@ -91,6 +91,8 @@ export function ledgerToTxDto(r: MarketerLedgerRow): MarketerTxDto {
 export interface MarketerRepo {
   /** Create (or upsert) a marketer within a brand. `siteId` stamps the brand; undefined => default site. */
   create(name: string, phone: string, siteId?: string): Promise<MarketerRow>;
+  /** Admin edit of an existing marketer's name and/or phone (per-brand phone unique). */
+  update(id: string, name: string | null, phone: string | null): Promise<MarketerRow>;
   /** List marketers. `siteId` scopes to one brand (undefined => all brands, for platform admins). */
   list(limit: number, siteId?: string): Promise<MarketerProfile[]>;
   profile(id: string): Promise<MarketerProfile | null>;
@@ -118,6 +120,7 @@ const MARKETER_STATUS: Readonly<Record<string, number>> = {
   AMOUNT_MUST_BE_NONNEGATIVE: 400,
   NAME_REQUIRED: 400,
   PHONE_REQUIRED: 400,
+  PHONE_TAKEN: 409,
   INVALID_PIN: 400,
   NO_PIN_SET: 409,
   INVALID_CREDENTIALS: 401,
@@ -219,6 +222,15 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const b = bodyObj(ctx);
     const m = await domain(() => deps.marketers.create(reqStr(b, "name"), reqStr(b, "phone"), adminScopeSite(ctx) ?? undefined));
     return { status: 201, body: m };
+  });
+
+  // Edit an existing marketer's name and/or phone (admin/superadmin). Per-brand phone-unique.
+  router.patch(`${BASE}/admin/marketers/:id`, auth, admin, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const name = typeof b.name === "string" ? b.name : null;
+    const phone = typeof b.phone === "string" ? b.phone : null;
+    if (name === null && phone === null) throw new ApiError("VALIDATION", "name and/or phone is required", 400);
+    return domain(() => deps.marketers.update(idOf(ctx), name, phone));
   });
 
   // List marketer profiles (incl. derived first_name + initials and balances).

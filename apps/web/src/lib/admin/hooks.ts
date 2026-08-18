@@ -429,6 +429,21 @@ export function useCreateMarketer() {
     },
   });
 }
+export function useUpdateMarketer() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; name?: string; phone?: string }) => {
+      const body: { name?: string; phone?: string } = {};
+      if (v.name !== undefined) body.name = v.name;
+      if (v.phone !== undefined) body.phone = v.phone;
+      return adminApi.updateMarketer(t, v.id, body);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+    },
+  });
+}
 export function useMarketerCredit(id: string) {
   const t = useTok();
   const qc = useQueryClient();

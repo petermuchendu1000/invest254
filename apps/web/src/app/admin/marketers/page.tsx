@@ -16,6 +16,7 @@ import {
   useMarketer,
   useMarketerStatement,
   useCreateMarketer,
+  useUpdateMarketer,
   useMarketerCredit,
   useMarketerWithdraw,
   useMarketerFuliza,
@@ -282,6 +283,7 @@ function ManageMarketerModal({ id, onClose }: { id: string | null; onClose: () =
               <StatCard label="Airtime" money={m.airtime_balance_cents} />
             </div>
 
+            <EditMarketerAction m={m} />
             <WalletActions m={m} />
             <FloatActions m={m} />
             <PinAction m={m} />
@@ -291,6 +293,34 @@ function ManageMarketerModal({ id, onClose }: { id: string | null; onClose: () =
         )}
       </div>
     </Modal>
+  );
+}
+
+function EditMarketerAction({ m }: { m: AdminMarketerRow }) {
+  const update = useUpdateMarketer();
+  const toast = useToast();
+  const [name, setName] = useState(m.name);
+  const [phone, setPhone] = useState(m.phone);
+  const inputCls = 'h-9 flex-1 rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent';
+  function save() {
+    const body: { id: string; name?: string; phone?: string } = { id: m.id };
+    if (name.trim() && name.trim() !== m.name) body.name = name.trim();
+    if (phone.trim() && phone.trim() !== m.phone) body.phone = phone.trim();
+    if (body.name === undefined && body.phone === undefined) { toast.push({ tone: 'info', title: 'No changes' }); return; }
+    update.mutate(body, {
+      onSuccess: () => toast.push({ tone: 'success', title: 'Marketer updated', description: 'Name/phone saved.' }),
+      onError: (e) => toast.push({ tone: 'error', title: 'Update failed', description: (e as Error).message }),
+    });
+  }
+  return (
+    <div className="flex flex-col gap-2 rounded-brand border border-border p-3">
+      <span className="text-sm font-semibold">Edit details</span>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={inputCls} />
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Phone" className={inputCls} />
+        <Button size="sm" onClick={save} disabled={update.isPending}>{update.isPending ? 'Saving…' : 'Save'}</Button>
+      </div>
+    </div>
   );
 }
 
