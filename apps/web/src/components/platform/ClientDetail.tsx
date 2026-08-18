@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { checkFeasible } from '@invest254/shared/config';
-import { useUpdateSite, useSetSiteConfig, useSetSiteTheme, usePlatformSiteUsers, usePlatformSiteAudit, usePlatformUserAction } from '@/lib/platform/hooks';
+import { useUpdateSite, useSetSiteConfig, useSetSiteTheme, useSetSiteOwner, usePlatformSiteUsers, usePlatformSiteAudit, usePlatformUserAction } from '@/lib/platform/hooks';
 import type { SiteWithConfig, SiteConfig, SiteUserRow, AuditRow } from '@/lib/platform/endpoints';
 import { deriveMinimalPalette } from '@/lib/brand/derivePalette';
 import { groupedPresets, presetForSeed } from '@/lib/brand/presets';
@@ -250,6 +250,7 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
   const params = useMemo(() => ({ q: q.trim() || undefined, status: statusF || undefined, limit: '50' }), [q, statusF]);
   const users = usePlatformSiteUsers(site.siteId, params);
   const action = usePlatformUserAction(site.siteId);
+  const setOwner = useSetSiteOwner();
   const toast = useToast();
   const [sel, setSel] = useState<SiteUserRow | null>(null);
   const rows = users.data?.items ?? [];
@@ -268,6 +269,26 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* Brand marketer (commission owner) — every deposit on this brand credits this marketer by default. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-brand border border-accent/30 bg-accent/5 p-3">
+        <span className="text-xs font-semibold text-fg">Brand marketer (commission owner):</span>
+        <select
+          value={site.ownerUserId ?? ''}
+          onChange={(e) => setOwner.mutate({ id: site.siteId, ownerUserId: e.target.value || null }, {
+            onSuccess: () => toast.push({ tone: 'success', title: 'Brand marketer updated' }),
+            onError: (er) => toast.push({ tone: 'error', title: 'Update failed', description: (er as Error).message }),
+          })}
+          disabled={setOwner.isPending}
+          className="h-9 rounded-lg border border-border bg-surface-2 px-2 text-sm text-fg"
+        >
+          <option value="">— unassigned —</option>
+          {rows.filter((u) => u.role === 'marketer').map((m) => (
+            <option key={m.userId} value={m.userId}>@{m.username} · {m.phone}</option>
+          ))}
+        </select>
+        <span className="text-[11px] text-muted">All deposits on this brand credit this marketer (25%) unless a player used a specific referral code.</span>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search phone / username…" className="h-9 w-56 max-w-full rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent" />
         <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="h-9 rounded-lg border border-border bg-surface-2 px-2 text-sm text-fg">

@@ -14,6 +14,7 @@ export interface SiteRow {
   mpesaEnv?: string | null; mpesaShortcode?: string | null; mpesaCallbackBase?: string | null; mpesaB2cInitiator?: string | null;
   hasMpesaConsumerKey?: boolean; hasMpesaConsumerSecret?: boolean; hasMpesaPasskey?: boolean; hasMpesaB2cCredential?: boolean;
   legalCopy?: Record<string, unknown> | null;
+  ownerUserId?: string | null;
 }
 export interface SiteWithConfig extends SiteRow { config: SiteConfig }
 export interface SiteKpis {
@@ -86,6 +87,8 @@ export const platformApi = {
     apiFetch<SiteRow>(`/platform/sites/${id}`, { method: 'PATCH', token: t, body: patch }),
   setConfig: (t: string, id: string, patch: Record<string, unknown>) =>
     apiFetch<SiteConfig>(`/platform/sites/${id}/config`, { method: 'PATCH', token: t, body: patch }),
+  setSiteOwner: (t: string, id: string, ownerUserId: string | null) =>
+    apiFetch<SiteRow>(`/platform/sites/${id}/owner`, { method: 'PATCH', token: t, body: { ownerUserId } }),
   setTheme: (t: string, id: string, tokens: Record<string, string>) =>
     apiFetch<SiteRow>(`/platform/sites/${id}/theme`, { method: 'PATCH', token: t, body: { tokens } }),
   // Task R — cross-brand marketer rollup (reporting only).

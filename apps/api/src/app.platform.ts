@@ -55,6 +55,9 @@ const PLATFORM_STATUS: Readonly<Record<string, number>> = {
   INVALID_GLOBAL: 400,
   MARKETER_GLOBAL_NOT_FOUND: 404,
   NOT_AFFILIATE: 404,
+  OWNER_NOT_FOUND: 404,
+  OWNER_NOT_MARKETER: 422,
+  OWNER_WRONG_SITE: 422,
 };
 
 async function domain<T>(fn: () => Promise<T>): Promise<T> {
@@ -212,6 +215,14 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   router.patch(`${BASE}/platform/sites/:id/config`, auth, platform, async (ctx: Ctx) => {
     const patch = asObject(ctx.body);
     return domain(() => deps.platform.setSiteConfig(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
+  });
+
+  // Assign / change the brand's marketer (site-owner commission model). ownerUserId null clears it.
+  router.patch(`${BASE}/platform/sites/:id/owner`, auth, platform, async (ctx: Ctx) => {
+    const body = asObject(ctx.body);
+    const owner = body.ownerUserId === null ? null : (typeof body.ownerUserId === "string" ? body.ownerUserId : undefined);
+    if (owner === undefined) throw new ApiError("VALIDATION", "ownerUserId (string or null) is required", 400);
+    return domain(() => deps.platform.setSiteOwner(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, owner));
   });
 
   // Persist a brand's full design-token palette (from the console's seed-hue → derived palette).

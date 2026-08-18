@@ -94,6 +94,16 @@ export function useSetSiteConfig() {
   });
 }
 
+/** Assign/clear a brand's marketer (owner_user_id) — site-owner commission model. */
+export function useSetSiteOwner() {
+  const t = useTok();
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: (v: { id: string; ownerUserId: string | null }) => platformApi.setSiteOwner(t, v.id, v.ownerUserId),
+    onSuccess: invalidate,
+  });
+}
+
 /** Persist a brand's full design-token palette (docs/22 Task G+). */
 export function useSetSiteTheme() {
   const t = useTok();

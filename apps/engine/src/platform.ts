@@ -17,6 +17,7 @@ export interface SiteRow {
   mpesaEnv: string | null; mpesaShortcode: string | null; mpesaCallbackBase: string | null; mpesaB2cInitiator: string | null;
   hasMpesaConsumerKey: boolean; hasMpesaConsumerSecret: boolean; hasMpesaPasskey: boolean; hasMpesaB2cCredential: boolean;
   legalCopy: Record<string, unknown> | null;
+  ownerUserId: string | null;
 }
 export interface SiteConfigRow {
   houseEdge: number; maxMultiplier: number; minStakeCents: number; maxStakeCents: number; minWithdrawalCents: number;
@@ -59,6 +60,8 @@ export interface PlatformRepository {
   linkMarketer(actorId: string, actorRole: string, affiliateUserId: string, globalId: string | null): Promise<void>;
   /** Persist a brand's full design-token palette (docs/22 Task G+). platform_superadmin-gated. */
   setSiteTheme(actorId: string, actorRole: string, siteId: string, tokens: JsonPatch): Promise<SiteRow>;
+  /** Assign/clear the brand's marketer (owner_user_id) — the site-owner commission model (0081/0082). */
+  setSiteOwner(actorId: string, actorRole: string, siteId: string, ownerUserId: string | null): Promise<SiteRow>;
 }
 
 const num = (v: unknown): number => (typeof v === "string" ? Number(v) : (v as number)) || 0;
@@ -76,6 +79,7 @@ function mapSiteRow(x: Record<string, unknown>): SiteRow {
     hasMpesaConsumerKey: Boolean(x.mpesa_consumer_key_ref), hasMpesaConsumerSecret: Boolean(x.mpesa_consumer_secret_ref),
     hasMpesaPasskey: Boolean(x.mpesa_passkey_ref), hasMpesaB2cCredential: Boolean(x.mpesa_b2c_credential_ref),
     legalCopy: (x.legal_copy as Record<string, unknown>) ?? null,
+    ownerUserId: (x.owner_user_id as string) ?? null,
   };
 }
 function mapConfigRow(x: Record<string, unknown>): SiteConfigRow {
@@ -201,6 +205,12 @@ export class PgPlatformRepository implements PlatformRepository {
       [actorId, actorRole, siteId, JSON.stringify(tokens)]);
     return mapSiteRow(r.rows[0] as Record<string, unknown>);
   }
+
+  async setSiteOwner(actorId: string, actorRole: string, siteId: string, ownerUserId: string | null): Promise<SiteRow> {
+    const r = await this.q.query("select * from fn_platform_set_site_owner($1,$2,$3,$4)",
+      [actorId, actorRole, siteId, ownerUserId]);
+    return mapSiteRow(r.rows[0] as Record<string, unknown>);
+  }
 }
 
 const DEFAULT_CONFIG: SiteConfigRow = {
@@ -226,6 +236,7 @@ export class InMemoryPlatformRepository implements PlatformRepository {
       mpesaEnv: null, mpesaShortcode: null, mpesaCallbackBase: null, mpesaB2cInitiator: null,
       hasMpesaConsumerKey: false, hasMpesaConsumerSecret: false, hasMpesaPasskey: false, hasMpesaB2cCredential: false,
       legalCopy: null,
+      ownerUserId: null,
       config: { ...DEFAULT_CONFIG },
     });
   }
@@ -248,6 +259,7 @@ export class InMemoryPlatformRepository implements PlatformRepository {
       mpesaEnv: null, mpesaShortcode: null, mpesaCallbackBase: null, mpesaB2cInitiator: null,
       hasMpesaConsumerKey: false, hasMpesaConsumerSecret: false, hasMpesaPasskey: false, hasMpesaB2cCredential: false,
       legalCopy: null,
+      ownerUserId: null,
       config: { ...DEFAULT_CONFIG },
     });
     return id;
@@ -348,6 +360,15 @@ export class InMemoryPlatformRepository implements PlatformRepository {
     const { config, ...row } = s;
     return { ...row };
   }
+
+  async setSiteOwner(_actorId: string, actorRole: string, siteId: string, ownerUserId: string | null): Promise<SiteRow> {
+    this.gate(actorRole);
+    const s = this.sites.get(siteId);
+    if (!s) throw new Error("SITE_NOT_FOUND");
+    s.ownerUserId = ownerUserId;
+    const { config, ...row } = s;
+    return { ...row };
+  }
 }
 
 /** Thin service over the repo: input validation + a stable surface for the API + console. */
@@ -389,5 +410,8 @@ export class PlatformService {
   setSiteTheme(actorId: string, actorRole: string, siteId: string, tokens: JsonPatch): Promise<SiteRow> {
     if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) throw new Error("INVALID_PATCH");
     return this.repo.setSiteTheme(actorId, actorRole, siteId, tokens);
+  }
+  setSiteOwner(actorId: string, actorRole: string, siteId: string, ownerUserId: string | null): Promise<SiteRow> {
+    return this.repo.setSiteOwner(actorId, actorRole, siteId, ownerUserId);
   }
 }
