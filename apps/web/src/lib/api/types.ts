@@ -214,3 +214,39 @@ export interface NotificationDto {
   category: string | null;
   createdAtMs: number;
 }
+
+// ── Deposit-based referral commissions (0078/0079) ──────────────────────────────────────────────
+export interface ReferralSummaryDto {
+  referralCode: string | null;
+  referralPath: string | null;
+  isMarketer: boolean;
+  totalReferrals: number;
+  earnedCents: number;
+  heldCents: number;
+  paidCents: number;
+  availableCents: number;
+  minPayoutCents: number;
+}
+export interface CommissionLineDto {
+  id: number;
+  depositTxId: string;
+  referredUser: string;
+  referredUsername: string | null;
+  position: number;
+  role: string;
+  rate: number;
+  depositAmountCents: number;
+  commissionCents: number;
+  status: string;
+  createdAtMs: number;
+}
+export interface CommissionPayoutDto {
+  id: string;
+  amountCents: number;
+  status: string;
+  requestedAtMs: number;
+  approvedAtMs: number | null;
+  paidAtMs: number | null;
+  paidRef: string | null;
+  note: string | null;
+}

@@ -11,6 +11,9 @@ import type {
   NotificationDto,
   Paginated,
   PayoutRequestResult,
+  ReferralSummaryDto,
+  CommissionLineDto,
+  CommissionPayoutDto,
   MarketerExpensesResponse,
   PositionDetailDto,
   PositionDto,
@@ -118,6 +121,15 @@ export const api = {
     }),
   affiliateRequestPayout: (token: string) =>
     apiFetch<PayoutRequestResult>('/affiliate/payouts', { method: 'POST', token }),
+
+  // Deposit-based referral commissions (0078/0079) — separate stream from the GGR affiliate payouts.
+  myReferral: (token: string) => apiFetch<ReferralSummaryDto>('/me/referral', { token }),
+  myReferralCommissions: (token: string) =>
+    apiFetch<{ items: CommissionLineDto[] }>('/me/referral/commissions', { token }),
+  requestCommissionPayout: (token: string) =>
+    apiFetch<CommissionPayoutDto>('/me/referral/payouts', { method: 'POST', token }),
+  myCommissionPayouts: (token: string) =>
+    apiFetch<{ items: CommissionPayoutDto[] }>('/me/referral/payouts', { token }),
   affiliateExpenses: (token: string) =>
     apiFetch<MarketerExpensesResponse>('/affiliate/expenses', { token }),
 

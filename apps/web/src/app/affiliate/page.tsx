@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/ui/Badge';
 import { Money } from '@/components/ui/Money';
 import { ApiError } from '@/lib/api/client';
 import type { AffiliateSummary, CommissionRecord } from '@/lib/api/types';
+import { ReferralCommissionsCard } from '@/components/marketer/ReferralCommissionsCard';
 import { formatKes } from '@invest254/shared/money';
 import { useSession } from '@/lib/auth/session';
 import { useAuthUi } from '@/lib/auth/ui';
@@ -194,6 +195,7 @@ function MarketerView() {
     <div className="flex flex-col gap-4">
       <EarningsHero summary={s} />
       <ReferralLinkCard summary={s} />
+      <ReferralCommissionsCard />
       <Funnel summary={s} />
       <EarningsTrend />
       <ReferralsList />
