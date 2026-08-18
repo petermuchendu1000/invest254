@@ -638,6 +638,13 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     const u = this.byId.get(userId);
     if (u) u.role = role;
   }
+  /** Test/admin seam: edit a user's phone/username (item 6). Null leaves the field unchanged. */
+  adminSetContact(userId: string, phone: string | null, username: string | null): void {
+    const u = this.byId.get(userId);
+    if (!u) return;
+    if (phone != null) u.phone = phone;
+    if (username != null) u.username = username;
+  }
   /** All affiliates' commission terms. */
   adminAffiliates(): AdminAffiliateSnapshot[] {
     return [...this.affiliates.values()].map((a) => ({ userId: a.userId, commissionRate: a.commissionRate, status: a.status }));

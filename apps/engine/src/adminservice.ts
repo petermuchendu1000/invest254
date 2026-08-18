@@ -8,7 +8,7 @@ import type {
   ReportRange, DailyReportRow, UserReportRow, AdminDayReport,
   GameConfigRow, GameConfigPatch, RtpMonitor, AdminSeedRow, SeedRotateResult,
   WithdrawalPoolRow,
-  MpesaConfigRow, MpesaConfigPatch, SetUserRoleResult,
+  MpesaConfigRow, MpesaConfigPatch, SetUserRoleResult, UpdateUserDetailsResult,
   AdminPayoutRow, AdminPayoutListQuery, AdminChatModRow,
   AdminUserActivityRow, AdminUserActivityQuery,
 } from "./admin.js";
@@ -50,6 +50,11 @@ export class AdminService {
   /** Promote/demote a user's role (superadmin) — guards + audit live in the repo/RPC. */
   setUserRole(actorId: string, actorRole: string, targetId: string, role: string): Promise<SetUserRoleResult> {
     return this.repo.setUserRole(actorId, actorRole, targetId, role);
+  }
+
+  /** Edit a user's phone/username (item 6). Guards + per-brand uniqueness live in the RPC/mirror. */
+  updateUserDetails(actorId: string, actorRole: string, targetId: string, phone: string | null, username: string | null): Promise<UpdateUserDetailsResult> {
+    return this.repo.updateUserDetails(actorId, actorRole, targetId, phone, username);
   }
 
   listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>> { return this.repo.listWithdrawals(q); }

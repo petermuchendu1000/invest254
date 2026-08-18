@@ -30,6 +30,10 @@ const ADMIN_STATUS: Readonly<Record<string, number>> = {
   INVALID_STATUS: 400,
   INVALID_RATE: 400,
   INVALID_ROLE: 400,
+  INVALID_PHONE: 400,
+  INVALID_USERNAME: 400,
+  PHONE_TAKEN: 409,
+  USERNAME_TAKEN: 409,
   INVALID_AMOUNT: 400,
   INVALID_KIND: 400,
   INVALID_PATCH: 400,
@@ -307,8 +311,9 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     });
   }
 
-  // Role management — superadmin only (promote/demote). Effective on the target's next login.
-  router.post(`${BASE}/admin/users/:id/role`, auth, superadmin, async (ctx: Ctx) => {
+  // Role management — a plain admin may promote/demote player<->marketer (the RPC confines admins to
+  // that transition); superadmin+ retain full power (admin/superadmin). Effective on next login.
+  router.post(`${BASE}/admin/users/:id/role`, auth, admin, async (ctx: Ctx) => {
     const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
     const role = typeof body.role === "string" ? body.role : "";
     if (!["player", "marketer", "admin", "superadmin"].includes(role)) {
@@ -316,6 +321,16 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     }
     await ensureUserInScope(deps, ctx, ctx.params.id!);
     return domain(() => deps.admin.setUserRole(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, role));
+  });
+
+  // Edit a user's contact details — phone and/or username (item 6). Admin+, brand-scoped, unique-per-brand.
+  router.post(`${BASE}/admin/users/:id/details`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const phone = typeof body.phone === "string" ? body.phone : null;
+    const username = typeof body.username === "string" ? body.username : null;
+    if (phone === null && username === null) throw new ApiError("VALIDATION", "provide phone and/or username", 400);
+    await ensureUserInScope(deps, ctx, ctx.params.id!);
+    return domain(() => deps.admin.updateUserDetails(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, phone, username));
   });
 
   router.patch(`${BASE}/admin/affiliates/:id/rate`, auth, admin, async (ctx: Ctx) => {

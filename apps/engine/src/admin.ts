@@ -95,6 +95,7 @@ export interface AdminWithdrawalListQuery extends PageQuery { status?: string | 
 export interface SetUserStatusResult { userId: string; status: string; }
 export interface SetCommissionRateResult { userId: string; commissionRate: number; }
 export interface SetUserRoleResult { userId: string; role: string; }
+export interface UpdateUserDetailsResult { userId: string; phone: string; username: string; }
 /** Result of a manual wallet balance adjustment (J3). */
 export interface AdjustBalanceResult { userId: string; amountCents: Cents; newBalanceCents: Cents; direction: "credit" | "debit"; }
 /** Result of resetting a wallet to the user's last funded (most recent successful deposit) amount. */
@@ -277,6 +278,8 @@ export interface AdminRepository {
   setUserStatus(actorId: string, actorRole: string, targetId: string, status: string, reason: string | null): Promise<SetUserStatusResult>;
   setCommissionRate(actorId: string, actorRole: string, targetId: string, rate: number): Promise<SetCommissionRateResult>;
   setUserRole(actorId: string, actorRole: string, targetId: string, role: string): Promise<SetUserRoleResult>;
+  /** Edit a user's phone/username (item 6). Admin+ (a plain admin may not edit an admin). Per-brand unique. */
+  updateUserDetails(actorId: string, actorRole: string, targetId: string, phone: string | null, username: string | null): Promise<UpdateUserDetailsResult>;
   listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>>;
   /** Unified deposits + withdrawals feed for the Finance transactions explorer (newest-first, keyset). */
   listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>>;
@@ -716,6 +719,15 @@ export class PgAdminRepository implements AdminRepository {
       const r = await this.q.query("select user_id, role from fn_admin_set_user_role($1,$2,$3,$4)", [actorId, actorRole, targetId, role]);
       const x = r.rows[0];
       return { userId: String(x.user_id), role: String(x.role) };
+    } catch (e) { mapAdminError(e); }
+  }
+
+  async updateUserDetails(actorId: string, actorRole: string, targetId: string, phone: string | null, username: string | null): Promise<UpdateUserDetailsResult> {
+    try {
+      const r = await this.q.query("select user_id, phone, username from fn_admin_update_user($1,$2,$3,$4,$5)",
+        [actorId, actorRole, targetId, phone ?? null, username ?? null]);
+      const x = r.rows[0];
+      return { userId: String(x.user_id), phone: String(x.phone), username: String(x.username) };
     } catch (e) { mapAdminError(e); }
   }
 
@@ -1486,17 +1498,44 @@ export class InMemoryAdminRepository implements AdminRepository {
   }
 
   async setUserRole(actorId: string, actorRole: string, targetId: string, role: string): Promise<SetUserRoleResult> {
-    if (actorRole !== "superadmin") throw new Error("NOT_AUTHORIZED");
+    if (!["admin", "superadmin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
     if (!VALID_ROLES.includes(role)) throw new Error("INVALID_ROLE");
     if (role === "superadmin") throw new Error("SUPERADMIN_PROTECTED");
     if (actorId === targetId) throw new Error("NO_SELF_ACTION");
     const u = this.identity.adminUser(targetId);
     if (!u) throw new Error("USER_NOT_FOUND");
-    if (u.role === "superadmin") throw new Error("SUPERADMIN_PROTECTED");
+    if (u.role === "superadmin" || u.role === "platform_superadmin") throw new Error("SUPERADMIN_PROTECTED");
+    // A plain admin is confined to the player<->marketer transition.
+    if (actorRole === "admin" && (!["player", "marketer"].includes(role) || !["player", "marketer"].includes(u.role))) {
+      throw new Error("NOT_AUTHORIZED");
+    }
     const from = u.role;
     this.identity.adminSetRole(targetId, role);
     this.record(actorId, actorRole, "user.role", "user", targetId, { from, to: role });
     return { userId: targetId, role };
+  }
+
+  async updateUserDetails(actorId: string, actorRole: string, targetId: string, phone: string | null, username: string | null): Promise<UpdateUserDetailsResult> {
+    if (!["admin", "superadmin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    const u = this.identity.adminUser(targetId);
+    if (!u) throw new Error("USER_NOT_FOUND");
+    if (actorRole === "admin" && ["admin", "superadmin", "platform_superadmin"].includes(u.role)) throw new Error("NOT_AUTHORIZED");
+    const site = u.siteId ?? ADMIN_DEFAULT_SITE;
+    const newPhone = phone && phone.trim() ? phone.replace(/^\+?254/, "0").trim() : null;
+    const newName = username && username.trim() ? username.trim() : null;
+    const all = this.identity.adminUsers();
+    if (newPhone != null) {
+      if (!/^0[17][0-9]{8}$/.test(newPhone)) throw new Error("INVALID_PHONE");
+      if (all.some((x) => x.userId !== targetId && (x.siteId ?? ADMIN_DEFAULT_SITE) === site && x.phone === newPhone)) throw new Error("PHONE_TAKEN");
+    }
+    if (newName != null) {
+      if (newName.length < 2 || newName.length > 40) throw new Error("INVALID_USERNAME");
+      if (all.some((x) => x.userId !== targetId && (x.siteId ?? ADMIN_DEFAULT_SITE) === site && x.username.toLowerCase() === newName.toLowerCase())) throw new Error("USERNAME_TAKEN");
+    }
+    this.identity.adminSetContact(targetId, newPhone, newName);
+    const after = this.identity.adminUser(targetId)!;
+    this.record(actorId, actorRole, "user.update_details", "user", targetId, { phone: after.phone, username: after.username });
+    return { userId: targetId, phone: after.phone, username: after.username };
   }
 
   async setCommissionRate(actorId: string, actorRole: string, targetId: string, rate: number): Promise<SetCommissionRateResult> {

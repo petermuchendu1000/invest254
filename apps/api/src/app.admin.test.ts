@@ -369,13 +369,18 @@ test("M-Pesa config: admin reads masked; only superadmin edits; secrets write-on
   } finally { await api.close(); }
 });
 
-test("user role: only superadmin promotes/demotes; validates; no self-action; audited", async () => {
+test("user role: admin promotes player<->marketer; superadmin full power; validates; no self-action; audited", async () => {
   const api = await startTestApi();
   try {
     const uid = await register(api, "0712000099", "role_target");
 
-    // a plain admin cannot change roles (superadmin only)
-    assert.equal((await req(api, "POST", `/api/v1/admin/users/${uid}/role`, { token: "admin-1:admin", body: { role: "marketer" } })).status, 403);
+    // item 6: a plain admin CAN promote player -> marketer, but CANNOT mint an admin
+    assert.equal((await req(api, "POST", `/api/v1/admin/users/${uid}/role`, { token: "admin-1:admin", body: { role: "admin" } })).status, 403);
+    const adminUp = await req(api, "POST", `/api/v1/admin/users/${uid}/role`, { token: "admin-1:admin", body: { role: "marketer" } });
+    assert.equal(adminUp.status, 200);
+    assert.equal((await json(adminUp)).role, "marketer");
+    // demote back to player (superadmin) so the flow below is meaningful
+    assert.equal((await req(api, "POST", `/api/v1/admin/users/${uid}/role`, { token: "root-1:superadmin", body: { role: "player" } })).status, 200);
 
     // superadmin promotes player -> marketer
     const up = await req(api, "POST", `/api/v1/admin/users/${uid}/role`, { token: "root-1:superadmin", body: { role: "marketer" } });
