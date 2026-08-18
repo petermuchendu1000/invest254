@@ -770,6 +770,7 @@ export class PgAdminRepository implements AdminRepository {
          ) agg on true
         where t.kind = 'withdrawal'
           and t.provider is distinct from 'internal'
+          and t.user_id not in (select user_id from marketer_account_ids)
           and ($1::text is null or t.status = $1)
           and ($5::uuid is null or t.site_id = $5)
           and ($2::timestamptz is null or (t.created_at, t.id) < ($2::timestamptz, $3::uuid))
@@ -801,6 +802,7 @@ export class PgAdminRepository implements AdminRepository {
         where ($1::text is null or t.kind = $1)
           and ($2::text is null or t.status = $2)
           and t.provider is distinct from 'internal'
+          and t.user_id not in (select user_id from marketer_account_ids)
           and ($7::uuid is null or t.site_id = $7)
           and ($3::text is null or p.username ilike '%'||$3||'%' or t.phone ilike '%'||$3||'%' or t.mpesa_receipt ilike '%'||$3||'%')
           and ($4::timestamptz is null or (t.created_at, t.id) < ($4::timestamptz, $5::uuid))
