@@ -3,6 +3,7 @@ import {
   InMemoryGameRepository, PgGameRepository, type GameRepository, type Querier,
 } from "./wallet.js";
 import { StaticConfigProvider, SiteGameConfigStore, type ConfigProvider, type ListenClient } from "./gameconfig.js";
+import { SitesStore } from "./sitesstore.js";
 import { PgUserOverridesRepository, type UserOverridesRepository } from "./overrides.js";
 import { PoolController, PgPoolRepo } from "./poolcontroller.js";
 import { makePgPools } from "./pgpools.js";
@@ -44,7 +45,9 @@ let configFor: (siteId: string) => ConfigProvider | Promise<ConfigProvider>;
 let masterSeedFor: ((siteId: string) => string | undefined) | undefined;
 // docs/25: pool controller (shared; site passed per-call) + per-brand pool_mode flag. Only in DB mode.
 let poolController: PoolController | undefined;
-const poolModeBySite = new Map<string, boolean>();
+// docs/25 + migration 0088: pool_mode is kept LIVE via SitesStore (LISTEN sites_changed + poll), so a
+// toggle or a new brand applies without redeploy. Replaces the old boot-time static map.
+let sitesStore: SitesStore | undefined;
 // docs/25 + migration 0084: canonical marketer/demo classifier, shared by pool exemption + money routing.
 let loadIsMarketer: ((userId: string) => Promise<boolean>) | undefined;
 /** host/slug/id -> siteId resolution table, seeded at boot from `sites`. */
@@ -78,11 +81,14 @@ if (usingDb) {
     if (r.slug) siteAliases.set(String(r.slug), id);
     if (r.primary_domain) siteAliases.set(String(r.primary_domain), id);
     if (r.master_seed_ref && process.env[String(r.master_seed_ref)]) masterRefBySite.set(id, process.env[String(r.master_seed_ref)]!);
-    if (r.pool_mode === true) poolModeBySite.set(id, true);
   }
   masterSeedFor = (siteId) => masterRefBySite.get(siteId);
   poolController = new PoolController(new PgPoolRepo(q));
-  console.log(`[engine] pool controller ready; pool_mode brands: ${[...poolModeBySite.keys()].length}`);
+  // Live pool_mode: LISTEN sites_changed (migration 0088) + poll fallback, so toggles / new brands
+  // apply without a redeploy. Uses the session pooler for LISTEN, like the per-brand config stores.
+  sitesStore = new SitesStore(q, { connect: () => listenPool.connect() as unknown as Promise<ListenClient> });
+  await sitesStore.init();
+  console.log(`[engine] pool controller ready; pool_mode brands: ${sitesStore.poolModeBrandCount()} (live)`);
 
   // Canonical "is this a demo/marketer account?" (migration 0084: fn_is_marketer_account). One source
   // of truth for the pool exemption AND the money layer's demo routing, so they can never diverge. A
@@ -154,7 +160,7 @@ const registry = new SiteRegistry({
   configFor,
   ...(masterSeedFor ? { masterSeedFor } : {}),
   ...(overridesRepo ? { loadOverride: (uid: string) => overridesRepo!.getForUser(uid) } : {}),
-  ...(poolController ? { poolController, poolModeFor: (siteId: string) => poolModeBySite.get(siteId) === true } : {}),
+  ...(poolController ? { poolController, poolModeFor: (siteId: string) => sitesStore!.poolModeFor(siteId) } : {}),
   ...(loadIsMarketer ? { loadIsMarketer } : {}),
 });
 
