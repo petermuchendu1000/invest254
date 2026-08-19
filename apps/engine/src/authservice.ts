@@ -261,13 +261,15 @@ export class AuthService {
    * The response is identical whether or not the account exists (and the hash is computed either
    * way) so this cannot be used to enumerate registered phone numbers.
    */
-  async resetPassword(phone: string, newPassword: string): Promise<{ reset: boolean }> {
+  async resetPassword(phone: string, newPassword: string, siteId?: string): Promise<{ reset: boolean }> {
     if (!this.allowUnverifiedReset) throw new Error("RESET_DISABLED");
     const pw = validatePassword(newPassword);
     if (!pw.ok) throw new Error(`PASSWORD_${pw.reason}`);
     let normalized: string;
     try { normalized = normalizeMsisdn(phone); } catch { throw new Error("INVALID_PHONE"); }
-    const rec = await this.repo.findByPhone(normalized);
+    // Scope to the caller's brand so a phone shared across brands can't cross-reset the wrong
+    // account. Undefined siteId preserves single-tenant behaviour (default site).
+    const rec = await this.repo.findByPhone(normalized, siteId);
     const hash = await hashPassword(newPassword); // computed unconditionally: uniform timing
     if (rec) await this.repo.setPasswordHash(rec.userId, hash);
     return { reset: true };

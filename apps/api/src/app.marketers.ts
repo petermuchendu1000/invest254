@@ -154,6 +154,25 @@ function optStr(o: Record<string, unknown>, key: string): string | null {
   const v = o[key];
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 }
+
+/**
+ * Resolve the brand a marketer login belongs to, BEFORE any token exists (mirrors app.auth.ts
+ * resolveSiteId). The API is a single shared host, so the marketer app must name its brand via
+ * `site`/`host` (slug, domain or id) on the login body/query; brandByHost validates it against the
+ * ACTIVE sites. WHY THIS EXISTS: marketers are brand-scoped and a phone is only unique WITHIN a
+ * brand (e.g. "0706597235" belongs to different marketers on two brands). Without this, the login
+ * defaulted to site #1 and authenticated against whichever marketer happened to sit on the default
+ * brand — so a marketer on any other brand could never sign in as themselves. Undefined (no hint)
+ * preserves the legacy default-site behaviour for single-tenant callers.
+ */
+async function resolveSiteId(ctx: Ctx, body: Record<string, unknown>, deps: ApiDeps): Promise<string | undefined> {
+  const ref =
+    optStr(body, "site") ?? ctx.query.get("site") ??
+    optStr(body, "host") ?? ctx.query.get("host") ?? undefined;
+  if (!ref) return undefined;
+  const brand = await deps.brandByHost(ref.toLowerCase());
+  return brand?.siteId;
+}
 /** Positive integer cents (for credit/withdraw). */
 function reqPositiveCents(o: Record<string, unknown>, key = "amountCents"): number {
   const raw = o[key];
@@ -284,7 +303,11 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const b = bodyObj(ctx);
     const phone = reqStr(b, "phone");
     const pin = reqPin(b, "pin");
-    const id = await domain(() => deps.marketers.login(phone, pin));
+    // Brand-scope the PIN login: a phone is unique only within a brand, so resolve which brand this
+    // login is for and match the marketer there (else fn_marketer_login falls back to the default
+    // site and can authenticate the wrong marketer / reject the right one — the Patricia bug).
+    const siteId = await resolveSiteId(ctx, b, deps);
+    const id = await domain(() => deps.marketers.login(phone, pin, siteId));
     if (!id) throw new ApiError("INVALID_CREDENTIALS", "invalid phone or PIN", 401);
     const token = await deps.auth.issueToken(id, "marketer");
     const marketerProfile = await deps.marketers.profile(id);
@@ -307,15 +330,20 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const password = typeof b.password === "string" ? b.password : "";
     if (password.length === 0) throw new ApiError("VALIDATION", "password is required", 400);
 
+    // Brand-scope this login: resolve which brand the marketer app is signing into so both the
+    // website-account check and the marketer-wallet lookup target the correct brand. Without it a
+    // shared phone across brands resolves to whichever account sits on the default site.
+    const siteId = await resolveSiteId(ctx, b, deps);
+
     // 1) Prove the website account (phone + password). Any failure collapses to a generic 401.
     try {
-      await deps.auth.login({ phone, password });
+      await deps.auth.login({ phone, password, ...(siteId ? { siteId } : {}) });
     } catch {
       throw new ApiError("INVALID_CREDENTIALS", "invalid phone or password", 401);
     }
 
-    // 2) The website identity must be linked to an ACTIVE marketer wallet (same phone).
-    const profile = await domain(() => deps.marketers.profileByPhone(phone));
+    // 2) The website identity must be linked to an ACTIVE marketer wallet (same phone + brand).
+    const profile = await domain(() => deps.marketers.profileByPhone(phone, siteId));
     if (!profile) throw new ApiError("NOT_MARKETER", "not a marketer account", 403);
     if (profile.status !== "active") throw new ApiError("MARKETER_INACTIVE", `marketer is ${profile.status}`, 403);
 
