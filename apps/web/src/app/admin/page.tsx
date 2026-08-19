@@ -7,6 +7,7 @@ import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty } from '@/components/admin/ui';
 import { AreaChart, GroupedBars, ChartCard, LegendDot, KpiCard, kesCompact, type Point } from '@/components/admin/charts';
 import { useOverview, useRtp, useReportDaily } from '@/lib/admin/hooks';
+import { RealCashRtpPanel, ConfigChangeReviewPanel } from '@/components/admin/EconomyIntegrityPanels';
 
 function isoDaysAgo(days: number): string {
   const d = new Date();
@@ -136,6 +137,14 @@ export default function AdminOverviewPage() {
           </div>
         )}
       </Section>
+
+      {/* Economy integrity (rec #7 + docs/28 §4): real-cash truth + config change review. Owner tier. */}
+      {isSuper && (
+        <>
+          <RealCashRtpPanel />
+          <ConfigChangeReviewPanel />
+        </>
+      )}
     </>
   );
 }

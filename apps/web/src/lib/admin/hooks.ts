@@ -24,6 +24,14 @@ export function useRtp() {
   const t = useTok();
   return useQuery({ queryKey: ['admin', 'rtp'], queryFn: () => adminApi.rtp(t), enabled: !!t });
 }
+export function useRealCashRtp() {
+  const t = useTok();
+  return useQuery({ queryKey: ['admin', 'real-cash-rtp'], queryFn: () => adminApi.realCashRtp(t), enabled: !!t });
+}
+export function useConfigReview(limit = 50) {
+  const t = useTok();
+  return useQuery({ queryKey: ['admin', 'config-review', limit], queryFn: () => adminApi.configReview(t, limit), enabled: !!t });
+}
 
 // ── Users ──
 export interface UsersFilter {

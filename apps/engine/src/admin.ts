@@ -195,6 +195,17 @@ export interface WithdrawalPoolRow {
 export interface RtpWindowRow { window: string; settledPositions: number; turnoverCents: Cents; payoutCents: Cents; realisedRtp: number | null; }
 /** RTP monitor: realised vs target across rolling windows, with a drift alert (J5). */
 export interface RtpMonitor { targetRtp: number; toleranceAbs: number; minSamples: number; windows: RtpWindowRow[]; alert: boolean; }
+
+/** Real-cash RTP (rec #7): committed-money truth from the ledger, marketer cohort shown separately. */
+export interface RealCashSide { turnoverCents: Cents; payoutCents: Cents; ggrCents: Cents; bets: number; rtp: number | null; }
+export interface RealCashWindow { window: string; real: RealCashSide; demo: RealCashSide; cash: { depositsCents: Cents; withdrawalsCents: Cents; netCashCents: Cents }; }
+export interface RealCashRtp { rtpTarget: number | null; windows: RealCashWindow[]; }
+
+/** One economy-config version in the change-review (diff vs prior + risk flag). */
+export interface ConfigChangeRow {
+  version: number; createdAtMs: number; houseEdge: number; targetWinRate: number; maxMultiplier: number;
+  prevHouseEdge: number | null; prevTargetWinRate: number | null; changedFields: string[]; risk: boolean; riskReason: string;
+}
 /** One provably-fair day row for the admin seed panel (J5). Hash is the public commitment. */
 export interface AdminSeedRow { gameDayId: number | null; tradeDate: string; serverSeedHash: string | null; seedVersion: number; revealed: boolean; revealedAtMs: number | null; }
 /** Result of a superadmin-forced seed rotation (J5): the day and its new (bumped) seed version. */
@@ -317,6 +328,10 @@ export interface AdminRepository {
   getMpesaConfig(): Promise<MpesaConfigRow>;
   updateMpesaConfig(actorId: string, actorRole: string, patch: MpesaConfigPatch): Promise<MpesaConfigRow>;
   rtpMonitor(siteId?: string): Promise<RtpMonitor>;
+  /** Real-cash RTP from committed ledger money (rec #7); marketer cohort shown separately. */
+  realCashRtp(siteId?: string): Promise<RealCashRtp>;
+  /** Economy-config change review: recent versions with diffs + risk flags (docs/28 §4). */
+  configChangeReview(siteId: string, limit?: number): Promise<ConfigChangeRow[]>;
   listSeeds(limit: number, siteId?: string): Promise<AdminSeedRow[]>;
   rotateSeed(actorId: string, actorRole: string, tradeDate: string): Promise<SeedRotateResult>;
   // J6 — affiliate payout queue + chat moderation
@@ -1172,6 +1187,21 @@ export class PgAdminRepository implements AdminRepository {
     ];
     return buildRtpMonitor(cfg.rtpTarget, windows);
   }
+  async realCashRtp(siteId?: string): Promise<RealCashRtp> {
+    const r = await this.q.query("select fn_real_cash_rtp($1::uuid) as j", [siteId ?? null]);
+    return (r.rows[0]?.j ?? { rtpTarget: null, windows: [] }) as RealCashRtp;
+  }
+  async configChangeReview(siteId: string, limit = 50): Promise<ConfigChangeRow[]> {
+    const r = await this.q.query("select * from fn_config_change_review($1::uuid, $2)", [siteId, limit]);
+    return r.rows.map((x: any) => ({
+      version: Number(x.version), createdAtMs: ms(x.created_at),
+      houseEdge: Number(x.house_edge), targetWinRate: Number(x.target_win_rate), maxMultiplier: Number(x.max_multiplier),
+      prevHouseEdge: x.prev_house_edge == null ? null : Number(x.prev_house_edge),
+      prevTargetWinRate: x.prev_target_win_rate == null ? null : Number(x.prev_target_win_rate),
+      changedFields: Array.isArray(x.changed_fields) ? x.changed_fields.map(String) : [],
+      risk: x.risk === true, riskReason: x.risk_reason == null ? "" : String(x.risk_reason),
+    }));
+  }
 
   async listSeeds(limit: number, siteId?: string): Promise<AdminSeedRow[]> {
     const r = await this.q.query(
@@ -1948,6 +1978,10 @@ export class InMemoryAdminRepository implements AdminRepository {
     const windows = RTP_WINDOWS.map(({ window, days }) => { const a = agg(days); return rtpWindowRow(window, a.n, a.t, a.p); });
     return buildRtpMonitor(1 - this.siteConfig(siteId ?? ADMIN_DEFAULT_SITE).houseEdge, windows);
   }
+  async realCashRtp(siteId?: string): Promise<RealCashRtp> {
+    return { rtpTarget: Number((1 - this.siteConfig(siteId ?? ADMIN_DEFAULT_SITE).houseEdge).toFixed(4)), windows: [] };
+  }
+  async configChangeReview(_siteId: string, _limit = 50): Promise<ConfigChangeRow[]> { return []; }
 
   // The in-memory harness models seeds globally (no per-site seed_rows); `_siteId` is accepted for
   // interface parity and scoped for real in the Pg repo (game_days.site_id), proven by the DB e2e.

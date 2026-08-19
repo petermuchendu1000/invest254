@@ -6,7 +6,7 @@ import type {
   AdjustBalanceResult, AdjustBalanceKindResult, ClearBalanceResult, ResetBalanceResult, BalanceKind, UserOverrideRow, UserOverridePatch,
   AdminDepositRow, AdminDepositListQuery, AdminDepositsReconcile,
   ReportRange, DailyReportRow, UserReportRow, AdminDayReport,
-  GameConfigRow, GameConfigPatch, RtpMonitor, AdminSeedRow, SeedRotateResult,
+  GameConfigRow, GameConfigPatch, RtpMonitor, RealCashRtp, ConfigChangeRow, AdminSeedRow, SeedRotateResult,
   WithdrawalPoolRow,
   MpesaConfigRow, MpesaConfigPatch, SetUserRoleResult, UpdateUserDetailsResult,
   AdminPayoutRow, AdminPayoutListQuery, AdminChatModRow,
@@ -137,6 +137,8 @@ export class AdminService {
 
   /** Realised RTP vs target across rolling windows, with a drift alert (J5). */
   rtpMonitor(siteId?: string): Promise<RtpMonitor> { return this.repo.rtpMonitor(siteId); }
+  realCashRtp(siteId?: string): Promise<RealCashRtp> { return this.repo.realCashRtp(siteId); }
+  configChangeReview(siteId: string, limit?: number): Promise<ConfigChangeRow[]> { return this.repo.configChangeReview(siteId, limit); }
 
   /** Provably-fair day rows: commitment hash, seed version, reveal state (J5). */
   listSeeds(limit: number, siteId?: string): Promise<AdminSeedRow[]> { return this.repo.listSeeds(limit, siteId); }

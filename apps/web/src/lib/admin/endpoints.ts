@@ -30,6 +30,8 @@ import type {
   MpesaConfigPatch,
   MpesaConfigRow,
   RtpMonitor,
+  RealCashRtp,
+  ConfigChangeRow,
   AdminSeedRow,
   SeedRotateResult,
   WithdrawalPoolRow,
@@ -47,6 +49,8 @@ interface Page {
 export const adminApi = {
   overview: (t: string) => apiFetch<AdminOverview>('/admin/overview', { token: t }),
   rtp: (t: string) => apiFetch<RtpMonitor>('/admin/rtp', { token: t }),
+  realCashRtp: (t: string) => apiFetch<RealCashRtp>('/admin/real-cash-rtp', { token: t }),
+  configReview: (t: string, limit = 50) => apiFetch<ConfigChangeRow[]>(`/admin/config-review?limit=${limit}`, { token: t }),
 
   // Users
   users: (

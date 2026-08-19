@@ -54,6 +54,17 @@ export interface RtpMonitor {
   alert: boolean;
 }
 
+/** Real-cash RTP (rec #7): committed-money truth; marketer cohort shown separately from real players. */
+export interface RealCashSide { turnoverCents: Cents; payoutCents: Cents; ggrCents: Cents; bets: number; rtp: number | null; }
+export interface RealCashWindow { window: string; real: RealCashSide; demo: RealCashSide; cash: { depositsCents: Cents; withdrawalsCents: Cents; netCashCents: Cents }; }
+export interface RealCashRtp { rtpTarget: number | null; windows: RealCashWindow[]; }
+
+/** One economy-config version in the change-review (diff vs prior + risk flag). */
+export interface ConfigChangeRow {
+  version: number; createdAtMs: number; houseEdge: number; targetWinRate: number; maxMultiplier: number;
+  prevHouseEdge: number | null; prevTargetWinRate: number | null; changedFields: string[]; risk: boolean; riskReason: string;
+}
+
 /** Enriched user-list row — wallet, lifetime cash flow, game economics and last activity. */
 export interface AdminUserRow {
   userId: string;

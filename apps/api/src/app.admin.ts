@@ -615,7 +615,13 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     return domain(async () => ({ enabled: await deps.admin.setWithdrawalsEnabled(actor, role, site, body.enabled as boolean) }));
   });
 
-  router.get(`${BASE}/admin/rtp`, auth, admin, async (ctx: Ctx) => deps.admin.rtpMonitor(adminScopeSite(ctx) ?? undefined));  // ── M-Pesa configuration (admin reads masked; superadmin edits; secrets write-only) ──────────
+  router.get(`${BASE}/admin/rtp`, auth, admin, async (ctx: Ctx) => deps.admin.rtpMonitor(adminScopeSite(ctx) ?? undefined));
+  // Real-cash RTP (rec #7): committed-money truth from the ledger, marketer cohort shown separately.
+  router.get(`${BASE}/admin/real-cash-rtp`, auth, admin, async (ctx: Ctx) => deps.admin.realCashRtp(adminScopeSite(ctx) ?? undefined));
+  // Economy change review (docs/28 §4): recent config versions with diffs + risk flags.
+  router.get(`${BASE}/admin/config-review`, auth, admin, async (ctx: Ctx) =>
+    deps.admin.configChangeReview(adminScopeSite(ctx) ?? "00000000-0000-0000-0000-000000000001", Math.min(200, Math.max(1, Number(ctx.query.get("limit") ?? "50") || 50))));
+  // ── M-Pesa configuration (admin reads masked; superadmin edits; secrets write-only) ──────────
   router.get(`${BASE}/admin/mpesa-config`, auth, admin, async () => domain(() => deps.admin.getMpesaConfig()));
 
   router.patch(`${BASE}/admin/mpesa-config`, auth, superadmin, async (ctx: Ctx) => {
