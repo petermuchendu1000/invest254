@@ -50,10 +50,11 @@ test("SitesStore: loads pool_mode for active brands (poll path)", async () => {
   } finally { s.stop(); }
 });
 
-test("SitesStore: a LIVE toggle applies via notification (no redeploy)", async () => {
+test("SitesStore: a LIVE toggle applies via notification (no redeploy) + onChange fires", async () => {
   const { q, set } = fakeSites([{ id: "A", pool_mode: false }]);
   const fl = fakeListen();
-  const s = new SitesStore(q, { pollMs: 0, connect: fl.connect });
+  const changes: Array<[string, boolean]> = [];
+  const s = new SitesStore(q, { pollMs: 0, connect: fl.connect, onChange: (id, pm) => changes.push([id, pm]) });
   await s.init();
   try {
     assert.equal(s.poolModeFor("A"), false);
@@ -65,6 +66,7 @@ test("SitesStore: a LIVE toggle applies via notification (no redeploy)", async (
     await fl.notify("A");
     await new Promise((r) => setTimeout(r, 5));
     assert.equal(s.poolModeFor("A"), false, "toggle OFF picked up live");
+    assert.deepEqual(changes, [["A", true], ["A", false]], "onChange fired for each real flip");
   } finally { s.stop(); }
 });
 

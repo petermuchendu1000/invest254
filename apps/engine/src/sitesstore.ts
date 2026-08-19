@@ -25,6 +25,8 @@ export interface SitesStoreOptions {
   /** Reconnect backoff after a LISTEN connection error. Default 5s. */
   reconnectMs?: number;
   onError?: (err: Error, ctx: string) => void;
+  /** Invoked when a brand's pool_mode actually changes (add/flip/remove) — for operator-visible logs. */
+  onChange?: (siteId: string, poolMode: boolean) => void;
 }
 
 export class SitesStore {
@@ -56,19 +58,29 @@ export class SitesStore {
     void this.startListening();
   }
 
-  /** Full re-read of every active brand's pool_mode (poll path + initial load). */
+  /** Emit onChange only when a brand's effective pool_mode actually flips (loaded state only). */
+  private applyOne(siteId: string, next: boolean): void {
+    const prev = this.poolMode.get(siteId) === true;
+    if (next) this.poolMode.set(siteId, true); else this.poolMode.delete(siteId);
+    if (this.loaded && prev !== next) { try { this.opts.onChange?.(siteId, next); } catch { /* logging must never break refresh */ } }
+  }
+
+  /** Full re-read of every active brand's pool_mode (poll path + initial load). Diffs to emit onChange. */
   async refreshAll(): Promise<void> {
     const r = await this.q.query("select id, pool_mode from sites where status = 'active'", []);
     const next = new Map<string, boolean>();
     for (const row of r.rows) next.set(String(row.id), row.pool_mode === true);
-    this.poolMode = next;
+    // union of keys so a brand that disappeared (deactivated/deleted) also flips to false
+    for (const id of new Set<string>([...this.poolMode.keys(), ...next.keys()])) {
+      this.applyOne(id, next.get(id) === true);
+    }
   }
 
   /** Refresh ONE brand from a notification payload (add/flip/remove). */
   async refreshOne(siteId: string): Promise<void> {
     const r = await this.q.query("select pool_mode, status from sites where id = $1", [siteId]);
-    if (!r.rows.length || r.rows[0].status !== "active") { this.poolMode.delete(siteId); return; }
-    this.poolMode.set(siteId, r.rows[0].pool_mode === true);
+    const active = r.rows.length > 0 && r.rows[0].status === "active";
+    this.applyOne(siteId, active && r.rows[0].pool_mode === true);
   }
 
   private startPolling(): void {

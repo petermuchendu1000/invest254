@@ -86,7 +86,11 @@ if (usingDb) {
   poolController = new PoolController(new PgPoolRepo(q));
   // Live pool_mode: LISTEN sites_changed (migration 0088) + poll fallback, so toggles / new brands
   // apply without a redeploy. Uses the session pooler for LISTEN, like the per-brand config stores.
-  sitesStore = new SitesStore(q, { connect: () => listenPool.connect() as unknown as Promise<ListenClient> });
+  sitesStore = new SitesStore(q, {
+    connect: () => listenPool.connect() as unknown as Promise<ListenClient>,
+    onChange: (siteId, poolMode) => console.log(`[engine] pool_mode ${siteId} -> ${poolMode} (live; no redeploy)`),
+    onError: (err, ctx) => console.error(`[engine] sites ${ctx}:`, err.message),
+  });
   await sitesStore.init();
   console.log(`[engine] pool controller ready; pool_mode brands: ${sitesStore.poolModeBrandCount()} (live)`);
 
