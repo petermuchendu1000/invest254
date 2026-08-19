@@ -20,6 +20,12 @@
 alter table public.wallets add column if not exists demo_balance bigint not null default 0
   check (demo_balance >= 0);
 
+-- Allow the non-withdrawable 'demo' ledger kind — the money RPCs below write balance_kind='demo' for
+-- marketer/demo accounts; the pre-existing CHECK only allowed ('real','bonus'). Idempotent.
+alter table public.ledger_entries drop constraint if exists ledger_entries_balance_kind_check;
+alter table public.ledger_entries add constraint ledger_entries_balance_kind_check
+  check (balance_kind = any (array['real'::text, 'bonus'::text, 'demo'::text]));
+
 -- ── 2. Canonical "is this account a demo/marketer account?" — ONE definition, reused everywhere ─────
 -- A marketer account = a profile whose phone matches a `marketers` row (role-independent). We match on
 -- the SIGNIFICANT 9 digits (Kenyan MSISDN: 7XXXXXXXX / 1XXXXXXXX) after stripping non-digits, so every
