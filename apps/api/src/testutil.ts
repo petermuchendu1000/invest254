@@ -150,11 +150,17 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
     async statement(id: string, limit: number): Promise<MarketerLedgerRow[]> { return (ledgers.get(id) ?? []).slice().reverse().slice(0, limit); },
     async setPin(id: string, pin: string): Promise<void> { if (!/^\d{4,6}$/.test(pin)) throw new Error("INVALID_PIN"); if (!byId.has(id)) throw new Error("MARKETER_NOT_FOUND"); pins.set(id, pin); },
     async login(phone: string, pin: string, siteId?: string): Promise<string | null> {
-      // Brand-scoped: resolve the marketer within the login's site (defaulting to the default brand),
-      // mirroring fn_marketer_login(phone, pin, site_id). A shared phone across brands never leaks.
-      const id = byPhone.get(pkey(phone, siteId)); if (!id) return null;
-      const m = byId.get(id)!; if (!pins.has(id) || m.status !== "active") return null;
-      return pins.get(id) === pin ? id : null;
+      // Mirrors fn_marketer_login (0093): a phone is unique only within a brand, so match the PIN
+      // across every brand holding this phone (or scope to one brand when siteId is given). The PIN
+      // — not a client-supplied brand — identifies the marketer, so a shared phone never leaks.
+      const candidates = [...byId.values()]
+        .filter((m) => m.phone === phone && (siteId == null || m.site_id === siteId))
+        .sort((a, b) => a.created_at.localeCompare(b.created_at));
+      for (const m of candidates) {
+        if (m.status !== "active") continue;
+        if (pins.get(m.id) === pin) return m.id;
+      }
+      return null;
     },
     async changePin(id: string, currentPin: string, newPin: string): Promise<void> {
       if (!/^\d{4,6}$/.test(newPin)) throw new Error("INVALID_PIN");

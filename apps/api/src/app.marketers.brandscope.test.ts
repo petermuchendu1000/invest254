@@ -1,17 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startTestApi, TEST_ADMIN, type TestApi } from "./testutil.js";
+import { startTestApi, TEST_ADMIN, SITE_A, SITE_B, type TestApi } from "./testutil.js";
 
 /**
- * Regression: marketer login must be BRAND-scoped.
+ * Regression: a marketer must sign in with ONLY phone + PIN/password — no brand hint.
  *
- * Reproduces the production "Patricia Muthoni cannot log in" bug. A marketer phone is unique only
- * WITHIN a brand, so two brands can each own an active marketer with the same number. Before the
- * fix the login ignored the brand entirely and defaulted to the default site, so it authenticated
- * against whichever marketer sat on the default brand — a marketer on any other brand (Patricia,
- * brand "brandb") could never sign in as themselves, and their PIN was checked against the wrong
- * account. These tests pin the corrected behaviour: the login resolves the marketer within the
- * brand named on the request (`site`), and never leaks across brands.
+ * The marketer apps (mpesa_2, truecaller) are a single generic build that cannot know which brand a
+ * marketer belongs to; the sign-in screen collects only phone + secret. A marketer phone is unique
+ * only WITHIN a brand, so two brands can each own an active marketer on the same number (the real
+ * "0706597235" is on both the default brand and "33 Traders"). Before the fix the login ignored the
+ * credential and fell back to the default brand, authenticating the wrong marketer — so a marketer
+ * on any other brand ("Patricia Muthoni") could never sign in. These tests pin the corrected
+ * behaviour: the CREDENTIAL (PIN for /login, password for /login-web) identifies which brand's
+ * marketer is signing in, with the client sending no `site`.
  */
 
 const json = (res: Response): Promise<any> => res.json() as Promise<any>;
@@ -23,8 +24,8 @@ function req(api: TestApi, method: string, path: string, body?: unknown, token?:
   return fetch(`${api.baseUrl}${path}`, init);
 }
 
-const ADMIN_DEFAULT = `${TEST_ADMIN}:admin`;                                              // default brand
-const ADMIN_BRANDB = `${TEST_ADMIN}:admin:22222222-2222-2222-2222-222222222222`;          // brand "brandb"
+const ADMIN_DEFAULT = `${TEST_ADMIN}:admin:${SITE_A}`;   // default brand (slug "invest254")
+const ADMIN_BRANDB = `${TEST_ADMIN}:admin:${SITE_B}`;    // brand "brandb"
 
 /** Create a marketer on the admin token's brand + set its PIN; return the marketer id. */
 async function onboard(api: TestApi, adminToken: string, name: string, phone: string, pin: string): Promise<string> {
@@ -32,52 +33,57 @@ async function onboard(api: TestApi, adminToken: string, name: string, phone: st
   assert.equal((await req(api, "POST", `/api/v1/admin/marketers/${id}/pin`, { pin }, adminToken)).status, 200, "set pin");
   return id;
 }
+/** Register a website account (phone + password) on a brand named by slug. */
+async function register(api: TestApi, phone: string, username: string, password: string, siteSlug: string): Promise<void> {
+  const res = await req(api, "POST", "/api/v1/auth/register", { phone, username, password, site: siteSlug });
+  assert.equal(res.status, 201, `register ${username}`);
+}
 
 const PHONE = "0706597235"; // the colliding number owned on BOTH brands
 
-test("PIN login resolves the marketer in the request's brand, not the default brand", async () => {
+test("PIN login (no brand hint) resolves the marketer by matching the PIN across brands", async () => {
   const api = await startTestApi();
   try {
-    const gritel = await onboard(api, ADMIN_DEFAULT, "gritel", PHONE, "1111");           // default brand
+    const gritel = await onboard(api, ADMIN_DEFAULT, "gritel", PHONE, "1111");            // default brand
     const patricia = await onboard(api, ADMIN_BRANDB, "Patricia Muthoni", PHONE, "2222"); // brand "brandb"
-    assert.notEqual(gritel, patricia, "two distinct marketers share the phone across brands");
+    assert.notEqual(gritel, patricia);
 
-    // Patricia signs in on HER brand with HER PIN -> resolves Patricia (not gritel).
-    const ok = await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "2222", site: "brandb" });
-    assert.equal(ok.status, 200, "brand-scoped login succeeds");
-    assert.equal((await json(ok)).marketer.id, patricia, "resolved the brand-B marketer");
+    // Patricia signs in with HER PIN and NO site -> the PIN picks her (brand B), not gritel.
+    const ok = await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "2222" });
+    assert.equal(ok.status, 200);
+    assert.equal((await json(ok)).marketer.id, patricia);
 
-    // gritel signs in on the default brand with gritel's PIN -> resolves gritel.
-    const okA = await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "1111", site: "invest254" });
+    // gritel's PIN (no site) picks gritel (default brand).
+    const okA = await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "1111" });
     assert.equal(okA.status, 200);
-    assert.equal((await json(okA)).marketer.id, gritel, "resolved the default-brand marketer");
+    assert.equal((await json(okA)).marketer.id, gritel);
+
+    // A PIN that matches neither -> generic 401.
+    assert.equal((await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "9999" })).status, 401);
   } finally { await api.close(); }
 });
 
-test("a marketer's PIN is never accepted against the same phone on another brand", async () => {
+test("login-web (no brand hint) resolves the marketer by matching the PASSWORD across brands", async () => {
   const api = await startTestApi();
   try {
-    await onboard(api, ADMIN_DEFAULT, "gritel", PHONE, "1111");            // default brand, PIN 1111
-    await onboard(api, ADMIN_BRANDB, "Patricia Muthoni", PHONE, "2222");   // brand "brandb", PIN 2222
-
-    // Patricia's PIN must NOT authenticate against the default brand's marketer.
-    assert.equal((await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "2222", site: "invest254" })).status, 401);
-    // gritel's PIN must NOT authenticate against Patricia's brand.
-    assert.equal((await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "1111", site: "brandb" })).status, 401);
-  } finally { await api.close(); }
-});
-
-test("no-brand login keeps the legacy default-brand behaviour (single-tenant callers)", async () => {
-  const api = await startTestApi();
-  try {
+    // Website accounts: same phone on two brands, DIFFERENT passwords.
+    await register(api, PHONE, "gritel254", "AlphaPass1", "invest254"); // default brand
+    await register(api, PHONE, "muthoni", "BravoPass2", "brandb");      // brand "brandb"
+    // Matching marketer wallets on each brand.
     const gritel = await onboard(api, ADMIN_DEFAULT, "gritel", PHONE, "1111");
-    await onboard(api, ADMIN_BRANDB, "Patricia Muthoni", PHONE, "2222");
+    const patricia = await onboard(api, ADMIN_BRANDB, "Patricia Muthoni", PHONE, "2222");
 
-    // With no `site` hint we fall back to the default brand -> only gritel's PIN works there.
-    const res = await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "1111" });
-    assert.equal(res.status, 200);
-    assert.equal((await json(res)).marketer.id, gritel);
-    // Patricia's PIN (brand B) does not work without naming her brand.
-    assert.equal((await req(api, "POST", "/api/v1/marketers/auth/login", { phone: PHONE, pin: "2222" })).status, 401);
+    // Patricia's password (no site) -> resolves brand B's marketer.
+    const okB = await req(api, "POST", "/api/v1/marketers/auth/login-web", { phone: PHONE, password: "BravoPass2" });
+    assert.equal(okB.status, 200);
+    assert.equal((await json(okB)).marketer.id, patricia);
+
+    // The default-brand account's password (no site) -> resolves the default-brand marketer.
+    const okA = await req(api, "POST", "/api/v1/marketers/auth/login-web", { phone: PHONE, password: "AlphaPass1" });
+    assert.equal(okA.status, 200);
+    assert.equal((await json(okA)).marketer.id, gritel);
+
+    // Wrong password -> generic 401 (no enumeration).
+    assert.equal((await req(api, "POST", "/api/v1/marketers/auth/login-web", { phone: PHONE, password: "WrongPass9" })).status, 401);
   } finally { await api.close(); }
 });
