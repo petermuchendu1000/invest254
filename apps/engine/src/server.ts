@@ -45,6 +45,8 @@ let masterSeedFor: ((siteId: string) => string | undefined) | undefined;
 // docs/25: pool controller (shared; site passed per-call) + per-brand pool_mode flag. Only in DB mode.
 let poolController: PoolController | undefined;
 const poolModeBySite = new Map<string, boolean>();
+// docs/25 + migration 0084: canonical marketer/demo classifier, shared by pool exemption + money routing.
+let loadIsMarketer: ((userId: string) => Promise<boolean>) | undefined;
 /** host/slug/id -> siteId resolution table, seeded at boot from `sites`. */
 const siteAliases = new Map<string, string>();
 /** Opens a dedicated LISTEN connection (session pooler) for the platform live deposit feed. */
@@ -81,6 +83,26 @@ if (usingDb) {
   masterSeedFor = (siteId) => masterRefBySite.get(siteId);
   poolController = new PoolController(new PgPoolRepo(q));
   console.log(`[engine] pool controller ready; pool_mode brands: ${[...poolModeBySite.keys()].length}`);
+
+  // Canonical "is this a demo/marketer account?" (migration 0084: fn_is_marketer_account). One source
+  // of truth for the pool exemption AND the money layer's demo routing, so they can never diverge. A
+  // short TTL cache keeps it off the trade hot path (marketer status changes rarely).
+  const marketerCache = new Map<string, { v: boolean; exp: number }>();
+  loadIsMarketer = async (userId: string): Promise<boolean> => {
+    const now = Date.now();
+    const hit = marketerCache.get(userId);
+    if (hit && hit.exp > now) return hit.v;
+    try {
+      const r = await q.query("select fn_is_marketer_account($1) as m", [userId]);
+      const v = r.rows[0]?.m === true;
+      marketerCache.set(userId, { v, exp: now + 60_000 });
+      return v;
+    } catch {
+      // On a lookup failure, DON'T treat a real player as a marketer (fail toward the real path, which
+      // the DB RPC still guards); and don't cache the miss.
+      return hit?.v ?? false;
+    }
+  };
 
   // Each brand gets its own live store: LISTEN site_game_config_changed (filtered to the brand's
   // payload) + a poll fallback, with historical versions resolved from site_game_config_versions.
@@ -133,6 +155,7 @@ const registry = new SiteRegistry({
   ...(masterSeedFor ? { masterSeedFor } : {}),
   ...(overridesRepo ? { loadOverride: (uid: string) => overridesRepo!.getForUser(uid) } : {}),
   ...(poolController ? { poolController, poolModeFor: (siteId: string) => poolModeBySite.get(siteId) === true } : {}),
+  ...(loadIsMarketer ? { loadIsMarketer } : {}),
 });
 
 // Deterministic crash recovery across every brand with open positions, before accepting traffic.
