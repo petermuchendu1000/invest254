@@ -5,8 +5,8 @@
 --   1. Override win-rate guard — 0074 blocked only a favourable per-user house_edge; a favourable
 --      per-user WIN_RATE (above the site target) is still an arbitrary per-user win-frequency lever
 --      (the fairness/regulatory anti-pattern that produced the ~90% cohort win-rates). Reject it.
---   2. Config-change rate limit — operators thrashed site_game_config (30 versions on invest254 in a
---      day). Cap changes per rolling 24h per brand at the un-bypassable versions-insert chokepoint.
+--   2. Config-change rate limit — operators thrashed site_game_config (bursts of swings in minutes).
+--      Cap changes per rolling HOUR per brand at the un-bypassable versions-insert chokepoint.
 --   3. Version immutability — 1,606/3,785 settled positions (42%) referenced a PRUNED
 --      site_game_config_versions row, so their outcome can't be recomputed/verified/recovered. Make
 --      the versions table append-only (no UPDATE/DELETE) so provenance can never be destroyed again.
@@ -79,16 +79,17 @@ end;
 $function$;
 
 -- ── 2. Config-change rate limit (per brand, rolling 24h) at the versions-insert chokepoint ──────────
--- MAX_CONFIG_CHANGES_PER_DAY is intentionally generous (2x normal tuning) to curb thrash without
--- blocking legitimate work. Superadmin can still edit; this only stops runaway churn.
+-- MAX_CONFIG_CHANGES_PER_HOUR curbs runaway BURST thrash (the real failure mode: many swings in
+-- minutes) without freezing deliberate, spaced tuning — a rolling-24h cap would have frozen config for
+-- ~17h after the historical thrash. Superadmin can still edit; this only stops rapid churn.
 create or replace function public.fn_guard_config_change_rate()
 returns trigger language plpgsql set search_path = public as $fn$
-declare v_recent int; v_cap constant int := 12;
+declare v_recent int; v_cap constant int := 6;
 begin
   select count(*) into v_recent from public.site_game_config_versions
-   where site_id = NEW.site_id and created_at > now() - interval '24 hours';
+   where site_id = NEW.site_id and created_at > now() - interval '1 hour';
   if v_recent >= v_cap then
-    raise exception 'CONFIG_CHANGE_RATE_LIMIT: % changes in the last 24h for this brand (cap %). Slow down / review before more economy edits.', v_recent, v_cap;
+    raise exception 'CONFIG_CHANGE_RATE_LIMIT: % economy changes in the last hour for this brand (cap %). Slow down / review before more edits.', v_recent, v_cap;
   end if;
   return NEW;
 end $fn$;
