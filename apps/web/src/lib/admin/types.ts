@@ -64,6 +64,10 @@ export interface AdminUserRow {
   createdAtMs: number;
   realBalanceCents: Cents;
   bonusBalanceCents: Cents;
+  /** Non-withdrawable demo bucket (migration 0084); non-zero only for marketer/demo accounts. */
+  demoBalanceCents: Cents;
+  /** True when this is a demo/marketer account (plays on demo_balance; excluded from real cash). */
+  isMarketer: boolean;
   depositsCents: Cents;
   withdrawalsCents: Cents;
   netDepositsCents: Cents;

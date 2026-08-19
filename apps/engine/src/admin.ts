@@ -37,6 +37,10 @@ export interface AdminOverview {
 export interface AdminUserRow {
   userId: string; username: string; phone: string; role: string; status: string; createdAtMs: number;
   realBalanceCents: Cents; bonusBalanceCents: Cents;
+  /** Non-withdrawable demo bucket (migration 0084). Non-zero only for marketer/demo accounts. */
+  demoBalanceCents: Cents;
+  /** True when this is a demo/marketer account (plays on demo_balance; excluded from real cash). */
+  isMarketer: boolean;
   depositsCents: Cents; withdrawalsCents: Cents; netDepositsCents: Cents;
   lastFundedCents: Cents | null;
   turnoverCents: Cents; ggrCents: Cents; betCount: number;
@@ -631,6 +635,8 @@ export class PgAdminRepository implements AdminRepository {
       `select p.id, p.username, p.phone, p.role, p.status, p.referred_by, p.created_at,
               coalesce(w.real_balance,0)  as real_balance,
               coalesce(w.bonus_balance,0) as bonus_balance,
+              coalesce(w.demo_balance,0)  as demo_balance,
+              fn_is_marketer_account(p.id) as is_marketer,
               coalesce(td.deposits,0)     as deposits,
               coalesce(tw.withdrawals,0)  as withdrawals,
               coalesce(po.turnover,0)     as turnover,
@@ -1254,6 +1260,8 @@ function mapUserRow(x: any): AdminUserRow {
     userId: String(x.id), username: String(x.username), phone: x.phone == null ? "" : String(x.phone),
     role: String(x.role), status: String(x.status), createdAtMs: ms(x.created_at),
     realBalanceCents: num(x.real_balance), bonusBalanceCents: num(x.bonus_balance),
+    demoBalanceCents: x.demo_balance == null ? 0 : num(x.demo_balance),
+    isMarketer: x.is_marketer === true,
     depositsCents: deposits, withdrawalsCents: withdrawals, netDepositsCents: deposits - withdrawals,
     lastFundedCents: x.last_funded == null ? null : num(x.last_funded),
     turnoverCents: num(x.turnover), ggrCents: num(x.ggr), betCount: num(x.bet_count),
@@ -1414,6 +1422,7 @@ export class InMemoryAdminRepository implements AdminRepository {
     return {
       userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status, createdAtMs: u.createdAtMs,
       realBalanceCents: await this.payments.getBalance(u.userId), bonusBalanceCents: this.bonusBal.get(u.userId) ?? 0,
+      demoBalanceCents: 0, isMarketer: false,   // in-memory harness has no demo bucket / marketers cohort
       depositsCents: deposits, withdrawalsCents: withdrawals, netDepositsCents: deposits - withdrawals,
       lastFundedCents: lastFundedTx ? lastFundedTx.amountCents : null,
       turnoverCents: turnover, ggrCents: ggr, betCount: plays.length,

@@ -43,8 +43,18 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
           />
 
           <Section title="Balances">
+            {q.data.isMarketer && (
+              <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                Demo / social-proof account — plays on a non-withdrawable <strong>demo balance</strong>; its
+                winnings are excluded from real cash (GGR/RTP) and can never be withdrawn to M-Pesa.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatCard label="Real balance" money={q.data.realBalanceCents} />
+              {q.data.isMarketer ? (
+                <StatCard label="Demo balance (non-withdrawable)" money={q.data.demoBalanceCents} />
+              ) : (
+                <StatCard label="Real balance" money={q.data.realBalanceCents} />
+              )}
               <StatCard label="Bonus balance" money={q.data.bonusBalanceCents} />
               <StatCard label="Turnover" money={q.data.turnoverCents} />
               <StatCard label="Net revenue (GGR)" money={q.data.ggrCents} tone={q.data.ggrCents >= 0 ? 'up' : 'down'} />
