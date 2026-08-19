@@ -6,6 +6,7 @@ import { GameServer } from "./game.js";
 import { SeedManager } from "./daycontext.js";
 import { RecoveryService } from "./recovery.js";
 import { StaticConfigProvider } from "./gameconfig.js";
+import { InMemoryUserOverridesRepository } from "./overrides.js";
 
 /**
  * Recovery faithfulness (audit rec #5 / docs/28 §4.4): a crash-recovered statistical WIN must settle
@@ -64,4 +65,41 @@ test("recovered statistical WIN reproduces the committed settleVariable multipli
   const balAfter = await repo.getBalance("u1");
   assert.equal(balAfter - balBefore, committedPayout,
     "recovery credits EXACTLY the committed (settleVariable) payout the player was shown");
+});
+
+test("recovered OVERRIDE win reproduces the committed per-user settleVariable payout", async () => {
+  // A per-user pricing override must recover under the SAME userSettlement + settleVariable draw.
+  const config = new StaticConfigProvider(cfg);
+  const repo = new InMemoryGameRepository();
+  repo.seed("ov1", 100_000_000);
+  const ovRepo = new InMemoryUserOverridesRepository();
+  // feasible pricing override: (1-0.05)/0.9 = 1.055 in (1, maxMultiplier]
+  ovRepo.set({ userId: "ov1", winRate: 0.9, houseEdge: 0.05, tradeDurationS: null, maxWinMultiplier: null, minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: 0 });
+  const loadOverride = (uid: string) => ovRepo.getForUser(uid);
+  const clock = { ms: 1_000 };
+  const seeds1 = new SeedManager(MASTER, config, repo, () => clock.ms, OPTS);
+  await seeds1.init();
+  const game1 = new GameServer(() => seeds1.getActive(), repo, () => cfg, () => clock.ms, loadOverride);
+
+  let winner: any = null;
+  for (let i = 0; i < 40 && !winner; i++) {
+    clock.ms = 1_000 + i * 60_000;
+    const { position } = await game1.openPosition({ userId: "ov1", stakeCents: 25000, direction: "buy" });
+    if (position.outcome.result === "win") { winner = position; break; }
+    clock.ms += (cfg.defaultDurationS + 1) * 1000; await game1.step();
+  }
+  assert.ok(winner, "expected an in-flight overridden winner");
+  const committedPayout = winner.outcome.payoutCents;
+
+  const balBefore = await repo.getBalance("ov1");
+  clock.ms = winner.expiresAtMs + 1;
+  const seeds2 = new SeedManager(MASTER, config, repo, () => clock.ms, OPTS);
+  await seeds2.init();
+  const game2 = new GameServer(() => seeds2.getActive(), repo, () => cfg, () => clock.ms, loadOverride);
+  // RecoveryService MUST receive the same override provider (param 5) to reprice identically.
+  const rec = new RecoveryService(repo, seeds2, game2, () => clock.ms, loadOverride);
+  const report = await rec.recover();
+  assert.equal(report.settled, 1);
+  assert.equal(await repo.getBalance("ov1") - balBefore, committedPayout,
+    "recovered override win matches the committed per-user settleVariable payout");
 });
