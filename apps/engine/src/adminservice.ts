@@ -9,6 +9,7 @@ import type {
   GameConfigRow, GameConfigPatch, RtpMonitor, RealCashRtp, ConfigChangeRow, AdminSeedRow, SeedRotateResult,
   WithdrawalPoolRow,
   MpesaConfigRow, MpesaConfigPatch, SetUserRoleResult, UpdateUserDetailsResult,
+  DeleteUserResult, RestoreUserResult,
   AdminPayoutRow, AdminPayoutListQuery, AdminChatModRow,
   AdminUserActivityRow, AdminUserActivityQuery,
 } from "./admin.js";
@@ -55,6 +56,16 @@ export class AdminService {
   /** Edit a user's phone/username (item 6). Guards + per-brand uniqueness live in the RPC/mirror. */
   updateUserDetails(actorId: string, actorRole: string, targetId: string, phone: string | null, username: string | null): Promise<UpdateUserDetailsResult> {
     return this.repo.updateUserDetails(actorId, actorRole, targetId, phone, username);
+  }
+
+  /** Recoverable soft-delete (item 1): guards/audit live in the repo/RPC. */
+  deleteUser(actorId: string, actorRole: string, targetId: string, reason: string | null): Promise<DeleteUserResult> {
+    return this.repo.deleteUser(actorId, actorRole, targetId, reason);
+  }
+
+  /** Undo a soft-delete: reverts prior status + clears delete markers. */
+  restoreUser(actorId: string, actorRole: string, targetId: string): Promise<RestoreUserResult> {
+    return this.repo.restoreUser(actorId, actorRole, targetId);
   }
 
   listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>> { return this.repo.listWithdrawals(q); }

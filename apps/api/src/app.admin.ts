@@ -260,6 +260,8 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
       // Admin site scope: a token minted for a site operator carries a `site` claim -> only that
       // brand's users; a platform admin token has no claim -> all brands (docs/22 Task E/H).
       siteId: ctx.claims?.site,
+      // Include soft-deleted users (opt-in) so they can be found and restored.
+      includeDeleted: ctx.query.get("includeDeleted") === "true",
     };
     return deps.admin.listUsers(q);
   });
@@ -331,6 +333,44 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     if (phone === null && username === null) throw new ApiError("VALIDATION", "provide phone and/or username", 400);
     await ensureUserInScope(deps, ctx, ctx.params.id!);
     return domain(() => deps.admin.updateUserDetails(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, phone, username));
+  });
+
+  // Recoverable soft-delete (item 1): blocks login + money (via the existing status gates) while
+  // preserving all history for restore. Brand-scoped; a plain admin may not delete another admin.
+  router.post(`${BASE}/admin/users/:id/delete`, auth, admin, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const reason = typeof body.reason === "string" ? body.reason : null;
+    const targetId = ctx.params.id!;
+    await ensureUserInScope(deps, ctx, targetId);
+    const result = await domain(() => deps.admin.deleteUser(ctx.claims!.userId, ctx.claims!.role ?? "player", targetId, reason));
+    // Best-effort: raise a blocking account-limited banner (never fail the delete on a notify hiccup).
+    try {
+      await deps.notifications.resolveByCategory(targetId, "account_limited");
+      await deps.notifications.create({
+        userId: targetId, level: "error", dismissible: false, category: "account_limited",
+        title: "Your account has been closed",
+        body: reason && reason.trim() !== "" ? `Reason: ${reason.trim()}. Contact support if you believe this is a mistake.`
+                                             : "Contact support if you believe this is a mistake.",
+        createdBy: ctx.claims!.userId,
+      });
+    } catch { /* non-fatal: the delete already succeeded */ }
+    return result;
+  });
+
+  // Restore a soft-deleted user: reverts to the pre-delete status and clears the delete markers.
+  router.post(`${BASE}/admin/users/:id/restore`, auth, admin, async (ctx: Ctx) => {
+    const targetId = ctx.params.id!;
+    await ensureUserInScope(deps, ctx, targetId);
+    const result = await domain(() => deps.admin.restoreUser(ctx.claims!.userId, ctx.claims!.role ?? "player", targetId));
+    try {
+      await deps.notifications.resolveByCategory(targetId, "account_limited");
+      await deps.notifications.create({
+        userId: targetId, level: "success", dismissible: true, category: "account_reactivated",
+        title: "Your account has been restored", body: "Welcome back — full access is restored.",
+        createdBy: ctx.claims!.userId,
+      });
+    } catch { /* non-fatal */ }
+    return result;
   });
 
   router.patch(`${BASE}/admin/affiliates/:id/rate`, auth, admin, async (ctx: Ctx) => {

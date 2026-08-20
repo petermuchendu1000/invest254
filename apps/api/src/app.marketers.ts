@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, rateLimit, adminScopeSite, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, rateLimit, adminScopeSite, assertTargetSiteInScope, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
 
@@ -99,6 +99,8 @@ export interface MarketerRepo {
   create(name: string, phone: string, siteId?: string): Promise<MarketerRow>;
   /** Admin edit of an existing marketer's name and/or phone (per-brand phone unique). */
   update(id: string, name: string | null, phone: string | null): Promise<MarketerRow>;
+  /** Move a marketer to another brand (site). Phone must be free on the destination. */
+  setSite(id: string, siteId: string): Promise<MarketerRow>;
   /** List marketers. `siteId` scopes to one brand (undefined => all brands, for platform admins). */
   list(limit: number, siteId?: string): Promise<MarketerProfile[]>;
   profile(id: string): Promise<MarketerProfile | null>;
@@ -121,6 +123,7 @@ export interface MarketerRepo {
 const MARKETER_STATUS: Readonly<Record<string, number>> = {
   MARKETER_NOT_FOUND: 404,
   MARKETER_NOT_ACTIVE: 409,
+  SITE_NOT_FOUND: 404,
   INSUFFICIENT_FUNDS: 409,
   AMOUNT_MUST_BE_POSITIVE: 400,
   AMOUNT_MUST_BE_NONNEGATIVE: 400,
@@ -255,6 +258,17 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const phone = typeof b.phone === "string" ? b.phone : null;
     if (name === null && phone === null) throw new ApiError("VALIDATION", "name and/or phone is required", 400);
     return domain(() => deps.marketers.update(idOf(ctx), name, phone));
+  });
+
+  // Assign / move a marketer to a specific brand (item 1a). The DESTINATION site must be within the
+  // caller's scope: a brand-scoped admin can only pull a marketer into their own brand; a platform
+  // admin (no site claim) may move freely. Phone-uniqueness on the destination is enforced by the RPC.
+  router.patch(`${BASE}/admin/marketers/:id/site`, auth, admin, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const siteId = typeof b.siteId === "string" ? b.siteId.trim() : "";
+    if (!siteId) throw new ApiError("VALIDATION", "siteId is required", 400);
+    assertTargetSiteInScope(ctx, siteId);
+    return domain(() => deps.marketers.setSite(idOf(ctx), siteId));
   });
 
   // List marketer profiles (incl. derived first_name + initials and balances).

@@ -115,8 +115,21 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
       m.updated_at = now();
       return { id: m.id, name: m.name, phone: m.phone, status: m.status, created_at: m.created_at, updated_at: m.updated_at };
     },
-    async list(limit: number): Promise<MarketerProfile[]> {
-      return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit).map(profileOf);
+    async setSite(id: string, siteId: string): Promise<MarketerRow> {
+      const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
+      if (m.site_id === siteId) return { id: m.id, name: m.name, phone: m.phone, status: m.status, created_at: m.created_at, updated_at: m.updated_at };
+      const other = byPhone.get(pkey(m.phone, siteId));
+      if (other && other !== id) throw new Error("PHONE_TAKEN");   // phone must be free on the destination brand
+      byPhone.delete(pkey(m.phone, m.site_id));
+      m.site_id = siteId;
+      byPhone.set(pkey(m.phone, siteId), id);
+      m.updated_at = now();
+      return { id: m.id, name: m.name, phone: m.phone, status: m.status, created_at: m.created_at, updated_at: m.updated_at };
+    },
+    async list(limit: number, siteId?: string): Promise<MarketerProfile[]> {
+      return [...byId.values()]
+        .filter((m) => !siteId || m.site_id === siteId)   // site-scoped, mirroring the Pg query's WHERE
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit).map(profileOf);
     },
     async profile(id: string): Promise<MarketerProfile | null> { const m = byId.get(id); return m ? profileOf(m) : null; },
     async profileByPhone(phone: string, siteId?: string): Promise<MarketerProfile | null> {

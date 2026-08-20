@@ -46,6 +46,8 @@ export interface AdminUserRow {
   turnoverCents: Cents; ggrCents: Cents; betCount: number;
   lastTxAtMs: number | null; lastTxKind: string | null; lastTxAmountCents: Cents | null; lastTxStatus: string | null;
   lastActiveAtMs: number | null;
+  /** Soft-delete timestamp (migration 0096); null = active. Deleted users are hidden by default. */
+  deletedAtMs: number | null;
 }
 export interface AdminUserDetail extends AdminUserRow {
   referredBy: string | null;
@@ -94,12 +96,17 @@ export interface AdminUserListQuery extends PageQuery {
   minTurnoverCents?: number | undefined; minBets?: number | undefined;
   // Admin site scope (docs/22 Task E/H): filter to one brand. Undefined = platform-wide (all brands).
   siteId?: string | undefined;
+  /** Include soft-deleted users (migration 0096). Default false => deleted users are hidden. */
+  includeDeleted?: boolean | undefined;
 }
 export interface AdminWithdrawalListQuery extends PageQuery { status?: string | undefined; siteId?: string | undefined; }
 export interface SetUserStatusResult { userId: string; status: string; }
 export interface SetCommissionRateResult { userId: string; commissionRate: number; }
 export interface SetUserRoleResult { userId: string; role: string; }
 export interface UpdateUserDetailsResult { userId: string; phone: string; username: string; }
+/** Result of a recoverable soft-delete / restore (migration 0096). */
+export interface DeleteUserResult { userId: string; status: string; deletedAtMs: number | null; }
+export interface RestoreUserResult { userId: string; status: string; }
 /** Result of a manual wallet balance adjustment (J3). */
 export interface AdjustBalanceResult { userId: string; amountCents: Cents; newBalanceCents: Cents; direction: "credit" | "debit"; }
 /** Result of resetting a wallet to the user's last funded (most recent successful deposit) amount. */
@@ -295,6 +302,10 @@ export interface AdminRepository {
   setUserRole(actorId: string, actorRole: string, targetId: string, role: string): Promise<SetUserRoleResult>;
   /** Edit a user's phone/username (item 6). Admin+ (a plain admin may not edit an admin). Per-brand unique. */
   updateUserDetails(actorId: string, actorRole: string, targetId: string, phone: string | null, username: string | null): Promise<UpdateUserDetailsResult>;
+  /** Recoverable soft-delete (item 1): blocks login + money via existing gates; preserves all data. */
+  deleteUser(actorId: string, actorRole: string, targetId: string, reason: string | null): Promise<DeleteUserResult>;
+  /** Undo a soft-delete: reverts to the pre-delete status and clears the delete markers. */
+  restoreUser(actorId: string, actorRole: string, targetId: string): Promise<RestoreUserResult>;
   listWithdrawals(q: AdminWithdrawalListQuery): Promise<Page<AdminWithdrawalRow>>;
   /** Unified deposits + withdrawals feed for the Finance transactions explorer (newest-first, keyset). */
   listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>>;
@@ -607,7 +618,7 @@ export class PgAdminRepository implements AdminRepository {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
-      `select p.id, p.username, p.phone, p.role, p.status, p.created_at,
+      `select p.id, p.username, p.phone, p.role, p.status, p.created_at, p.deleted_at,
               coalesce(w.real_balance,0)  as real_balance,
               coalesce(w.bonus_balance,0) as bonus_balance,
               coalesce(td.deposits,0)     as deposits,
@@ -637,17 +648,18 @@ export class PgAdminRepository implements AdminRepository {
           and ($10::bigint is null or coalesce(tw.withdrawals,0) >= $10)
           and ($11::bigint is null or coalesce(po.turnover,0)    >= $11)
           and ($12::bigint is null or coalesce(po.bet_count,0)   >= $12)
+          and ($14::boolean is true or p.deleted_at is null)
         order by p.created_at desc, p.id desc
         limit $6`,
       [q.role ?? null, q.status ?? null, q.q ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1,
-       q.minBalanceCents ?? null, q.maxBalanceCents ?? null, q.minDepositsCents ?? null, q.minWithdrawalsCents ?? null, q.minTurnoverCents ?? null, q.minBets ?? null, q.siteId ?? null]);
+       q.minBalanceCents ?? null, q.maxBalanceCents ?? null, q.minDepositsCents ?? null, q.minWithdrawalsCents ?? null, q.minTurnoverCents ?? null, q.minBets ?? null, q.siteId ?? null, q.includeDeleted ?? false]);
     const rows: AdminUserRow[] = r.rows.map(mapUserRow);
     return pageFrom(rows, limit, (u) => `${u.createdAtMs}:${u.userId}`);
   }
 
   async getUserDetail(userId: string): Promise<AdminUserDetail | null> {
     const r = await this.q.query(
-      `select p.id, p.username, p.phone, p.role, p.status, p.referred_by, p.created_at,
+      `select p.id, p.username, p.phone, p.role, p.status, p.referred_by, p.created_at, p.deleted_at,
               coalesce(w.real_balance,0)  as real_balance,
               coalesce(w.bonus_balance,0) as bonus_balance,
               coalesce(w.demo_balance,0)  as demo_balance,
@@ -749,6 +761,23 @@ export class PgAdminRepository implements AdminRepository {
         [actorId, actorRole, targetId, phone ?? null, username ?? null]);
       const x = r.rows[0];
       return { userId: String(x.user_id), phone: String(x.phone), username: String(x.username) };
+    } catch (e) { mapAdminError(e); }
+  }
+
+  async deleteUser(actorId: string, actorRole: string, targetId: string, reason: string | null): Promise<DeleteUserResult> {
+    try {
+      const r = await this.q.query("select user_id, status, deleted_at from fn_admin_delete_user($1,$2,$3,$4)",
+        [actorId, actorRole, targetId, reason ?? null]);
+      const x = r.rows[0];
+      return { userId: String(x.user_id), status: String(x.status), deletedAtMs: x.deleted_at == null ? null : new Date(x.deleted_at).getTime() };
+    } catch (e) { mapAdminError(e); }
+  }
+
+  async restoreUser(actorId: string, actorRole: string, targetId: string): Promise<RestoreUserResult> {
+    try {
+      const r = await this.q.query("select user_id, status from fn_admin_restore_user($1,$2,$3)", [actorId, actorRole, targetId]);
+      const x = r.rows[0];
+      return { userId: String(x.user_id), status: String(x.status) };
     } catch (e) { mapAdminError(e); }
   }
 
@@ -1300,6 +1329,7 @@ function mapUserRow(x: any): AdminUserRow {
     lastTxAmountCents: x.last_tx_amount == null ? null : num(x.last_tx_amount),
     lastTxStatus: x.last_tx_status == null ? null : String(x.last_tx_status),
     lastActiveAtMs: lastActive > 0 ? lastActive : null,
+    deletedAtMs: x.deleted_at == null ? null : ms(x.deleted_at),
   };
 }
 
@@ -1437,6 +1467,9 @@ export class InMemoryAdminRepository implements AdminRepository {
     };
   }
 
+  /** In-memory soft-delete state (the identity fake has no deleted flag): userId -> {when, prior status}. */
+  private readonly deleted = new Map<string, { deletedAtMs: number; prevStatus: string }>();
+
   /** Build an enriched AdminUserRow from the in-memory stores (mirrors the Pg lateral aggregates). */
   private async memUserRow(u: { userId: string; username: string; phone: string; role: string; status: string; createdAtMs: number }): Promise<AdminUserRow> {
     const txs = this.payments.adminTransactions().filter((t) => t.userId === u.userId);
@@ -1459,6 +1492,7 @@ export class InMemoryAdminRepository implements AdminRepository {
       lastTxAtMs: last ? last.createdAtMs : null, lastTxKind: last ? last.kind : null,
       lastTxAmountCents: last ? last.amountCents : null, lastTxStatus: last ? last.status : null,
       lastActiveAtMs: last ? last.createdAtMs : null,
+      deletedAtMs: this.deleted.get(u.userId)?.deletedAtMs ?? null,
     };
   }
 
@@ -1476,7 +1510,8 @@ export class InMemoryAdminRepository implements AdminRepository {
       (q.minDepositsCents === undefined || r.depositsCents >= q.minDepositsCents) &&
       (q.minWithdrawalsCents === undefined || r.withdrawalsCents >= q.minWithdrawalsCents) &&
       (q.minTurnoverCents === undefined || r.turnoverCents >= q.minTurnoverCents) &&
-      (q.minBets === undefined || r.betCount >= q.minBets));
+      (q.minBets === undefined || r.betCount >= q.minBets) &&
+      (q.includeDeleted === true || !this.deleted.has(r.userId)));
     return memKeyset(rows, q);
   }
 
@@ -1577,6 +1612,37 @@ export class InMemoryAdminRepository implements AdminRepository {
     const after = this.identity.adminUser(targetId)!;
     this.record(actorId, actorRole, "user.update_details", "user", targetId, { phone: after.phone, username: after.username });
     return { userId: targetId, phone: after.phone, username: after.username };
+  }
+
+  async deleteUser(actorId: string, actorRole: string, targetId: string, reason: string | null): Promise<DeleteUserResult> {
+    if (!["admin", "superadmin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    if (actorId === targetId) throw new Error("NO_SELF_ACTION");
+    const u = this.identity.adminUser(targetId);
+    if (!u) throw new Error("USER_NOT_FOUND");
+    if (["superadmin", "platform_superadmin"].includes(u.role)) throw new Error("SUPERADMIN_PROTECTED");
+    if (u.role === "admin" && !["superadmin", "platform_superadmin"].includes(actorRole)) throw new Error("INSUFFICIENT_PRIVILEGE");
+    const existing = this.deleted.get(targetId);
+    if (existing) return { userId: targetId, status: u.status, deletedAtMs: existing.deletedAtMs };  // idempotent
+    const prevStatus = u.status;
+    const deletedAtMs = Date.now();
+    this.deleted.set(targetId, { deletedAtMs, prevStatus });
+    this.identity.adminSetStatus(targetId, "banned");   // immediate money/action lockout
+    this.record(actorId, actorRole, "user.delete", "user", targetId, { reason, prevStatus });
+    return { userId: targetId, status: "banned", deletedAtMs };
+  }
+
+  async restoreUser(actorId: string, actorRole: string, targetId: string): Promise<RestoreUserResult> {
+    if (!["admin", "superadmin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    const u = this.identity.adminUser(targetId);
+    if (!u) throw new Error("USER_NOT_FOUND");
+    if (["superadmin", "platform_superadmin"].includes(u.role)) throw new Error("SUPERADMIN_PROTECTED");
+    if (u.role === "admin" && !["superadmin", "platform_superadmin"].includes(actorRole)) throw new Error("INSUFFICIENT_PRIVILEGE");
+    const existing = this.deleted.get(targetId);
+    if (!existing) return { userId: targetId, status: u.status };  // idempotent
+    this.deleted.delete(targetId);
+    this.identity.adminSetStatus(targetId, existing.prevStatus);
+    this.record(actorId, actorRole, "user.restore", "user", targetId, { restoredStatus: existing.prevStatus });
+    return { userId: targetId, status: existing.prevStatus };
   }
 
   async setCommissionRate(actorId: string, actorRole: string, targetId: string, rate: number): Promise<SetCommissionRateResult> {

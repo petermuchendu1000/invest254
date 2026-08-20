@@ -326,7 +326,8 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
     const r = await this.q.query(
       `select p.id, p.role, p.status, p.site_id, c.password_hash
          from profiles p join user_credentials c on c.user_id = p.id
-        where p.phone = $1 and ($2::uuid is null or p.site_id = $2)`, [phone, siteId ?? null]);
+        where p.phone = $1 and ($2::uuid is null or p.site_id = $2)
+          and p.deleted_at is null`, [phone, siteId ?? null]);
     if (!r.rows.length) return null;
     const x = r.rows[0];
     return { userId: String(x.id), role: String(x.role), status: String(x.status), siteId: x.site_id == null ? null : String(x.site_id), passwordHash: String(x.password_hash) };
@@ -338,6 +339,7 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
       `select p.id, p.role, p.status, p.site_id, c.password_hash
          from profiles p join user_credentials c on c.user_id = p.id
         where p.phone = $1
+          and p.deleted_at is null
         order by p.created_at asc, p.id asc`, [phone]);
     return r.rows.map((x: Record<string, unknown>) => ({
       userId: String(x.id), role: String(x.role), status: String(x.status),
