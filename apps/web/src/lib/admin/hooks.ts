@@ -44,6 +44,7 @@ export interface UsersFilter {
   minWithdrawalsCents?: number;
   minTurnoverCents?: number;
   minBets?: number;
+  includeDeleted?: boolean;
 }
 export function useUsers(filter: UsersFilter) {
   const t = useTok();
@@ -108,6 +109,38 @@ export function useUpdateUserDetails() {
       void qc.invalidateQueries({ queryKey: ['admin', 'user', v.id] });
       void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
     },
+  });
+}
+export function useDeleteUser() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; reason?: string }) => adminApi.deleteUser(t, v.id, v.reason),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'user', v.id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+export function useRestoreUser() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string }) => adminApi.restoreUser(t, v.id),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'user', v.id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+export function useMoveMarketer() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; siteId: string }) => adminApi.moveMarketerToSite(t, v.id, v.siteId),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] }); },
   });
 }
 export function useAdjustBalance() {

@@ -41,6 +41,7 @@ export default function UsersPage() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [showAdv, setShowAdv] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const [minBal, setMinBal] = useState('');
   const [maxBal, setMaxBal] = useState('');
@@ -65,10 +66,11 @@ export default function UsersPage() {
       const mw = kesToCents(minWd); if (mw !== undefined) next.minWithdrawalsCents = mw;
       const mt = kesToCents(minTurn); if (mt !== undefined) next.minTurnoverCents = mt;
       const mbet = intOrU(minBets); if (mbet !== undefined) next.minBets = mbet;
+      if (showDeleted) next.includeDeleted = true;
       setApplied(next);
     }, 350);
     return () => clearTimeout(id);
-  }, [role, status, search, minBal, maxBal, minDep, minWd, minTurn, minBets]);
+  }, [role, status, search, minBal, maxBal, minDep, minWd, minTurn, minBets, showDeleted]);
 
   const query = useUsers(applied);
   const overview = useOverview();
@@ -135,6 +137,9 @@ export default function UsersPage() {
           {advCount > 0 ? (
             <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">{advCount}</span>
           ) : null}
+        </Button>
+        <Button variant={showDeleted ? 'primary' : 'outline'} size="sm" onClick={() => setShowDeleted((v) => !v)}>
+          {showDeleted ? 'Hiding deleted' : 'Show deleted'}
         </Button>
         {anyFilter ? <Button variant="ghost" size="sm" onClick={clearAll}>Clear</Button> : null}
       </Toolbar>
@@ -375,7 +380,7 @@ function UserRow({ r, selected, onToggle }: { r: AdminUserRow; selected: boolean
         </Link>
       </Td>
       <Td className="capitalize text-muted">{r.role}</Td>
-      <Td><StatusBadge status={r.status} /></Td>
+      <Td><StatusBadge status={r.status} />{r.deletedAtMs != null ? <span className="ml-1.5 inline-flex rounded-full bg-down/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-down">Deleted</span> : null}</Td>
       <Td className="text-right font-medium tabular-nums"><Money cents={r.realBalanceCents} /></Td>
       <Td className="text-right tabular-nums text-muted">{r.lastFundedCents != null ? <Money cents={r.lastFundedCents} /> : '—'}</Td>
       <Td className="text-right tabular-nums text-up"><Money cents={r.depositsCents} /></Td>

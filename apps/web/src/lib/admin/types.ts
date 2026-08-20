@@ -91,6 +91,8 @@ export interface AdminUserRow {
   lastTxAmountCents: Cents | null;
   lastTxStatus: string | null;
   lastActiveAtMs: number | null;
+  /** Soft-delete timestamp (null = active). Deleted users are hidden unless includeDeleted is set. */
+  deletedAtMs: number | null;
 }
 export interface AdminUserDetail extends AdminUserRow {
   referredBy: string | null;

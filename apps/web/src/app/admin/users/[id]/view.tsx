@@ -13,7 +13,7 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/auth/session';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
-import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useUpdateUserDetails, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig, useMarketerExpenses, useAddMarketerExpense } from '@/lib/admin/hooks';
+import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useUpdateUserDetails, useDeleteUser, useRestoreUser, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig, useMarketerExpenses, useAddMarketerExpense } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel, UserOverridePatch } from '@/lib/admin/types';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
@@ -103,6 +103,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <NotificationSend id={id} />
               {q.data.role === 'marketer' ? <CommissionRate id={id} /> : null}
               {q.data.role === 'marketer' ? <MarketerExpenses id={id} /> : null}
+              <DangerZone id={id} deletedAtMs={q.data.deletedAtMs} />
             </>
           )}
         </>
@@ -260,6 +261,67 @@ function StatusActions({ id, status }: { id: string; status: string }) {
           ) : null}
         </div>
         <p className="text-xs text-muted">Suspended or banned accounts can still sign in and deposit, but cannot open trades or withdraw. Banned is permanent. Every change is audited.</p>
+      </Card>
+    </Section>
+  );
+}
+
+/** Recoverable delete / restore (item 1). Delete locks the account (login + money) but preserves all
+ *  data; restore reverts it. Distinct from ban (which still allows login/deposit). */
+function DangerZone({ id, deletedAtMs }: { id: string; deletedAtMs: number | null }) {
+  const del = useDeleteUser();
+  const restore = useRestoreUser();
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const isDeleted = deletedAtMs != null;
+
+  return (
+    <Section title="Danger zone">
+      <Card className="flex flex-col gap-3 border-down/40">
+        {isDeleted ? (
+          <>
+            <span className="text-sm font-medium text-down">This account is deleted</span>
+            <span className="text-xs text-muted">Deleted {formatDateTime(deletedAtMs!)}. The user cannot sign in and all money/game actions are locked. Data is preserved and can be restored.</span>
+            <div className="flex flex-wrap gap-2">
+              <ConfirmButton
+                label="Restore account"
+                variant="primary"
+                busy={restore.isPending}
+                onConfirm={() =>
+                  restore.mutate({ id }, {
+                    onSuccess: () => toast.push({ tone: 'success', title: 'Account restored' }),
+                    onError: (e) => toast.push({ tone: 'error', title: 'Restore failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+                  })
+                }
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-sm font-medium text-fg">Delete account (recoverable)</span>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Reason (recorded in the audit log)"
+              className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
+            />
+            <div className="flex flex-wrap gap-2">
+              <ConfirmButton
+                label="Delete account"
+                variant="down"
+                confirmLabel="Delete account"
+                busy={del.isPending}
+                onConfirm={() =>
+                  del.mutate({ id, ...(reason.trim() ? { reason: reason.trim() } : {}) }, {
+                    onSuccess: () => { setReason(''); toast.push({ tone: 'success', title: 'Account deleted', description: 'It can be restored from this page.' }); },
+                    onError: (e) => toast.push({ tone: 'error', title: 'Delete failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
+                  })
+                }
+              />
+            </div>
+            <p className="text-xs text-muted">A soft delete: the user can no longer sign in and every money/game action is blocked, but nothing is erased — you can restore the account at any time. Audited.</p>
+          </>
+        )}
       </Card>
     </Section>
   );

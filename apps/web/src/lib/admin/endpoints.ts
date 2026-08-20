@@ -65,6 +65,7 @@ export const adminApi = {
       minWithdrawalsCents?: number | undefined;
       minTurnoverCents?: number | undefined;
       minBets?: number | undefined;
+      includeDeleted?: boolean | undefined;
     } = {},
   ) =>
     apiFetch<Paginated<AdminUserRow>>('/admin/users', {
@@ -81,6 +82,7 @@ export const adminApi = {
         minWithdrawalsCents: p.minWithdrawalsCents,
         minTurnoverCents: p.minTurnoverCents,
         minBets: p.minBets,
+        includeDeleted: p.includeDeleted ? 'true' : undefined,
       },
     }),
   user: (t: string, id: string) => apiFetch<AdminUserDetail>(`/admin/users/${id}`, { token: t }),
@@ -95,6 +97,12 @@ export const adminApi = {
     apiFetch<SetUserRoleResult>(`/admin/users/${id}/role`, { method: 'POST', token: t, body: { role } }),
   updateUserDetails: (t: string, id: string, body: { phone?: string; username?: string }) =>
     apiFetch<{ userId: string; phone: string; username: string }>(`/admin/users/${id}/details`, { method: 'POST', token: t, body }),
+  deleteUser: (t: string, id: string, reason?: string) =>
+    apiFetch<{ userId: string; status: string; deletedAtMs: number | null }>(`/admin/users/${id}/delete`, { method: 'POST', token: t, body: { reason } }),
+  restoreUser: (t: string, id: string) =>
+    apiFetch<{ userId: string; status: string }>(`/admin/users/${id}/restore`, { method: 'POST', token: t }),
+  moveMarketerToSite: (t: string, id: string, siteId: string) =>
+    apiFetch<{ id: string; name: string; phone: string; status: string }>(`/admin/marketers/${id}/site`, { method: 'PATCH', token: t, body: { siteId } }),
   adjustBalance: (t: string, id: string, amountCents: number, reason: string, kind?: 'real' | 'bonus') =>
     apiFetch<AdjustBalanceResult>(`/admin/wallets/${id}/adjust`, { method: 'POST', token: t, body: { amountCents, reason, kind } }),
   clearBalance: (t: string, id: string, kind: 'real' | 'bonus' | 'both', reason: string) =>
