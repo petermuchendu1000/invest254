@@ -290,6 +290,14 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return { marketers: groupMarketerRollup(rows), rows };
   });
 
+  // ── Task 4: comprehensive per-(marketer, site) earnings table for the platform console ──
+  // One row per marketer per site with clients, deposits, GGR, commission, payouts, expenses and
+  // the resulting balance due — every figure scoped to that site (see fn_platform_marketer_earnings).
+  router.get(`${BASE}/platform/marketers/earnings`, auth, platform, async (ctx: Ctx) => {
+    const rows = await domain(() => deps.platform.marketerEarnings(ctx.claims!.role ?? "player"));
+    return { rows };
+  });
+
   // Create a global marketer identity (a real person spanning brands).
   router.post(`${BASE}/platform/marketers`, auth, platform, async (ctx: Ctx) => {
     const body = asObject(ctx.body);

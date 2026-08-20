@@ -48,6 +48,18 @@ export interface MarketerRollupGroup {
   totals: { clients: number; ggrCents: number; commissionCents: number };
 }
 
+/** Task 4 — one comprehensive per-(marketer, site) earnings row (all figures site-scoped). */
+export interface MarketerEarningsRow {
+  marketerGlobalId: string | null; label: string | null;
+  affiliateUserId: string; username: string | null; phone: string | null;
+  siteId: string; siteSlug: string; siteName: string; siteStatus: string;
+  affiliateStatus: string; commissionRate: number;
+  totalClients: number; activeClients: number;
+  depositsCents: number; ggrCents: number; commissionCents: number;
+  paidCents: number; pendingCents: number; expensesCents: number; balanceDueCents: number;
+  firstReferralAt: string | null; lastCommissionPeriod: string | null;
+}
+
 /** Platform-superadmin API surface (docs/22 Task H + R). All calls require a platform_superadmin token. */
 export interface OnboardColors { primary?: string; bg?: string; accent?: string }
 export interface OnboardBody {
@@ -102,6 +114,8 @@ export const platformApi = {
     apiFetch<SiteRow>(`/platform/sites/${id}/theme`, { method: 'PATCH', token: t, body: { tokens } }),
   // Task R — cross-brand marketer rollup (reporting only).
   marketerRollup: (t: string) => apiFetch<{ marketers: MarketerRollupGroup[] }>('/platform/marketers/rollup', { token: t }),
+  // Task 4 — comprehensive per-(marketer, site) earnings table.
+  marketerEarnings: (t: string) => apiFetch<{ rows: MarketerEarningsRow[] }>('/platform/marketers/earnings', { token: t }),
   // Instant client onboarding (brand + economy + optional domain provisioning).
   onboard: (t: string, body: OnboardBody) => apiFetch<OnboardResult>('/platform/onboard', { method: 'POST', token: t, body }),
   domainStatus: (t: string, domain: string) => apiFetch<DomainStatus>('/platform/onboard/domain-status', { token: t, query: { domain } }),

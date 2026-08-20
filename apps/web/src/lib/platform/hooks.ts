@@ -65,6 +65,12 @@ export function usePlatformMarketerRollup() {
   return useQuery({ queryKey: ['platform', 'marketers'], queryFn: () => platformApi.marketerRollup(t), enabled: !!t });
 }
 
+/** Task 4 — comprehensive per-(marketer, site) earnings for the console table. */
+export function usePlatformMarketerEarnings() {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'marketer-earnings'], queryFn: () => platformApi.marketerEarnings(t), enabled: !!t });
+}
+
 /** Mint a brand-scoped superadmin token so the platform owner can enter a client's admin console. */
 export function useImpersonate() {
   const t = useTok();

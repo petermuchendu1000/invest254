@@ -59,6 +59,20 @@ export interface MarketerRollupRow {
   clients: number; ggrCents: number; commissionCents: number;
 }
 
+/** One comprehensive per-(marketer, site) earnings row for the platform console (Task 4).
+ *  Every money/count field is scoped to this affiliate's site. `balanceDueCents` = accrued
+ *  commission - paid - pending - expenses. Money is integer cents (KES). */
+export interface MarketerEarningsRow {
+  marketerGlobalId: string | null; label: string | null;
+  affiliateUserId: string; username: string | null; phone: string | null;
+  siteId: string; siteSlug: string; siteName: string; siteStatus: string;
+  affiliateStatus: string; commissionRate: number;
+  totalClients: number; activeClients: number;
+  depositsCents: number; ggrCents: number; commissionCents: number;
+  paidCents: number; pendingCents: number; expensesCents: number; balanceDueCents: number;
+  firstReferralAt: string | null; lastCommissionPeriod: string | null;
+}
+
 export interface PlatformRepository {
   listSites(): Promise<SiteWithConfig[]>;
   createSite(actorId: string, actorRole: string, input: CreateSiteInput): Promise<string>;
@@ -69,6 +83,8 @@ export interface PlatformRepository {
   performance(fromMs: number, toMs: number): Promise<SitePerformance[]>;
   // Task R — cross-brand marketer rollup (reporting only; money stays per site).
   marketerRollup(actorRole: string): Promise<MarketerRollupRow[]>;
+  /** Task 4 — comprehensive per-(marketer, site) earnings for the platform console. */
+  marketerEarnings(actorRole: string): Promise<MarketerEarningsRow[]>;
   createMarketerGlobal(actorId: string, actorRole: string, label: string): Promise<string>;
   linkMarketer(actorId: string, actorRole: string, affiliateUserId: string, globalId: string | null): Promise<void>;
   /** Persist a brand's full design-token palette (docs/22 Task G+). platform_superadmin-gated. */
@@ -219,6 +235,27 @@ export class PgPlatformRepository implements PlatformRepository {
       affiliateUserId: String(x.affiliate_user_id),
       siteId: String(x.site_id), siteSlug: String(x.site_slug), siteName: String(x.site_name),
       clients: num(x.clients), ggrCents: num(x.ggr_cents), commissionCents: num(x.commission_cents),
+    }));
+  }
+
+  async marketerEarnings(actorRole: string): Promise<MarketerEarningsRow[]> {
+    const r = await this.q.query("select * from fn_platform_marketer_earnings($1)", [actorRole]);
+    return r.rows.map((x: Record<string, unknown>) => ({
+      marketerGlobalId: x.marketer_global_id == null ? null : String(x.marketer_global_id),
+      label: x.label == null ? null : String(x.label),
+      affiliateUserId: String(x.affiliate_user_id),
+      username: x.username == null ? null : String(x.username),
+      phone: x.phone == null ? null : String(x.phone),
+      siteId: String(x.site_id), siteSlug: String(x.site_slug), siteName: String(x.site_name),
+      siteStatus: String(x.site_status),
+      affiliateStatus: String(x.affiliate_status),
+      commissionRate: Number(x.commission_rate),
+      totalClients: num(x.total_clients), activeClients: num(x.active_clients),
+      depositsCents: num(x.deposits_cents), ggrCents: num(x.ggr_cents), commissionCents: num(x.commission_cents),
+      paidCents: num(x.paid_cents), pendingCents: num(x.pending_cents), expensesCents: num(x.expenses_cents),
+      balanceDueCents: num(x.balance_due_cents),
+      firstReferralAt: x.first_referral_at == null ? null : new Date(x.first_referral_at as string).toISOString(),
+      lastCommissionPeriod: x.last_commission_period == null ? null : String(x.last_commission_period),
     }));
   }
 
@@ -406,6 +443,28 @@ export class InMemoryPlatformRepository implements PlatformRepository {
     });
   }
 
+  // In-memory earnings: fills identity/site + the rollup facts; the money-detail fields (rate, paid,
+  // pending, expenses, deposits, active) default to sensible values here — the DB e2e validates the
+  // real per-site aggregation. This exists so the API contract/gating tests exercise the route shape.
+  async marketerEarnings(actorRole: string): Promise<MarketerEarningsRow[]> {
+    this.gate(actorRole);
+    return this.marketers.map((m) => {
+      const site = this.sites.get(m.siteId);
+      return {
+        marketerGlobalId: m.marketerGlobalId,
+        label: m.marketerGlobalId ? (this.globals.get(m.marketerGlobalId)?.label ?? null) : null,
+        affiliateUserId: m.affiliateUserId, username: null, phone: null,
+        siteId: m.siteId, siteSlug: site?.slug ?? "", siteName: site?.name ?? "",
+        siteStatus: (site?.status as string) ?? "active",
+        affiliateStatus: "active", commissionRate: 0.20,
+        totalClients: m.clients, activeClients: m.clients,
+        depositsCents: 0, ggrCents: m.ggrCents, commissionCents: m.commissionCents,
+        paidCents: 0, pendingCents: 0, expensesCents: 0, balanceDueCents: m.commissionCents,
+        firstReferralAt: null, lastCommissionPeriod: null,
+      };
+    });
+  }
+
   async setSiteTheme(_actorId: string, actorRole: string, siteId: string, tokens: JsonPatch): Promise<SiteRow> {
     this.gate(actorRole);
     if (!tokens || typeof tokens !== "object") throw new Error("INVALID_PATCH");
@@ -489,6 +548,8 @@ export class PlatformService {
 
   // ── Task R: cross-brand marketer rollup (reporting only) ──
   marketerRollup(actorRole: string): Promise<MarketerRollupRow[]> { return this.repo.marketerRollup(actorRole); }
+  // ── Task 4: comprehensive per-(marketer, site) earnings ──
+  marketerEarnings(actorRole: string): Promise<MarketerEarningsRow[]> { return this.repo.marketerEarnings(actorRole); }
   createMarketerGlobal(actorId: string, actorRole: string, label: string): Promise<string> {
     if (typeof label !== "string" || !label.trim()) throw new Error("INVALID_LABEL");
     return this.repo.createMarketerGlobal(actorId, actorRole, label.trim());
