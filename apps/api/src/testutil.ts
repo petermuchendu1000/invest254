@@ -88,7 +88,7 @@ export function makeInMemoryMarketerRepo(): MarketerRepo {
   const parts = (n: string) => n.trim().split(/\s+/).filter(Boolean);
   const firstName = (n: string) => parts(n)[0] ?? "";
   const initials = (n: string) => { const p = parts(n); return p.length === 0 ? "" : p.length === 1 ? p[0]!.slice(0, 2).toUpperCase() : (p[0]![0]! + p[p.length - 1]![0]!).toUpperCase(); };
-  const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES" });
+  const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES", site_id: m.site_id });
   const push = (id: string, entry_type: string, amount_cents: number, balance_after_cents: number, ref: string | null, meta: unknown): number => {
     const row: MarketerLedgerRow = { id: ++lseq, entry_type, amount_cents, balance_after_cents, ref, meta: meta ?? {}, created_at: now() };
     (ledgers.get(id) ?? []).push(row);
@@ -351,6 +351,10 @@ export const TEST_BRANDS: Record<string, Brand> = {
 export function resolveTestBrand(hostOrSlug: string): Brand | null {
   const k = normalizeHost(hostOrSlug);
   if (!k) return null;
+  // Resolve by site id (UUID) too — mirrors the production brandByHost `lower(id::text)=$1` match,
+  // so brand-aware lookups keyed on a marketer's site_id resolve in tests exactly as in prod.
+  const raw = hostOrSlug.trim().toLowerCase();
+  for (const b of Object.values(TEST_BRANDS)) if (b.siteId.toLowerCase() === raw) return b;
   for (const b of Object.values(TEST_BRANDS)) if (b.slug === k) return b;
   for (const [host, b] of Object.entries(TEST_BRANDS)) if (normalizeHost(host) === k) return b;
   return null;

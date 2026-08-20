@@ -30,6 +30,8 @@ export interface MarketerProfile {
   phone: string; status: string;
   balance_cents: number; available_fuliza_cents: number; airtime_balance_cents: number;
   currency: string;
+  /** The brand (site) this marketer belongs to. Used to render brand-aware M-PESA text. */
+  site_id?: string;
 }
 export interface MarketerLedgerRow {
   id: number; entry_type: string; amount_cents: number; balance_after_cents: number;
@@ -57,8 +59,12 @@ export interface MarketerTxDto {
   mpesa: { code: string; party: string; amountText: string; message: string };
 }
 
-/** Map a raw ledger row to the app DTO, generating the M-PESA confirmation text. */
-export function ledgerToTxDto(r: MarketerLedgerRow): MarketerTxDto {
+/**
+ * Map a raw ledger row to the app DTO, generating the M-PESA confirmation text.
+ * `brandName` is the counterparty shown for game-withdrawal credits (the marketer's brand,
+ * e.g. "Madolar"); it defaults to "Invest254" for backward-compatibility when unresolved.
+ */
+export function ledgerToTxDto(r: MarketerLedgerRow, brandName = "Invest254"): MarketerTxDto {
   const createdAtMs = Number.isFinite(Date.parse(r.created_at)) ? Date.parse(r.created_at) : Date.now();
   const meta = (r.meta && typeof r.meta === "object" ? r.meta : {}) as Record<string, unknown>;
   const source = typeof meta.source === "string" ? meta.source : null;
@@ -66,7 +72,7 @@ export function ledgerToTxDto(r: MarketerLedgerRow): MarketerTxDto {
   // Counterparty on the confirmation. Game winnings paid instantly into the mpesa wallet read as
   // coming from the platform; otherwise honour an explicit meta.name, else the generic "M-PESA".
   const rawParty = source === "game_withdrawal"
-    ? "Invest254"
+    ? brandName
     : (typeof meta.name === "string" && meta.name.trim() ? meta.name.trim() : "M-PESA");
   const party = rawParty.toUpperCase();
   const code = mpesaCode(createdAtMs, r.id);
@@ -368,7 +374,13 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   // withdrawal lands in the wallet. The token subject IS the marketer id (see requireMarketer).
   router.get(`${BASE}/marketers/me/transactions`, auth, marketer, async (ctx: Ctx) => {
     const rows = await domain(() => deps.marketers.statement(ctx.claims!.userId, limitOf(ctx)));
-    return { items: rows.map(ledgerToTxDto) };
+    // Brand-aware M-PESA text: a game-withdrawal credit must read as coming from THIS marketer's
+    // brand (e.g. "from MADOLAR"), not a hard-coded "INVEST254". Resolve the brand ONCE per request
+    // from the marketer's site; fall back to the historical default when it can't be resolved.
+    const profile = marketerCtx.get(ctx);
+    const brand = profile?.site_id ? await deps.brandByHost(profile.site_id) : null;
+    const brandName = brand?.name ?? "Invest254";
+    return { items: rows.map((r) => ledgerToTxDto(r, brandName)) };
   });
 
   // Change own PIN (proves possession of the current PIN).

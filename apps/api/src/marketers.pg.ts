@@ -18,6 +18,8 @@ function toProfile(r: any): MarketerProfile {
     available_fuliza_cents: num(r.available_fuliza_cents),
     airtime_balance_cents: num(r.airtime_balance_cents),
     currency: r.currency,
+    // marketer_profiles view carries site_id (migration 0076); surface it for brand-aware M-PESA text.
+    site_id: r.site_id ?? undefined,
   };
 }
 

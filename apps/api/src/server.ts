@@ -313,6 +313,7 @@ async function buildDeps(): Promise<ApiDeps> {
            from sites
           where status = 'active'
             and (lower(slug) = $1
+                 or lower(id::text) = $1
                  or lower(primary_domain) = $1
                  or regexp_replace(lower(primary_domain), '^www\\.', '') = $1)
           limit 1`,
