@@ -5,6 +5,10 @@ import { ApiError } from '@/lib/api/client';
 import { useSession } from '@/lib/auth/session';
 import { roleFromToken } from '@/lib/auth/token';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { useWelcomeBonusFx } from '@/lib/game/welcomeBonusFx';
+
+/** 200 KES welcome bonus granted at registration (fn_register_user, migration 0095), in cents. */
+const WELCOME_BONUS_CENTS = 20000;
 
 export function useAuthActions() {
   const setToken = useSession((s) => s.setToken);
@@ -14,6 +18,7 @@ export function useAuthActions() {
   // carries it so the shared API scopes the account + token to the right brand (GAP 1 fix). The
   // API is one host for all domains, so without this a player on any brand pools into site #1.
   const brand = useBrand();
+  const celebrateWelcome = useWelcomeBonusFx((s) => s.show);
 
   async function login(phone: string, password: string) {
     const res = await api.login({ phone, password, site: brand.slug });
@@ -27,6 +32,9 @@ export function useAuthActions() {
     const res = await api.register({ ...input, site: input.site ?? brand.slug });
     setToken(res.token);
     setUser(await api.me(res.token));
+    // Celebrate the 200 KES welcome bonus granted server-side at registration (Task 2). Amount is a
+    // constant matching fn_register_user (0095); avoids racing the WS balance push for the figure.
+    celebrateWelcome(WELCOME_BONUS_CENTS);
     return res;
   }
 
