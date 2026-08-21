@@ -46,6 +46,10 @@ entry: what, evidence, root cause, impact, and resolution.
   EAT `today`. **No production financial-reporting behaviour changed** (only the harness), so the prior
   concern about touching a live report does not apply. Baseline test suite is now fully green (610/610),
   and the finance-isolation e2e is deterministic regardless of wall-clock.
+- **Follow-on:** two `app.admin.test.ts` report tests computed their expected day in UTC
+  (`toISOString().slice(0,10)`) and were the mirror of the isolation test (they only passed during
+  Nairobi daytime). Aligned both to the EAT calendar date so ALL day-report tests now agree with the
+  production EAT boundary and each other.
 
 ## #4 — Phone-only password reset is account takeover for admins/superadmins — FIXED (issue 2 / migration 0097)
 - **What:** `POST /api/v1/auth/password/reset` sets a new password from phone + new password alone
