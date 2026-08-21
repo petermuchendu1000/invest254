@@ -298,6 +298,32 @@ export function useSetCommissionRate() {
   });
 }
 
+// ── Deposit-referral commission payouts (0079) — separate money-out queue from GGR payouts ──
+export function useCommissionPayouts(status?: string) {
+  const t = useTok();
+  return useQuery({
+    queryKey: ['admin', 'commission-payouts', status ?? 'all'],
+    enabled: !!t,
+    queryFn: () => adminApi.commissionPayouts(t, status),
+  });
+}
+export function useCommissionPayoutAction() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; action: 'approve' | 'paid' | 'reject'; ref?: string; reason?: string }) =>
+      v.action === 'approve'
+        ? adminApi.approveCommissionPayout(t, v.id)
+        : v.action === 'paid'
+          ? adminApi.markCommissionPayoutPaid(t, v.id, v.ref)
+          : adminApi.rejectCommissionPayout(t, v.id, v.reason),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'commission-payouts'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
 // ── Game config / seeds ──
 export function useGameConfig() {
   const t = useTok();
