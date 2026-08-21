@@ -7,6 +7,7 @@ import { PageHeader, StatCard, Section, TableWrap, Th, Td, Toolbar, FilterSelect
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Money } from '@/components/ui/Money';
+import { Modal } from '@/components/ui/Modal';
 import { RejectDialog } from '@/components/admin/RejectDialog';
 import { cn } from '@/lib/cn';
 import {
@@ -36,10 +37,10 @@ import type { AdminPayoutRow, AdminCommissionPayoutRow, AdminMarketerRow } from 
 type Tab = 'affiliate' | 'referral' | 'wallets' | 'expenses';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'affiliate', label: 'Affiliate payouts' },
   { id: 'referral', label: 'Referral payouts' },
   { id: 'wallets', label: 'Marketer wallets' },
   { id: 'expenses', label: 'Expenses' },
+  { id: 'affiliate', label: 'Affiliate payouts' },
 ];
 
 const PAYOUT_STATUSES = [
@@ -84,7 +85,7 @@ function KesInput({ value, onChange, placeholder }: { value: string; onChange: (
 }
 
 export default function MarketerFinancePage() {
-  const [tab, setTab] = useState<Tab>('affiliate');
+  const [tab, setTab] = useState<Tab>('referral');
 
   // KPI queries (dedicated 'requested' windows, independent of a tab's own status filter).
   const kpiAffiliate = useAffiliatePayouts('requested');
@@ -359,21 +360,21 @@ function MarketerWallets({ marketers, loading }: { marketers: AdminMarketerRow[]
               <Td className="text-right text-muted"><Money cents={m.airtime_balance_cents} /></Td>
               <Td><StatusPill status={m.status} /></Td>
               <Td className="text-right">
-                <Button size="sm" variant="outline" onClick={() => setSelected((s) => (s?.id === m.id ? null : m))}>
-                  {selected?.id === m.id ? 'Close' : 'Manage'}
-                </Button>
+                <Button size="sm" variant="outline" onClick={() => setSelected(m)}>Manage</Button>
               </Td>
             </tr>
           ))}
           {filtered.length === 0 ? <tr><Td className="text-muted">{loading ? 'Loading…' : 'No marketers.'}</Td></tr> : null}
         </tbody>
       </TableWrap>
-      {selected ? <MarketerDetail key={selected.id} marketer={selected} /> : null}
+      <Modal open={!!selected} onClose={() => setSelected(null)} title={selected ? `Manage ${selected.name}` : 'Manage marketer'}>
+        {selected ? <MarketerDetail marketer={selected} onClose={() => setSelected(null)} /> : null}
+      </Modal>
     </Section>
   );
 }
 
-function MarketerDetail({ marketer }: { marketer: AdminMarketerRow }) {
+function MarketerDetail({ marketer, onClose }: { marketer: AdminMarketerRow; onClose: () => void }) {
   const [credit, setCredit] = useState('');
   const [withdraw, setWithdraw] = useState('');
   const [ref, setRef] = useState('');
@@ -382,14 +383,24 @@ function MarketerDetail({ marketer }: { marketer: AdminMarketerRow }) {
   const statement = useMarketerStatement(marketer.id);
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="flex flex-col gap-4 p-5">
+      <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold text-fg">{marketer.name} <span className="text-muted">· {marketer.phone}</span></p>
-          <p className="text-xs text-muted">Balance <Money cents={marketer.balance_cents} className="text-fg" /></p>
+          <p className="text-base font-semibold tracking-tight text-fg">{marketer.name}</p>
+          <p className="text-xs text-muted">{marketer.phone} · Balance <Money cents={marketer.balance_cents} className="text-fg" /></p>
         </div>
-        <Link href="/admin/marketers" className="text-xs font-medium text-accent hover:underline">Fuliza / airtime / PIN →</Link>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg"
+        >
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
+          </svg>
+        </button>
       </div>
+      <Link href="/admin/marketers" className="-mt-2 text-xs font-medium text-accent hover:underline">Fuliza / airtime / PIN →</Link>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <form
