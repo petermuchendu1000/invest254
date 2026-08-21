@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { kesToCents } from '@invest254/shared/money';
+import { formatKes, kesToCents } from '@invest254/shared/money';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Toolbar, FilterSelect, Empty } from '@/components/admin/ui';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Money } from '@/components/ui/Money';
+import { RejectDialog } from '@/components/admin/RejectDialog';
 import { cn } from '@/lib/cn';
 import {
   useAffiliatePayouts,
@@ -142,6 +143,7 @@ function AffiliatePayouts() {
   const q = useAffiliatePayouts(status);
   const action = usePayoutAction();
   const bulk = useBulkPayouts();
+  const [rejecting, setRejecting] = useState<AdminPayoutRow | null>(null);
 
   const rows = (q.data?.pages ?? []).flatMap((p) => p.items as AdminPayoutRow[]);
   const pendingIds = rows.filter((r) => r.status === 'requested').map((r) => r.payoutId);
@@ -198,7 +200,7 @@ function AffiliatePayouts() {
                 {r.status === 'requested' ? (
                   <span className="flex justify-end gap-1.5">
                     <Button size="sm" variant="up" disabled={action.isPending} onClick={() => action.mutate({ id: r.payoutId, action: 'approve' })}>Approve</Button>
-                    <Button size="sm" variant="down" disabled={action.isPending} onClick={() => confirm('Reject this payout?') && action.mutate({ id: r.payoutId, action: 'reject' })}>Reject</Button>
+                    <Button size="sm" variant="down" disabled={action.isPending} onClick={() => setRejecting(r)}>Reject</Button>
                   </span>
                 ) : (
                   <span className="text-xs text-muted">—</span>
@@ -214,6 +216,24 @@ function AffiliatePayouts() {
           {q.isFetchingNextPage ? 'Loading…' : 'Load more'}
         </Button>
       ) : null}
+      <RejectDialog
+        open={!!rejecting}
+        onClose={() => setRejecting(null)}
+        busy={action.isPending}
+        title="Reject affiliate payout"
+        subject={rejecting ? `${rejecting.username} · ${formatKes(rejecting.amountCents)}` : undefined}
+        consequence={
+          <>
+            No money is sent. The reserved commission is released back to{' '}
+            <span className="font-medium text-fg">{rejecting?.username}</span>&apos;s available balance, so they can
+            request a new payout. This only affects a <span className="font-medium text-fg">requested</span> (pre-dispatch) payout.
+          </>
+        }
+        onConfirm={(reason) =>
+          rejecting &&
+          action.mutate({ id: rejecting.payoutId, action: 'reject', ...(reason ? { reason } : {}) }, { onSuccess: () => setRejecting(null) })
+        }
+      />
     </Section>
   );
 }
@@ -224,16 +244,12 @@ function ReferralPayouts() {
   const q = useCommissionPayouts(status);
   const action = useCommissionPayoutAction();
   const rows: AdminCommissionPayoutRow[] = q.data?.items ?? [];
+  const [rejecting, setRejecting] = useState<AdminCommissionPayoutRow | null>(null);
 
   const markPaid = (r: AdminCommissionPayoutRow) => {
     const input = window.prompt('M-Pesa / bank reference for this payment (optional):');
     const ref = input && input.trim() ? input.trim() : undefined;
     action.mutate({ id: r.id, action: 'paid', ...(ref ? { ref } : {}) });
-  };
-  const reject = (r: AdminCommissionPayoutRow) => {
-    const input = window.prompt('Reason for rejection (optional):');
-    const reason = input && input.trim() ? input.trim() : undefined;
-    if (confirm('Reject this commission payout?')) action.mutate({ id: r.id, action: 'reject', ...(reason ? { reason } : {}) });
   };
 
   return (
@@ -268,12 +284,12 @@ function ReferralPayouts() {
                   {r.status === 'requested' ? (
                     <>
                       <Button size="sm" variant="up" disabled={action.isPending} onClick={() => action.mutate({ id: r.id, action: 'approve' })}>Approve</Button>
-                      <Button size="sm" variant="down" disabled={action.isPending} onClick={() => reject(r)}>Reject</Button>
+                      <Button size="sm" variant="down" disabled={action.isPending} onClick={() => setRejecting(r)}>Reject</Button>
                     </>
                   ) : r.status === 'approved' ? (
                     <>
                       <Button size="sm" variant="up" disabled={action.isPending} onClick={() => markPaid(r)}>Mark paid</Button>
-                      <Button size="sm" variant="down" disabled={action.isPending} onClick={() => reject(r)}>Reject</Button>
+                      <Button size="sm" variant="down" disabled={action.isPending} onClick={() => setRejecting(r)}>Reject</Button>
                     </>
                   ) : (
                     <span className="text-xs text-muted">—</span>
@@ -285,6 +301,25 @@ function ReferralPayouts() {
           {rows.length === 0 ? <tr><Td className="text-muted">{q.isLoading ? 'Loading…' : 'No commission payouts for this status.'}</Td></tr> : null}
         </tbody>
       </TableWrap>
+      <RejectDialog
+        open={!!rejecting}
+        onClose={() => setRejecting(null)}
+        busy={action.isPending}
+        title="Reject commission payout"
+        subject={rejecting ? `${rejecting.username ?? rejecting.beneficiaryUser.slice(0, 8)} · ${formatKes(rejecting.amountCents)}` : undefined}
+        consequence={
+          <>
+            No money is sent. The amount is no longer held, so it returns to the marketer&apos;s{' '}
+            <span className="font-medium text-fg">available</span> commission balance and they can request a new
+            payout. Works on <span className="font-medium text-fg">requested</span> or{' '}
+            <span className="font-medium text-fg">approved</span> payouts.
+          </>
+        }
+        onConfirm={(reason) =>
+          rejecting &&
+          action.mutate({ id: rejecting.id, action: 'reject', ...(reason ? { reason } : {}) }, { onSuccess: () => setRejecting(null) })
+        }
+      />
     </Section>
   );
 }

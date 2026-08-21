@@ -161,8 +161,9 @@ export interface AffiliateRepository {
    * move accrued->paid); failure => 'rejected' (reservation released, buckets stay accrued).
    */
   completePayout(payoutId: string, resultCode: number, conversationId: string | null, receipt: string | null, resultDesc: string | null, raw: unknown): Promise<PayoutCompleteResult>;
-  /** Admin rejects a pre-dispatch ('requested') payout, releasing its reservation. Idempotent. */
-  rejectPayout(payoutId: string, adminId: string): Promise<boolean>;
+  /** Admin rejects a pre-dispatch ('requested') payout, releasing its reservation. Optional reason
+   *  is stored for audit (0098). Idempotent. */
+  rejectPayout(payoutId: string, adminId: string, reason?: string): Promise<boolean>;
   /** Resolve the brand a payout belongs to (admin write-path scope guard, docs/22 Task H). A legacy
    *  null site normalizes to the default brand; an unknown/untracked payout resolves to null — a
    *  null never blocks, so the site-aware RPC remains the ultimate guard (the in-memory mirror does
@@ -303,9 +304,9 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
       return { applied: Boolean(x.applied), status: String(x.status) };
     } catch (e) { mapPgError(e); }
   }
-  async rejectPayout(payoutId: string, adminId: string): Promise<boolean> {
+  async rejectPayout(payoutId: string, adminId: string, reason?: string): Promise<boolean> {
     try {
-      const r = await this.q.query("select fn_affiliate_reject_payout($1,$2) as ok", [payoutId, adminId]);
+      const r = await this.q.query("select fn_affiliate_reject_payout($1,$2,$3) as ok", [payoutId, adminId, reason ?? null]);
       return Boolean(r.rows[0]?.ok);
     } catch (e) { mapPgError(e); }
   }
@@ -468,7 +469,7 @@ interface MemAffiliate { userId: string; referralCode: string; commissionRate: n
 interface MemPlay { referredUser: string; period: string; stakeCents: number; payoutCents: number; openedAtMs: number; }
 interface MemCommission { id: number; affiliateId: string; referredUser: string; period: string; ggr: number; commission: number; status: string; createdAtMs: number; payoutId: string | null; }
 interface MemReferral { id: number; affiliateId: string; referredUser: string; createdAtMs: number; }
-interface MemPayout { id: string; affiliateId: string; amount: number; status: string; approvedBy: string | null; conversationId: string | null; receipt: string | null; resultCode: number | null; createdAtMs: number; }
+interface MemPayout { id: string; affiliateId: string; amount: number; status: string; approvedBy: string | null; conversationId: string | null; receipt: string | null; resultCode: number | null; createdAtMs: number; rejectReason?: string | null; }
 
 /** In-memory identity store mirroring the RPC contracts (tests + dev). */
 export class InMemoryIdentityRepository implements IdentityRepository, AffiliateRepository {
@@ -722,11 +723,11 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     for (const c of this.commissions) if (c.payoutId === payoutId && c.status === "accrued") c.payoutId = null; // release
     return { applied: true, status: "rejected" };
   }
-  async rejectPayout(payoutId: string, adminId: string): Promise<boolean> {
+  async rejectPayout(payoutId: string, adminId: string, reason?: string): Promise<boolean> {
     const p = this.payouts.get(payoutId);
     if (!p) throw new Error("PAYOUT_NOT_FOUND");
     if (p.status !== "requested") return false;
-    p.status = "rejected"; p.approvedBy = adminId;
+    p.status = "rejected"; p.approvedBy = adminId; p.rejectReason = reason ?? null;
     for (const c of this.commissions) if (c.payoutId === payoutId && c.status === "accrued") c.payoutId = null; // release
     return true;
   }
