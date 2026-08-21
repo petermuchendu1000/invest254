@@ -151,8 +151,8 @@ export const adminApi = {
     }),
   approvePayout: (t: string, id: string) =>
     apiFetch<unknown>(`/admin/affiliate/payouts/${id}/approve`, { method: 'POST', token: t }),
-  rejectPayout: (t: string, id: string) =>
-    apiFetch<unknown>(`/admin/affiliate/payouts/${id}/reject`, { method: 'POST', token: t }),
+  rejectPayout: (t: string, id: string, reason?: string) =>
+    apiFetch<unknown>(`/admin/affiliate/payouts/${id}/reject`, { method: 'POST', token: t, body: reason ? { reason } : {} }),
   // Bulk payout moderation (partial success per row; approve dispatches M-Pesa B2C each).
   bulkPayouts: (t: string, body: { action: 'approve' | 'reject'; payoutIds: string[] }) =>
     apiFetch<AdminBulkResult>('/admin/affiliate/payouts/bulk', { method: 'POST', token: t, body }),
