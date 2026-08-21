@@ -49,13 +49,16 @@ entry: what, evidence, root cause, impact, and resolution.
   path is that public endpoint (no admin-panel reset exists). Production roles are player/marketer/
   admin/platform_superadmin — note there is NO literal `superadmin`, so the real top account is
   `platform_superadmin` and had to be included in the privileged set.
-- **Impact:** full account takeover of any admin whose phone number is known, IF the flag is enabled.
-  The flag is currently OFF in production (reset returns RESET_DISABLED), so it was not live-exploitable
-  at fix time, but a single env flip would have opened it.
+- **Impact:** full account takeover of any admin whose phone number is known. `ALLOW_UNVERIFIED_PASSWORD_RESET`
+  IS set as a Fly secret on `invest254-api` (confirmed via `fly secrets list`; value hidden but presence
+  implies enabled), so this was very likely LIVE-exploitable before the fix. (An earlier partial GraphQL
+  secret listing wrongly suggested the flag was absent.)
 - **Resolution (migration 0097 + code):** privileged resets now REQUIRE all three security-question
   answers to verify, independent of the flag, and fail CLOSED when answers are unset. Added
   `user_security_answers` (scrypt-hashed, RLS/service-role only) + `profiles.sessions_valid_after`
   force-logout epoch (privileged tokens issued before it are rejected). `/auth/me` exposes
   `securitySetupRequired`; the web shows a mandatory non-dismissible setup gate. See docs/32.
-  Force-logout of current admins is a deliberate rollout step (stamp `sessions_valid_after = now()`
-  for privileged roles) run after the API/web deploy. Full suite 609 pass / 0 fail.
+  ROLLOUT COMPLETED 2026-08-21: migration 0097 applied; API deployed to Fly invest254-api; web deployed
+  via Cloudflare Pages (commit 26b630a); force-logout stamped for all 3 privileged accounts. Verified in
+  prod: reset on a real admin phone returns 403 SECURITY_QUESTIONS_NOT_SET (fail-closed, no change).
+  Full suite 610 pass / 0 fail.
