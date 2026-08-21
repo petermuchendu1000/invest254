@@ -23,6 +23,14 @@
 --   SECURITY DEFINER RPCs (service-role only). Additive + idempotent. Fully revertible (see tail).
 
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- 0. Remove the (dormant) deposit-bonus remnants. Deposit-bonus GRANTING was already removed at
+--    0077/0078 (fn_complete_deposit no longer awards it); this drops the now-orphaned tier helper so
+--    the ONLY bonus in the system is the welcome bonus. The frontend deposit-bonus preview is removed
+--    in the same change set. bonus_config's legacy tiers/wagering_x columns are left in place (inert).
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+drop function if exists public.fn_deposit_bonus_pct(bigint);
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
 -- 1. Config: welcome-bonus knobs on the existing singleton bonus_config (0037). Global + default-on.
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
 alter table public.bonus_config add column if not exists welcome_enabled      boolean not null default true;
@@ -239,12 +247,61 @@ end;
 $fn$;
 
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
--- 5. Grants: service-role only (mirrors 0037/0084). Player reads go through the API.
+-- 5. Clear the welcome bonus when a player is promoted to a marketer.
+--    Marketers are demo / social-proof accounts, so they must not keep a real, restricted welcome
+--    bonus. A trigger on profiles.role -> 'marketer' catches EVERY promotion path (admin set-role RPC,
+--    affiliate self-enrollment, or a direct role update) with no rewrite of those RPCs.
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+create or replace function public.fn_clear_welcome_bonus(p_user uuid)
+returns bigint
+language plpgsql security definer set search_path = public
+as $fn$
+declare v_bal bigint; v_site uuid; v_voided int;
+begin
+  select bonus_balance, site_id into v_bal, v_site from wallets where user_id = p_user for update;
+  if not found then return 0; end if;
+  -- Void the account's active welcome bonus(es).
+  update bonuses set status = 'void', converted_at = now()
+   where user_id = p_user and type = 'welcome' and status = 'active';
+  get diagnostics v_voided = row_count;
+  if v_voided = 0 then return 0; end if;   -- no welcome bonus to clear
+  -- Remove the still-restricted welcome funds from bonus_balance. Deposit bonuses are not granted
+  -- (see §0), so all bonus_balance is welcome-derived; a fully-staked bonus leaves v_bal = 0.
+  if v_bal > 0 then
+    update wallets set bonus_balance = bonus_balance - v_bal where user_id = p_user;
+    insert into ledger_entries(user_id, site_id, type, amount, balance_kind, ref_table, ref_id, meta)
+      values (p_user, v_site, 'bonus', -v_bal, 'bonus', 'wallets', p_user::text,
+              jsonb_build_object('kind', 'welcome_void', 'reason', 'promoted_to_marketer'));
+  end if;
+  return v_bal;
+end;
+$fn$;
+
+create or replace function public.trg_clear_welcome_on_marketer()
+returns trigger language plpgsql security definer set search_path = public
+as $fn$
+begin
+  if new.role = 'marketer' and coalesce(old.role, '') <> 'marketer' then
+    perform public.fn_clear_welcome_bonus(new.id);
+  end if;
+  return new;
+end;
+$fn$;
+
+drop trigger if exists clear_welcome_on_marketer on public.profiles;
+create trigger clear_welcome_on_marketer
+  after update of role on public.profiles
+  for each row execute function public.trg_clear_welcome_on_marketer();
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- 6. Grants: service-role only (mirrors 0037/0084). Player reads go through the API.
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
 do $g$
 begin
   revoke all on function public.fn_grant_welcome_bonus(uuid) from public, anon, authenticated;
   grant  execute on function public.fn_grant_welcome_bonus(uuid) to service_role;
+  revoke all on function public.fn_clear_welcome_bonus(uuid) from public, anon, authenticated;
+  grant  execute on function public.fn_clear_welcome_bonus(uuid) to service_role;
   revoke all on function public.fn_open_position(uuid,bigint,text,numeric,int,bigint,bigint,timestamptz,bigint,uuid) from public;
   grant  execute on function public.fn_open_position(uuid,bigint,text,numeric,int,bigint,bigint,timestamptz,bigint,uuid) to service_role;
   revoke all on function public.fn_settle_position(uuid,numeric,text,numeric,bigint) from public;
@@ -255,9 +312,13 @@ $g$;
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
 -- REVERT (manual, if ever needed):
 --   1. Restore fn_open_position / fn_settle_position from migration 0084 (verbatim bodies).
---   2. drop function if exists public.fn_grant_welcome_bonus(uuid);
---   3. drop index if exists public.idx_bonuses_one_welcome_per_user;
---   4. alter table public.bonus_config drop column if exists welcome_enabled,
+--   2. drop trigger if exists clear_welcome_on_marketer on public.profiles;
+--      drop function if exists public.trg_clear_welcome_on_marketer();
+--      drop function if exists public.fn_clear_welcome_bonus(uuid);
+--   3. drop function if exists public.fn_grant_welcome_bonus(uuid);
+--   4. drop index if exists public.idx_bonuses_one_welcome_per_user;
+--   5. alter table public.bonus_config drop column if exists welcome_enabled,
 --        drop column if exists welcome_amount_cents, drop column if exists welcome_wagering_x;
+--   6. (optional) recreate fn_deposit_bonus_pct from 0037 if deposit bonuses are ever reinstated.
 --   (Existing granted welcome bonuses can be voided via the admin bonus tools if desired.)
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────

@@ -15,18 +15,15 @@ entry: what, evidence, root cause, impact, and resolution.
 - **Resolution:** migration 0094 restores bonus-first staking, wagering accrual, and FIFO conversion in
   the site-scoped/demo-aware RPCs (additive; verified no-op for existing zero-bonus accounts). See docs/31.
 
-## #2 — DepositForm advertises a deposit bonus the backend no longer grants — OPEN (needs a decision)
-- **What:** `apps/web/src/components/wallet/DepositForm.tsx` shows a live "+KES X bonus (50%/25%/15%)…
-  credited instantly as bonus balance" preview on the deposit screen.
-- **Evidence:** `bonusPctForDeposit` + the preview block render for any deposit ≥ KES 1,000, but the live
-  `fn_complete_deposit` (0078) does **not** grant any deposit bonus (removed at 0077/0078); the `bonuses`
-  table has zero `type='deposit'` rows in production.
-- **Impact:** users are promised an instant deposit bonus they never receive — a trust/compliance risk.
-- **Options:** (a) re-enable deposit-bonus granting in `fn_complete_deposit` (the 0094 wagering engine
-  now supports it) — an economic change across all brands, needs sign-off; or (b) remove/hide the
-  DepositForm bonus preview until (a) ships.
-- **Status:** documented, NOT changed under issue 1 (out of scope — separate economic decision). Flagged
-  for the next issue.
+## #2 — DepositForm advertised a deposit bonus the backend never grants — FIXED (issue 1)
+- **What:** the deposit screen showed a live "+KES X bonus (50%/25%/15%)… credited instantly as bonus
+  balance" preview, but `fn_complete_deposit` (0078) grants no deposit bonus.
+- **Resolution (per direction "remove any deposit-bonus apart from the one we just implemented"):**
+  removed the DepositForm preview + `bonusPctForDeposit` import; deleted the shared deposit-tier module
+  (`packages/shared/src/bonus.ts`, its `./bonus` package export, the engagement re-export, and its
+  tests); and dropped the orphaned `fn_deposit_bonus_pct` in migration 0094. The **only** bonus in the
+  system is now the sign-up welcome bonus. (Legacy `bonus_config.tiers/wagering_x` columns are left
+  inert.)
 
 ## #3 — Admin "day" finance report is timezone-fragile (fails 00:00–03:00 EAT) — OPEN (pre-existing)
 - **What:** `app.admin.isolation.e2e.test.ts` → "finance reports (daily/day/users) are brand-scoped"

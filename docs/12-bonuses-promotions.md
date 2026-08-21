@@ -43,5 +43,11 @@ Full design + psychology + implementation map: **docs/31-welcome-bonus.md**. Sum
   wagering on every staked shilling, and convert cleared bonuses to real (this bonus machinery was
   dormant since site-scoping 0047; migration 0094 restores it while preserving demo isolation).
 - **UX:** the winning-card animation (`WelcomeBonusOverlay`, reusing `OutcomeOverlay`'s confetti /
-  count-up / chip-to-balance-pill) fires on sign-up; the CTA drops the user into the deposit sheet
-  pre-seeded with the exact KES 50 gap. Active bonus + wagering progress show in the wallet widget.
+  count-up / chip-to-balance-pill) fires on sign-up. The CTA encourages depositing at least the
+  **min stake read from the DB** (`site_game_config.min_stake` → `minStakeCents`; never hard-coded) —
+  "Deposit KES 250+ & play" — and seeds the deposit sheet with that amount ("always encourage more").
+  Active bonus + wagering progress show in the wallet widget.
+- **Lifecycle:** if a player is later **promoted to a marketer** (any path — admin set-role, affiliate
+  self-enrollment, or a direct role change), the welcome bonus is **cleared immediately** (bonus voided,
+  restricted balance removed, audit ledger entry) — marketers are demo accounts and must not hold a
+  real welcome bonus. Enforced by a DB trigger on `profiles.role → 'marketer'`.

@@ -47,8 +47,9 @@ export function WelcomeBonusOverlay() {
   const rafRef = useRef<number | null>(null);
 
   const amountCents = current?.amountCents ?? 0;
-  const minStakeCents = config?.minStakeCents ?? 25000;
-  const gapCents = Math.max(0, minStakeCents - amountCents);
+  // Min stake is the DB-driven amount a player must be able to stake (site_game_config.min_stake,
+  // surfaced as GameConfigDto.minStakeCents) — never hard-coded here. Undefined until config loads.
+  const minStakeCents = config?.minStakeCents;
   const shown = useCountUp(visible ? amountCents : 0, 1000, current?.id);
 
   // Show / auto-dismiss lifecycle (celebratory, so it lingers a touch longer than a win).
@@ -178,11 +179,12 @@ export function WelcomeBonusOverlay() {
   }, [visible, current]);
 
   const nudge = useMemo(() => {
-    if (gapCents > 0) {
-      return `You're only ${formatKes(gapCents)} away from your first trade — top up ${formatKes(gapCents)} to play.`;
+    if (minStakeCents && minStakeCents > 0) {
+      // The bonus is a sweetener on top of a real deposit — encourage funding at least the min stake.
+      return `Deposit ${formatKes(minStakeCents)} or more to place your first trade — the bigger your stake, the bigger you can win.`;
     }
-    return `It's in your wallet — you're ready to place your first trade.`;
-  }, [gapCents]);
+    return `Deposit to place your first trade — the more you add, the bigger you can win.`;
+  }, [minStakeCents]);
 
   if (!current) return null;
 
@@ -233,11 +235,11 @@ export function WelcomeBonusOverlay() {
           onClick={(e) => {
             e.stopPropagation();
             setVisible(false);
-            openDeposit(gapCents > 0 ? { amountCents: gapCents } : { amountCents: minStakeCents });
+            openDeposit(minStakeCents ? { amountCents: minStakeCents } : {});
           }}
           className="mt-5 h-10 w-full rounded-xl bg-up text-sm font-semibold text-white transition hover:opacity-90"
         >
-          {gapCents > 0 ? `Add ${formatKes(gapCents)} & play` : 'Deposit & play'}
+          {minStakeCents ? `Deposit ${formatKes(minStakeCents)}+ & play` : 'Deposit & play'}
         </button>
         <button
           type="button"

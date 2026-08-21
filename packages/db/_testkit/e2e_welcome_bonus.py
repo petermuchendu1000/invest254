@@ -159,6 +159,30 @@ def main():
     settle(cur, pid8, "win", 2.0, 50000)
     check("marketer payout to demo (125000)", wallet(cur, muid8)["demo"] == 125000)
 
+    print("T9: promotion to marketer clears the welcome bonus (trigger on profiles.role)")
+    uid9, _ = new_player(cur)
+    cur.execute("select fn_grant_welcome_bonus(%s)", (uid9,))
+    check("granted before promotion (bonus=20000)", wallet(cur, uid9)["bonus"] == 20000)
+    cur.execute("update profiles set role='marketer' where id=%s", (uid9,))   # any promotion path does this
+    w9 = wallet(cur, uid9)
+    cur.execute("select status from bonuses where user_id=%s and type='welcome'", (uid9,)); st9 = cur.fetchone()[0]
+    cur.execute("select amount,balance_kind,meta->>'kind' from ledger_entries where user_id=%s and (meta->>'kind')='welcome_void'", (uid9,)); void_led = cur.fetchall()
+    check("bonus_balance cleared to 0 on promotion", w9["bonus"] == 0, w9)
+    check("welcome bonus row voided", st9 == "void", st9)
+    check("welcome_void ledger entry (-20000, bonus)", void_led == [(-20000, "bonus", "welcome_void")], void_led)
+    # a partially-staked bonus clears whatever remains (no negative balance)
+    uid9b, _ = new_player(cur, real=5000)
+    cur.execute("select fn_grant_welcome_bonus(%s)", (uid9b,))
+    open_pos(cur, uid9b, 25000, DAY, CFG)   # spends the 20000 bonus -> bonus_balance 0
+    cur.execute("update profiles set role='marketer' where id=%s", (uid9b,))
+    check("already-spent bonus clears cleanly (bonus stays 0)", wallet(cur, uid9b)["bonus"] == 0)
+    cur.execute("select status from bonuses where user_id=%s and type='welcome'", (uid9b,))
+    check("spent bonus row still voided on promotion", cur.fetchone()[0] == "void")
+
+    print("T10: deposit-bonus fully removed (orphaned fn_deposit_bonus_pct dropped)")
+    cur.execute("select count(*) from pg_proc where proname='fn_deposit_bonus_pct'")
+    check("fn_deposit_bonus_pct no longer exists", cur.fetchone()[0] == 0)
+
     print(f"\n{'='*60}\n  {len(PASS)} passed, {len(FAIL)} failed\n{'='*60}")
     if FAIL:
         print("FAILED:", FAIL); sys.exit(1)

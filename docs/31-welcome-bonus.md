@@ -11,8 +11,10 @@ behavioural nudge engineered to convert those dormant sign-ups into first-time d
 
 - **Endowment effect** — once the KES 200 sits in the user's wallet they psychologically *own* it and
   become loss-averse to letting it go to waste.
-- **Goal-gradient effect** — motivation spikes as a goal nears completion. "You're only KES 50 away
-  from your first trade" pulls far harder than starting from zero.
+- **Goal-gradient effect** — motivation spikes as a goal nears completion. Being *almost* able to
+  trade (holding KES 200 against a KES 250 min stake) pulls far harder than starting from zero. (The
+  celebration CTA encourages depositing at least the DB min stake — "Deposit KES 250+ & play" — rather
+  than naming the gap, so the copy never contradicts the configured minimum deposit.)
 - **Zeigarnik effect** — an unused balance is an open loop that nags until closed.
 - **Peak-end rule** — the winning-card celebration makes the *first* brand moment a "win", anchoring a
   positive emotional peak.
@@ -50,6 +52,7 @@ see docs/BUGLOG.md).
 ## 4. Implementation map
 
 ### DB — `packages/db/migrations/0094_welcome_bonus.sql` (additive; CREATE OR REPLACE)
+- Drops the orphaned `fn_deposit_bonus_pct` — the welcome bonus is now the only bonus in the system.
 - `bonus_config`: `welcome_enabled`, `welcome_amount_cents=20000`, `welcome_wagering_x=3`.
 - `idx_bonuses_one_welcome_per_user` — one welcome per user (race-proof).
 - `fn_grant_welcome_bonus(uuid) -> bigint` — idempotent, config/brand aware, skips demo accounts;
@@ -58,6 +61,10 @@ see docs/BUGLOG.md).
   then real, splits the stake ledger by `balance_kind`, accrues wagering on active bonuses.
 - `fn_settle_position` (5-arg, identical signature) — demo path unchanged; real path credits payout to
   real, then FIFO-converts any bonus whose wagering is met (`meta.kind='wagering_conversion'`).
+- `fn_clear_welcome_bonus(uuid)` + `trg_clear_welcome_on_marketer` trigger on `profiles` — when a
+  player is promoted to a marketer (`role → 'marketer'` via ANY path), the welcome bonus is voided and
+  the restricted balance removed (`meta.kind='welcome_void'`). Catches admin set-role, affiliate
+  enrollment, and direct role updates with no RPC surgery.
 - Signatures are byte-identical to 0084 so `PgGameRepository` calls them unchanged. Revert notes in tail.
 
 ### Engine
@@ -72,14 +79,23 @@ see docs/BUGLOG.md).
 ### Web
 - `lib/game/welcomeBonusFx.ts` — celebration bus (separate from the game `outcomeFx` bus).
 - `components/game/WelcomeBonusOverlay.tsx` — reuses the winning-card language (confetti, count-up,
-  chip-flies-to-balance-pill, haptics, `pp-pop`); welcome copy + the exact-gap deposit CTA.
+  chip-flies-to-balance-pill, haptics, `pp-pop`); the CTA references the **DB-driven min stake**
+  (`GameConfigDto.minStakeCents`, never hard-coded), encourages depositing at least that ("or more"),
+  and seeds the deposit sheet with it.
 - `components/Providers.tsx` — mounts the overlay beside `OutcomeOverlay`.
 - `lib/auth/useAuthActions.ts` — on register with `welcomeBonusCents > 0`: refresh `['wallet']` and
   fire the celebration (short delay so the auth sheet closes first).
 - `components/game/BetPanel.tsx` — affordability now counts `real + bonus` (spendable), so the bonus
-  plus a small top-up can reach the min stake.
+  plus a real deposit can reach the min stake.
 - `lib/game/GameSocketProvider.tsx` — invalidate `['wallet']` on settle (bonus/wagering stay live).
 - `components/wallet/WalletWidget.tsx` — label corrected from "Deposit bonus" to "Bonus".
+- **Deposit-bonus removed:** `DepositForm` preview deleted; shared `bonus.ts` (tiers/`bonusPctForDeposit`)
+  and its `./bonus` export + tests removed. The welcome bonus is the only bonus.
+
+### Promotion → marketer
+A DB trigger (`trg_clear_welcome_on_marketer`) clears the welcome bonus the instant `profiles.role`
+becomes `'marketer'` — no engine/API wiring needed, so it holds for every current and future promotion
+path. Demo/marketer accounts never keep a real welcome bonus.
 
 ## 5. Tests
 - **DB e2e:** `packages/db/_testkit/e2e_welcome_bonus.py` — 23 assertions: grant idempotency,
