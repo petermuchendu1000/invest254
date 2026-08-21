@@ -39,3 +39,23 @@ entry: what, evidence, root cause, impact, and resolution.
 - **Status:** documented, NOT fixed under issue 1 (unrelated to the welcome bonus; changing day-report
   timezone handling on a live financial report warrants its own scoped fix + decision on the canonical
   reporting timezone).
+
+## #4 — Phone-only password reset is account takeover for admins/superadmins — FIXED (issue 2 / migration 0097)
+- **What:** `POST /api/v1/auth/password/reset` sets a new password from phone + new password alone
+  (no possession proof), gated only by `ALLOW_UNVERIFIED_PASSWORD_RESET`. For a privileged account
+  (admin / superadmin / platform_superadmin) anyone who knows the phone number could seize the back
+  office.
+- **Evidence:** `AuthService.resetPassword` had no second factor for privileged roles; the only reset
+  path is that public endpoint (no admin-panel reset exists). Production roles are player/marketer/
+  admin/platform_superadmin — note there is NO literal `superadmin`, so the real top account is
+  `platform_superadmin` and had to be included in the privileged set.
+- **Impact:** full account takeover of any admin whose phone number is known, IF the flag is enabled.
+  The flag is currently OFF in production (reset returns RESET_DISABLED), so it was not live-exploitable
+  at fix time, but a single env flip would have opened it.
+- **Resolution (migration 0097 + code):** privileged resets now REQUIRE all three security-question
+  answers to verify, independent of the flag, and fail CLOSED when answers are unset. Added
+  `user_security_answers` (scrypt-hashed, RLS/service-role only) + `profiles.sessions_valid_after`
+  force-logout epoch (privileged tokens issued before it are rejected). `/auth/me` exposes
+  `securitySetupRequired`; the web shows a mandatory non-dismissible setup gate. See docs/32.
+  Force-logout of current admins is a deliberate rollout step (stamp `sessions_valid_after = now()`
+  for privileged roles) run after the API/web deploy. Full suite 609 pass / 0 fail.
