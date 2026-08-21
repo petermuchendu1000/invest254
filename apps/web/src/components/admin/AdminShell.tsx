@@ -11,6 +11,7 @@ import { useAuthUi } from '@/lib/auth/ui';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { LogoMark } from '@/components/layout/Logo';
+import { useSidebarCollapsed } from '@/lib/useSidebarCollapsed';
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 type NavSection = { title: string; items: NavItem[]; superadmin?: boolean; platform?: boolean };
@@ -65,6 +66,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const user = useSession((s) => s.user);
   const openAuth = useAuthUi((s) => s.openAuth);
   const { logout } = useAuthActions();
+  const { collapsed, toggle } = useSidebarCollapsed('admin-sidebar-collapsed');
 
   if (!hydrated) {
     return (
@@ -107,13 +109,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       {/* Sidebar (desktop) / top bar + scroll nav (mobile) */}
       <aside
         className={cn(
-          'flex shrink-0 flex-col border-b bg-surface md:h-dvh md:w-60 md:border-b-0 md:border-r md:sticky md:top-0',
+          'flex shrink-0 flex-col border-b bg-surface transition-[width] duration-200 md:h-dvh md:border-b-0 md:border-r md:sticky md:top-0',
+          collapsed ? 'md:w-16' : 'md:w-60',
           isSuper ? 'border-warn/40' : 'border-border',
         )}
       >
-        <div className="flex items-center justify-between px-4 py-3">
-          <Link href="/admin" className="flex items-center gap-2">
-            <LogoMark className="h-7 w-7" />
+        <div className={cn('flex items-center gap-2 py-3', collapsed ? 'justify-between px-4 md:justify-center md:px-2' : 'justify-between px-4')}>
+          <Link href="/admin" className={cn('flex min-w-0 items-center gap-2', collapsed && 'md:hidden')}>
+            <LogoMark className="h-7 w-7 shrink-0" />
             <span className="flex flex-col leading-tight">
               <span className="text-sm font-semibold tracking-tight">invest254 {isSuper ? 'Console' : 'Admin'}</span>
               <span className={cn('text-[10px] font-medium uppercase tracking-wide', isSuper ? 'text-warn' : 'text-muted')}>
@@ -121,6 +124,17 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               </span>
             </span>
           </Link>
+          {/* Desktop-only collapse toggle (icon-rail pattern). State persists via localStorage. */}
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-pressed={collapsed}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg md:flex"
+          >
+            <Icon d={collapsed ? 'M9 6l6 6-6 6' : 'M15 6l-6 6 6 6'} />
+          </button>
         </div>
 
         <nav className="no-scrollbar flex gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:overflow-visible md:px-2">
@@ -130,6 +144,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 className={cn(
                   'mt-2 hidden px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider md:block',
                   section.superadmin ? 'text-warn' : 'text-muted',
+                  collapsed && 'md:hidden',
                 )}
               >
                 {section.title}
@@ -140,8 +155,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                   key={n.href}
                   href={n.href}
                   aria-current={active(n.href) ? 'page' : undefined}
+                  title={collapsed ? n.label : undefined}
                   className={cn(
                     'flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition',
+                    collapsed && 'md:justify-center md:px-2',
                     active(n.href)
                       ? section.superadmin
                         ? 'bg-warn text-bg'
@@ -150,28 +167,42 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                   )}
                 >
                   {n.icon}
-                  {n.label}
+                  <span className={cn(collapsed && 'md:hidden')}>{n.label}</span>
                 </Link>
               ))}
             </React.Fragment>
           ))}
         </nav>
 
-        <div className="mt-auto hidden flex-col gap-2 border-t border-border px-4 py-3 md:flex">
-          <div className="flex flex-col gap-1">
-            <span className="truncate text-sm font-medium">@{user?.username}</span>
-            <span
-              className={cn(
-                'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-                isSuper ? 'bg-warn/15 text-warn' : 'bg-surface-2 text-muted',
-              )}
+        <div className={cn('mt-auto hidden flex-col gap-2 border-t border-border py-3 md:flex', collapsed ? 'px-2' : 'px-4')}>
+          {collapsed ? (
+            <button
+              type="button"
+              onClick={logout}
+              title="Log out"
+              aria-label="Log out"
+              className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-muted transition hover:text-fg"
             >
-              {isSuper ? '★ System owner' : 'Operator'}
-            </span>
-          </div>
-          <Button variant="secondary" size="sm" onClick={logout}>
-            Log out
-          </Button>
+              <Icon d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+            </button>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1">
+                <span className="truncate text-sm font-medium">@{user?.username}</span>
+                <span
+                  className={cn(
+                    'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                    isSuper ? 'bg-warn/15 text-warn' : 'bg-surface-2 text-muted',
+                  )}
+                >
+                  {isSuper ? '★ System owner' : 'Operator'}
+                </span>
+              </div>
+              <Button variant="secondary" size="sm" onClick={logout}>
+                Log out
+              </Button>
+            </>
+          )}
         </div>
       </aside>
 
