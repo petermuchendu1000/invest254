@@ -8,10 +8,15 @@
 platform_superadmin** that is account takeover: anyone who knows the operator's phone number can seize
 the back office (approve withdrawals, adjust balances, change RTP/seed config).
 
-> **Live status at time of fix:** `ALLOW_UNVERIFIED_PASSWORD_RESET` is **not** set on the production
-> API (Fly app `invest254-api`), so the phone-only reset currently returns `RESET_DISABLED`. The fix
-> still matters: it makes privileged reset **permanently** safe (independent of the flag) and lets
-> admins self-serve a reset that is genuinely protected by a knowledge factor.
+> **Live status at time of fix:** `ALLOW_UNVERIFIED_PASSWORD_RESET` **IS set as a Fly secret** on the
+> production API (`invest254-api`) — confirmed via `fly secrets list` (value not visible, digest only;
+> its presence strongly implies it was enabled). So the phone-only reset was very likely **live and
+> exploitable** for admins before this fix. (An earlier Fly GraphQL query returned only a partial
+> secret list and misled an initial assessment that the flag was absent — `fly secrets list` is
+> authoritative.) The fix makes privileged reset **permanently** safe regardless of the flag's value.
+>
+> **Verified in production after deploy:** a reset attempt against a real admin phone now returns
+> `403 SECURITY_QUESTIONS_NOT_SET` and changes nothing (fail-closed) — the takeover path is closed.
 
 Production roles (Supabase, at fix time): `player` (535), `marketer` (12), `admin` (2),
 `platform_superadmin` (1). **There is no literal `superadmin` role** — the real "superadmin" is
@@ -61,8 +66,19 @@ case/whitespace-insensitive by design.
 - `public.profiles.sessions_valid_after timestamptz` (nullable; NULL = never force-logged-out).
 - Additive, idempotent, money-neutral. Revert notes in the file tail.
 
-The migration is **structural only**. The force-logout STAMP is a deliberate, separate operational
-step run at rollout (see below), so applying the migration never disrupts a live session on its own.
+## Rollout status — COMPLETED (2026-08-21)
+
+- **Migration 0097** applied to production Supabase; ledger stamped (97/97, 0 problems).
+- **API deployed** to Fly `invest254-api` (rolling, health checks passed). New endpoints verified live.
+- **Web deployed** to Cloudflare Pages project `invest254` (auto-deploy on `main`, deployment
+  `dd58e31b`, commit `26b630a`, deploy success). The live game **engine** (`invest254-engine-pm`) was
+  intentionally **not** redeployed — the fix ships entirely via the API (AuthService/identity are a
+  bundled workspace dep), so active traders were not disrupted.
+- **Force-logout stamped**: `sessions_valid_after = now()` for all 3 privileged accounts
+  (2 admin + 1 platform_superadmin). Their existing tokens are now rejected by the deployed verifier;
+  next login routes them through the mandatory setup gate.
+- **Production verification**: reset on a real admin phone → `403 SECURITY_QUESTIONS_NOT_SET`
+  (fail-closed, no mutation). Vulnerability closed.
 
 ## Rollout order (must be followed)
 
