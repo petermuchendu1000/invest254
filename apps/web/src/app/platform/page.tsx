@@ -44,7 +44,7 @@ export default function PlatformOverviewPage() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
   const [currency, setCurrency] = useState('all');
-  const [preset, setPreset] = useState<RangePreset>('all');
+  const [preset, setPreset] = useState<RangePreset>('today');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'ggr', dir: 'desc' });
