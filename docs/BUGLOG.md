@@ -96,7 +96,10 @@ entry: what, evidence, root cause, impact, and resolution.
   player-flagged 13→8 (the 5 cross-site players become real pool players; all had 0 balance / 0 trades),
   marketer-flagged 10→12 (ALL enrolled marketers stay demo; moha KES 3,152 and jake KES 3,005 demo
   balances preserved). Additive, idempotent, reversible, money-neutral.
-- **Follow-up (data hygiene, deferred for operator review):** `madolar/moha` and `safitraders/jake` are
-  `role=marketer` but have **no `marketers` row on their own brand** (so they can't marketer-login there).
-  The 0100 `role='marketer'` clause keeps them demo; backfilling their brand's `marketers` row is a
-  separate cleanup awaiting sign-off.
+- **Follow-up (data hygiene) — DONE:** `madolar/moha` and `safitraders/jake` were `role=marketer` with
+  live demo balances but had **no `marketers` row on their own brand** — an artifact of 0076 backfilling
+  every pre-existing marketer to the default site (invest254). Enrolled them properly on their own brand
+  via `fn_marketer_create` (active row + `marketer_wallets`), leaving the invest254 rows untouched;
+  audited as `marketer.enroll.backfill` in `admin_actions`. Their classification now resolves via the
+  site-scoped same-site match (not just the `role='marketer'` safety clause). NOTE: no marketer-dashboard
+  PIN was set for the new brand identities — set one via the marketer admin if they need to log in there.
