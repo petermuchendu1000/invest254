@@ -319,3 +319,11 @@ staying responsive (activation lag 2–8 days) and stable (churn ~6.5%). Steps, 
   and resolved by a daily cadence.
 - The allocation only sets pool CAPS; it never moves player money. Fully audited via the existing
   `platform_pool_distributions` + `admin_actions` trail.
+
+### 15.5 Scheduled autonomous distribution (#5)
+`.github/workflows/pool-distribute.yml` runs `scripts/pool_distribute_daily.mts` daily at **21:15 UTC
+(00:15 EAT)** — it re-sizes every brand's pool cap from demand with no superadmin, via the same audited
+`PlatformService.distributePoolDynamic` path. **Guarded + opt-in:** it is INERT until the operator sets
+the repo variable `POOL_DAILY_TOTAL_CENTS` (the global envelope, integer cents); without it the script
+cleanly no-ops (never spends unallocated money). `Σ alloc ≤ envelope` by construction, fully audited.
+Manual `workflow_dispatch` supports a `dry_run` preview. Requires the existing `DATABASE_URL` repo secret.
