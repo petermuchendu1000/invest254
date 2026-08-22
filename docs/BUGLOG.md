@@ -103,3 +103,36 @@ entry: what, evidence, root cause, impact, and resolution.
   audited as `marketer.enroll.backfill` in `admin_actions`. Their classification now resolves via the
   site-scoped same-site match (not just the `role='marketer'` safety clause). NOTE: no marketer-dashboard
   PIN was set for the new brand identities — set one via the marketer admin if they need to log in there.
+## #6 — Pool RTP tracked pool-size, not house_edge (Bug 1) — FIXED (pool RTP redesign, docs/25 §14)
+- **What:** the pool controller paced payouts against `pool_amount × elapsed_day_fraction`, so realized
+  player RTP tracked how big the daily pool was relative to turnover — not the operator's `house_edge`.
+- **Evidence:** `sessionWinProbability` pace term was `(amount·dayFraction − paid)/amount`. With a pool
+  large relative to turnover, `paid` sits far behind pace every trade, pinning win-prob at `pCap`. With
+  the pre-redesign defaults (`pCap 0.6`, `meanMultiplier 1.8`) that yields `E[RTP] = 0.6·1.8 = 108%`.
+  Simulation of the real decision fn confirmed RTP saturating well above the intended `1 − house_edge`.
+- **Impact:** RTP was effectively set by pool sizing, not the configured edge; on generously-sized pools
+  the house could pay ~100%+ RTP.
+- **Resolution:** pace realized RTP toward `targetRtp × cumulative_turnover` (player-only, per site-day);
+  the pool `available()` becomes only the hard cash fuse. Net: `realized RTP = min(targetRtp,
+  pool/turnover)`. Turnover is tracked in-memory + DB-seeded (no migration).
+
+## #7 — No structural positive-edge guarantee; low-volume days ran underwater (Bug 2) — FIXED (docs/25 §14)
+- **What:** nothing guaranteed cumulative payout stayed below turnover. A fixed probability cap bounds
+  only the *expected* per-trade edge, not realized aggregate RTP.
+- **Evidence:** driving the real engine over 400 simulated days at 8 trades/day (strict `pCap = base`,
+  no ceiling) ended **above 100% RTP on 116/400 days** (house net loss), max day 177%; even high-volume
+  days spiked intraday RTP to 124–135%.
+- **Impact:** on thin/low-volume brand-days, the house could and did (in simulation) lose money.
+- **Resolution:** a HARD RTP-budget ceiling in `decidePoolOutcome` — `paid + reserved ≤ ⌊targetRtp ×
+  turnover⌋` at all times (subtracting reserved makes it concurrency-safe across in-flight positions).
+  Guarantees realized RTP ≤ target at **every** volume; simulation: 0/400 days over target, `maxIntraday
+  = target` exactly. The pool `available()` remains the absolute cash fuse.
+
+## #8 — Pool and statistical engines disagreed on win frequency (Bug 3) — FIXED (docs/25 §14)
+- **What:** the pool used hardcoded knobs (`targetSessionRtp 0.6`, `meanMultiplier 1.8`) disconnected from
+  each brand's `site_game_config`, so pool win frequency (base `0.6/1.8 = 0.33`) did not match the
+  statistical engine's `targetWinRate` (default `0.125`). A player's win cadence changed with pool mode.
+- **Resolution:** derive the pool's `meanMultiplier = targetRtp / targetWinRate` (the same `rtp/winRate`
+  the `SettlementEngine` calibrates to), so pool base win-prob = `targetWinRate`. Both engines now share
+  `targetWinRate` and both deliver RTP = `1 − house_edge`. `game.ts` threads `cfg.targetWinRate` into the
+  controller; an infeasible config falls back to the default multiplier (defence-in-depth).
