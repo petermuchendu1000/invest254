@@ -73,3 +73,30 @@ entry: what, evidence, root cause, impact, and resolution.
   via Cloudflare Pages (commit 26b630a); force-logout stamped for all 3 privileged accounts. Verified in
   prod: reset on a real admin phone returns 403 SECURITY_QUESTIONS_NOT_SET (fail-closed, no change).
   Full suite 610 pass / 0 fail.
+
+## #5 — Demo/marketer classifier was NOT site-scoped → players bypassed the withdrawal pool — FIXED (migration 0100)
+- **What:** `fn_is_marketer_account` (0084) matched a profile to the `marketers` cohort on **phone
+  (significant-9) alone, across ALL brands** — no `site_id` filter. But 0076 made `marketers` per-site
+  and docs/20 §7 defines marketer identity as per-site. So a real **player on brand B** whose phone
+  collided with a marketer on brand A was classified demo/marketer on brand B.
+- **Symptoms (reported):** "global pool fund not applying to some clients (e.g. 33traders)" and "players
+  using game config meant for marketers instead of the pool fund."
+- **Mechanism (confirmed end-to-end):** engine `loadIsMarketer` → `fn_is_marketer_account` → wrongly
+  true → `poolPath = poolActive && !isMarketer` = false → the player **skips the withdrawal pool and
+  settles on the statistical ("marketer") path**, and the money layer (0086) routes them to the demo
+  bucket. Not a mirror/template or deployment issue — the defect is in applied SQL affecting every brand;
+  33traders is a normal row in the primary DB and pools correctly once classification is right.
+- **Evidence (live):** 13 `role=player` accounts flagged as marketer; 5 were pure cross-site
+  contamination (no marketer on their own site): 33traders/boyz, 66investors/Mercy, tamutraders/boyz,
+  madolar/jake, invest254/grace254_waithera. The predicate also drives finance/RTP exclusion + money
+  routing, so it mis-bucketed money too.
+- **Fix (0100):** a user is demo/marketer IFF a `marketers` row exists **on the user's own site**
+  (significant-9 match) **OR** the profile is `role='marketer'` (safety: never un-demo an enrolled
+  marketer — 0084 warns that would turn funny-money into withdrawable cash). Rolled-back validation:
+  player-flagged 13→8 (the 5 cross-site players become real pool players; all had 0 balance / 0 trades),
+  marketer-flagged 10→12 (ALL enrolled marketers stay demo; moha KES 3,152 and jake KES 3,005 demo
+  balances preserved). Additive, idempotent, reversible, money-neutral.
+- **Follow-up (data hygiene, deferred for operator review):** `madolar/moha` and `safitraders/jake` are
+  `role=marketer` but have **no `marketers` row on their own brand** (so they can't marketer-login there).
+  The 0100 `role='marketer'` clause keeps them demo; backfilling their brand's `marketers` row is a
+  separate cleanup awaiting sign-off.
