@@ -96,6 +96,12 @@ export function OutcomeOverlay() {
   // Show / auto-dismiss lifecycle.
   useEffect(() => {
     if (!current) return;
+    // The stake input (BetPanel) has autoFocus and may still hold focus when a position
+    // settles. On mobile that keeps the soft keyboard open, covering the outcome card.
+    // Blur whatever is focused so the keyboard dismisses before the overlay appears.
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setVisible(true);
     // Haptics: celebratory pattern for wins, single soft tap for losses.
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
