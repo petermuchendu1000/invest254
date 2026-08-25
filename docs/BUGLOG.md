@@ -5,6 +5,37 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #13 — Banned marketer stayed a brand's earning default; no admin-panel way to reassign — FIXED (migration 0104)
+- **Report (operator):** *Mohane* (the only ACTIVE marketer on **madolar**) was still not the brand
+  default; the "Make brand default" control couldn't be found where marketers are actually managed.
+- **Evidence (read-only, production):** madolar had `sites.owner_user_id = moha`, but **moha and Mohan
+  were both `banned`** and *Mohane* was the lone `active` marketer — yet a **banned** marketer remained
+  the brand default and kept accruing 25% of every deposit. The only assignment UI lived in the
+  **Platform Console** (`/platform`, platform_superadmin), not the **Admin panel** (`/admin/users`)
+  operators use; and nothing prevented a default marketer from being banned or stopped a banned user
+  from being (or staying) the default.
+- **Root causes:** (1) surface mismatch — the control was platform-only; (2) `fn_platform_set_site_owner`
+  validated role + site but **not status**, so a banned/suspended marketer could be set/left as default;
+  (3) `fn_admin_set_user_status` had **no guard** against banning/suspending the current default.
+- **Immediate data fix:** reassigned madolar's default from banned *moha* → active *Mohane*
+  (`fn_platform_set_site_owner`, audited). Future deposits now credit Mohane 25%. (Historical
+  commissions already paid to *moha* were left as-is.)
+- **Resolution (branch `feat/admin-default-marketer-guards`, migration 0104 + API + web):**
+  * **0104:** (a) `fn_platform_set_site_owner` now rejects a non-active marketer (`OWNER_NOT_ACTIVE`);
+    (b) new **site-scoped** `fn_admin_set_site_owner(actor, role, marketer, make_default)` lets a brand
+    `admin`/`superadmin` set/clear THEIR OWN brand's default (site derived from the marketer;
+    `SITE_SCOPE_FORBIDDEN` off-brand; active-marketer enforced); (c) `fn_admin_set_user_status` blocks
+    banning/suspending the current default (`DEFAULT_MARKETER_LOCKED`) — reassign first (per operator
+    choice: **block**). Reactivating is always allowed.
+  * **API:** `POST /admin/marketers/:id/make-default` and `/clear-default` (admin-gated, brand-scope
+    enforced), routed via `PlatformRepository.setDefaultMarketer`. `AdminUserDetail` gains
+    `isBrandDefaultMarketer`.
+  * **Web:** `/admin/users/:id` shows a **"Make brand default" / "Remove as default"** control for
+    marketers with a ★ current-default badge — where operators already manage users.
+- **Verification:** rolled-back live e2e (13 scenarios: every guard + valid set/clear) against the real
+  schema; 0104 applied to production and re-checked live (ban-of-default → `DEFAULT_MARKETER_LOCKED`).
+  Typecheck clean (backend + web); full suite 673/673 (added an admin route-wiring/gating test).
+
 ## #12 — "Mohane's earnings not populating" — NOT A BUG (by design); default-marketer assignment made a first-class button + docs corrected
 - **Report:** marketer *Mohane*'s dashboard showed no earnings; suspected a regression of #11.
 - **Investigation (read-only, production):** *Mohane* (`0cb63be4…`, role `marketer`, brand **madolar**

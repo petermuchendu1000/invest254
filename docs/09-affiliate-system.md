@@ -65,12 +65,20 @@ Worked example: a player deposits KES 20,000 on madolar (default marketer *moha*
 > (`profiles.referred_by`). This is by design, not a bug: a non-default sub-marketer earns only from
 > deposits routed through their own referral chain.
 
-**Assigning / changing a brand's default marketer.** The default marketer is `sites.owner_user_id`.
-A `platform_superadmin` sets it from **Platform Console → (client) → Users →** select a user **→
-"Make brand default"** (or the *Brand marketer* selector at the top of the client's user list). The
-target must be a **marketer on that same brand**; the backend (`fn_platform_set_site_owner`,
-migration 0082, `PATCH /platform/sites/:id/owner`) enforces this and audits the change. Setting it to
-*unassigned* means deposits on that brand pay **no** marketer commission until a default is assigned.
+**Assigning / changing a brand's default marketer.** The default marketer is `sites.owner_user_id`
+and must be an **active marketer on that brand** (migration 0104). Two ways to set it:
+- **Admin panel** (brand `admin`/`superadmin`): **Admin → Users → open a marketer → "Make brand
+  default"** (or "Remove as default"). Site-scoped: an admin can only assign within their own brand
+  (`fn_admin_set_site_owner`, `POST /admin/marketers/:id/make-default|clear-default`).
+- **Platform Console** (`platform_superadmin`, cross-brand): **open the client → Users →** select a
+  user **→ "Make brand default"** (or the *Brand marketer* selector) — `fn_platform_set_site_owner`,
+  `PATCH /platform/sites/:id/owner`.
+
+Both paths require the target to be an **active** marketer on that brand and are audited. A
+banned/suspended user cannot be set as default (`OWNER_NOT_ACTIVE`), and the **current default marketer
+cannot be banned/suspended until reassigned** (`DEFAULT_MARKETER_LOCKED`, migration 0104) — so a brand
+is never left crediting a disabled account. Setting the default to *unassigned* means deposits on that
+brand pay **no** marketer commission until a new default is assigned.
 
 > **Legacy (deprecated):** an earlier design paid **20% of GGR** (net loss) accrued daily via
 > `fn_accrue_affiliate_commissions` into `affiliate_commissions`. The live payout stream is the
