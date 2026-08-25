@@ -59,6 +59,19 @@ Worked example: a player deposits KES 20,000 on madolar (default marketer *moha*
 - Referred by sub-marketer *Mohane* → *Mohane* earns `20,000 × 0.20 = KES 4,000` and *moha*
   (root) earns `20,000 × 0.05 = KES 1,000` (total KES 5,000 = 25%).
 
+> **A brand always credits its default marketer.** Even when **no** referral link is used, the
+> default marketer earns the full 25% of every deposit — a non-default marketer (e.g. *Mohane*)
+> therefore shows **KES 0** in their dashboard until a depositor is actually attributed to them
+> (`profiles.referred_by`). This is by design, not a bug: a non-default sub-marketer earns only from
+> deposits routed through their own referral chain.
+
+**Assigning / changing a brand's default marketer.** The default marketer is `sites.owner_user_id`.
+A `platform_superadmin` sets it from **Platform Console → (client) → Users →** select a user **→
+"Make brand default"** (or the *Brand marketer* selector at the top of the client's user list). The
+target must be a **marketer on that same brand**; the backend (`fn_platform_set_site_owner`,
+migration 0082, `PATCH /platform/sites/:id/owner`) enforces this and audits the change. Setting it to
+*unassigned* means deposits on that brand pay **no** marketer commission until a default is assigned.
+
 > **Legacy (deprecated):** an earlier design paid **20% of GGR** (net loss) accrued daily via
 > `fn_accrue_affiliate_commissions` into `affiliate_commissions`. The live payout stream is the
 > **25%-of-deposits** model above; the GGR tables remain only for historical reporting.
