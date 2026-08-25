@@ -249,7 +249,10 @@ backend: **[live]** already available, **[gap]** needs a new platform endpoint (
   required). This sets `sites.owner_user_id` via `PATCH /platform/sites/:id/owner` →
   `fn_platform_set_site_owner` (migration 0082, audited) — the marketer who earns 25% of every deposit
   on that brand (see docs/09 §3). A top-of-list *Brand marketer* selector offers the same for marketers
-  already visible in the loaded page.
+  already visible in the loaded page. The target must be an **active** marketer on that brand
+  (`OWNER_NOT_ACTIVE` otherwise, migration 0104). Brand `admin`/`superadmin`s can do the same from the
+  **Admin panel** (`/admin/users/:id` → "Make brand default", site-scoped `fn_admin_set_site_owner`),
+  and the current default cannot be banned/suspended until reassigned (`DEFAULT_MARKETER_LOCKED`).
 - Backend gap: `GET /platform/sites/:id/users`, `GET /platform/sites/:id/users/:uid`, and
   platform wrappers routing to the (now platform-capable) `fn_admin_*` RPCs with the target user's
   brand context. Owner accounts remain `SUPERADMIN_PROTECTED`.
