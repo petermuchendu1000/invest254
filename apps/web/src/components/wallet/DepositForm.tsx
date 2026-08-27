@@ -129,7 +129,8 @@ export function DepositForm() {
         <FailX />
         <h3 className="text-base font-semibold text-fg">Payment not completed</h3>
         <p className="text-sm text-muted">
-          The M-Pesa prompt wasn’t approved in time or was cancelled. No money was deducted.
+          We couldn’t complete this M-Pesa payment. This can happen if the prompt was cancelled or timed out,
+          or if M-Pesa is temporarily unavailable. No money was deducted — please try again in a moment.
         </p>
         <Button fullWidth onClick={() => { setDone(false); setTxId(null); }}>Try again</Button>
       </div>

@@ -5,6 +5,47 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #15 — Deposits failing "System internal error" + activity_feed log flood — DIAGNOSED (Safaricom-side) + HARDENED (branch `fix/mpesa-resilience-buglog-15`)
+- **Report (operator):** admin finance showed a wall of `Failed` deposits reading "System internal error";
+  Supabase logs were flooded (~every 4s) with `relation "activity_feed" does not exist` (42P01). It had
+  been working in the morning; no code was deployed that day.
+- **Two independent problems, established with production evidence:**
+  1. **Deposit failures = Safaricom-side, NOT our code.** Every failed row carries a genuine Safaricom
+     STK callback `ResultCode 17 "System internal error."`. Requests are well-formed and accepted
+     (valid `CheckoutRequestID`), OAuth succeeds, and — decisively — Safaricom's own authoritative
+     `STKPushQuery` returns `ResultCode 17` for these checkouts when queried live from the API machine
+     with the production creds. Timeline: last success 12:41 UTC (15:41 EAT), then success → 0 with
+     code-17 dominating; ~100 real callbacks since, **0 with ResultCode 0**. External corroboration:
+     Safaricom confirmed a nationwide M-PESA core-system-upgrade outage (Aug 25) with ongoing STK
+     internal errors in this window. **No money lost:** 0 failed/pending deposits carry an M-Pesa
+     receipt (no debit-without-credit); all 771 successes have receipts. Server clock is UTC so the STK
+     `Timestamp` is sent in UTC (3h behind EAT), but Safaricom accepts it (OAuth+query succeed) — not the
+     cause. **Action:** escalate the shortcode to Safaricom/aggregator; only they can clear code 17.
+  2. **`activity_feed` log flood = deployment drift.** Migration `0039` dropped `activity_feed`/
+     `chat_messages` (Aug 25); current HEAD writes to neither. But the deployed **engine** (`invest254-engine-pm`)
+     had the `ACTIVITY_SIM` secret set and was running the older pre-removal build whose background
+     simulator inserts a simulated row every ~4s → every insert failed against the dropped table.
+     Harmless to money; pure log noise. **Fix applied:** unset `ACTIVITY_SIM` on the engine app (engine
+     restarted; flood stopped, verified in logs). Follow-up: redeploy the engine from current HEAD so the
+     simulator code is gone entirely (belt-and-suspenders).
+- **Resilience hardening in this branch (does NOT make Safaricom succeed — it makes the outage honest and
+  less damaging):**
+  * **`packages/shared/src/mpesa.ts` — `classifyMpesaResult(code)`:** pure classifier mapping every STK
+    ResultCode to a category (`paid`/`cancelled`/`unreachable`/`insufficient`/`wrong_pin`/`invalid_number`/
+    `in_progress`/`provider_down`/`unknown`), a `retriable` flag, and an honest, non-blaming user message
+    that always reassures "No money was deducted." Code 17/26/1025/9999 → `provider_down` (names Safaricom,
+    not the user). +7 unit tests.
+  * **Duplicate-STK guard (`PaymentService.initiateDeposit` + `PaymentRepository.hasFreshPendingDeposit`,
+    in-memory + Pg):** refuses a new STK push while the user's previous deposit is still in flight
+    (pending/processing, 90s window) → `DEPOSIT_IN_PROGRESS` (HTTP 409). Stops the double-tap / rapid retry
+    storms observed during the outage (individual players fired ~10 pushes in minutes). Only spans the
+    non-terminal lifetime, so a legitimate retry after a failed/successful outcome is never blocked; fails
+    OPEN on a lookup error so it can never block a real deposit. +5 tests (incl. the code-17 scenario).
+  * **Web `DepositForm` copy:** the failed-state message no longer blames the user ("wasn't approved in
+    time or was cancelled"); it now names a possible provider outage and invites a retry.
+- **Verification:** full suite **685/685** green; `tsc -b` + web typecheck clean. NOT merged — left on the
+  branch for operator review before merge to `main`.
+
 ## #14 — Marketer expenses/advances never reached the dashboard; didn't affect withdrawable — FIXED (migration 0105)
 - **Report:** expenses/advances logged in admin ("Marketer expenses") weren't reflected on the
   marketer's dashboard, and the net (withdrawable) math looked wrong.

@@ -5,6 +5,7 @@ export * from "./site.js";
 export * from "./activity.js";
 export * from "./chatfilter.js";
 export * from "./payments.js";
+export * from "./mpesa.js";
 export * from "./credentials.js";
 export * from "./security-questions.js";
 export * from "./totp.js";

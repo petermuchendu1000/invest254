@@ -91,6 +91,12 @@ export class PaymentService {
   private readonly darajaForSite?: (siteId: string | undefined) => DarajaClient | undefined | Promise<DarajaClient | undefined>;
   private readonly events: PaymentEvents;
   private readonly verifyStk: boolean;
+  /**
+   * How long a single deposit is considered "in flight" for the duplicate-STK guard. Safaricom's
+   * STK prompt itself times out around 60s (code 1037 "DS timeout"); 90s covers that plus callback
+   * delivery latency, after which the previous attempt is terminal and a fresh push is allowed.
+   */
+  static readonly DEPOSIT_DEDUP_WINDOW_MS = 90_000;
   constructor(private readonly repo: PaymentRepository, private readonly daraja: DarajaClient, opts: PaymentServiceOptions = {}) {
     this.minDeposit = opts.minDepositCents ?? MIN_DEPOSIT_CENTS;
     this.minWithdrawal = opts.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
@@ -117,6 +123,21 @@ export class PaymentService {
     if (amountCents < minDep) throw new Error("BELOW_MIN");
     const maxDep = await this.currentMaxDeposit();
     if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
+    // Duplicate-STK guard: refuse a new push while the user's previous deposit is still in flight
+    // (pending/processing). This stops double-taps and the rapid retry storms observed when M-Pesa
+    // is degraded — during the code-17 (Safaricom "System internal error") incident individual
+    // players fired ~10 STK pushes in minutes, adding load without any chance of success. The window
+    // only spans the non-terminal lifetime of a deposit, so a legitimate retry after a failed or
+    // successful outcome is never blocked. Fail-open on a repository error so a lookup glitch can
+    // never block a real deposit.
+    try {
+      if (await this.repo.hasFreshPendingDeposit(userId, PaymentService.DEPOSIT_DEDUP_WINDOW_MS, siteId)) {
+        throw new Error("DEPOSIT_IN_PROGRESS");
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message === "DEPOSIT_IN_PROGRESS") throw e;
+      /* lookup failed — fall through and allow the deposit (never block on a guard glitch) */
+    }
     const msisdn = normalizeMsisdn(phoneRaw);
     const txId = await this.repo.createDeposit(userId, amountCents, msisdn, siteId);
     // Site-aware AccountReference: show the depositing brand's account, not a hardcoded one. And

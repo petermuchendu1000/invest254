@@ -322,21 +322,25 @@ test("PaymentService: global min-deposit ENFORCED wins over the static default",
 });
 
 test("PaymentService: global min-deposit fail-open (0 / throw) defers to the static default", async () => {
-  const repo = new InMemoryPaymentRepository(); repo.seed("u", 1_000_000);
+  // Distinct users per successful initiation so the duplicate-STK guard (BUGLOG #15) — which blocks
+  // a second in-flight deposit for the SAME user — doesn't mask the min-deposit assertions here.
+  const repo = new InMemoryPaymentRepository(); repo.seed("u", 1_000_000); repo.seed("u2", 1_000_000);
   const svc0 = new PaymentService(repo, new StubDarajaClient(), { minDepositForGlobal: async () => 0 });
   await assert.rejects(() => svc0.initiateDeposit("u", 9_999, "0712345678"), /BELOW_MIN/); // static 20_000 still applies
   assert.ok((await svc0.initiateDeposit("u", 20_000, "0712345678")).txId);
   const svcThrow = new PaymentService(repo, new StubDarajaClient(), { minDepositForGlobal: async () => { throw new Error("db"); } });
-  assert.ok((await svcThrow.initiateDeposit("u", 20_000, "0712345678")).txId, "throw => static default, not a block");
+  assert.ok((await svcThrow.initiateDeposit("u2", 20_000, "0712345678")).txId, "throw => static default, not a block");
 });
 
 test("PaymentService: global max-deposit caps a single deposit (ABOVE_MAX)", async () => {
-  const repo = new InMemoryPaymentRepository(); repo.seed("u", 100_000_000);
+  // Distinct users per successful initiation so the duplicate-STK guard (BUGLOG #15) doesn't block
+  // the second, unrelated success while the first is still in flight.
+  const repo = new InMemoryPaymentRepository(); repo.seed("u", 100_000_000); repo.seed("u2", 100_000_000);
   const svc = new PaymentService(repo, new StubDarajaClient(), { maxDepositForGlobal: async () => 5_000_000 }); // KES 50k cap
   await assert.rejects(() => svc.initiateDeposit("u", 5_000_001, "0712345678"), /ABOVE_MAX/);
   assert.ok((await svc.initiateDeposit("u", 5_000_000, "0712345678")).txId, "at the cap is allowed");
   const svcNoCap = new PaymentService(repo, new StubDarajaClient(), {});
-  assert.ok((await svcNoCap.initiateDeposit("u", 9_000_000, "0712345678")).txId, "no global => no cap");
+  assert.ok((await svcNoCap.initiateDeposit("u2", 9_000_000, "0712345678")).txId, "no global => no cap");
 });
 
 test("PaymentService: global min-withdrawal WINS over per-site + provider (global overrides all clients)", async () => {
@@ -357,4 +361,48 @@ test("PaymentService: global min-withdrawal fail-open (0) defers to per-site/pro
     minWithdrawalForSite: () => 40_000,
   });
   await assert.rejects(() => svc.requestWithdrawal("u", 39_999, "0712345678", "site-a"), /BELOW_MIN/);
+});
+
+// ── Duplicate-STK guard (BUGLOG #15) ───────────────────────────────────────────────────────────
+test("PaymentService: rejects a duplicate STK push while the first deposit is still in flight", async () => {
+  const { svc } = rig();
+  const first = await svc.initiateDeposit("u", 50_000, "0712345678"); // now pending/processing
+  assert.ok(first.checkoutRequestId);
+  // A second attempt before the first resolves must be refused (double-tap / retry storm).
+  await assert.rejects(() => svc.initiateDeposit("u", 50_000, "0712345678"), /DEPOSIT_IN_PROGRESS/);
+});
+
+test("PaymentService: a fresh deposit IS allowed after the previous one reaches a terminal state", async () => {
+  const { svc, repo } = rig();
+  const first = await svc.initiateDeposit("u", 50_000, "0712345678");
+  // Simulate the incident outcome: Safaricom returns code 17 (System internal error) -> failed.
+  const done = await svc.handleStkCallback(first.checkoutRequestId, 17, "System internal error.", null, {});
+  assert.equal(done.status, "failed");
+  // The user may now legitimately retry — the guard only spans the non-terminal lifetime.
+  const second = await svc.initiateDeposit("u", 50_000, "0712345678");
+  assert.ok(second.checkoutRequestId && second.checkoutRequestId !== first.checkoutRequestId);
+  assert.equal(await repo.getBalance("u"), 100_000); // no phantom credit from the failed attempt
+});
+
+test("PaymentService: a fresh deposit is allowed after the previous one succeeds", async () => {
+  const { svc } = rig();
+  const first = await svc.initiateDeposit("u", 50_000, "0712345678");
+  await svc.handleStkCallback(first.checkoutRequestId, 0, "OK", "RCPT", {}); // success -> terminal
+  const second = await svc.initiateDeposit("u", 20_000, "0712345678");
+  assert.ok(second.checkoutRequestId);
+});
+
+test("PaymentService: the guard fails OPEN — a repository lookup error never blocks a real deposit", async () => {
+  const { svc, repo } = rig();
+  (repo as any).hasFreshPendingDeposit = async () => { throw new Error("DB_DOWN"); };
+  const out = await svc.initiateDeposit("u", 50_000, "0712345678");
+  assert.ok(out.checkoutRequestId); // proceeded despite the guard throwing
+});
+
+test("PaymentService: the guard is per-user — a different user is not blocked", async () => {
+  const { svc, repo } = rig();
+  repo.seed("v", 100_000);
+  await svc.initiateDeposit("u", 50_000, "0712345678"); // u in flight
+  const other = await svc.initiateDeposit("v", 50_000, "0722000000"); // v unaffected
+  assert.ok(other.checkoutRequestId);
 });

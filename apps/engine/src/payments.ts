@@ -53,6 +53,12 @@ export interface PaymentRepository {
   listTransactions(userId: string, q: TxListQuery, siteId?: string): Promise<Page<TransactionRecord>>;
   /** Deposits still non-terminal after `olderThanMs` (oldest first) — input to the reconcile sweep. */
   listUnsettledDeposits(olderThanMs: number, limit: number): Promise<UnsettledDeposit[]>;
+  /**
+   * True if the user has a non-terminal (pending/processing) deposit created within `withinMs`.
+   * Used to reject a duplicate STK push fired before the previous one resolves (double-tap /
+   * rapid retry storms). `siteId` scopes the check per brand when provided.
+   */
+  hasFreshPendingDeposit(userId: string, withinMs: number, siteId?: string): Promise<boolean>;
 }
 
 interface MemTx { id: string; userId: string; kind: "deposit" | "withdrawal"; amount: Cents; status: string; phone: string; checkoutId?: string; seq: number; createdAtMs: number; receipt: string | null; siteId?: string | null; }
@@ -105,6 +111,15 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       .sort((a, b) => a.createdAtMs - b.createdAtMs || a.seq - b.seq)
       .slice(0, limit)
       .map((t) => ({ txId: t.id, checkoutRequestId: t.checkoutId! }));
+  }
+
+  async hasFreshPendingDeposit(userId: string, withinMs: number, siteId?: string): Promise<boolean> {
+    const cutoff = this.now() - withinMs;
+    return [...this.txns.values()].some((t) =>
+      t.userId === userId && t.kind === "deposit" &&
+      (t.status === "pending" || t.status === "processing") &&
+      t.createdAtMs >= cutoff &&
+      (siteId === undefined || (t.siteId ?? null) === siteId));
   }
 
   async createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents, siteId?: string): Promise<CreateWithdrawalResult> {
@@ -271,6 +286,17 @@ export class PgPaymentRepository implements PaymentRepository {
       [olderThanMs, limit],
     );
     return r.rows.map((x: any) => ({ txId: String(x.id), checkoutRequestId: String(x.checkout_request_id) }));
+  }
+  async hasFreshPendingDeposit(userId: string, withinMs: number, siteId?: string): Promise<boolean> {
+    const r = await this.q.query(
+      `select 1 from transactions
+        where user_id = $1 and kind = 'deposit' and status in ('pending','processing')
+          and created_at >= now() - ($2::double precision * interval '1 millisecond')
+          and ($3::uuid is null or site_id = $3)
+        limit 1`,
+      [userId, withinMs, siteId ?? null],
+    );
+    return r.rows.length > 0;
   }
   async createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents, siteId?: string): Promise<CreateWithdrawalResult> {
     // migration 0047: fn_create_withdrawal(user, amount, phone, min, site_id) — holds within the brand's wallet.
