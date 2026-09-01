@@ -12,6 +12,14 @@ import type { DarajaClient } from "./daraja.js";
 export interface PaymentEvents {
   /** Fired once when a withdrawal is confirmed paid (for the real activity feed). */
   onWithdrawalSuccess?(e: { userId: string; amountCents: Cents }): void;
+  /**
+   * Fired once when a player creates a PENDING withdrawal that needs an admin decision (the normal
+   * player Daraja path — NOT the instant marketer transfer, which settles immediately and fires
+   * onWithdrawalSuccess). The server routes this into PushService so admins receive a real-time Web
+   * Push with Approve/Reject actions (Issue 1). Fire-and-forget: it must never block or fail the
+   * withdrawal, so the handler is invoked without await and any throw is swallowed here.
+   */
+  onWithdrawalRequested?(e: { txId: string; userId: string; amountCents: Cents; phone: string; siteId?: string | undefined }): void;
 }
 export interface PaymentServiceOptions {
   minDepositCents?: Cents;
@@ -228,6 +236,11 @@ export class PaymentService {
     // Normal player: real M-Pesa payout via the pending -> admin approve -> Daraja B2C flow.
     const msisdn = normalizeMsisdn(phoneRaw);
     const res: CreateWithdrawalResult = await this.repo.createWithdrawal(userId, amountCents, msisdn, minWithdrawal, siteId);
+    // Real-time admin alert (Issue 1): a pending request now exists that needs an approve/reject
+    // decision. Fire-and-forget so a push failure can never roll back or delay the player's request.
+    try {
+      this.events.onWithdrawalRequested?.({ txId: res.txId, userId, amountCents, phone: msisdn, siteId });
+    } catch { /* never let a notification hook affect the withdrawal outcome */ }
     return { mode: "daraja", txId: res.txId, newBalance: res.newBalance };
   }
 
