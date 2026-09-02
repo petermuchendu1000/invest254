@@ -15,6 +15,8 @@ import { makePgReferralRepo } from "./referral.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
 import { makeDomainProvisioner } from "./domains.js";
 import { makeWebPushTransport } from "./webpush.js";
+import { makeResendSender, buildWithdrawalEmail } from "./email.js";
+import { signWithdrawalAction } from "./withdrawalactionlink.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.platform.js";
 
 /**
@@ -148,6 +150,37 @@ async function buildDeps(): Promise<ApiDeps> {
     : undefined;
   if (pushService) console.log("[api] admin web-push enabled (withdrawal alerts with Approve/Reject actions)");
 
+  // Email alerts (Issue 1): the reliable, login-free channel — a withdrawal request emails the
+  // admin(s) with one-tap Approve/Reject magic links. Dormant unless RESEND_API_KEY + EMAIL_FROM +
+  // ADMIN_ALERT_EMAILS are set. Signed with SUPABASE_JWT_SECRET (no new secret needed).
+  const emailSender = makeResendSender();
+  const actionSecret = process.env.SUPABASE_JWT_SECRET;
+  const apiPublicUrl = (process.env.API_PUBLIC_URL || "https://invest254-api.fly.dev").replace(/\/+$/, "");
+  const alertEmails = (process.env.ADMIN_ALERT_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (emailSender && alertEmails.length > 0) console.log(`[api] admin withdrawal EMAIL alerts enabled -> ${alertEmails.length} recipient(s)`);
+
+  // Records who approved/rejected a withdrawal actioned from an email link (approved_by FK -> profiles).
+  const resolveActionActor = async (): Promise<string | null> => {
+    const override = process.env.WITHDRAWAL_ACTION_ADMIN_ID?.trim();
+    if (override) return override;
+    try {
+      const r = await q.query("select id from profiles where role in ('admin','superadmin') and status = 'active' order by (role = 'superadmin') desc, created_at asc limit 1", []);
+      return r.rows[0] ? String(r.rows[0].id) : null;
+    } catch { return null; }
+  };
+
+  async function emailWithdrawalAlert(e: { txId: string; userId: string; amountCents: number; phone: string }): Promise<void> {
+    if (!emailSender || !actionSecret || alertEmails.length === 0) return;
+    try {
+      const who = await resolveHandle(e.userId);
+      const approveUrl = `${apiPublicUrl}/api/v1/w/act?token=${signWithdrawalAction(e.txId, "approve", actionSecret)}`;
+      const rejectUrl = `${apiPublicUrl}/api/v1/w/act?token=${signWithdrawalAction(e.txId, "reject", actionSecret)}`;
+      const mail = buildWithdrawalEmail({ who, amountCents: e.amountCents, phone: e.phone, txId: e.txId, approveUrl, rejectUrl });
+      const r = await emailSender.send({ to: alertEmails, ...mail });
+      if (!r.ok) console.warn("[api] withdrawal alert email failed:", r.error);
+    } catch (err) { console.warn("[api] withdrawal alert email error:", (err as Error).message); }
+  }
+
   const payments = new PaymentService(payRepo, daraja, {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
     // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
@@ -173,8 +206,9 @@ async function buildDeps(): Promise<ApiDeps> {
       // Fire-and-forget: push a real-time Approve/Reject alert to admins. Never awaited and fully
       // isolated so a push outage can't slow down or fail the player's withdrawal request.
       onWithdrawalRequested: (e) => {
-        if (!pushService) return;
-        void pushService.notifyWithdrawalRequested(e).catch((err) => {
+        // Fire both channels, fire-and-forget: email (reliable, login-free) + web push (if enabled).
+        void emailWithdrawalAlert(e);
+        if (pushService) void pushService.notifyWithdrawalRequested(e).catch((err) => {
           console.warn("[api] admin withdrawal push failed:", (err as Error).message);
         });
       },
@@ -294,6 +328,8 @@ async function buildDeps(): Promise<ApiDeps> {
     platform,
     notifications,
     push: pushService,
+    actionSecret: process.env.SUPABASE_JWT_SECRET,
+    withdrawalActionActor: resolveActionActor,
     corsAllowOrigin: (origin: string) => brandCors.allows(origin),
     marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
     referral: makePgReferralRepo((sql, params) => q.query(sql, params ?? [])),

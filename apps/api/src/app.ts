@@ -13,6 +13,7 @@ import { registerAdminRoutes } from "./app.admin.js";
 import { registerPlatformRoutes } from "./app.platform.js";
 import { registerNotificationRoutes } from "./app.notifications.js";
 import { registerPushRoutes } from "./app.push.js";
+import { registerWithdrawalActionRoutes } from "./app.withdrawalact.js";
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
 import { registerReferralRoutes, type ReferralRepo } from "./app.referral.js";
 import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
@@ -99,6 +100,10 @@ export interface ApiDeps {
   /** Admin Web Push subscriptions (Issue 1): opt-in real-time withdrawal-request alerts. Absent when
    *  push is not configured (no VAPID keys) — the /admin/push/* routes then stay unregistered. */
   push?: Pick<PushService, "publicKey" | "upsert" | "removeByEndpoint"> | undefined;
+  /** HMAC secret for email magic-link withdrawal actions (Issue 1). Absent => the /w/act routes stay off. */
+  actionSecret?: string | undefined;
+  /** Resolves the admin profile id recorded as approver/rejecter for email magic-link actions. */
+  withdrawalActionActor?: (() => Promise<string | null>) | undefined;
   /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
   marketers: MarketerRepo;
   /** Deposit-based referral commissions + separate commission-payout queue (0078/0079). */
@@ -250,6 +255,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerPlatformRoutes(router, deps);
   registerNotificationRoutes(router, deps);
   registerPushRoutes(router, deps);
+  registerWithdrawalActionRoutes(router, deps);
   registerMarketerRoutes(router, deps);
   registerProtectedRoutes(router, deps);
   registerHistoryRoutes(router, deps);
