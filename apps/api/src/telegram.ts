@@ -206,6 +206,57 @@ export function parseCallback(data: string): { kind: PayoutKind; action: "approv
 }
 
 // ── Concrete Bot API client ───────────────────────────────────────────────────────────────────
+/** A settled decision, for the `/history` view (read live from the DB — always accurate). */
+export interface PayoutDecisionRecord {
+  kind: PayoutKind;
+  reference: string;
+  who: string;
+  userType: string;
+  client: string;
+  amountCents: Cents;
+  decision: PayoutDecision;
+  actor: string;
+  atMs?: number | undefined;
+}
+
+/** Header shown before the live pending queue (`/pending`). */
+export function buildQueueHeader(count: number): string {
+  if (count === 0) return "<b>PENDING APPROVALS</b>\nYou're all caught up — no real-money requests are waiting.";
+  return `<b>PENDING APPROVALS — ${count} waiting</b>\n${rule}\nEach card below is live. Approve requires the superadmin password; Reject returns the funds.`;
+}
+
+/** The `/history` view — recent decisions grouped Approved / Rejected (read live from the DB). */
+export function buildHistoryText(records: PayoutDecisionRecord[]): string {
+  if (records.length === 0) return "<b>RECENT DECISIONS</b>\nNo approvals or rejections recorded yet.";
+  const line = (r: PayoutDecisionRecord): string => {
+    const what = r.kind === "commission" ? "Commission" : "Withdrawal";
+    return `• ${escHtml(fmtKes(r.amountCents))} — ${escHtml(r.who)} (${escHtml(r.userType)}, ${escHtml(r.client)})\n` +
+      `   ${what} · by ${escHtml(r.actor)} · ${escHtml(fmtWhen(r.atMs))}`;
+  };
+  const approved = records.filter((r) => r.decision === "approved");
+  const rejected = records.filter((r) => r.decision === "rejected");
+  const parts: string[] = ["<b>RECENT DECISIONS</b>", rule];
+  parts.push(`<b>Approved (${approved.length})</b>`);
+  parts.push(approved.length ? approved.map(line).join("\n") : "  —");
+  parts.push(rule);
+  parts.push(`<b>Rejected (${rejected.length})</b>`);
+  parts.push(rejected.length ? rejected.map(line).join("\n") : "  —");
+  return parts.join("\n");
+}
+
+/** The `/help` / `/start` text — what the operator can do and whether this chat is authorized. */
+export function buildHelpText(authorized: boolean, chatId: unknown): string {
+  return (
+    `<b>Invest254 — payout approvals</b>\n${rule}\n` +
+    `<b>/pending</b> — the live queue of real-money requests awaiting approval (with Approve/Reject).\n` +
+    `<b>/history</b> — recent approved &amp; rejected decisions (who and when).\n` +
+    `<b>/help</b> — this message.\n${rule}\n` +
+    `Approve requires the superadmin password; Reject is immediate.\n` +
+    `Your chat ID is <code>${escHtml(String(chatId))}</code>. ` +
+    (authorized ? "This chat is authorized." : "\u26a0 This chat is NOT authorized — send this ID to your platform admin.")
+  );
+}
+
 export function makeTelegramClient(fetchImpl: typeof fetch = fetch): TelegramClient | null {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return null;

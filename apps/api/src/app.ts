@@ -15,7 +15,7 @@ import { registerNotificationRoutes } from "./app.notifications.js";
 import { registerPushRoutes } from "./app.push.js";
 import { registerWithdrawalActionRoutes } from "./app.withdrawalact.js";
 import { registerTelegramRoutes, type TelegramCommissionOps } from "./app.telegram.js";
-import type { TelegramClient, PayoutAlert } from "./telegram.js";
+import type { TelegramClient, PayoutAlert, PayoutDecisionRecord } from "./telegram.js";
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
 import { registerReferralRoutes, type ReferralRepo } from "./app.referral.js";
 import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
@@ -114,6 +114,10 @@ export interface ApiDeps {
   telegramWebhookSecret?: string | undefined;
   /** Rebuild the enriched payout card from the DB for in-place status edits + topic records. */
   describePayout?: ((kind: "withdrawal" | "commission", id: string) => Promise<PayoutAlert | null>) | undefined;
+  /** Live pending real-money requests (DB truth) — powers the /pending bot command. */
+  listPendingPayouts?: (() => Promise<PayoutAlert[]>) | undefined;
+  /** Recent settled decisions (DB truth) — powers the /history bot command. */
+  listRecentPayoutDecisions?: ((limit: number) => Promise<PayoutDecisionRecord[]>) | undefined;
   /** Verify a supplied password against an active superadmin credential (scrypt, constant-time). */
   verifyApprovalPassword?: ((password: string) => Promise<boolean>) | undefined;
   /** Human display name of the acting superadmin (for "Approved by …" on the card). */

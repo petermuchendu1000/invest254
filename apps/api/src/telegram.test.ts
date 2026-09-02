@@ -200,3 +200,51 @@ test("webhook: idempotent — approving an already-actioned record reports noop"
   assert.equal(r.handled, "reply_noop");
   assert.ok(calls.messages.some((m) => /Already actioned/.test(m.text)));
 });
+
+// ── Commands (DB-truth views) ────────────────────────────────────────────────────────────────
+const cmd = (text: string, chatId = 123, fromId = 123) => ({
+  message: { message_id: 9, chat: { id: chatId }, from: { id: fromId }, text },
+});
+
+test("command /pending lists the live queue with actionable cards", async () => {
+  const { deps, calls } = fake();
+  deps.listPending = async () => [wAlert(), cAlert()];
+  const r = await processTelegramUpdate(cmd("/pending"), deps);
+  assert.equal(r.handled, "cmd_pending");
+  assert.ok(calls.messages.some((m) => /PENDING APPROVALS — 2 waiting/.test(m.text)), "header with count");
+  assert.equal(calls.alerts.length, 2, "one actionable card per pending item");
+});
+
+test("command /pending with empty queue says caught up", async () => {
+  const { deps, calls } = fake();
+  deps.listPending = async () => [];
+  const r = await processTelegramUpdate(cmd("/pending"), deps);
+  assert.equal(r.handled, "cmd_pending");
+  assert.ok(calls.messages.some((m) => /caught up/.test(m.text)));
+  assert.equal(calls.alerts.length, 0);
+});
+
+test("command /history shows grouped recent decisions (DB truth, stale-proof)", async () => {
+  const { deps, calls } = fake();
+  deps.listRecent = async () => [
+    { kind: "withdrawal", reference: UUID, who: "stanley", userType: "Player", client: "Invest254", amountCents: 200000, decision: "approved", actor: "Jay", atMs: 1_700_000_000_000 },
+    { kind: "commission", reference: CUUID, who: "marktop", userType: "Marketer", client: "Tamu Traders", amountCents: 125000, decision: "rejected", actor: "zrinok", atMs: 1_700_000_000_000 },
+  ];
+  const r = await processTelegramUpdate(cmd("/history"), deps);
+  assert.equal(r.handled, "cmd_history");
+  const msg = calls.messages.map((m) => m.text).join("\n");
+  assert.match(msg, /RECENT DECISIONS/);
+  assert.match(msg, /Approved \(1\)/);
+  assert.match(msg, /Rejected \(1\)/);
+  assert.match(msg, /by Jay/);
+});
+
+test("command /help echoes chat id + authorization; /pending refused for unauthorized", async () => {
+  const { deps, calls } = fake();
+  deps.listPending = async () => [wAlert()];
+  assert.equal((await processTelegramUpdate(cmd("/help"), deps)).handled, "cmd_help");
+  assert.ok(calls.messages.some((m) => /authorized/.test(m.text)));
+  const r = await processTelegramUpdate(cmd("/pending", 999, 999), deps);
+  assert.equal(r.handled, "cmd_unauthorized");
+  assert.ok(calls.messages.some((m) => /Not authorized/.test(m.text)));
+});
