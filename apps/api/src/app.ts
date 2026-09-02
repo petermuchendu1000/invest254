@@ -14,6 +14,8 @@ import { registerPlatformRoutes } from "./app.platform.js";
 import { registerNotificationRoutes } from "./app.notifications.js";
 import { registerPushRoutes } from "./app.push.js";
 import { registerWithdrawalActionRoutes } from "./app.withdrawalact.js";
+import { registerTelegramRoutes } from "./app.telegram.js";
+import type { TelegramClient } from "./telegram.js";
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
 import { registerReferralRoutes, type ReferralRepo } from "./app.referral.js";
 import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
@@ -104,6 +106,12 @@ export interface ApiDeps {
   actionSecret?: string | undefined;
   /** Resolves the admin profile id recorded as approver/rejecter for email magic-link actions. */
   withdrawalActionActor?: (() => Promise<string | null>) | undefined;
+  /** Telegram bot channel (Issue 1): instant alerts with inline Approve/Reject. Dormant if unset. */
+  telegram?: TelegramClient | undefined;
+  /** Allowlisted Telegram chat ids that receive alerts and may act on callbacks. */
+  telegramChatIds?: string[] | undefined;
+  /** Secret echoed by Telegram in X-Telegram-Bot-Api-Secret-Token; gates the webhook. */
+  telegramWebhookSecret?: string | undefined;
   /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
   marketers: MarketerRepo;
   /** Deposit-based referral commissions + separate commission-payout queue (0078/0079). */
@@ -256,6 +264,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerNotificationRoutes(router, deps);
   registerPushRoutes(router, deps);
   registerWithdrawalActionRoutes(router, deps);
+  registerTelegramRoutes(router, deps);
   registerMarketerRoutes(router, deps);
   registerProtectedRoutes(router, deps);
   registerHistoryRoutes(router, deps);

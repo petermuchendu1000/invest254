@@ -16,6 +16,7 @@ import { makePgSupportDeps } from "./support.pg.js";
 import { makeDomainProvisioner } from "./domains.js";
 import { makeWebPushTransport } from "./webpush.js";
 import { makeResendSender, buildWithdrawalEmail } from "./email.js";
+import { makeTelegramClient } from "./telegram.js";
 import { signWithdrawalAction } from "./withdrawalactionlink.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.platform.js";
 
@@ -181,6 +182,22 @@ async function buildDeps(): Promise<ApiDeps> {
     } catch (err) { console.warn("[api] withdrawal alert email error:", (err as Error).message); }
   }
 
+  // Telegram channel (Issue 1): instant push with inline Approve/Reject. The callback is handled by
+  // /api/v1/telegram/webhook. Dormant unless TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_IDS are set.
+  const telegram = makeTelegramClient();
+  const telegramChatIds = (process.env.TELEGRAM_CHAT_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const telegramWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (telegram && telegramChatIds.length > 0) console.log(`[api] admin TELEGRAM alerts enabled -> ${telegramChatIds.length} chat(s)`);
+  async function telegramWithdrawalAlert(e: { txId: string; userId: string; amountCents: number; phone: string }): Promise<void> {
+    if (!telegram || telegramChatIds.length === 0) return;
+    try {
+      const who = await resolveHandle(e.userId);
+      await Promise.all(telegramChatIds.map((chatId) =>
+        telegram.sendWithdrawalAlert(chatId, { who, amountCents: e.amountCents, phone: e.phone, txId: e.txId })
+          .then((r) => { if (!r.ok) console.warn("[api] telegram alert failed:", r.error); })));
+    } catch (err) { console.warn("[api] telegram alert error:", (err as Error).message); }
+  }
+
   const payments = new PaymentService(payRepo, daraja, {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
     // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
@@ -206,8 +223,9 @@ async function buildDeps(): Promise<ApiDeps> {
       // Fire-and-forget: push a real-time Approve/Reject alert to admins. Never awaited and fully
       // isolated so a push outage can't slow down or fail the player's withdrawal request.
       onWithdrawalRequested: (e) => {
-        // Fire both channels, fire-and-forget: email (reliable, login-free) + web push (if enabled).
+        // Fire all channels, fire-and-forget: email + Telegram (login-free) + web push (if enabled).
         void emailWithdrawalAlert(e);
+        void telegramWithdrawalAlert(e);
         if (pushService) void pushService.notifyWithdrawalRequested(e).catch((err) => {
           console.warn("[api] admin withdrawal push failed:", (err as Error).message);
         });
@@ -330,6 +348,9 @@ async function buildDeps(): Promise<ApiDeps> {
     push: pushService,
     actionSecret: process.env.SUPABASE_JWT_SECRET,
     withdrawalActionActor: resolveActionActor,
+    telegram: telegram ?? undefined,
+    telegramChatIds,
+    telegramWebhookSecret,
     corsAllowOrigin: (origin: string) => brandCors.allows(origin),
     marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
     referral: makePgReferralRepo((sql, params) => q.query(sql, params ?? [])),
