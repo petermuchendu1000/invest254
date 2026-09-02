@@ -2,6 +2,7 @@ import {
   PgGameRepository, PgEngagementRepository, PgPaymentRepository, PgIdentityRepository,
   PaymentService, AuthService, AffiliateService, AdminService, PgAdminRepository, PlatformService, PgPlatformRepository, makeDarajaClientFromConfig, loadDarajaConfigFromDb, makeVerifier,
   NotificationService, PgNotificationRepository,
+  PushService, PgPushSubscriptionRepository,
   GameConfigStore, mapConfigRow, makePgPools,
   type GameRepository, type EngagementRepository, type PaymentRepository,
   type Querier, type FairnessRecord, type ListenClient,
@@ -13,6 +14,7 @@ import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgReferralRepo } from "./referral.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
 import { makeDomainProvisioner } from "./domains.js";
+import { makeWebPushTransport } from "./webpush.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.platform.js";
 
 /**
@@ -133,6 +135,19 @@ async function buildDeps(): Promise<ApiDeps> {
   // min-withdrawal enforcement can read platformGate.economy(). Reused as the app dep below.
   const platformGate = new PlatformGate((sql: string, p?: unknown[]) => q.query(sql, p ?? []));
 
+  // Real-time admin withdrawal alerts (Issue 1). Constructed before PaymentService so the
+  // onWithdrawalRequested hook can fan a pending request out to every opted-in admin device as a
+  // Web Push with Approve/Reject actions. Absent (null) when VAPID keys aren't configured — the
+  // /admin/push/* routes and the fan-out then stay dormant, so push is purely additive.
+  const pushTransport = makeWebPushTransport();
+  const pushService = pushTransport
+    ? new PushService(new PgPushSubscriptionRepository(q), pushTransport, {
+        resolveHandle: (userId) => resolveHandle(userId),
+        appBaseUrl: process.env.PUBLIC_WEB_URL || process.env.APP_BASE_URL || "",
+      })
+    : undefined;
+  if (pushService) console.log("[api] admin web-push enabled (withdrawal alerts with Approve/Reject actions)");
+
   const payments = new PaymentService(payRepo, daraja, {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
     // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
@@ -154,6 +169,14 @@ async function buildDeps(): Promise<ApiDeps> {
     events: {
       onWithdrawalSuccess: ({ userId, amountCents }) => {
         void resolveHandle(userId)
+      },
+      // Fire-and-forget: push a real-time Approve/Reject alert to admins. Never awaited and fully
+      // isolated so a push outage can't slow down or fail the player's withdrawal request.
+      onWithdrawalRequested: (e) => {
+        if (!pushService) return;
+        void pushService.notifyWithdrawalRequested(e).catch((err) => {
+          console.warn("[api] admin withdrawal push failed:", (err as Error).message);
+        });
       },
     },
   });
@@ -270,6 +293,7 @@ async function buildDeps(): Promise<ApiDeps> {
     admin,
     platform,
     notifications,
+    push: pushService,
     corsAllowOrigin: (origin: string) => brandCors.allows(origin),
     marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
     referral: makePgReferralRepo((sql, params) => q.query(sql, params ?? [])),
