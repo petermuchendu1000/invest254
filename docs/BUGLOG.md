@@ -5,6 +5,39 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #17 — Two divergent "marketer" systems + no way to delete; a "player" (stanley) was silently a demo account — FIXED (migration 0110, branch `feat/delete-and-marketer-consolidation`)
+- **Report:** stanley is a player, but his withdrawals took the demo/instant rail (no bot alert). Also
+  two UIs "manage a marketer" (Users → upgrade-to-marketer role; Marketer-finance → add-marketer demo),
+  and there was no button to delete a marketer/user/admin.
+- **Root cause (two concepts, one name):** `role='marketer'` (affiliate, real 25% commission via
+  `affiliates`/`commission_payouts`) is INDEPENDENT of the DEMO cohort, which is defined by
+  `fn_is_marketer_account` = a phone match in the `marketers` table (per docs/29). stanley (`role=player`)
+  had a `marketers` row on his phone, so the money layer treated him as demo. `fn_is_marketer_account`
+  ignores the marketers row's status, so even a `disabled` marketers row keeps a person demo — only
+  DELETING the row un-demos them. Data confirmed the drift: 28 demo rows = 20 linked + 8 phantom; of
+  the linked, 10 are `role=marketer` and 10 are `role=player` (demo-only, like stanley); plus 4
+  affiliate-only. No delete function existed anywhere.
+- **FK reality:** `marketers` FKs all CASCADE (safe hard delete). `profiles` FKs are mostly NO ACTION
+  (transactions/ledger/positions/referrals/commissions/audit) → a real user/admin CANNOT be hard-deleted
+  without destroying the financial audit trail.
+- **Resolution:**
+  * **Delete demo marketer (hard):** `POST /admin/marketers/:id/delete` → `DELETE FROM marketers`
+    (cascades wallet/ledger/withdrawals/credentials), brand-scoped. Removes demo status.
+  * **Delete user/admin (soft):** migration 0110 adds status `'deleted'` + `fn_admin_delete_user`
+    (no-self, superadmin-protected, admin-only-by-superadmin, default-marketer-locked, idempotent);
+    sets `sessions_valid_after=now()`. `POST /admin/users/:id/delete`. Login now blocks `'deleted'`
+    accounts (anti-enumeration); lists hide them; money layer already rejects non-active.
+  * **Consolidation:** the Marketer & affiliate finance hub is the single place to add/remove a demo
+    marketer (delete in the Manage modal) and cross-links to the linked website account for the
+    affiliate role; the Users page keeps the role field + deep-links to the hub.
+  * **stanley fixed in production:** deleted his `marketers` row → `fn_is_marketer_account` True→False;
+    profile stays player/active, real+demo balances intact. He now withdraws on the real rail.
+- **Impact:** the demo/real ambiguity is resolvable from the UI; deleting is safe (cascade) or
+  history-preserving (soft). Tests: full suite 728/728; `tsc -b` + web `tsc` clean; migration 0110 +
+  the stanley delete verified against the real schema.
+
+---
+
 ## #16 — Real-money vs "funny money" were entangled on the approval channel + approvals had no password — FIXED (branch `feat/telegram-approvals-issue1`, migration 0109)
 - **Report (Issue 1):** improve Telegram payout alerts (thorough content, bank-grade look, no emojis),
   organise them (waiting/approved/rejected), reduce Approve/Reject to immediate actions, and require the

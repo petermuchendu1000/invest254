@@ -122,6 +122,9 @@ export const adminApi = {
       token: t,
       query: { cursor: p.cursor ?? undefined, limit: p.limit, status: p.status },
     }),
+  // Soft-delete a user/admin (status='deleted'; server-guarded). History preserved.
+  deleteUser: (t: string, id: string) =>
+    apiFetch<{ userId: string; status: string }>(`/admin/users/${id}/delete`, { method: 'POST', token: t }),
   // Approve is gated by the superadmin password (Issue 1); the server verifies it before paying out.
   approveWithdrawal: (t: string, id: string, password: string) =>
     apiFetch<unknown>(`/admin/withdrawals/${id}/approve`, { method: 'POST', token: t, body: { password } }),
@@ -229,6 +232,9 @@ export const adminApi = {
     apiFetch<AdminMarketerRow>('/admin/marketers', { method: 'POST', token: t, body }),
   updateMarketer: (t: string, id: string, body: { name?: string; phone?: string }) =>
     apiFetch<AdminMarketerRow>(`/admin/marketers/${id}`, { method: 'PATCH', token: t, body }),
+  // HARD delete a demo marketer (cascades wallet/ledger/withdrawals). Un-demos the matching person.
+  deleteMarketer: (t: string, id: string) =>
+    apiFetch<{ deleted: boolean }>(`/admin/marketers/${id}/delete`, { method: 'POST', token: t }),
   creditMarketer: (t: string, id: string, amountCents: number, ref?: string) =>
     apiFetch<{ balanceCents: number }>(`/admin/marketers/${id}/credit`, { method: 'POST', token: t, body: { amountCents, ref } }),
   withdrawMarketer: (t: string, id: string, amountCents: number, ref?: string, method?: string) =>

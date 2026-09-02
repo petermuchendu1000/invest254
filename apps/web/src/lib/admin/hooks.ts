@@ -95,6 +95,20 @@ export function useSetUserRole() {
   });
 }
 
+/** Soft-delete a user/admin (status='deleted', login-blocked, hidden). Server-guarded. */
+export function useDeleteUser() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminApi.deleteUser(t, id),
+    onSuccess: (_d, id) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'user', id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
 /** Make / clear this marketer as the brand's default marketer (site-owner commission model, 0104). */
 export function useSetDefaultMarketer() {
   const t = useTok();
@@ -489,6 +503,19 @@ export function useUpdateMarketer() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+    },
+  });
+}
+
+/** HARD-delete a demo marketer (removes the social-proof account; un-demos the matching person). */
+export function useDeleteMarketer() {
+  const t = useTok();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminApi.deleteMarketer(t, id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'marketers'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
     },
   });
 }
