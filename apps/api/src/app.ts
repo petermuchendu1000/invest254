@@ -14,8 +14,8 @@ import { registerPlatformRoutes } from "./app.platform.js";
 import { registerNotificationRoutes } from "./app.notifications.js";
 import { registerPushRoutes } from "./app.push.js";
 import { registerWithdrawalActionRoutes } from "./app.withdrawalact.js";
-import { registerTelegramRoutes } from "./app.telegram.js";
-import type { TelegramClient } from "./telegram.js";
+import { registerTelegramRoutes, type TelegramCommissionOps } from "./app.telegram.js";
+import type { TelegramClient, PayoutAlert } from "./telegram.js";
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
 import { registerReferralRoutes, type ReferralRepo } from "./app.referral.js";
 import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
@@ -112,6 +112,20 @@ export interface ApiDeps {
   telegramChatIds?: string[] | undefined;
   /** Secret echoed by Telegram in X-Telegram-Bot-Api-Secret-Token; gates the webhook. */
   telegramWebhookSecret?: string | undefined;
+  /** Rebuild the enriched payout card from the DB for in-place status edits + topic records. */
+  describePayout?: ((kind: "withdrawal" | "commission", id: string) => Promise<PayoutAlert | null>) | undefined;
+  /** Verify a supplied password against an active superadmin credential (scrypt, constant-time). */
+  verifyApprovalPassword?: ((password: string) => Promise<boolean>) | undefined;
+  /** Human display name of the acting superadmin (for "Approved by …" on the card). */
+  resolveActorName?: (() => Promise<string>) | undefined;
+  /** Real-money commission payout ops for the bot (Approve = approve + mark-paid). */
+  commissionTelegramOps?: TelegramCommissionOps | undefined;
+  /** Optional forum group id for self-organising status topics. */
+  telegramForumChatId?: string | undefined;
+  /** Optional forum topic thread ids for Approved / Rejected records. */
+  telegramTopics?: { approved?: number | undefined; rejected?: number | undefined } | undefined;
+  /** Fired (fire-and-forget) when a marketer requests a real-money commission payout. */
+  onCommissionRequested?: ((payoutId: string) => void) | undefined;
   /** Marketer payments module (0033): create/credit/withdraw + admin-set Fuliza/airtime + statement. */
   marketers: MarketerRepo;
   /** Deposit-based referral commissions + separate commission-payout queue (0078/0079). */

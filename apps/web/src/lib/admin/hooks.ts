@@ -199,8 +199,8 @@ export function useWithdrawalAction() {
   const t = useTok();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: string; action: 'approve' | 'reject' }) =>
-      v.action === 'approve' ? adminApi.approveWithdrawal(t, v.id) : adminApi.rejectWithdrawal(t, v.id),
+    mutationFn: (v: { id: string; action: 'approve' | 'reject'; password?: string }) =>
+      v.action === 'approve' ? adminApi.approveWithdrawal(t, v.id, v.password ?? '') : adminApi.rejectWithdrawal(t, v.id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'withdrawals'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
@@ -325,11 +325,11 @@ export function useCommissionPayoutAction() {
   const t = useTok();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: string; action: 'approve' | 'paid' | 'reject'; ref?: string; reason?: string }) =>
+    mutationFn: (v: { id: string; action: 'approve' | 'paid' | 'reject'; ref?: string; reason?: string; password?: string }) =>
       v.action === 'approve'
-        ? adminApi.approveCommissionPayout(t, v.id)
+        ? adminApi.approveCommissionPayout(t, v.id, v.password ?? '')
         : v.action === 'paid'
-          ? adminApi.markCommissionPayoutPaid(t, v.id, v.ref)
+          ? adminApi.markCommissionPayoutPaid(t, v.id, v.ref, v.password ?? '')
           : adminApi.rejectCommissionPayout(t, v.id, v.reason),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'commission-payouts'] });
@@ -576,7 +576,7 @@ export function useBulkWithdrawals() {
   const t = useTok();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { action: 'approve' | 'reject'; txIds: string[] }) => adminApi.bulkWithdrawals(t, body),
+    mutationFn: (body: { action: 'approve' | 'reject'; txIds: string[]; password?: string }) => adminApi.bulkWithdrawals(t, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'withdrawals'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
