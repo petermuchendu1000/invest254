@@ -27,10 +27,17 @@ const fmtKes = (cents: Cents): string => {
   const s = Number.isInteger(kes) ? kes.toLocaleString("en-KE") : kes.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `KES ${s}`;
 };
+/** Escape for Telegram HTML parse mode (dynamic, user-controlled fields are escaped). */
+const escHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** The alert text + inline keyboard for a withdrawal (pure, unit-testable). */
+/** The alert text (Telegram HTML) + inline keyboard for a withdrawal (pure, unit-testable). */
 export function buildWithdrawalAlert(a: { who: string; amountCents: Cents; phone: string; txId: string }): { text: string; reply_markup: unknown } {
-  const text = `💸 *Withdrawal request*\n\n*${fmtKes(a.amountCents)}*\nFrom: ${a.who}\nTo M-Pesa: ${a.phone}\n\nApprove to pay out, or reject to return the funds.`;
+  const text =
+    `💸 <b>Withdrawal request</b>\n\n` +
+    `<b>${escHtml(fmtKes(a.amountCents))}</b>\n` +
+    `From: ${escHtml(a.who)}\n` +
+    `To M-Pesa: ${escHtml(a.phone)}\n\n` +
+    `Approve to pay out, or reject to return the funds.`;
   const reply_markup = {
     inline_keyboard: [[
       { text: "✅ Approve", callback_data: `${CB_APPROVE}${a.txId}` },
@@ -60,17 +67,19 @@ export function makeTelegramClient(fetchImpl: typeof fetch = fetch): TelegramCli
   return {
     async sendWithdrawalAlert(chatId, a) {
       const { text, reply_markup } = buildWithdrawalAlert(a);
-      const r = await call("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown", reply_markup });
+      const r = await call("sendMessage", { chat_id: chatId, text, parse_mode: "HTML", reply_markup });
       return { ok: Boolean(r?.ok), messageId: r?.result?.message_id, error: r?.ok ? undefined : (r?.description || "send failed") };
     },
     async answerCallback(callbackQueryId, text) {
       await call("answerCallbackQuery", { callback_query_id: callbackQueryId, text, show_alert: false });
     },
     async editMessageText(chatId, messageId, text) {
-      await call("editMessageText", { chat_id: chatId, message_id: messageId, text, parse_mode: "Markdown" });
+      // Plain text (no parse_mode): the original message text comes back from Telegram entity-stripped,
+      // so re-parsing it as HTML/Markdown could fail. Robustness over formatting here.
+      await call("editMessageText", { chat_id: chatId, message_id: messageId, text });
     },
     async sendMessage(chatId, text) {
-      const r = await call("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown" });
+      const r = await call("sendMessage", { chat_id: chatId, text });
       return { ok: Boolean(r?.ok), messageId: r?.result?.message_id, error: r?.ok ? undefined : (r?.description || "send failed") };
     },
     async setWebhook(url, secretToken) {

@@ -59,7 +59,7 @@ export async function processTelegramUpdate(update: any, deps: TelegramUpdateDep
       if (chatId != null) {
         const ok = authorized(chatId);
         await deps.telegram.sendMessage(String(chatId),
-          `Your Telegram chat ID is \`${chatId}\`.\n` +
+          `Your Telegram chat ID is ${chatId}.\n` +
           (ok ? "✅ This chat is authorized — you'll receive withdrawal alerts here." :
                 "⚠️ Not yet authorized. Send this ID to your platform admin to enable alerts."));
         return { handled: "message" };
