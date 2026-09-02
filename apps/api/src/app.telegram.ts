@@ -2,7 +2,8 @@ import { Router, ApiError, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
 import {
   parseCallback, parseApprovalToken, buildApprovalPrompt, buildDecisionText, buildTopicRecord,
-  type TelegramClient, type PayoutKind, type PayoutAlert, type PayoutDecision,
+  buildQueueHeader, buildHistoryText, buildHelpText,
+  type TelegramClient, type PayoutKind, type PayoutAlert, type PayoutDecision, type PayoutDecisionRecord,
 } from "./telegram.js";
 
 /**
@@ -37,6 +38,10 @@ export interface TelegramUpdateDeps {
   commission?: TelegramCommissionOps | undefined;
   /** Rebuild the enriched payout card from the DB (for in-place status edits + topic records). */
   describe: (kind: PayoutKind, id: string) => Promise<PayoutAlert | null>;
+  /** Live queue of real-money requests awaiting approval (DB truth) — powers /pending. */
+  listPending?: (() => Promise<PayoutAlert[]>) | undefined;
+  /** Recent settled decisions (DB truth) — powers /history. */
+  listRecent?: ((limit: number) => Promise<PayoutDecisionRecord[]>) | undefined;
   /** Verify a supplied password against an active superadmin credential (scrypt, constant-time). */
   verifyApprovalPassword: (password: string) => Promise<boolean>;
   /** The admin uuid recorded as approver/rejecter (approved_by FK). */
@@ -151,6 +156,30 @@ export async function processTelegramUpdate(update: any, deps: TelegramUpdateDep
         return { handled: "reply_noop" };
       }
 
+      // Bot commands — the authoritative, always-accurate view (reads the DB, immune to stale cards).
+      const text = msg.text.trim();
+      if (text.startsWith("/")) {
+        const cmd = text.split(/\s+/)[0]!.toLowerCase().replace(/@[\w_]+$/, "");
+        const ok = authorized(chatId) || authorized(msg.from?.id);
+        if (cmd === "/pending" || cmd === "/queue") {
+          if (!ok) { await deps.telegram.sendMessage(String(chatId), "Not authorized."); return { handled: "cmd_unauthorized" }; }
+          const items = deps.listPending ? await deps.listPending().catch(() => []) : [];
+          await deps.telegram.sendMessage(String(chatId), buildQueueHeader(items.length));
+          for (const a of items.slice(0, 12)) await deps.telegram.sendPayoutAlert(String(chatId), a);
+          if (items.length > 12) await deps.telegram.sendMessage(String(chatId), `…and ${items.length - 12} more — action the above first.`);
+          return { handled: "cmd_pending" };
+        }
+        if (cmd === "/history" || cmd === "/recent") {
+          if (!ok) { await deps.telegram.sendMessage(String(chatId), "Not authorized."); return { handled: "cmd_unauthorized" }; }
+          const recs = deps.listRecent ? await deps.listRecent(10).catch(() => []) : [];
+          await deps.telegram.sendMessage(String(chatId), buildHistoryText(recs));
+          return { handled: "cmd_history" };
+        }
+        // /help, /start, or anything unrecognised -> help + authorization status.
+        await deps.telegram.sendMessage(String(chatId), buildHelpText(ok, chatId));
+        return { handled: "cmd_help" };
+      }
+
       // Plain message → echo the chat id + authorization status (onboarding helper).
       if (chatId != null) {
         const ok = authorized(chatId) || authorized(msg.from?.id);
@@ -175,6 +204,8 @@ export function buildTelegramUpdateDeps(deps: ApiDeps): TelegramUpdateDeps {
     payments: deps.payments,
     commission: deps.commissionTelegramOps,
     describe: deps.describePayout ?? (async () => null),
+    listPending: deps.listPendingPayouts,
+    listRecent: deps.listRecentPayoutDecisions,
     verifyApprovalPassword: deps.verifyApprovalPassword ?? (async () => false),
     resolveActor: deps.withdrawalActionActor ?? (async () => null),
     resolveActorName: deps.resolveActorName ?? (async () => "superadmin"),

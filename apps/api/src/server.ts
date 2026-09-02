@@ -17,7 +17,7 @@ import { makePgSupportDeps } from "./support.pg.js";
 import { makeDomainProvisioner } from "./domains.js";
 import { makeWebPushTransport } from "./webpush.js";
 import { makeResendSender, buildPayoutEmail } from "./email.js";
-import { makeTelegramClient, type PayoutAlert } from "./telegram.js";
+import { makeTelegramClient, type PayoutAlert, type PayoutDecisionRecord } from "./telegram.js";
 import { signWithdrawalAction } from "./withdrawalactionlink.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.platform.js";
 
@@ -206,6 +206,57 @@ async function buildDeps(): Promise<ApiDeps> {
         userType: "Marketer", client: String(x.site ?? "Invest254"),
         amountCents: Number(x.amount_cents), phone: String(x.phone ?? ""), requestedAtMs: Number(x.ms) };
     } catch (err) { console.warn("[api] describePayout failed:", (err as Error).message); return null; }
+  };
+
+  // Live pending queue + recent decisions (DB truth) for the /pending and /history bot commands.
+  const listPendingPayouts = async (): Promise<PayoutAlert[]> => {
+    try {
+      const out: PayoutAlert[] = [];
+      const w = await q.query(
+        `select t.id, t.amount, t.phone, extract(epoch from t.created_at)*1000 as ms, p.username, p.role, s.name as site
+           from transactions t left join profiles p on p.id = t.user_id left join sites s on s.id = t.site_id
+          where t.kind='withdrawal' and t.status='pending' and t.provider is distinct from 'internal'
+          order by t.created_at asc limit 50`, []);
+      for (const x of w.rows as Record<string, unknown>[]) out.push({ kind: "withdrawal", reference: String(x.id),
+        who: String(x.username ?? "user"), userType: roleToUserType(x.role as string | null), client: String(x.site ?? "Invest254"),
+        amountCents: Number(x.amount), phone: String(x.phone ?? ""), requestedAtMs: Number(x.ms) });
+      const c = await q.query(
+        `select cp.id, cp.amount_cents, extract(epoch from cp.requested_at)*1000 as ms, pr.username, pr.phone, s.name as site
+           from commission_payouts cp left join profiles pr on pr.id = cp.beneficiary_user left join sites s on s.id = cp.site_id
+          where cp.status='requested' order by cp.requested_at asc limit 50`, []);
+      for (const x of c.rows as Record<string, unknown>[]) out.push({ kind: "commission", reference: String(x.id),
+        who: String(x.username ?? "marketer"), userType: "Marketer", client: String(x.site ?? "Invest254"),
+        amountCents: Number(x.amount_cents), phone: String(x.phone ?? ""), requestedAtMs: Number(x.ms) });
+      out.sort((a, b) => (b.requestedAtMs ?? 0) - (a.requestedAtMs ?? 0));
+      return out;
+    } catch (err) { console.warn("[api] listPendingPayouts failed:", (err as Error).message); return []; }
+  };
+  const listRecentPayoutDecisions = async (limit: number): Promise<PayoutDecisionRecord[]> => {
+    try {
+      const recs: PayoutDecisionRecord[] = [];
+      const w = await q.query(
+        `select t.id, t.amount, t.status, extract(epoch from t.updated_at)*1000 as ms, p.username, p.role, s.name as site, ap.username as actor
+           from transactions t left join profiles p on p.id = t.user_id left join sites s on s.id = t.site_id
+                left join profiles ap on ap.id = t.approved_by
+          where t.kind='withdrawal' and t.approved_by is not null and t.status in ('processing','success','reversed')
+          order by t.updated_at desc limit $1`, [limit]);
+      for (const x of w.rows as Record<string, unknown>[]) recs.push({ kind: "withdrawal", reference: String(x.id),
+        who: String(x.username ?? "user"), userType: roleToUserType(x.role as string | null), client: String(x.site ?? "Invest254"),
+        amountCents: Number(x.amount), decision: x.status === "reversed" ? "rejected" : "approved", actor: String(x.actor ?? "admin"), atMs: Number(x.ms) });
+      const c = await q.query(
+        `select cp.id, cp.amount_cents, cp.status,
+                extract(epoch from coalesce(cp.rejected_at, cp.paid_at, cp.approved_at))*1000 as ms,
+                pr.username, s.name as site, coalesce(rb.username, pb.username, apb.username) as actor
+           from commission_payouts cp left join profiles pr on pr.id = cp.beneficiary_user left join sites s on s.id = cp.site_id
+                left join profiles rb on rb.id = cp.rejected_by left join profiles pb on pb.id = cp.paid_by left join profiles apb on apb.id = cp.approved_by
+          where cp.status in ('approved','paid','rejected')
+          order by coalesce(cp.rejected_at, cp.paid_at, cp.approved_at) desc limit $1`, [limit]);
+      for (const x of c.rows as Record<string, unknown>[]) recs.push({ kind: "commission", reference: String(x.id),
+        who: String(x.username ?? "marketer"), userType: "Marketer", client: String(x.site ?? "Invest254"),
+        amountCents: Number(x.amount_cents), decision: x.status === "rejected" ? "rejected" : "approved", actor: String(x.actor ?? "admin"), atMs: Number(x.ms) });
+      recs.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0));
+      return recs.slice(0, limit);
+    } catch (err) { console.warn("[api] listRecentPayoutDecisions failed:", (err as Error).message); return []; }
   };
 
   // Email alert (login-free channel). Withdrawal emails carry one-tap magic links (the confirm page is
@@ -465,6 +516,8 @@ async function buildDeps(): Promise<ApiDeps> {
     telegramChatIds,
     telegramWebhookSecret,
     describePayout,
+    listPendingPayouts,
+    listRecentPayoutDecisions,
     verifyApprovalPassword,
     resolveActorName,
     commissionTelegramOps,
