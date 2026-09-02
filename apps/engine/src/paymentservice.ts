@@ -228,10 +228,13 @@ export class PaymentService {
     // Marketer instant path (game -> mpesa wallet). Phone is resolved from the player's profile.
     const gw = await this.repo.gameWithdraw(userId, amountCents);
     if (gw.isMarketer) {
-      // The instant marketer transfer is a completed withdrawal: surface it exactly like a
-      // settled B2C payout (activity feed, notifications, analytics hooks).
-      this.events.onWithdrawalSuccess?.({ userId, amountCents });
-      return { mode: "marketer", txId: gw.txId!, newBalance: gw.newBalance!, mpesaBalanceCents: gw.mpesaBalanceCents! };
+      // Gated (Issue 1 / migration 0108): the marketer cash-out is now a PENDING request that needs
+      // admin approval before the marketer wallet is credited. Notify admins (Approve/Reject) and
+      // return PENDING — not paid. The demo balance is already held by fn_marketer_game_withdraw.
+      let notifyPhone = phoneRaw;
+      try { notifyPhone = normalizeMsisdn(phoneRaw); } catch { /* keep raw for the informational alert */ }
+      try { this.events.onWithdrawalRequested?.({ txId: gw.txId!, userId, amountCents, phone: notifyPhone, siteId }); } catch { /* never block the request */ }
+      return { mode: "daraja", txId: gw.txId!, newBalance: gw.newBalance! };
     }
     // Normal player: real M-Pesa payout via the pending -> admin approve -> Daraja B2C flow.
     const msisdn = normalizeMsisdn(phoneRaw);
@@ -302,7 +305,14 @@ export class PaymentService {
   /** Finance admin approves: flips to processing and dispatches the B2C payment. */
   async approveWithdrawal(txId: string, adminId: string): Promise<{ approved: boolean; conversationId?: string }> {
     const ap = await this.repo.approveWithdrawal(txId, adminId);
-    if (!ap.approved || ap.amountCents === null || ap.phone === null) return { approved: false };
+    if (!ap.approved || ap.amountCents === null) return { approved: false };
+    if (ap.provider === "internal") {
+      // Marketer rail (0108): fn_approve_withdrawal already credited the marketer wallet and settled
+      // 'success' — there is no B2C payout. Surface it as a completed withdrawal (activity feed).
+      if (ap.userId) this.events.onWithdrawalSuccess?.({ userId: ap.userId, amountCents: ap.amountCents });
+      return { approved: true };
+    }
+    if (ap.phone === null) return { approved: false };
     const b2c = await this.daraja.b2cPayment({ amountCents: ap.amountCents, msisdn: ap.phone, remarks: "Withdrawal", resultId: txId });
     return { approved: true, conversationId: b2c.conversationId };
   }
