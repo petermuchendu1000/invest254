@@ -15,11 +15,16 @@ test("action link: wrong secret is rejected", () => {
 
 test("action link: tampered payload/signature is rejected", () => {
   const tok = signWithdrawalAction("tx-1", "approve", S);
-  const flipped = tok.slice(0, -1) + (tok.at(-1) === "A" ? "B" : "A");
-  assert.equal(verifyWithdrawalAction(flipped, S), null);
-  // swap the payload for a different tx but keep the old signature -> must fail
-  const other = signWithdrawalAction("tx-2", "approve", S).split(".")[0];
-  assert.equal(verifyWithdrawalAction(`${other}.${tok.split(".")[1]}`, S), null);
+  const [body, sig] = tok.split(".");
+  // corrupt the first char of the signature (always changes decoded bytes) -> must fail
+  const badSig = (sig![0] === "A" ? "B" : "A") + sig!.slice(1);
+  assert.equal(verifyWithdrawalAction(`${body}.${badSig}`, S), null);
+  // corrupt the payload but keep the original signature -> must fail
+  const badBody = (body![0] === "A" ? "B" : "A") + body!.slice(1);
+  assert.equal(verifyWithdrawalAction(`${badBody}.${sig}`, S), null);
+  // a valid signature for a DIFFERENT tx cannot authorize this payload
+  const otherBody = signWithdrawalAction("tx-2", "approve", S).split(".")[0];
+  assert.equal(verifyWithdrawalAction(`${otherBody}.${sig}`, S), null);
 });
 
 test("action link: expired token is rejected", () => {
