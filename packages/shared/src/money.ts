@@ -70,16 +70,14 @@ export function formatMoney(cents: Cents, opts: DisplayCurrencyOpts = {}): strin
   if (!isForeignDisplay(opts)) return formatKes(cents);
   const { currency = "KES", locale = "en-KE", fxRateFromKes = 1 } = opts;
   const amount = centsToKes(cents) * fxRateFromKes;
+  // Like formatKes: show decimals only when there is a real fractional part, so round figures read
+  // clean ("$15", "$100") while converted balances keep cents ("$15.46").
+  const hasFraction = Math.round(amount * 100) % 100 !== 0;
+  const digits = { minimumFractionDigits: hasFraction ? 2 : 0, maximumFractionDigits: 2 };
   try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency,
-      currencyDisplay: "narrowSymbol",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
+    return new Intl.NumberFormat(locale, { style: "currency", currency, currencyDisplay: "narrowSymbol", ...digits }).format(amount);
   } catch {
-    return `${currency} ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `${currency} ${amount.toLocaleString("en-US", digits)}`;
   }
 }
 

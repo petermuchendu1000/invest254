@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { centsToKes, formatKes, kesToCents } from '@invest254/shared/money';
 import { normalizeMsisdn, MIN_DEPOSIT_CENTS } from '@invest254/shared/payments';
-import { useDisplayMoney } from '@/lib/money';
+import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { api } from '@/lib/api/endpoints';
@@ -32,7 +32,7 @@ export function DepositForm() {
   const accountPhone = useSession((s) => s.user?.phone ?? null);
   const { data: wallet } = useWallet();
   const deposit = useDeposit();
-  const { fmt, both, symbol, isForeign, toKesCents, toDisplay } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toKesCents, toDisplay, limit } = useDisplayMoney();
   // Foreign brands enter in the display currency (e.g. USD); KES brands enter whole KES. Decimals
   // are allowed only for foreign entry. All validation + the API call use authoritative KES cents.
   const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
@@ -49,8 +49,8 @@ export function DepositForm() {
     : (Number.isInteger(Number(amount)) ? kesToCents(Number(amount)) : 0);
   // Quick amounts in the entry unit: $5/$10/$50/$100 for foreign brands, KES presets otherwise.
   const quick = isForeign ? [5, 10, 50, 100] : [200, 500, 1000, 5000];
-  // Foreign brands: minimum deposit is $5 (never below the platform's KES minimum). KES cents authoritative.
-  const minDepositCents = isForeign ? Math.max(MIN_DEPOSIT_CENTS, toKesCents(5)) : MIN_DEPOSIT_CENTS;
+  // Foreign brands: USD-native minimum ($5) converted to KES, never below the platform's KES floor.
+  const minDepositCents = limit(USD_LIMITS.minDeposit, MIN_DEPOSIT_CENTS);
   const [editingPhone, setEditingPhone] = useState(false);
   const [phone, setPhone] = useState('');
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});

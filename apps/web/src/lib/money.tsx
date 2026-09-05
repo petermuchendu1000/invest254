@@ -25,6 +25,13 @@ function currencySymbol(currency: string, locale: string): string {
   }
 }
 
+/**
+ * USD-native limits for foreign (display-currency) brands. These are the SOURCE values — we convert
+ * USD → KES for enforcement, never the other way round — so a USD brand's minimums read as round
+ * dollars ($15, not $15.46). See `limit()` for how the site's KES floor is honoured.
+ */
+export const USD_LIMITS = { minStake: 5, minDeposit: 5, minWithdrawal: 15 } as const;
+
 export function useDisplayMoney() {
   const brand = useBrand();
   const currency = brand.currency || 'KES';
@@ -54,6 +61,19 @@ export function useDisplayMoney() {
       toDisplay: (cents: Cents) => kesCentsToDisplay(cents, foreign ? fxRateFromKes : 1),
       /** User-entered display-currency major units -> authoritative KES cents. */
       toKesCents: (amount: number) => displayToKesCents(amount, foreign ? fxRateFromKes : 1),
+      /**
+       * Effective minimum in KES cents for a limit that is USD-native on foreign brands.
+       * Foreign: start from the round USD floor, never go below the site's KES floor, and if the KES
+       * floor wins, round UP to the next whole dollar so the displayed minimum is still a round
+       * figure AND always accepted by the server (e.g. site min KES 2,000 → "$16 (KES 2,070)").
+       * KES brands: the site's KES floor unchanged.
+       */
+      limit: (usdFloor: number, kesFloorCents: Cents): Cents => {
+        if (!foreign) return kesFloorCents;
+        const eff = Math.max(displayToKesCents(usdFloor, fxRateFromKes), kesFloorCents);
+        const wholeUsd = Math.ceil(kesCentsToDisplay(eff, fxRateFromKes) - 1e-6);
+        return displayToKesCents(wholeUsd, fxRateFromKes);
+      },
     } as const;
   }, [currency, locale, fxRateFromKes]);
 }
