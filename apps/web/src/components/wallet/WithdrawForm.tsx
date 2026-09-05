@@ -15,27 +15,18 @@ import { maskMsisdn } from '@/lib/wallet/format';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { quickAmountEntry } from '@/lib/wallet/quickAmount';
+import { MpesaIcon } from '@/components/wallet/MpesaIcon';
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
 
-/** Binance-style quick-select fractions of the available balance. MAX = the full balance. */
+/** Binance-style quick-select fractions of the available balance. Max = the full balance. */
 const QUICK_PCTS: ReadonlyArray<readonly [string, number]> = [
   ['25%', 0.25],
   ['50%', 0.5],
   ['75%', 0.75],
-  ['MAX', 1],
+  ['Max', 1],
 ];
-
-function MpesaIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <rect x="4" y="3" width="16" height="18" rx="3" />
-      <path d="M9 3v18" strokeOpacity="0" />
-      <path d="M12 7v6M9.5 9h4a1.5 1.5 0 010 3h-2.5a1.5 1.5 0 000 3H14" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 function CheckCircle() {
   return (
@@ -157,7 +148,7 @@ export function WithdrawForm() {
 
   // ── Form ─────────────────────────────────────────────────────────────────────
   return (
-    <form className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
+    <form className="mx-auto flex w-full max-w-sm flex-col gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
       {/* Amount hero — centered entry, the focal point of the form. */}
       <div
         className={[
@@ -184,22 +175,31 @@ export function WithdrawForm() {
       </div>
 
       {/* Available balance + Binance-style quick-select (drives the amount from the real balance). */}
-      <div className="-mt-1 flex items-center justify-between gap-2">
+      <div className="-mt-1 flex flex-col gap-2">
         <span className="text-xs text-muted">
           Available <span className="font-semibold tabular-nums text-fg">{fmt(realCents)}</span>
         </span>
-        <div className="flex gap-1.5">
-          {QUICK_PCTS.map(([label, fraction]) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => setPct(fraction)}
-              disabled={!canQuickSelect}
-              className="rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-xs font-semibold text-fg transition hover:border-accent/60 disabled:pointer-events-none disabled:opacity-40"
-            >
-              {label}
-            </button>
-          ))}
+        <div className="grid grid-cols-4 gap-2">
+          {QUICK_PCTS.map(([label, fraction]) => {
+            const targetCents = fraction >= 1 ? realCents : Math.floor(realCents * fraction);
+            const active = amount !== '' && amount === quickAmountEntry(targetCents, { isForeign, fxRateFromKes });
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setPct(fraction)}
+                disabled={!canQuickSelect}
+                aria-pressed={active}
+                className={[
+                  'rounded-lg border px-2 py-2 text-sm font-semibold transition',
+                  active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface-2 text-fg hover:border-accent/60',
+                  'disabled:pointer-events-none disabled:opacity-40',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
