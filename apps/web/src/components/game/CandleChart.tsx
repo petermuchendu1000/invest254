@@ -41,6 +41,7 @@ const SCALES: ReadonlyArray<{ id: ScaleMode; label: string }> = [
 ];
 const DEFAULT_INTERVAL_MS = 2000;
 const MIN_BARS = 8, MAX_BARS = 600, ZOOM_STEP = 0.7, RIGHT_OFFSET_BARS = 3;
+const RESUME_MS = 3000; // auto-return to the live edge after this idle time following manual pan/zoom
 const MA = { fast: 7, mid: 25, slow: 99 }, BB_PERIOD = 20, BB_MULT = 2, PRICE_PRECISION = 4;
 
 const readVar = (cs: CSSStyleDeclaration, n: string, f: string) => cs.getPropertyValue(n).trim() || f;
@@ -70,6 +71,7 @@ export function CandleChart({
   const candlesRef = useRef<Candle[]>([]);
   const hoverRef = useRef(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
+  const resumeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [intervalMs, setIntervalMs] = useState(DEFAULT_INTERVAL_MS);
   const [chartType, setChartType] = useState<MainType>('candles');
@@ -77,13 +79,12 @@ export function CandleChart({
   const [scaleMode, setScaleMode] = useState<ScaleMode>('normal');
   const [ind, setInd] = useState<Ind>({ ma7: false, ma25: false, ma99: false, bb: false });
   const indRef = useRef(ind); indRef.current = ind;
-  const [following, setFollowing] = useState(true);
   const followingRef = useRef(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [legend, setLegend] = useState<Legend | null>(null);
   const visibleBarsRef = useRef(Math.max(MIN_BARS, Math.ceil(windowMs / DEFAULT_INTERVAL_MS)));
 
-  const setFollow = useCallback((v: boolean) => { followingRef.current = v; setFollowing(v); }, []);
+  const setFollow = useCallback((v: boolean) => { followingRef.current = v; }, []);
   const legendOf = (c: Candle): Legend => ({ o: c.open, h: c.high, l: c.low, c: c.close, changePct: c.open ? ((c.close - c.open) / c.open) * 100 : 0 });
 
   const snapToLive = useCallback(() => {
@@ -133,7 +134,11 @@ export function CandleChart({
   useEffect(() => {
     let disposed = false, raf = 0;
     const host = hostRef.current; if (!host) return;
-    const detach = () => setFollow(false);
+    const detach = () => {
+      setFollow(false);
+      if (resumeRef.current) clearTimeout(resumeRef.current);
+      resumeRef.current = setTimeout(() => { setFollow(true); snapToLive(); }, RESUME_MS);
+    };
     host.addEventListener('wheel', detach, { passive: true });
     host.addEventListener('pointerdown', detach);
     host.addEventListener('touchstart', detach, { passive: true });
@@ -234,6 +239,7 @@ export function CandleChart({
     return () => {
       disposed = true;
       if (raf) cancelAnimationFrame(raf);
+      if (resumeRef.current) clearTimeout(resumeRef.current);
       host.removeEventListener('wheel', detach);
       host.removeEventListener('pointerdown', detach);
       host.removeEventListener('touchstart', detach);
@@ -291,7 +297,6 @@ export function CandleChart({
           </div>
           <button type="button" onClick={() => zoom('out')} aria-label="Zoom out" className={cn(pill, idle, 'text-sm')}>−</button>
           <button type="button" onClick={() => zoom('in')} aria-label="Zoom in" className={cn(pill, idle, 'text-sm')}>+</button>
-          <button type="button" onClick={() => { setFollow(true); snapToLive(); }} aria-pressed={following} className={cn(pill, following ? active : idle, 'px-2')} title="Follow the live price">{following ? '● Live' : 'Live'}</button>
         </div>
       </div>
 

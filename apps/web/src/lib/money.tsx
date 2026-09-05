@@ -57,6 +57,11 @@ export function useDisplayMoney() {
        * player always knows the real KES figure that M-Pesa moves. Plain KES for KES brands.
        */
       both: (cents: Cents) => (foreign ? `${formatMoney(cents, opts)} (${formatKes(cents)})` : formatKes(cents)),
+      /**
+       * Split for a STACKED display: the primary (display-currency) figure big, and the KES
+       * equivalent to render small underneath. `foreign` is false for KES brands (no second line).
+       */
+      parts: (cents: Cents) => ({ display: formatMoney(cents, opts), kes: formatKes(cents), foreign }),
       /** KES cents -> display-currency major units (for prefilling inputs). */
       toDisplay: (cents: Cents) => kesCentsToDisplay(cents, foreign ? fxRateFromKes : 1),
       /** User-entered display-currency major units -> authoritative KES cents. */

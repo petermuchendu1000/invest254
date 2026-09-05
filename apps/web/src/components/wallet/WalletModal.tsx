@@ -21,7 +21,7 @@ const TABS: { mode: WalletMode; label: string }[] = [
  * one surface, one balance header, and one mental model. Any caller picks the starting tab.
  */
 export function WalletModal() {
-  const { both } = useDisplayMoney();
+  const { parts } = useDisplayMoney();
   const open = useDepositUi((s) => s.open);
   const mode = useDepositUi((s) => s.mode);
   const setMode = useDepositUi((s) => s.setMode);
@@ -43,15 +43,17 @@ export function WalletModal() {
       <div className="px-4 pt-4">
         <div className="flex flex-col items-center gap-0.5 rounded-2xl bg-surface-2 px-4 py-3 text-center">
           <span className="text-xs text-muted">{mode === 'deposit' ? 'Available balance' : 'Available to withdraw'}</span>
-          {wallet ? (
-            <span className="text-2xl font-extrabold tracking-tight text-accent">
-              {both(mode === 'deposit' ? wallet.real + wallet.bonus : wallet.real)}
-            </span>
-          ) : token ? (
+          {token && !wallet ? (
             <Skeleton className="h-7 w-32" />
-          ) : (
-            <span className="text-2xl font-extrabold tracking-tight text-accent">{both(0)}</span>
-          )}
+          ) : (() => {
+            const bal = parts(wallet ? (mode === 'deposit' ? wallet.real + wallet.bonus : wallet.real) : 0);
+            return (
+              <>
+                <span className="text-2xl font-extrabold leading-tight tracking-tight text-accent">{bal.display}</span>
+                {bal.foreign ? <span className="text-xs font-medium text-muted">{bal.kes}</span> : null}
+              </>
+            );
+          })()}
         </div>
       </div>
 
