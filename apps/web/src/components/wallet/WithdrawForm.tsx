@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { kesToCents, centsToKes, formatKes } from '@invest254/shared/money';
+import { kesToCents, formatKes } from '@invest254/shared/money';
 import { normalizeMsisdn, MIN_WITHDRAWAL_CENTS } from '@invest254/shared/payments';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -13,6 +13,7 @@ import { useSession } from '@/lib/auth/session';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { useDisplayMoney } from '@/lib/money';
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
@@ -52,8 +53,9 @@ export function WithdrawForm() {
     staleTime: 5 * 60_000,
   });
   const minWithdrawalCents = config?.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
-  const minKes = centsToKes(minWithdrawalCents);
 
+  const { fmt, isForeign, toKesCents, currency } = useDisplayMoney();
+  const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
   const [amount, setAmount] = useState('');
   const [editingPhone, setEditingPhone] = useState(false);
   const [phone, setPhone] = useState('');
@@ -66,9 +68,11 @@ export function WithdrawForm() {
   const realCents = wallet?.real ?? 0;
   const effectivePhone = editingPhone || !accountPhone ? phone : accountPhone;
 
-  const kes = Number(amount);
-  const amountCents = Number.isFinite(kes) ? kesToCents(kes) : 0;
-  const amountValid = Number.isInteger(kes) && kes >= minKes && amountCents <= realCents;
+  const parsedAmount = Number.parseFloat(amount);
+  const amountCents = isForeign
+    ? (Number.isFinite(parsedAmount) && parsedAmount > 0 ? toKesCents(parsedAmount) : 0)
+    : (Number.isInteger(Number(amount)) ? kesToCents(Number(amount)) : 0);
+  const amountValid = amountCents >= minWithdrawalCents && amountCents <= realCents;
   const destMasked = useMemo(() => {
     try {
       return maskMsisdn(normalizeMsisdn(effectivePhone));
@@ -81,8 +85,8 @@ export function WithdrawForm() {
     e.preventDefault();
     setServerError(null);
     const next: Record<string, string | undefined> = {};
-    if (!Number.isInteger(kes) || kes < minKes) next['amount'] = `Minimum withdrawal is ${formatKes(minWithdrawalCents)}.`;
-    else if (kesToCents(kes) > realCents) next['amount'] = 'Amount exceeds your real balance.';
+    if (amountCents < minWithdrawalCents) next['amount'] = `Minimum withdrawal is ${formatKes(minWithdrawalCents)}.`;
+    else if (amountCents > realCents) next['amount'] = 'Amount exceeds your real balance.';
     try {
       normalizeMsisdn(effectivePhone);
     } catch {
@@ -91,9 +95,9 @@ export function WithdrawForm() {
     setErrors(next);
     if (Object.values(next).some(Boolean)) return;
     try {
-      const res = await withdraw.mutateAsync({ amount: kesToCents(kes), phone: effectivePhone });
+      const res = await withdraw.mutateAsync({ amount: amountCents, phone: effectivePhone });
       setPaid(Boolean(res?.paid));
-      setPaidAmountKes(kes);
+      setPaidAmountKes(amountCents);
       setDone(true);
     } catch (err) {
       setServerError(authErrorMessage(err));
@@ -118,7 +122,7 @@ export function WithdrawForm() {
         <div className="w-full max-w-xs rounded-2xl border border-border bg-surface-2 p-4">
           <div className="flex items-center justify-between py-1">
             <span className="text-xs text-muted">Amount</span>
-            <span className="text-sm font-bold tabular-nums text-fg">{formatKes(kesToCents(paidAmountKes))}</span>
+            <span className="text-sm font-bold tabular-nums text-fg">{fmt(paidAmountKes)}{isForeign ? ` (${formatKes(paidAmountKes)})` : ''}</span>
           </div>
           <div className="flex items-center justify-between py-1">
             <span className="text-xs text-muted">To</span>
@@ -142,22 +146,22 @@ export function WithdrawForm() {
       >
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted">Amount to withdraw</span>
         <div className="mt-2 flex items-baseline justify-center gap-1.5">
-          <span className="text-2xl font-bold text-muted">KES</span>
+          <span className="text-2xl font-bold text-muted">{currency}</span>
           <input
             name="amount"
             inputMode="numeric"
             autoComplete="off"
             autoFocus
-            aria-label="Amount to withdraw in KES"
+            aria-label={`Amount to withdraw in ${currency}`}
             placeholder="0"
-            value={grouped(amount)}
-            onChange={(e) => { setAmount(digitsOnly(e.target.value)); setErrors((p) => ({ ...p, amount: undefined })); }}
-            style={{ width: `${Math.max(1, (grouped(amount) || '0').length)}ch` }}
+            value={isForeign ? amount : grouped(amount)}
+            onChange={(e) => { setAmount(sanitizeAmount(e.target.value)); setErrors((p) => ({ ...p, amount: undefined })); }}
+            style={{ width: `${Math.max(1, ((isForeign ? amount : grouped(amount)) || '0').length)}ch` }}
             className="max-w-full bg-transparent text-4xl font-black tabular-nums text-fg outline-none placeholder:text-muted"
           />
         </div>
       </div>
-      <p className="-mt-1 text-center text-xs text-muted">Min {formatKes(minWithdrawalCents)}</p>
+      <p className="-mt-1 text-center text-xs text-muted">Min {formatKes(minWithdrawalCents)}{isForeign && amountCents > 0 ? ` · you receive ${formatKes(amountCents)} to M-Pesa` : ''}</p>
       {errors['amount'] ? <p className="text-center text-xs text-down">{errors['amount']}</p> : null}
 
       {/* Destination */}
@@ -220,7 +224,7 @@ export function WithdrawForm() {
       ) : null}
 
       <Button type="submit" size="lg" fullWidth disabled={withdraw.isPending || !amountValid}>
-        {withdraw.isPending ? 'Requesting…' : amountValid ? `Withdraw ${formatKes(amountCents)}` : 'Withdraw'}
+        {withdraw.isPending ? 'Requesting…' : amountValid ? `Withdraw ${fmt(amountCents)}` : 'Withdraw'}
       </Button>
 
       <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted">

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { centsToKes, formatKes, kesToCents } from '@invest254/shared/money';
 import { normalizeMsisdn, MIN_DEPOSIT_CENTS } from '@invest254/shared/payments';
+import { useDisplayMoney } from '@/lib/money';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { api } from '@/lib/api/endpoints';
@@ -15,8 +16,6 @@ import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
 
 /** Common top-up amounts (KES). One tap beats typing on mobile (NN/g: match input to data). */
-const QUICK_KES = [200, 500, 1000, 5000] as const;
-const MIN_KES = centsToKes(MIN_DEPOSIT_CENTS);
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
@@ -33,10 +32,23 @@ export function DepositForm() {
   const accountPhone = useSession((s) => s.user?.phone ?? null);
   const { data: wallet } = useWallet();
   const deposit = useDeposit();
+  const { fmt, isForeign, toKesCents, toDisplay, currency } = useDisplayMoney();
+  // Foreign brands enter in the display currency (e.g. USD); KES brands enter whole KES. Decimals
+  // are allowed only for foreign entry. All validation + the API call use authoritative KES cents.
+  const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
 
-  const [amount, setAmount] = useState(() =>
-    prefillAmountCents && prefillAmountCents > 0 ? String(Math.ceil(centsToKes(prefillAmountCents))) : '200',
-  );
+  const [amount, setAmount] = useState(() => {
+    if (prefillAmountCents && prefillAmountCents > 0) {
+      return isForeign ? String(Math.ceil(toDisplay(prefillAmountCents) * 100) / 100) : String(Math.ceil(centsToKes(prefillAmountCents)));
+    }
+    return isForeign ? '5' : '200';
+  });
+  const parsedAmount = Number.parseFloat(amount);
+  const amountKesCents = isForeign
+    ? (Number.isFinite(parsedAmount) && parsedAmount > 0 ? toKesCents(parsedAmount) : 0)
+    : (Number.isInteger(Number(amount)) ? kesToCents(Number(amount)) : 0);
+  // Quick amounts in the entry unit: round USD-style presets for foreign brands, KES presets otherwise.
+  const quick = isForeign ? [5, 10, 20, 50] : [200, 500, 1000, 5000];
   const [editingPhone, setEditingPhone] = useState(false);
   const [phone, setPhone] = useState('');
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
@@ -78,9 +90,8 @@ export function DepositForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setServerError(null);
-    const kes = Number(amount);
     const next: Record<string, string | undefined> = {};
-    if (!Number.isInteger(kes) || kes < MIN_KES) next['amount'] = `Enter at least ${formatKes(MIN_DEPOSIT_CENTS)}.`;
+    if (!Number.isInteger(amountKesCents) || amountKesCents < MIN_DEPOSIT_CENTS) next['amount'] = `Enter at least ${formatKes(MIN_DEPOSIT_CENTS)}.`;
     // Logged-out users only pick an amount here; the phone comes from their account after sign up.
     if (token) {
       try {
@@ -93,13 +104,13 @@ export function DepositForm() {
     if (Object.values(next).some(Boolean)) return;
     // Business logic first: capture the amount, route to sign up/login, then resume this deposit.
     if (!token) {
-      deferToAuth(kesToCents(kes));
+      deferToAuth(amountKesCents);
       openAuth('register');
       return;
     }
     try {
       balanceAtSubmitRef.current = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
-      const res = await deposit.mutateAsync({ amount: kesToCents(kes), phone: effectivePhone });
+      const res = await deposit.mutateAsync({ amount: amountKesCents, phone: effectivePhone });
       setTxId(res.transactionId);
       setDone(true);
     } catch (err) {
@@ -113,7 +124,7 @@ export function DepositForm() {
         <SuccessTick />
         <h3 className="text-base font-semibold text-fg">Deposit received</h3>
         <p className="text-sm text-muted">
-          {formatKes(kesToCents(Number(amount)))} has been added to your wallet.
+          {fmt(amountKesCents)} has been added to your wallet.
         </p>
         <p className="text-xs text-muted">
           {intentLabel ? `Your ${intentLabel} trade is ready.` : 'Closing…'}
@@ -143,7 +154,7 @@ export function DepositForm() {
         <h3 className="text-base font-semibold text-fg">Check your phone</h3>
         <p className="text-sm text-muted">
           We sent a prompt to <span className="font-medium text-fg">{maskMsisdn(normalizeMsisdn(effectivePhone))}</span>.
-          Enter your M-Pesa PIN to approve {formatKes(kesToCents(Number(amount)))}.
+          Enter your M-Pesa PIN to approve {formatKes(amountKesCents)}.
         </p>
         <p className="text-xs text-muted">
           {intentLabel
@@ -159,7 +170,7 @@ export function DepositForm() {
     <form className="flex flex-col gap-4 p-4" onSubmit={onSubmit} noValidate>
       {/* Quick amounts */}
       <div className="flex gap-2 overflow-x-auto pb-0.5">
-        {QUICK_KES.map((q) => {
+        {quick.map((q) => {
           const active = Number(amount) === q;
           return (
             <button
@@ -171,7 +182,7 @@ export function DepositForm() {
                 active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface-2 text-fg hover:border-accent/60',
               ].join(' ')}
             >
-              {grouped(String(q))}
+              {isForeign ? `${currency} ${q}` : grouped(String(q))}
             </button>
           );
         })}
@@ -179,18 +190,18 @@ export function DepositForm() {
 
       {/* Hero amount field: text + numeric inputmode (avoids number-spinner UX bugs) */}
       <Input
-        label="Amount (KES)"
+        label={`Amount (${currency})`}
         name="amount"
         type="text"
         inputMode="numeric"
         autoComplete="off"
         autoFocus
         required
-        leading={<span className="text-sm font-semibold text-muted">KES</span>}
-        value={grouped(amount)}
-        onChange={(e) => setAmount(digitsOnly(e.target.value))}
+        leading={<span className="text-sm font-semibold text-muted">{currency}</span>}
+        value={isForeign ? amount : grouped(amount)}
+        onChange={(e) => setAmount(sanitizeAmount(e.target.value))}
         error={errors['amount']}
-        hint={`Minimum ${formatKes(MIN_DEPOSIT_CENTS)}`}
+        hint={isForeign ? `≈ ${formatKes(amountKesCents)} charged via M-Pesa · min ${formatKes(MIN_DEPOSIT_CENTS)}` : `Minimum ${formatKes(MIN_DEPOSIT_CENTS)}`}
         className="text-lg font-semibold"
       />
 

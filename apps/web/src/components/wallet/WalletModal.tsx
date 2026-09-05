@@ -1,6 +1,6 @@
 'use client';
 
-import { formatKes } from '@invest254/shared/money';
+import { useDisplayMoney } from '@/lib/money';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -21,6 +21,7 @@ const TABS: { mode: WalletMode; label: string }[] = [
  * one surface, one balance header, and one mental model. Any caller picks the starting tab.
  */
 export function WalletModal() {
+  const { fmt } = useDisplayMoney();
   const open = useDepositUi((s) => s.open);
   const mode = useDepositUi((s) => s.mode);
   const setMode = useDepositUi((s) => s.setMode);
@@ -44,12 +45,12 @@ export function WalletModal() {
           <span className="text-xs text-muted">{mode === 'deposit' ? 'Available balance' : 'Available to withdraw'}</span>
           {wallet ? (
             <span className="text-2xl font-extrabold tracking-tight text-accent">
-              {formatKes(mode === 'deposit' ? wallet.real + wallet.bonus : wallet.real)}
+              {fmt(mode === 'deposit' ? wallet.real + wallet.bonus : wallet.real)}
             </span>
           ) : token ? (
             <Skeleton className="h-7 w-32" />
           ) : (
-            <span className="text-2xl font-extrabold tracking-tight text-accent">{formatKes(0)}</span>
+            <span className="text-2xl font-extrabold tracking-tight text-accent">{fmt(0)}</span>
           )}
         </div>
       </div>
