@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
+import { MultipliersPanel } from '@/components/game/digits/MultipliersPanel';
 import { DerivChart } from '@/components/game/digits/DerivChart';
 import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector';
 import { useInstrument } from '@/lib/game/useInstrument';
@@ -17,6 +18,7 @@ const MARKETS = [
   { id: 'matchesdiffers', label: 'Matches/Differs' },
   { id: 'evenodd', label: 'Even/Odd' },
   { id: 'overunder', label: 'Over/Under' },
+  { id: 'multipliers', label: 'Multipliers' },
 ] as const;
 type Market = (typeof MARKETS)[number]['id'];
 type Outcome = 'even' | 'odd' | 'over' | 'under' | 'matches' | 'differs';
@@ -201,7 +203,8 @@ export function DigitsTradeScreen() {
   }, [getTicks, settle, place, stakeCents, spendable, multiplier, targetProfit, stopLoss, toKesCents]);
 
   const [primary, secondary] = outcomesFor(market);
-  const needsDigit = market !== 'evenodd';
+  const isMultipliers = market === 'multipliers';
+  const needsDigit = !isMultipliers && market !== 'evenodd';
   const selectorValue = market === 'overunder' ? barrier : pick;
   const onSelectDigit = (d: number) => (market === 'overunder' ? setBarrier(d) : setPick(d));
 
@@ -281,21 +284,29 @@ export function DigitsTradeScreen() {
       </div>
 
       {/* Live digit heatmap (also the digit picker for Matches/Differs & Over/Under) */}
-      <DigitHeatmap
-        freqs={snap.freqs}
-        current={snap.digit}
-        selected={needsDigit ? selectorValue : null}
-        selectable={needsDigit}
-        onSelect={onSelectDigit}
-      />
-      {needsDigit ? (
-        <p className="-mt-1 text-center text-[11px] text-muted">
-          {market === 'overunder' ? 'Barrier digit' : 'Prediction digit'}: <span className="font-semibold text-fg">{selectorValue}</span> — tap a digit to change
-        </p>
+      {!isMultipliers ? (
+        <>
+          <DigitHeatmap
+            freqs={snap.freqs}
+            current={snap.digit}
+            selected={needsDigit ? selectorValue : null}
+            selectable={needsDigit}
+            onSelect={onSelectDigit}
+          />
+          {needsDigit ? (
+            <p className="-mt-1 text-center text-[11px] text-muted">
+              {market === 'overunder' ? 'Barrier digit' : 'Prediction digit'}: <span className="font-semibold text-fg">{selectorValue}</span> — tap a digit to change
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {/* Scrollable console */}
       <div className="flex min-h-0 flex-col gap-3">
+        {isMultipliers ? (
+          <MultipliersPanel getLastTick={getLastTick} resetKey={resetKey} />
+        ) : (
+        <>
         {/* AUTO / MANUAL */}
         <div className="flex rounded-xl border border-border bg-surface-2 p-1">
           {(['auto', 'manual'] as const).map((m) => (
@@ -407,6 +418,8 @@ export function DigitsTradeScreen() {
           </div>
         </div>
         <p className="text-center text-[10px] text-muted">Preview mode · outcomes settle against the live tick stream (no real-money movement yet).</p>
+        </>
+        )}
       </div>
     </div>
   );
