@@ -14,6 +14,7 @@ import { useAuthUi } from '@/lib/auth/ui';
 import { useSession } from '@/lib/auth/session';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
+import { MpesaIcon } from '@/components/wallet/MpesaIcon';
 
 /** Common top-up amounts (KES). One tap beats typing on mobile (NN/g: match input to data). */
 
@@ -32,7 +33,7 @@ export function DepositForm() {
   const accountPhone = useSession((s) => s.user?.phone ?? null);
   const { data: wallet } = useWallet();
   const deposit = useDeposit();
-  const { fmt, both, symbol, isForeign, toKesCents, toDisplay, limit } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toKesCents, toDisplay, limit, currency } = useDisplayMoney();
   // Foreign brands enter in the display currency (e.g. USD); KES brands enter whole KES. Decimals
   // are allowed only for foreign entry. All validation + the API call use authoritative KES cents.
   const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
@@ -169,9 +170,34 @@ export function DepositForm() {
   }
 
   return (
-    <form className="flex flex-col gap-4 p-4" onSubmit={onSubmit} noValidate>
-      {/* Quick amounts */}
-      <div className="flex gap-2 overflow-x-auto pb-0.5">
+    <form className="mx-auto flex w-full max-w-sm flex-col gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
+      {/* Amount hero — centered entry, matching the Withdraw sheet. */}
+      <div
+        className={[
+          'rounded-2xl border bg-surface-2 px-4 py-5 text-center transition',
+          errors['amount'] ? 'border-down' : 'border-border focus-within:border-accent',
+        ].join(' ')}
+      >
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted">Amount to deposit</span>
+        <div className="mt-2 flex items-baseline justify-center gap-1.5">
+          <span className="text-2xl font-bold text-muted">{symbol}</span>
+          <input
+            name="amount"
+            inputMode="numeric"
+            autoComplete="off"
+            autoFocus
+            aria-label={`Amount to deposit in ${currency}`}
+            placeholder="0"
+            value={isForeign ? amount : grouped(amount)}
+            onChange={(e) => { setAmount(sanitizeAmount(e.target.value)); setErrors((p) => ({ ...p, amount: undefined })); }}
+            style={{ width: `${Math.max(1, ((isForeign ? amount : grouped(amount)) || '0').length)}ch` }}
+            className="max-w-full bg-transparent text-4xl font-black tabular-nums text-fg outline-none placeholder:text-muted"
+          />
+        </div>
+      </div>
+
+      {/* Quick amount presets — same segmented treatment as the Withdraw percentage chips. */}
+      <div className="-mt-1 grid grid-cols-4 gap-2">
         {quick.map((q) => {
           const active = Number(amount) === q;
           return (
@@ -179,8 +205,9 @@ export function DepositForm() {
               key={q}
               type="button"
               onClick={() => { setAmount(String(q)); setErrors((p) => ({ ...p, amount: undefined })); }}
+              aria-pressed={active}
               className={[
-                'shrink-0 rounded-full border px-4 py-2 text-sm font-semibold transition',
+                'rounded-lg border px-2 py-2 text-sm font-semibold tabular-nums transition',
                 active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface-2 text-fg hover:border-accent/60',
               ].join(' ')}
             >
@@ -190,57 +217,48 @@ export function DepositForm() {
         })}
       </div>
 
-      {/* Hero amount field: text + numeric inputmode (avoids number-spinner UX bugs) */}
-      <Input
-        label={`Amount (${symbol})`}
-        name="amount"
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        autoFocus
-        required
-        leading={<span className="text-sm font-semibold text-muted">{symbol}</span>}
-        value={isForeign ? amount : grouped(amount)}
-        onChange={(e) => setAmount(sanitizeAmount(e.target.value))}
-        error={errors['amount']}
-        hint={isForeign ? `≈ ${formatKes(amountKesCents)} charged via M-Pesa · min ${both(minDepositCents)}` : `Minimum ${formatKes(MIN_DEPOSIT_CENTS)}`}
-        className="text-lg font-semibold"
-      />
-
-      {/* Deposit-bonus preview removed: the only bonus in the system is the sign-up welcome bonus
-          (see docs/31). Deposit bonuses are not granted, so we no longer advertise one here. */}
+      <p className="text-center text-xs text-muted">
+        Min {both(minDepositCents)}{isForeign && amountKesCents > 0 ? ` · ≈ ${formatKes(amountKesCents)} via M-Pesa` : ''}
+      </p>
+      {errors['amount'] ? <p className="text-center text-xs text-down">{errors['amount']}</p> : null}
 
       {/* M-Pesa number: only collected once signed in (prefilled from the account, read-only unless changed) */}
       {token ? (
-        accountPhone && !editingPhone ? (
-        <div className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3.5 py-3">
-          <div>
-            <div className="text-xs text-muted">M-Pesa number</div>
-            <div className="text-sm font-medium text-fg">{maskMsisdn(accountPhone)}</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => { setEditingPhone(true); setPhone(''); }}
-            className="text-sm font-semibold text-accent hover:underline"
-          >
-            Change
-          </button>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-fg">M-Pesa number</span>
+          {accountPhone && !editingPhone ? (
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 px-3.5 py-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-up/15 text-up">
+                <MpesaIcon />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold tabular-nums text-fg">{maskMsisdn(accountPhone)}</div>
+                <div className="text-xs text-muted">Your account number</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setEditingPhone(true); setPhone(''); }}
+                className="shrink-0 text-sm font-semibold text-accent hover:underline"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <Input
+              name="phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              required
+              placeholder="0712 345 678"
+              leading={<MpesaIcon />}
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              error={errors['phone']}
+              {...(accountPhone ? { hint: 'Sending to a different number than your account.' } : {})}
+            />
+          )}
         </div>
-      ) : (
-        <Input
-          label="M-Pesa number"
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          required
-          placeholder="0712 345 678"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          error={errors['phone']}
-          {...(accountPhone ? { hint: 'Sending to a different number than your account.' } : {})}
-        />
-        )
       ) : null}
 
       {serverError ? (

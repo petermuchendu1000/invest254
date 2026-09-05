@@ -14,19 +14,19 @@ import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
+import { quickAmountEntry } from '@/lib/wallet/quickAmount';
+import { MpesaIcon } from '@/components/wallet/MpesaIcon';
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
 
-function MpesaIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <rect x="4" y="3" width="16" height="18" rx="3" />
-      <path d="M9 3v18" strokeOpacity="0" />
-      <path d="M12 7v6M9.5 9h4a1.5 1.5 0 010 3h-2.5a1.5 1.5 0 000 3H14" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+/** Binance-style quick-select fractions of the available balance. Max = the full balance. */
+const QUICK_PCTS: ReadonlyArray<readonly [string, number]> = [
+  ['25%', 0.25],
+  ['50%', 0.5],
+  ['75%', 0.75],
+  ['Max', 1],
+];
 
 function CheckCircle() {
   return (
@@ -54,7 +54,7 @@ export function WithdrawForm() {
   });
   const serverMinWithdrawalCents = config?.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
 
-  const { fmt, both, symbol, isForeign, toKesCents, currency, limit } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toKesCents, currency, limit, fxRateFromKes } = useDisplayMoney();
   // Foreign brands: USD-native minimum ($15) converted to KES, honouring the site's KES floor (whole $).
   const minWithdrawalCents = limit(USD_LIMITS.minWithdrawal, serverMinWithdrawalCents);
   const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
@@ -82,6 +82,16 @@ export function WithdrawForm() {
       return effectivePhone ? effectivePhone : '—';
     }
   }, [effectivePhone]);
+
+  // Fill the amount from a Binance-style quick-select chip. The target is floored into the entry
+  // unit by quickAmountEntry, so the resulting amount can never exceed the real balance; MAX uses
+  // the exact available balance.
+  const canQuickSelect = realCents > 0;
+  const setPct = (fraction: number) => {
+    const targetCents = fraction >= 1 ? realCents : Math.floor(realCents * fraction);
+    setAmount(quickAmountEntry(targetCents, { isForeign, fxRateFromKes }));
+    setErrors((p) => ({ ...p, amount: undefined }));
+  };
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -138,7 +148,7 @@ export function WithdrawForm() {
 
   // ── Form ─────────────────────────────────────────────────────────────────────
   return (
-    <form className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
+    <form className="mx-auto flex w-full max-w-sm flex-col gap-4 px-5 pb-6 pt-4" onSubmit={onSubmit} noValidate>
       {/* Amount hero — centered entry, the focal point of the form. */}
       <div
         className={[
@@ -163,7 +173,37 @@ export function WithdrawForm() {
           />
         </div>
       </div>
-      <p className="-mt-1 text-center text-xs text-muted">Min {both(minWithdrawalCents)}{isForeign && amountCents > 0 ? ` · you receive ${formatKes(amountCents)} to M-Pesa` : ''}</p>
+
+      {/* Available balance + Binance-style quick-select (drives the amount from the real balance). */}
+      <div className="-mt-1 flex flex-col gap-2">
+        <span className="text-xs text-muted">
+          Available <span className="font-semibold tabular-nums text-fg">{fmt(realCents)}</span>
+        </span>
+        <div className="grid grid-cols-4 gap-2">
+          {QUICK_PCTS.map(([label, fraction]) => {
+            const targetCents = fraction >= 1 ? realCents : Math.floor(realCents * fraction);
+            const active = amount !== '' && amount === quickAmountEntry(targetCents, { isForeign, fxRateFromKes });
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setPct(fraction)}
+                disabled={!canQuickSelect}
+                aria-pressed={active}
+                className={[
+                  'rounded-lg border px-2 py-2 text-sm font-semibold transition',
+                  active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface-2 text-fg hover:border-accent/60',
+                  'disabled:pointer-events-none disabled:opacity-40',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <p className="text-center text-xs text-muted">Min {both(minWithdrawalCents)}{isForeign && amountCents > 0 ? ` · you receive ${formatKes(amountCents)} to M-Pesa` : ''}</p>
       {errors['amount'] ? <p className="text-center text-xs text-down">{errors['amount']}</p> : null}
 
       {/* Destination */}
@@ -226,7 +266,7 @@ export function WithdrawForm() {
       ) : null}
 
       <Button type="submit" size="lg" fullWidth disabled={withdraw.isPending || !amountValid}>
-        {withdraw.isPending ? 'Requesting…' : amountValid ? `Withdraw ${both(amountCents)}` : 'Withdraw'}
+        {withdraw.isPending ? 'Requesting…' : 'Withdraw'}
       </Button>
 
       <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted">
