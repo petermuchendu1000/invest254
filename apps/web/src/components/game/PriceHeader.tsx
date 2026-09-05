@@ -53,8 +53,8 @@ export function PriceHeader() {
   return (
     <div className="shrink-0 rounded-xl border border-border bg-surface px-3 py-1.5">
       {/* Single compact row: pair + live | price + % | 24H stats + online. Keeps the chart tall. */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
           <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status} />
           <span className="text-xs font-semibold text-fg">BTC/KES</span>
           <span
@@ -79,9 +79,9 @@ export function PriceHeader() {
             </span>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-right">
-          <Stat className="hidden xs:flex" label="24H H" value={hi !== null ? fmt(hi) : '\u2014'} />
-          <Stat className="hidden xs:flex" label="24H L" value={lo !== null ? fmt(lo) : '\u2014'} />
+        <div className="flex min-w-0 items-center gap-3 text-right">
+          <Stat className="hidden sm:flex" label="24H H" value={hi !== null ? fmt(hi) : '\u2014'} />
+          <Stat className="hidden sm:flex" label="24H L" value={lo !== null ? fmt(lo) : '\u2014'} />
           <Stat
             label="Online"
             valueClassName="text-up"
