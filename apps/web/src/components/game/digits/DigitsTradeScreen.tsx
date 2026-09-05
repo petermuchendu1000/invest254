@@ -237,15 +237,15 @@ export function DigitsTradeScreen() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
-      {/* Market-type segmented tabs */}
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-surface-2 p-1">
+      {/* Market-type tabs — size to content and scroll horizontally (hidden scrollbar) so no label clips */}
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-surface-2 p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {MARKETS.map((m) => (
           <button
             key={m.id}
             type="button"
             onClick={() => { setMarket(m.id); if (running) setRunning(false); }}
             className={cn(
-              'flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition',
+              'shrink-0 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold transition',
               market === m.id ? 'bg-accent text-accent-fg shadow-sm' : 'text-muted hover:text-fg',
             )}
           >
