@@ -27,7 +27,7 @@ test("formatMoney: converts KES cents to USD at the given rate", () => {
 test("formatMoney: unknown currency degrades to 'CUR 0.00' string, never throws", () => {
   const s = formatMoney(100000, { currency: "ZZZ", locale: "en-US", fxRateFromKes: 2 });
   assert.ok(s.includes("ZZZ"));
-  assert.ok(s.includes("2,000.00")); // KES 1000 * 2
+  assert.ok(s.includes("2,000") && !s.includes("2,000.00")); // KES 1000 * 2, whole -> no decimals
 });
 
 test("isForeignDisplay: true only for non-KES with a usable rate", () => {
@@ -49,4 +49,11 @@ test("displayToKesCents: rounds to whole cents, guards bad rate", () => {
   assert.equal(displayToKesCents(1, 1), 100);           // $1 @ rate 1 -> 100 cents
   assert.equal(displayToKesCents(10, 0), 1000);         // invalid rate -> treated as 1
   assert.throws(() => displayToKesCents(NaN, USD_PER_KES));
+});
+
+test("formatMoney: whole display amounts drop decimals; fractional keep 2dp", () => {
+  const fifteen = displayToKesCents(15, USD_PER_KES);        // $15 expressed in KES cents
+  assert.equal(formatMoney(fifteen, { currency: "USD", locale: "en-US", fxRateFromKes: USD_PER_KES }), "$15");
+  const s = formatMoney(200000, { currency: "USD", locale: "en-US", fxRateFromKes: USD_PER_KES }); // KES 2,000
+  assert.ok(/^\$15\.\d{2}$/.test(s), `expected $15.xx, got ${s}`);
 });

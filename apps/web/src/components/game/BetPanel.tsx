@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DisplayMoney as Money } from '@/lib/money';
-import { useDisplayMoney } from '@/lib/money';
+import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { api } from '@/lib/api/endpoints';
 import { useSession } from '@/lib/auth/session';
@@ -19,7 +19,7 @@ import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { LivePnl } from '@/components/game/LivePnl';
 
-const CHIP_CENTS = [25000, 50000, 75000, 100000];
+const CHIP_CENTS = [25000, 50000, 100000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
 // Stepper granularity for the +/- buttons on the stake field (KES).
 const STEP_KES = 50;
@@ -34,13 +34,13 @@ export function BetPanel() {
   const clearPending = useDepositUi((s) => s.clearPending);
 
   const brand = useBrand();
-  const { fmt, both, symbol, isForeign, toDisplay, toKesCents, currency } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toDisplay, toKesCents, currency, limit } = useDisplayMoney();
   // Quick stakes in the ENTRY unit: fixed $ presets for foreign brands ($5/$10/$50/$100), the KES
   // presets otherwise. Each chip's value is what lands in the stake field; KES cents are derived
   // from it for validation/placing the trade.
   const chips = isForeign
-    ? [5, 10, 50, 100].map((v) => ({ key: v, value: v, label: `${symbol}${v}` }))
-    : CHIP_CENTS.map((c) => ({ key: c, value: centsToKes(c), label: String(centsToKes(c)) }));
+    ? [5, 25, 100].map((v) => ({ key: v, value: v, label: `${symbol}${v}` }))
+    : CHIP_CENTS.slice(0, 3).map((c) => ({ key: c, value: centsToKes(c), label: String(centsToKes(c)) }));
   const { data: config } = useQuery({
     queryKey: ['gameConfig', brand.slug],
     queryFn: () => api.gameConfig(brand.slug),
@@ -49,12 +49,14 @@ export function BetPanel() {
   const { data: wallet } = useWallet();
   const { status, activePosition, openPosition, sell } = useGameSocket();
 
-  const minStakeCents = config?.minStakeCents ?? 25000;
+  const minStakeCents = limit(USD_LIMITS.minStake, config?.minStakeCents ?? 25000);
   const maxStakeCents = config?.maxStakeCents;
   const defaultDurationS = config?.defaultDurationS ?? 10;
 
   const [stake, setStake] = useState<string>('');
   const [durationS, setDurationS] = useState<number>(defaultDurationS);
+  // The free-text stake field is hidden behind a "Custom" chip to give the chart more room.
+  const [customOpen, setCustomOpen] = useState(false);
   // Direction the player picked before topping up. Purely informational: it drives the
   // "funds added" hint after a deposit settles. It never gates or re-fires the trade.
   const [resumeDir, setResumeDir] = useState<Direction | null>(null);
@@ -63,7 +65,7 @@ export function BetPanel() {
   useEffect(() => {
     if (stake === '') {
       const cents = Math.max(minStakeCents, 25000);
-      setStake(isForeign ? '10' : String(centsToKes(cents)));
+      setStake(isForeign ? String(USD_LIMITS.minStake) : String(centsToKes(cents)));
     }
   }, [minStakeCents, stake, isForeign]);
   useEffect(() => {
@@ -188,7 +190,39 @@ export function BetPanel() {
   // ── Idle — stake + duration + BUY/SELL (always visible) ──────────────────
   return (
     <Card className="flex flex-col gap-2.5 rounded-xl p-3">
-      {/* Stake input with KES prefix + quick steppers */}
+      {/* Quick stakes + Custom. The free-text field only appears when Custom is tapped (space for the chart). */}
+      <div className="grid grid-cols-4 gap-2">
+        {chips.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => { setStake(String(chip.value)); setCustomOpen(false); }}
+            className={cn(
+              'h-9 rounded-lg border text-sm font-semibold tabular-nums transition',
+              !customOpen && chipActive(chip.value)
+                ? 'border-accent bg-accent/10 text-accent'
+                : 'border-border bg-surface-2 text-fg hover:border-accent/60',
+            )}
+          >
+            {chip.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setCustomOpen((v) => !v)}
+          aria-expanded={customOpen}
+          className={cn(
+            'h-9 rounded-lg border text-sm font-semibold transition',
+            customOpen || !chips.some((c) => chipActive(c.value))
+              ? 'border-accent bg-accent/10 text-accent'
+              : 'border-border bg-surface-2 text-fg hover:border-accent/60',
+          )}
+        >
+          Custom
+        </button>
+      </div>
+
+      {customOpen ? (
       <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 transition focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
         <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">{symbol}</span>
         <input
@@ -219,25 +253,7 @@ export function BetPanel() {
           </button>
         </div>
       </div>
-
-      {/* Quick chips */}
-      <div className="grid grid-cols-4 gap-2">
-        {chips.map((chip) => (
-          <button
-            key={chip.key}
-            type="button"
-            onClick={() => setStake(String(chip.value))}
-            className={cn(
-              'h-10 rounded-lg border text-sm font-semibold tabular-nums transition',
-              chipActive(chip.value)
-                ? 'border-accent bg-accent/10 text-accent'
-                : 'border-border bg-surface-2 text-fg hover:border-accent/60',
-            )}
-          >
-            {chip.label}
-          </button>
-        ))}
-      </div>
+      ) : null}
 
       {errorHint ? <p className="text-xs text-down">{errorHint}</p> : null}
 
@@ -263,12 +279,12 @@ export function BetPanel() {
       ) : null}
 
       {/* BUY / SELL — primary CTAs: largest, most saturated, gain/loss framed. */}
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-2 gap-2">
         <Button
           variant="up"
           size="md"
           fullWidth
-          className="!h-14 flex-col !gap-0.5 !text-base"
+          className="!h-11 flex-col !gap-0 !text-sm"
           disabled={connecting}
           onClick={() => handleDirection('buy')}
         >
@@ -284,7 +300,7 @@ export function BetPanel() {
           variant="down"
           size="md"
           fullWidth
-          className="!h-14 flex-col !gap-0.5 !text-base"
+          className="!h-11 flex-col !gap-0 !text-sm"
           disabled={connecting}
           onClick={() => handleDirection('sell')}
         >

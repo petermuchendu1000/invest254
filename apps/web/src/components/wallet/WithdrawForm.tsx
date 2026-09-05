@@ -13,7 +13,7 @@ import { useSession } from '@/lib/auth/session';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { maskMsisdn } from '@/lib/wallet/format';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useDisplayMoney } from '@/lib/money';
+import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 
 const digitsOnly = (s: string) => s.replace(/\D/g, '');
 const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
@@ -52,9 +52,11 @@ export function WithdrawForm() {
     queryFn: () => api.gameConfig(brand.slug),
     staleTime: 5 * 60_000,
   });
-  const minWithdrawalCents = config?.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
+  const serverMinWithdrawalCents = config?.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
 
-  const { fmt, both, symbol, isForeign, toKesCents, currency } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toKesCents, currency, limit } = useDisplayMoney();
+  // Foreign brands: USD-native minimum ($15) converted to KES, honouring the site's KES floor (whole $).
+  const minWithdrawalCents = limit(USD_LIMITS.minWithdrawal, serverMinWithdrawalCents);
   const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
   const [amount, setAmount] = useState('');
   const [editingPhone, setEditingPhone] = useState(false);
