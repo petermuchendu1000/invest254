@@ -152,7 +152,7 @@ export function CandleChart({
         autoSize: true,
         layout: { background: { type: ColorType.Solid, color: bg }, textColor: text, fontSize: 10, attributionLogo: true },
         grid: { vertLines: { color: border }, horzLines: { color: border } },
-        rightPriceScale: { borderColor: border, scaleMargins: { top: 0.16, bottom: 0.12 }, mode: scaleMode === 'log' ? 1 : scaleMode === 'percent' ? 2 : 0 },
+        rightPriceScale: { borderColor: border, scaleMargins: { top: 0.08, bottom: 0.08 }, mode: scaleMode === 'log' ? 1 : scaleMode === 'percent' ? 2 : 0 },
         timeScale: {
           borderColor: border, timeVisible: true, secondsVisible: true, rightOffset: RIGHT_OFFSET_BARS, barSpacing: 6,
           tickMarkFormatter: (t: Time) => localTime(t as number),
@@ -251,38 +251,19 @@ export function CandleChart({
   const row = 'flex items-center gap-1';
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={hostRef} className="h-full w-full" aria-label="Live price chart" role="img" />
-
-      {/* Faint symbol watermark (TradingView-style). */}
-      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-        <span className="select-none text-4xl font-black uppercase tracking-widest text-fg/[0.04]">{symbol}</span>
-      </div>
-
-      {/* OHLC legend — tracks the crosshair, else the live bar. */}
-      {legend ? (
-        <div className="pointer-events-none absolute left-1.5 top-9 z-20 flex flex-wrap gap-x-2 rounded-md bg-surface/70 px-2 py-1 font-mono text-[10px] tabular-nums backdrop-blur">
-          <span className="text-muted">{symbol}</span>
-          <span className="text-muted">O <span className="text-fg">{legend.o.toFixed(4)}</span></span>
-          <span className="text-muted">H <span className="text-fg">{legend.h.toFixed(4)}</span></span>
-          <span className="text-muted">L <span className="text-fg">{legend.l.toFixed(4)}</span></span>
-          <span className="text-muted">C <span className="text-fg">{legend.c.toFixed(4)}</span></span>
-          <span className={cn('font-semibold', up ? 'text-up' : 'text-down')}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span>
-        </div>
-      ) : null}
-
-      {/* Toolbar: intervals (left) · features menu + zoom + Live (right). Overlaid so it costs no height. */}
-      <div className="pointer-events-none absolute inset-x-1.5 top-1.5 z-20 flex items-start justify-between gap-2">
-        <div className={cn('pointer-events-auto flex-wrap', row)}>
+    <div className="flex h-full w-full flex-col">
+      {/* Toolbar header strip — sits ABOVE the plot (TradingView-style) so it never covers candles. */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-1 pb-1">
+        <div className={cn('flex-wrap', row)}>
           {INTERVALS.map((iv) => (
             <button key={iv.ms} type="button" onClick={() => setIntervalMs(iv.ms)} aria-pressed={intervalMs === iv.ms} className={cn(pill, intervalMs === iv.ms ? active : idle)}>{iv.label}</button>
           ))}
         </div>
-        <div className={cn('pointer-events-auto', row)} ref={menuWrapRef}>
+        <div className={row} ref={menuWrapRef}>
           <div className="relative">
             <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} className={cn(pill, menuOpen ? active : idle, 'px-2')} title="Chart features">⚙ Tools</button>
             {menuOpen ? (
-              <div className="absolute right-0 top-7 z-20 w-52 rounded-lg border border-border bg-surface/95 p-2 text-left shadow-xl backdrop-blur">
+              <div className="absolute right-0 top-7 z-30 w-52 rounded-lg border border-border bg-surface/95 p-2 text-left shadow-xl backdrop-blur">
                 <Section title="Chart type">
                   <div className="grid grid-cols-3 gap-1">
                     {CHART_TYPES.map((c) => (
@@ -312,6 +293,24 @@ export function CandleChart({
           <button type="button" onClick={() => zoom('in')} aria-label="Zoom in" className={cn(pill, idle, 'text-sm')}>+</button>
           <button type="button" onClick={() => { setFollow(true); snapToLive(); }} aria-pressed={following} className={cn(pill, following ? active : idle, 'px-2')} title="Follow the live price">{following ? '● Live' : 'Live'}</button>
         </div>
+      </div>
+
+      {/* Plot area — fills the remaining height; only the faint watermark + compact legend overlay it. */}
+      <div className="relative min-h-0 flex-1">
+        <div ref={hostRef} className="h-full w-full" aria-label="Live price chart" role="img" />
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <span className="select-none text-4xl font-black uppercase tracking-widest text-fg/[0.04]">{symbol}</span>
+        </div>
+        {legend ? (
+          <div className="pointer-events-none absolute left-1 top-1 z-20 flex flex-wrap gap-x-2 rounded-md bg-surface/70 px-1.5 py-0.5 font-mono text-[10px] tabular-nums backdrop-blur">
+            <span className="text-muted">{symbol}</span>
+            <span className="text-muted">O <span className="text-fg">{legend.o.toFixed(4)}</span></span>
+            <span className="text-muted">H <span className="text-fg">{legend.h.toFixed(4)}</span></span>
+            <span className="text-muted">L <span className="text-fg">{legend.l.toFixed(4)}</span></span>
+            <span className="text-muted">C <span className="text-fg">{legend.c.toFixed(4)}</span></span>
+            <span className={cn('font-semibold', up ? 'text-up' : 'text-down')}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
