@@ -20,7 +20,7 @@ export function GameCurve() {
   return (
     <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface">
       {candles ? (
-        <CandleChart getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} />
+        <CandleChart getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} symbol={`BTC/${brand.currency || 'KES'}`} />
       ) : (
         <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} />
       )}
