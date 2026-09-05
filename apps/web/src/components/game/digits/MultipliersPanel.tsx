@@ -158,7 +158,7 @@ export function MultipliersPanel({ getLastTick, resetKey }: { getLastTick: () =>
             <span className="text-xs text-muted">Stake <span className="font-semibold text-fg">{fmt(position.stakeCents)}</span></span>
           </div>
           <div className="text-center">
-            <div className={cn('text-3xl font-black tabular-nums', livePnl >= 0 ? 'text-up' : 'text-down')}>
+            <div className={cn('text-2xl font-black tabular-nums', livePnl >= 0 ? 'text-up' : 'text-down')}>
               {livePnl >= 0 ? '+' : ''}{fmt(livePnl)}
             </div>
             <div className={cn('text-xs font-semibold tabular-nums', livePnl >= 0 ? 'text-up' : 'text-down')}>
@@ -197,7 +197,7 @@ export function MultipliersPanel({ getLastTick, resetKey }: { getLastTick: () =>
           {/* Stake */}
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease stake"
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-2 text-lg font-bold text-fg hover:border-accent/60">−</button>
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-2 text-base font-bold text-fg hover:border-accent/60">−</button>
             <div className="flex-1 rounded-xl border border-border bg-surface-2 px-3 py-2 text-center">
               <div className="text-[10px] font-medium uppercase tracking-wider text-muted">Stake</div>
               <div className="flex items-baseline justify-center gap-1">
@@ -208,7 +208,7 @@ export function MultipliersPanel({ getLastTick, resetKey }: { getLastTick: () =>
               </div>
             </div>
             <button type="button" onClick={() => stepStake(1)} aria-label="Increase stake"
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-2 text-lg font-bold text-fg hover:border-accent/60">+</button>
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-2 text-base font-bold text-fg hover:border-accent/60">+</button>
           </div>
 
           {/* Multiplier */}
@@ -249,14 +249,14 @@ export function MultipliersPanel({ getLastTick, resetKey }: { getLastTick: () =>
           {/* Up / Down */}
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={() => open('up')}
-              className="flex flex-col items-start gap-0.5 rounded-2xl bg-up px-4 py-3 text-left text-white transition hover:opacity-90">
-              <span className="text-base font-extrabold">Up</span>
-              <span className="text-[11px] font-semibold text-white/85">Profit if price rises · x{multiplier}</span>
+              className="flex flex-col items-start gap-0.5 rounded-xl bg-up px-3.5 py-2.5 text-left text-white transition hover:opacity-90">
+              <span className="text-sm font-extrabold">Up</span>
+              <span className="text-[10px] font-semibold text-white/85">Profit if price rises · x{multiplier}</span>
             </button>
             <button type="button" onClick={() => open('down')}
-              className="flex flex-col items-start gap-0.5 rounded-2xl bg-down px-4 py-3 text-left text-white transition hover:opacity-90">
-              <span className="text-base font-extrabold">Down</span>
-              <span className="text-[11px] font-semibold text-white/85">Profit if price falls · x{multiplier}</span>
+              className="flex flex-col items-start gap-0.5 rounded-xl bg-down px-3.5 py-2.5 text-left text-white transition hover:opacity-90">
+              <span className="text-sm font-extrabold">Down</span>
+              <span className="text-[10px] font-semibold text-white/85">Profit if price falls · x{multiplier}</span>
             </button>
           </div>
         </>

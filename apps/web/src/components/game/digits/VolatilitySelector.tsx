@@ -55,6 +55,7 @@ export function VolatilitySelector({
   }, [open]);
 
   const chgPos = changePct >= 0;
+  const leaf = instrument.short.replace(/^Vol\s*/, ''); // e.g. "10 (1s)"
 
   return (
     <div ref={rootRef} className="relative">
@@ -63,24 +64,22 @@ export function VolatilitySelector({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        title={price != null ? `${instrument.label} · ${price.toFixed(2)}` : instrument.label}
         className={cn(
-          'flex items-center gap-2.5 rounded-xl border bg-surface-2 px-3 py-2 text-left transition',
+          'flex items-center gap-1.5 rounded-lg border bg-surface-2/85 px-2 py-1 text-left backdrop-blur transition',
           open ? 'border-accent' : 'border-border hover:border-accent/60',
         )}
       >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
-          <BarsGlyph className="h-4 w-4" />
+        <BarsGlyph className="h-3.5 w-3.5 shrink-0 text-accent" />
+        <span className="text-[11px] font-medium text-muted">Volatility</span>
+        <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden>
+          <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span className="text-[13px] font-bold text-fg">{leaf}</span>
+        <span className={cn('ml-0.5 text-[10px] font-semibold tabular-nums', chgPos ? 'text-up' : 'text-down')}>
+          {chgPos ? '+' : ''}{changePct.toFixed(2)}%
         </span>
-        <span className="min-w-0">
-          <span className="block text-sm font-bold leading-tight text-fg">{instrument.short}</span>
-          <span className="flex items-center gap-1.5 leading-tight">
-            <span className="text-xs font-semibold tabular-nums text-fg">{price != null ? price.toFixed(2) : '—'}</span>
-            <span className={cn('text-[11px] font-semibold tabular-nums', chgPos ? 'text-up' : 'text-down')}>
-              {chgPos ? '+' : ''}{changePct.toFixed(2)}%
-            </span>
-          </span>
-        </span>
-        <svg viewBox="0 0 24 24" className={cn('h-4 w-4 shrink-0 text-muted transition-transform', open ? 'rotate-180' : '')} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <svg viewBox="0 0 24 24" className={cn('h-3.5 w-3.5 shrink-0 text-muted transition-transform', open ? 'rotate-180' : '')} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
           <path d="M6 15l6-6 6 6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
