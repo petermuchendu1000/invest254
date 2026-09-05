@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aggregateCandles, upsertCandle, bucketStartMs, normalizeBucketMs, type Candle } from "./chart.js";
+import { aggregateCandles, upsertCandle, bucketStartMs, normalizeBucketMs, sma, bollinger, type Candle } from "./chart.js";
 
 test("normalizeBucketMs: rejects non-multiples of 1000 and non-positive", () => {
   assert.equal(normalizeBucketMs(1000), 1000);
@@ -66,4 +66,20 @@ test("upsertCandle: opens a new bar at the previous close (visually continuous)"
   assert.equal(c.close, 58);
   assert.equal(c.high, 60);
   assert.equal(c.low, 58);
+});
+
+test("sma: null until the window fills, then the rolling mean", () => {
+  const out = sma([2, 4, 6, 8, 10], 3);
+  assert.deepEqual(out, [null, null, 4, 6, 8]);
+});
+
+test("bollinger: mid is the SMA, bands are symmetric around it", () => {
+  const closes = [1, 2, 3, 4, 5, 6];
+  const b = bollinger(closes, 3, 2);
+  assert.equal(b[0], null);
+  assert.equal(b[1], null);
+  const last = b[b.length - 1]!;
+  assert.equal(last.mid, 5);                         // mean of [4,5,6]
+  assert.ok(last.upper > last.mid && last.lower < last.mid);
+  assert.ok(Math.abs((last.upper - last.mid) - (last.mid - last.lower)) < 1e-9);
 });

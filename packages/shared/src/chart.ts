@@ -87,3 +87,38 @@ export function upsertCandle(candles: Candle[], tick: PriceTick, bucketMs: numbe
   candles.push(candle);
   return candle;
 }
+
+/**
+ * Simple moving average of the closes ending AT each index (null until `period` bars exist).
+ * Pure/O(n·1) with a rolling sum. Returned array is index-aligned with `candles`.
+ */
+export function sma(closes: readonly number[], period: number): Array<number | null> {
+  const out: Array<number | null> = new Array(closes.length).fill(null);
+  if (period <= 0) return out;
+  let sum = 0;
+  for (let i = 0; i < closes.length; i++) {
+    sum += closes[i]!;
+    if (i >= period) sum -= closes[i - period]!;
+    if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
+
+/** Bollinger Bands (middle SMA ± mult·σ) over closes; index-aligned, null until `period` bars. */
+export function bollinger(
+  closes: readonly number[],
+  period = 20,
+  mult = 2,
+): Array<{ mid: number; upper: number; lower: number } | null> {
+  const out: Array<{ mid: number; upper: number; lower: number } | null> = new Array(closes.length).fill(null);
+  for (let i = period - 1; i < closes.length; i++) {
+    let mean = 0;
+    for (let j = i - period + 1; j <= i; j++) mean += closes[j]!;
+    mean /= period;
+    let varSum = 0;
+    for (let j = i - period + 1; j <= i; j++) { const d = closes[j]! - mean; varSum += d * d; }
+    const sd = Math.sqrt(varSum / period);
+    out[i] = { mid: mean, upper: mean + mult * sd, lower: mean - mult * sd };
+  }
+  return out;
+}
