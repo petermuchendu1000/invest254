@@ -54,7 +54,7 @@ export function WithdrawForm() {
   });
   const minWithdrawalCents = config?.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
 
-  const { fmt, isForeign, toKesCents, currency } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toKesCents, currency } = useDisplayMoney();
   const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
   const [amount, setAmount] = useState('');
   const [editingPhone, setEditingPhone] = useState(false);
@@ -146,7 +146,7 @@ export function WithdrawForm() {
       >
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted">Amount to withdraw</span>
         <div className="mt-2 flex items-baseline justify-center gap-1.5">
-          <span className="text-2xl font-bold text-muted">{currency}</span>
+          <span className="text-2xl font-bold text-muted">{symbol}</span>
           <input
             name="amount"
             inputMode="numeric"
@@ -161,7 +161,7 @@ export function WithdrawForm() {
           />
         </div>
       </div>
-      <p className="-mt-1 text-center text-xs text-muted">Min {formatKes(minWithdrawalCents)}{isForeign && amountCents > 0 ? ` · you receive ${formatKes(amountCents)} to M-Pesa` : ''}</p>
+      <p className="-mt-1 text-center text-xs text-muted">Min {both(minWithdrawalCents)}{isForeign && amountCents > 0 ? ` · you receive ${formatKes(amountCents)} to M-Pesa` : ''}</p>
       {errors['amount'] ? <p className="text-center text-xs text-down">{errors['amount']}</p> : null}
 
       {/* Destination */}
@@ -224,7 +224,7 @@ export function WithdrawForm() {
       ) : null}
 
       <Button type="submit" size="lg" fullWidth disabled={withdraw.isPending || !amountValid}>
-        {withdraw.isPending ? 'Requesting…' : amountValid ? `Withdraw ${fmt(amountCents)}` : 'Withdraw'}
+        {withdraw.isPending ? 'Requesting…' : amountValid ? `Withdraw ${both(amountCents)}` : 'Withdraw'}
       </Button>
 
       <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted">
