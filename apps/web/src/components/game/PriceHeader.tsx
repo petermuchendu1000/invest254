@@ -55,16 +55,8 @@ export function PriceHeader() {
       {/* Single compact row: pair + live | price + % | 24H stats + online. Keeps the chart tall. */}
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
-          <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status} />
+          <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} aria-label={status} />
           <span className="text-xs font-semibold text-fg">BTC/KES</span>
-          <span
-            className={cn(
-              'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide',
-              status === 'open' ? 'bg-up/15 text-up' : status === 'connecting' ? 'bg-warn/15 text-warn' : 'bg-down/15 text-down',
-            )}
-          >
-            {status === 'open' ? 'Live' : status === 'connecting' ? 'Sync' : 'Off'}
-          </span>
           <span className={cn('ml-1 font-mono text-lg font-bold leading-none tabular-nums', up ? 'text-up' : 'text-down')}>
             {value !== null ? fmt(value) : '\u2014'}
           </span>
