@@ -32,7 +32,7 @@ export function DepositForm() {
   const accountPhone = useSession((s) => s.user?.phone ?? null);
   const { data: wallet } = useWallet();
   const deposit = useDeposit();
-  const { fmt, isForeign, toKesCents, toDisplay, currency } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toKesCents, toDisplay } = useDisplayMoney();
   // Foreign brands enter in the display currency (e.g. USD); KES brands enter whole KES. Decimals
   // are allowed only for foreign entry. All validation + the API call use authoritative KES cents.
   const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
@@ -41,14 +41,16 @@ export function DepositForm() {
     if (prefillAmountCents && prefillAmountCents > 0) {
       return isForeign ? String(Math.ceil(toDisplay(prefillAmountCents) * 100) / 100) : String(Math.ceil(centsToKes(prefillAmountCents)));
     }
-    return isForeign ? '5' : '200';
+    return isForeign ? '10' : '200';
   });
   const parsedAmount = Number.parseFloat(amount);
   const amountKesCents = isForeign
     ? (Number.isFinite(parsedAmount) && parsedAmount > 0 ? toKesCents(parsedAmount) : 0)
     : (Number.isInteger(Number(amount)) ? kesToCents(Number(amount)) : 0);
-  // Quick amounts in the entry unit: round USD-style presets for foreign brands, KES presets otherwise.
-  const quick = isForeign ? [5, 10, 20, 50] : [200, 500, 1000, 5000];
+  // Quick amounts in the entry unit: $5/$10/$50/$100 for foreign brands, KES presets otherwise.
+  const quick = isForeign ? [5, 10, 50, 100] : [200, 500, 1000, 5000];
+  // Foreign brands: minimum deposit is $5 (never below the platform's KES minimum). KES cents authoritative.
+  const minDepositCents = isForeign ? Math.max(MIN_DEPOSIT_CENTS, toKesCents(5)) : MIN_DEPOSIT_CENTS;
   const [editingPhone, setEditingPhone] = useState(false);
   const [phone, setPhone] = useState('');
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
@@ -91,7 +93,7 @@ export function DepositForm() {
     e.preventDefault();
     setServerError(null);
     const next: Record<string, string | undefined> = {};
-    if (!Number.isInteger(amountKesCents) || amountKesCents < MIN_DEPOSIT_CENTS) next['amount'] = `Enter at least ${formatKes(MIN_DEPOSIT_CENTS)}.`;
+    if (!Number.isInteger(amountKesCents) || amountKesCents < minDepositCents) next['amount'] = `Enter at least ${both(minDepositCents)}.`;
     // Logged-out users only pick an amount here; the phone comes from their account after sign up.
     if (token) {
       try {
@@ -182,7 +184,7 @@ export function DepositForm() {
                 active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface-2 text-fg hover:border-accent/60',
               ].join(' ')}
             >
-              {isForeign ? `${currency} ${q}` : grouped(String(q))}
+              {isForeign ? `${symbol}${q}` : grouped(String(q))}
             </button>
           );
         })}
@@ -190,18 +192,18 @@ export function DepositForm() {
 
       {/* Hero amount field: text + numeric inputmode (avoids number-spinner UX bugs) */}
       <Input
-        label={`Amount (${currency})`}
+        label={`Amount (${symbol})`}
         name="amount"
         type="text"
         inputMode="numeric"
         autoComplete="off"
         autoFocus
         required
-        leading={<span className="text-sm font-semibold text-muted">{currency}</span>}
+        leading={<span className="text-sm font-semibold text-muted">{symbol}</span>}
         value={isForeign ? amount : grouped(amount)}
         onChange={(e) => setAmount(sanitizeAmount(e.target.value))}
         error={errors['amount']}
-        hint={isForeign ? `≈ ${formatKes(amountKesCents)} charged via M-Pesa · min ${formatKes(MIN_DEPOSIT_CENTS)}` : `Minimum ${formatKes(MIN_DEPOSIT_CENTS)}`}
+        hint={isForeign ? `≈ ${formatKes(amountKesCents)} charged via M-Pesa · min ${both(minDepositCents)}` : `Minimum ${formatKes(MIN_DEPOSIT_CENTS)}`}
         className="text-lg font-semibold"
       />
 

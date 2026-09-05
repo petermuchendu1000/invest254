@@ -34,10 +34,13 @@ export function BetPanel() {
   const clearPending = useDepositUi((s) => s.clearPending);
 
   const brand = useBrand();
-  const { fmt, isForeign, toDisplay, toKesCents, currency } = useDisplayMoney();
-  // A quick-chip's stake in the display currency (rounded UP to a whole cent so the converted KES
-  // amount is never below the chip's KES value — keeps it >= min stake). KES brands are unchanged.
-  const chipDisplay = (cents: number) => ceil2(toDisplay(cents));
+  const { fmt, both, symbol, isForeign, toDisplay, toKesCents, currency } = useDisplayMoney();
+  // Quick stakes in the ENTRY unit: fixed $ presets for foreign brands ($5/$10/$50/$100), the KES
+  // presets otherwise. Each chip's value is what lands in the stake field; KES cents are derived
+  // from it for validation/placing the trade.
+  const chips = isForeign
+    ? [5, 10, 50, 100].map((v) => ({ key: v, value: v, label: `${symbol}${v}` }))
+    : CHIP_CENTS.map((c) => ({ key: c, value: centsToKes(c), label: String(centsToKes(c)) }));
   const { data: config } = useQuery({
     queryKey: ['gameConfig', brand.slug],
     queryFn: () => api.gameConfig(brand.slug),
@@ -60,9 +63,9 @@ export function BetPanel() {
   useEffect(() => {
     if (stake === '') {
       const cents = Math.max(minStakeCents, 25000);
-      setStake(String(isForeign ? ceil2(toDisplay(cents)) : centsToKes(cents)));
+      setStake(isForeign ? '10' : String(centsToKes(cents)));
     }
-  }, [minStakeCents, stake, isForeign, toDisplay]);
+  }, [minStakeCents, stake, isForeign]);
   useEffect(() => {
     if (config) setDurationS((d) => (d === 10 && defaultDurationS !== 10 ? defaultDurationS : d));
   }, [config, defaultDurationS]);
@@ -101,15 +104,14 @@ export function BetPanel() {
 
   const errorHint = (() => {
     if (!Number.isFinite(stakeCents)) return null;
-    if (!validStake) return `Minimum stake is ${fmt(minStakeCents)}.`;
-    if (overMax && maxStakeCents !== undefined) return `Maximum stake is ${fmt(maxStakeCents)}.`;
+    if (!validStake) return `Minimum stake is ${both(minStakeCents)}.`;
+    if (overMax && maxStakeCents !== undefined) return `Maximum stake is ${both(maxStakeCents)}.`;
     return null;
   })();
 
-  function chipActive(c: number): boolean {
+  function chipActive(value: number): boolean {
     const n = Number.parseFloat(stake);
-    if (!Number.isFinite(n)) return false;
-    return isForeign ? n === chipDisplay(c) : kesToCents(n) === c;
+    return Number.isFinite(n) && n === value;
   }
 
   function bumpStake(delta: number) {
@@ -188,7 +190,7 @@ export function BetPanel() {
     <Card className="flex flex-col gap-2.5 rounded-xl p-3">
       {/* Stake input with KES prefix + quick steppers */}
       <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 transition focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
-        <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">{currency}</span>
+        <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">{symbol}</span>
         <input
           inputMode="decimal"
           autoFocus
@@ -220,19 +222,19 @@ export function BetPanel() {
 
       {/* Quick chips */}
       <div className="grid grid-cols-4 gap-2">
-        {CHIP_CENTS.map((c) => (
+        {chips.map((chip) => (
           <button
-            key={c}
+            key={chip.key}
             type="button"
-            onClick={() => setStake(String(isForeign ? chipDisplay(c) : centsToKes(c)))}
+            onClick={() => setStake(String(chip.value))}
             className={cn(
               'h-10 rounded-lg border text-sm font-semibold tabular-nums transition',
-              chipActive(c)
+              chipActive(chip.value)
                 ? 'border-accent bg-accent/10 text-accent'
                 : 'border-border bg-surface-2 text-fg hover:border-accent/60',
             )}
           >
-            {fmt(c)}
+            {chip.label}
           </button>
         ))}
       </div>
