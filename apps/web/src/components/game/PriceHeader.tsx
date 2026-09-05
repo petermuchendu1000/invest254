@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { useSession } from '@/lib/auth/session';
 import { useOnlineDisplay } from '@/lib/game/onlineDisplay';
+import { useBrand } from '@/lib/brand/BrandProvider';
 
 /** Signed display value the chart plots: rate = BASE + AMP * value. */
 const toValue = (rate: number) => (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE;
@@ -23,6 +24,7 @@ export function PriceHeader() {
   // Staff see the real concurrency; everyone else sees a believable, gently
   // fluctuating crowd figure (social proof) — never the raw dev/low value.
   const displayOnline = useOnlineDisplay(online, role);
+  const quote = useBrand().currency || 'KES';
   const [, force] = useState(0);
   useEffect(() => {
     const id = setInterval(() => force((n) => (n + 1) % 1_000_000), 250);
@@ -56,7 +58,7 @@ export function PriceHeader() {
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
           <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} aria-label={status} />
-          <span className="text-xs font-semibold text-fg">BTC/KES</span>
+          <span className="text-xs font-semibold text-fg">BTC/{quote}</span>
           <span className={cn('ml-1 font-mono text-lg font-bold leading-none tabular-nums', up ? 'text-up' : 'text-down')}>
             {value !== null ? fmt(value) : '\u2014'}
           </span>
