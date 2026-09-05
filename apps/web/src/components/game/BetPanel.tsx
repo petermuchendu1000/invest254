@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { centsToKes, formatKes, kesToCents } from '@invest254/shared/money';
+import { centsToKes, kesToCents } from '@invest254/shared/money';
 import type { Direction } from '@invest254/shared';
 import { cn } from '@/lib/cn';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Money } from '@/components/ui/Money';
+import { DisplayMoney as Money } from '@/lib/money';
+import { useDisplayMoney } from '@/lib/money';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { api } from '@/lib/api/endpoints';
 import { useSession } from '@/lib/auth/session';
@@ -22,6 +23,8 @@ const CHIP_CENTS = [25000, 50000, 75000, 100000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
 // Stepper granularity for the +/- buttons on the stake field (KES).
 const STEP_KES = 50;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const ceil2 = (n: number) => Math.ceil(n * 100) / 100;
 
 export function BetPanel() {
   const hydrated = useHydrated();
@@ -31,6 +34,10 @@ export function BetPanel() {
   const clearPending = useDepositUi((s) => s.clearPending);
 
   const brand = useBrand();
+  const { fmt, isForeign, toDisplay, toKesCents, currency } = useDisplayMoney();
+  // A quick-chip's stake in the display currency (rounded UP to a whole cent so the converted KES
+  // amount is never below the chip's KES value — keeps it >= min stake). KES brands are unchanged.
+  const chipDisplay = (cents: number) => ceil2(toDisplay(cents));
   const { data: config } = useQuery({
     queryKey: ['gameConfig', brand.slug],
     queryFn: () => api.gameConfig(brand.slug),
@@ -51,8 +58,11 @@ export function BetPanel() {
 
   // Seed the stake with a sensible default (KES 250) once config arrives, never below the minimum.
   useEffect(() => {
-    if (stake === '') setStake(String(centsToKes(Math.max(minStakeCents, 25000))));
-  }, [minStakeCents, stake]);
+    if (stake === '') {
+      const cents = Math.max(minStakeCents, 25000);
+      setStake(String(isForeign ? ceil2(toDisplay(cents)) : centsToKes(cents)));
+    }
+  }, [minStakeCents, stake, isForeign, toDisplay]);
   useEffect(() => {
     if (config) setDurationS((d) => (d === 10 && defaultDurationS !== 10 ? defaultDurationS : d));
   }, [config, defaultDurationS]);
@@ -65,8 +75,8 @@ export function BetPanel() {
   const stakeCents = useMemo(() => {
     const n = Number.parseFloat(stake);
     if (!Number.isFinite(n) || n <= 0) return NaN;
-    return kesToCents(n);
-  }, [stake]);
+    return isForeign ? toKesCents(n) : kesToCents(n);
+  }, [stake, isForeign, toKesCents]);
 
   // Bonus funds are stakeable (bonus-first; migration 0094), so affordability counts real + bonus.
   // This is what lets a KES 200 welcome bonus + a small top-up reach the min stake.
@@ -91,23 +101,28 @@ export function BetPanel() {
 
   const errorHint = (() => {
     if (!Number.isFinite(stakeCents)) return null;
-    if (!validStake) return `Minimum stake is ${formatKes(minStakeCents)}.`;
-    if (overMax && maxStakeCents !== undefined) return `Maximum stake is ${formatKes(maxStakeCents)}.`;
+    if (!validStake) return `Minimum stake is ${fmt(minStakeCents)}.`;
+    if (overMax && maxStakeCents !== undefined) return `Maximum stake is ${fmt(maxStakeCents)}.`;
     return null;
   })();
 
   function chipActive(c: number): boolean {
     const n = Number.parseFloat(stake);
-    return Number.isFinite(n) && kesToCents(n) === c;
+    if (!Number.isFinite(n)) return false;
+    return isForeign ? n === chipDisplay(c) : kesToCents(n) === c;
   }
 
-  function bumpStake(deltaKes: number) {
-    const minKes = centsToKes(minStakeCents);
+  function bumpStake(delta: number) {
+    // KES brands step by whole KES (STEP_KES, snapped); foreign brands step by whole display units.
+    const minU = isForeign ? ceil2(toDisplay(minStakeCents)) : centsToKes(minStakeCents);
     const cur = Number.parseFloat(stake);
-    const base = Number.isFinite(cur) ? cur : minKes;
-    let next = Math.round((base + deltaKes) / STEP_KES) * STEP_KES;
-    if (next < minKes) next = minKes;
-    if (maxStakeCents !== undefined && kesToCents(next) > maxStakeCents) next = centsToKes(maxStakeCents);
+    const base = Number.isFinite(cur) ? cur : minU;
+    let next = isForeign ? round2(base + delta) : Math.round((base + delta) / STEP_KES) * STEP_KES;
+    if (next < minU) next = minU;
+    if (maxStakeCents !== undefined) {
+      const maxU = isForeign ? Math.floor(toDisplay(maxStakeCents) * 100) / 100 : centsToKes(maxStakeCents);
+      if (next > maxU) next = maxU;
+    }
     setStake(String(next));
   }
 
@@ -173,21 +188,21 @@ export function BetPanel() {
     <Card className="flex flex-col gap-2.5 rounded-xl p-3">
       {/* Stake input with KES prefix + quick steppers */}
       <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 transition focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
-        <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">KES</span>
+        <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">{currency}</span>
         <input
           inputMode="decimal"
           autoFocus
           value={stake}
           onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, ''))}
           placeholder="0"
-          aria-label="Stake amount in KES"
+          aria-label={`Stake amount in ${currency}`}
           className="h-11 w-full bg-transparent text-xl font-bold tabular-nums text-fg outline-none placeholder:text-muted"
         />
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             aria-label="Decrease stake"
-            onClick={() => bumpStake(-STEP_KES)}
+            onClick={() => bumpStake(isForeign ? -1 : -STEP_KES)}
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg"
           >
             −
@@ -195,7 +210,7 @@ export function BetPanel() {
           <button
             type="button"
             aria-label="Increase stake"
-            onClick={() => bumpStake(STEP_KES)}
+            onClick={() => bumpStake(isForeign ? 1 : STEP_KES)}
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg"
           >
             +
@@ -209,7 +224,7 @@ export function BetPanel() {
           <button
             key={c}
             type="button"
-            onClick={() => setStake(String(centsToKes(c)))}
+            onClick={() => setStake(String(isForeign ? chipDisplay(c) : centsToKes(c)))}
             className={cn(
               'h-10 rounded-lg border text-sm font-semibold tabular-nums transition',
               chipActive(c)
@@ -217,7 +232,7 @@ export function BetPanel() {
                 : 'border-border bg-surface-2 text-fg hover:border-accent/60',
             )}
           >
-            {centsToKes(c)}
+            {fmt(c)}
           </button>
         ))}
       </div>
@@ -283,7 +298,7 @@ export function BetPanel() {
 
       {resumeDir ? (
         <p className="text-center text-[11px] font-medium text-up">
-          Funds added — tap {resumeDir === 'buy' ? 'BUY' : 'SELL'} to place your {formatKes(stakeCents)} trade.
+          Funds added — tap {resumeDir === 'buy' ? 'BUY' : 'SELL'} to place your {fmt(stakeCents)} trade.
         </p>
       ) : !token ? (
         <p className="text-center text-[11px] text-muted">Deposit to buy or sell.</p>
