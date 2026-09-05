@@ -255,13 +255,13 @@ export function CandleChart({
       <div ref={hostRef} className="h-full w-full" aria-label="Live price chart" role="img" />
 
       {/* Faint symbol watermark (TradingView-style). */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
         <span className="select-none text-4xl font-black uppercase tracking-widest text-fg/[0.04]">{symbol}</span>
       </div>
 
       {/* OHLC legend — tracks the crosshair, else the live bar. */}
       {legend ? (
-        <div className="pointer-events-none absolute left-1.5 top-9 flex flex-wrap gap-x-2 rounded-md bg-surface/70 px-2 py-1 font-mono text-[10px] tabular-nums backdrop-blur">
+        <div className="pointer-events-none absolute left-1.5 top-9 z-20 flex flex-wrap gap-x-2 rounded-md bg-surface/70 px-2 py-1 font-mono text-[10px] tabular-nums backdrop-blur">
           <span className="text-muted">{symbol}</span>
           <span className="text-muted">O <span className="text-fg">{legend.o.toFixed(4)}</span></span>
           <span className="text-muted">H <span className="text-fg">{legend.h.toFixed(4)}</span></span>
@@ -272,7 +272,7 @@ export function CandleChart({
       ) : null}
 
       {/* Toolbar: intervals (left) · features menu + zoom + Live (right). Overlaid so it costs no height. */}
-      <div className="pointer-events-none absolute inset-x-1.5 top-1.5 flex items-start justify-between gap-2">
+      <div className="pointer-events-none absolute inset-x-1.5 top-1.5 z-20 flex items-start justify-between gap-2">
         <div className={cn('pointer-events-auto flex-wrap', row)}>
           {INTERVALS.map((iv) => (
             <button key={iv.ms} type="button" onClick={() => setIntervalMs(iv.ms)} aria-pressed={intervalMs === iv.ms} className={cn(pill, intervalMs === iv.ms ? active : idle)}>{iv.label}</button>
