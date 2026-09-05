@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
-import { GameCurve } from '@/components/game/GameCurve';
 import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
-import { useGameSocket } from '@/lib/game/GameSocketProvider';
+import { DerivChart } from '@/components/game/digits/DerivChart';
+import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector';
+import { useInstrument } from '@/lib/game/useInstrument';
+import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
 import { useDisplayMoney } from '@/lib/money';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useSession } from '@/lib/auth/session';
@@ -73,7 +75,9 @@ type Result = { id: number; won: boolean; delta: number; label: string };
 
 /** Deriv-style binary/digits trade surface (per-brand `tradeUi==='digits'`). */
 export function DigitsTradeScreen() {
-  const { getTicks } = useGameSocket();
+  const [instId, setInstId] = useState<string>(DEFAULT_INSTRUMENT_ID);
+  const instrument: Instrument = instrumentById(instId);
+  const { getTicks, getLastTick, resetKey } = useInstrument(instrument);
   const { fmt, symbol, isForeign, toKesCents } = useDisplayMoney();
   const token = useSession((s) => s.token);
   const openDeposit = useDepositUi((s) => s.openDeposit);
@@ -220,9 +224,6 @@ export function DigitsTradeScreen() {
     place(outcome, stakeCents);
   };
 
-  const priceStr = snap.price ? snap.price.toFixed(2) : '—';
-  const chgPos = snap.changePct >= 0;
-
   const ctaMeta = (o: Outcome) => {
     const prob = winProbability(o, barrier);
     const disabled = prob <= 0;
@@ -250,25 +251,22 @@ export function DigitsTradeScreen() {
         ))}
       </div>
 
-      {/* Chart panel with live asset header */}
-      <div className="relative flex min-h-[180px] flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface-2">
-        <div className="flex items-center justify-between px-3 pt-2">
-          <div className="flex items-baseline gap-2">
-            <span className="text-sm font-bold text-fg">Vol 10 (1s)</span>
-            <span className="text-sm font-semibold tabular-nums text-fg">{priceStr}</span>
-            <span className={cn('text-xs font-semibold tabular-nums', chgPos ? 'text-up' : 'text-down')}>
-              {chgPos ? '+' : ''}{snap.changePct.toFixed(2)}%
-            </span>
-          </div>
-          {snap.digit !== null ? (
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent/20 text-xs font-bold text-accent">
-              {snap.digit}
-            </span>
-          ) : null}
+      {/* Chart panel — Deriv-style axis chart with the volatility index picker floating top-left */}
+      <div className="relative min-h-[220px] flex-1 overflow-hidden rounded-xl border border-border bg-surface-2">
+        <DerivChart getTicks={getTicks} getLastTick={getLastTick} resetKey={resetKey} />
+        <div className="absolute left-2 top-2 z-20">
+          <VolatilitySelector
+            instrument={instrument}
+            price={snap.price || null}
+            changePct={snap.changePct}
+            onSelect={(i) => { setInstId(i.id); if (running) setRunning(false); }}
+          />
         </div>
-        <div className="min-h-0 flex-1">
-          <GameCurve />
-        </div>
+        {snap.digit !== null ? (
+          <span className="absolute right-2 bottom-2 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-accent/20 text-sm font-bold text-accent">
+            {snap.digit}
+          </span>
+        ) : null}
         {flash ? (
           <div
             className={cn(
