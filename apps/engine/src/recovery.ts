@@ -1,6 +1,7 @@
 import {
   dateKeyUTC, settleDigit, type DigitKind,
   InstrumentFeed, instrumentById, DEFAULT_INSTRUMENT_ID, digitPayoutFactor,
+  decisionDigit, withLastPip,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
 import type { SeedManager } from "./daycontext.js";
@@ -60,15 +61,31 @@ export class RecoveryService {
         const entryT = (row.openedAtMs - ctx.dayStartMs) / 1000;
         const expiresAtMs = row.openedAtMs + row.durationS * 1000;
 
-        // ── Phase 2 DIGIT contract: settle deterministically from the committed settleIndex ──────
-        // A digit outcome is a pure function of (daySeed, instrument, settleIndex) — all persisted in
-        // `contract` — so a crash between open and settle can never strand a debited stake: we
-        // recompute the exact same digit and settle idempotently (a racing settle is a no-op).
+        // ── Phase 2 DIGIT contract: settle deterministically, never stranding a debited stake ─────
+        // A POOL-decided digit settles from its persisted decision (position_decision — the same
+        // source of truth as rise/fall pool recovery), with the display digit re-drawn from the
+        // decision seed; a STATISTICAL digit recomputes the uniform fair digit from the committed
+        // (instrument, settleIndex). Both are pure functions ⇒ recovery is idempotent + identical
+        // to the no-crash path.
         if ((row.kind ?? "rise_fall") === "digit") {
           if (!ctx.seed) { report.failed++; continue; }
           const c = (row.contract ?? {}) as { kind?: DigitKind; target?: number; instrumentId?: string; settleIndex?: number };
           const feed = new InstrumentFeed(ctx.seed, instrumentById(c.instrumentId ?? DEFAULT_INSTRUMENT_ID));
           const tick = feed.tickAt(Number(c.settleIndex ?? 0));
+          const decision = this.pool ? await this.pool.getDecision(row.id) : null;
+          if (decision) {
+            const won = decision.result === "win";
+            const digit = decisionDigit(decision.seed, decision.nonce, c.kind ?? "even", c.target ?? 0, won) ?? tick.digit;
+            const res = await this.repo.settlePosition({
+              positionId: row.id, exitRate: withLastPip(tick.quote, digit),
+              result: decision.result, multiplier: 0, payoutCents: won ? decision.payoutCents : 0,
+            });
+            if (res.settled) {
+              report.settled++;
+              if (won && this.pool) { try { await this.pool.commit(row.id); } catch { /* reservation keeps the budget protected */ } }
+            } else report.noop++;
+            continue;
+          }
           const st = settleDigit(row.stakeCents, c.kind ?? "even", c.target ?? 0, tick.digit, digitPayoutFactor(ctx.cfg));
           const res = await this.repo.settlePosition({ positionId: row.id, exitRate: tick.quote, result: st.won ? "win" : "loss", multiplier: 0, payoutCents: st.payoutCents });
           if (res.settled) report.settled++; else report.noop++;

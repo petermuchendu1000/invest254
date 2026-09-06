@@ -1,8 +1,45 @@
 # 34 — Deriv-style DIGIT contracts, live (Issue 1)
 
-> Status: implemented on branch `feat/issue1-digits-live` (server-authoritative, provably fair,
-> crash-safe). Multipliers are the next increment and remain preview. Supersedes the "demo-first /
-> unwired" state of the Phase-2 contracts described elsewhere.
+> Status: implemented on branch `feat/issue1-digits-live` — server-authoritative, crash-safe, and
+> **pool-governed** (docs/25 applied to digits). Multipliers are the next increment and remain
+> preview. Supersedes the "demo-first / unwired" state of the Phase-2 contracts described elsewhere.
+
+## Governance: the pool fund is the central control point (docs/25 applied to digits)
+Digit contracts follow **exactly** the rise/fall governance split:
+
+- **POOL PATH — brand `pool_mode` ON + non-marketer (the production default for clients):** the
+  outcome is decided at open by the SAME `PoolController` brain as rise/fall — decide →
+  atomically **reserve** → **commit** at settle (release on refusal) — via the fixed-odds adaptation
+  `decidePoolOutcomeFixed` / `decideReserveFixed`:
+  - A win pays **exactly** the contract return (`stake × factor / winProb`) or the trade **loses** —
+    budget clamps can never produce a shrunk win (strictly safer than the variable-amount path).
+  - Same gates, same order: propensity (base win-prob = `targetRtp / m` where `m` is the contract's
+    fixed multiplier — the edge invariant `E[RTP per trade] ≤ targetRtp = 1 − house_edge`), the pool
+    **cash fuse** (`available`), the per-player **no-scoop share**, the **hard RTP-budget ceiling**
+    (`paid + reserved ≤ ⌊targetRtp × turnover⌋`), and the min-withdrawal near-miss lever (a fixed
+    payout that would cross the line becomes a near-miss loss unless let through).
+  - Digits and rise/fall share **ONE budget per brand**: the same `withdrawal_pool` (site, EAT-day)
+    row, the same turnover accumulator, the same `position_decision` audit and `pool_ledger`. Every
+    central lever therefore governs digits automatically: per-client daily pools, recurring
+    `default_daily_pool_cents`, the **dynamic demand-based distribution** across all clients
+    (docs/25 §15, incl. the scheduled autonomous run), `pool_mode` toggles (live via LISTEN), and the
+    global economy dials (`house_edge` → targetRtp).
+  - The **displayed digit is decision-consistent**: drawn (seeded, uniform within the set) from the
+    digits that reproduce the decided outcome; the owner's streamed tick at `settleIndex` carries it
+    (per-owner override), so their chart always matches their result. As with rise/fall pool mode,
+    the feed is presentation; the decision is the arbiter — do NOT advertise "provably fair" for
+    pool-mode brands (docs/25 §1.1).
+- **STATISTICAL PATH — pool OFF, or marketers/demo:** the provably-fair uniform digit
+  `HMAC(daySeed, "dg:<instrument>:<index>") mod 10`; RTP = the digit payout factor. Marketers stake
+  demo funds and never touch the real-cash pool (decision F), exactly as in rise/fall.
+
+### ⚠ Operational sizing rules (surfaced by tests — read before enabling for a client)
+1. **No-scoop share vs fixed payout:** a single player's daily winnings are capped at
+   `playerShare (15%) × pool`. If the pool is smaller than `largest digit payout / 0.15`
+   (≈ 7× the payout; e.g. ≈ KES 3,167 pool for a KES 475 even/odd win on a KES 250 stake),
+   **players can never win a digit trade** on that brand. Size each client's daily pool accordingly.
+2. **Pool vs target RTP:** realized RTP = `min(1 − house_edge, pool / turnover)` — an undersized pool
+   pays below target; that is the safety working as designed (docs/25 §14.5).
 
 ## What the "bot" is (researched)
 Deriv's binary "bot" (DBot) is a **client-side auto-trader**: it repeatedly places digit contracts

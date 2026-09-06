@@ -85,9 +85,23 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
       try {
         let data;
         try { data = rt.game.instrumentTick(instrumentId); } catch { return; } // NO_SEED (dev without seed)
-        const frame = { instrumentId, index: data.index, quote: data.quote, digit: data.digit, t: data.dayStartMs + data.index * data.tickMs };
-        entry.subs.forEach((ws) => send(ws, "inst_tick", frame));
+        // Settle due contracts FIRST so a pool-decided digit can override the owner's tick frame at
+        // this index (docs/25 applied to digits: the curve/stream is cosmetic; the decision rules).
         const settled = await rt.game.settleDueDigits(instrumentId, data.index);
+        const overrideByUser = new Map<string, number>();
+        for (const s of settled) overrideByUser.set(s.userId, s.digit);
+        const t = data.dayStartMs + data.index * data.tickMs;
+        entry.subs.forEach((ws) => {
+          const u = userOf.get(ws);
+          const d = u !== undefined ? overrideByUser.get(u) : undefined;
+          if (d !== undefined && d !== data.digit) {
+            const scaled = Math.round(data.quote * 100);
+            const quote = (scaled - (((scaled % 10) + 10) % 10) + d) / 100;
+            send(ws, "inst_tick", { instrumentId, index: data.index, quote, digit: d, t });
+          } else {
+            send(ws, "inst_tick", { instrumentId, index: data.index, quote: data.quote, digit: data.digit, t });
+          }
+        });
         for (const s of settled) {
           toSiteUser(siteId, s.userId, "digit_settled", { positionId: s.positionId, instrumentId, index: data.index, digit: s.digit, won: s.won, payoutCents: s.payoutCents, pnlCents: s.pnlCents, balance: s.balance });
           void opts.repo.getWalletSnapshot(s.userId)
@@ -304,6 +318,7 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                 userId, stakeCents, kind: String(msg.data.kind) as DigitKind,
                 target: msg.data.target != null ? Number(msg.data.target) : undefined,
                 instrumentId, ticks: msg.data.ticks != null ? Number(msg.data.ticks) : undefined,
+                role: roleOf.get(ws) ?? "player",
               });
               await ensureStreamer(siteId, instrumentId); // guarantee settlement fires even with no watcher
               send(ws, "digit_opened", { positionId: r.positionId, instrumentId, openIndex: r.openIndex, settleIndex: r.settleIndex, entryRate: r.entryRate, stakeCents, kind: msg.data.kind, target: msg.data.target ?? null });

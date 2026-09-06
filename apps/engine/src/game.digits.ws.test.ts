@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { WebSocket } from "ws";
-import { DEFAULT_VERSIONED_CONFIG, type VersionedGameConfig } from "@invest254/shared";
+import { DEFAULT_VERSIONED_CONFIG, DEFAULT_POOL_KNOBS, type VersionedGameConfig } from "@invest254/shared";
 import { InMemoryGameRepository } from "./wallet.js";
 import { StaticConfigProvider } from "./gameconfig.js";
 import { SiteRegistry } from "./siteregistry.js";
 import { startMultiEngine, type MultiEngineHandle } from "./multiengine.js";
+import { PoolController, InMemoryPoolRepo, eatDay } from "./poolcontroller.js";
 
 /**
  * Phase 2 — DIGIT contracts end-to-end over the real WebSocket transport (in-memory brand).
@@ -121,5 +122,54 @@ test("digits WS: an unknown instrument id is rejected (no spoofing)", async () =
     c.send("subscribe_instrument", { instrumentId: "vol999_evil" });
     const err = await c.waitFor("error");
     assert.equal(err.data.code, "INVALID_INSTRUMENT");
+  } finally { c.close(); await handle.close(); }
+});
+
+test("digits WS (POOL MODE): outcome is pool-decided and the owner's settle-index tick carries the decided digit", async () => {
+  const repo = new InMemoryGameRepository();
+  const poolRepo = new InMemoryPoolRepo();
+  const controller = new PoolController(poolRepo, DEFAULT_POOL_KNOBS);
+  poolRepo.setPool(SITE, eatDay(Date.now()), 5_000_000); // fund today's EAT-day pool
+  const seeded = new Set<string>();
+  const registry = new SiteRegistry({
+    masterSeed: "platform-master-digits-pool",
+    repo,
+    configFor: () => new StaticConfigProvider(cfg),
+    seedManagerOpts: { calibrationSamples: 4000 },
+    poolController: controller,
+    poolModeFor: () => true,
+  });
+  const handle = await startMultiEngine({
+    port: 0, registry, repo, verifier: null,
+    resolveSite: (req) => new URL(req.url ?? "/", "http://x").searchParams.get("site") ?? SITE,
+    devSeedBalance: (_s, u) => { if (!seeded.has(u)) { seeded.add(u); repo.seed(u, 1_000_000); } },
+    onError: () => { /* quiet */ },
+  });
+  const port = (handle.wss.address() as any).port as number;
+  const c = new Client(`ws://127.0.0.1:${port}/?site=${SITE}`);
+  try {
+    await c.open(); await c.waitFor("hello");
+    c.send("auth", { userId: "poolp" });
+    await c.waitFor("balance");
+    c.send("subscribe_instrument", { instrumentId: "vol10_1s" });
+    await c.waitFor("inst_history");
+
+    c.send("open_digit", { instrumentId: "vol10_1s", kind: "even", stakeCents: 25000 });
+    const opened = await c.waitFor("digit_opened");
+    const settled = await c.waitFor("digit_settled");
+    assert.equal(settled.data.positionId, opened.data.positionId);
+
+    // The decision governs: digit parity must reproduce the decided result exactly.
+    assert.equal(settled.data.won, settled.data.digit % 2 === 0, "digit is consistent with the pool decision");
+    if (settled.data.won) {
+      assert.equal(settled.data.payoutCents, 47500, "fixed-odds pool win pays the full contract return");
+    } else {
+      assert.equal(settled.data.payoutCents, 0);
+    }
+    // The OWNER's chart tick at settleIndex must carry the SAME (possibly overridden) digit.
+    const chartTick = c.of("inst_tick").find((m) => m.data.index === opened.data.settleIndex);
+    assert.ok(chartTick, "the settle-index tick was streamed to the owner");
+    assert.equal(chartTick.data.digit, settled.data.digit, "owner's on-chart digit == pool-decided settled digit");
+    assert.equal(Math.round(chartTick.data.quote * 100) % 10, settled.data.digit, "quote's last pip matches too");
   } finally { c.close(); await handle.close(); }
 });

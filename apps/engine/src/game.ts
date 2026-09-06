@@ -3,6 +3,7 @@ import {
   type Direction, type Outcome, type Tick, presentOutcome, type OutcomePresentation,
   settleDigit, type DigitKind,
   InstrumentFeed, instrumentById, isKnownInstrument, DEFAULT_INSTRUMENT_ID, digitPayoutFactor,
+  digitReturnCents, decisionDigit, withLastPip,
   multiplierPnlCents, evaluateMultiplier, dealCancellationFeeCents,
   type MultiplierState, type MultDir, type MultCloseReason,
 } from "@invest254/shared";
@@ -66,7 +67,7 @@ function clampTargetDigit(d: number): number {
 export class GameServer {
   private positions = new Map<string, Position>();
   /** Phase 2: in-flight digit contracts awaiting their 1-tick settlement (server-side only). */
-  private digitContracts = new Map<string, { userId: string; stakeCents: number; kind: DigitKind; target: number; instrumentId: string; openIndex: number; settleIndex: number; siteId: string | null }>();
+  private digitContracts = new Map<string, { userId: string; stakeCents: number; kind: DigitKind; target: number; instrumentId: string; openIndex: number; settleIndex: number; openedAtMs: number; siteId: string | null; decided: { result: "win" | "loss"; payoutCents: number; digit: number } | null }>();
   /** Per-(daySeed, instrument) authoritative feed cache; feeds are pure/deterministic and cheap. */
   private feeds = new Map<string, InstrumentFeed>();
   /** Phase 2: open (running) multiplier contracts, evaluated live against the authoritative quote. */
@@ -289,22 +290,31 @@ export class GameServer {
   }
 
   /**
-   * Open a Deriv-style DIGIT contract (Phase 2), server-authoritative & provably fair.
+   * Open a Deriv-style DIGIT contract (Phase 2), server-authoritative over PER-INSTRUMENT feeds.
    *
-   * The engine extends the daily-seed model to a PER-INSTRUMENT feed: the settling last digit is
-   * `digitAt(daySeed, instrument, settleIndex)` — exactly uniform, so the payout factor IS the edge
-   * (no distributional drift). `settleIndex = openIndex + ticks` (Deriv "ticks"; default 1). The
-   * pool controller / admin overrides do NOT apply (digits are pool-exempt). Stake+position+ledger
-   * persist atomically (fn_open_contract); settlement reuses fn_settle_position. Because the outcome
-   * is a pure function of (seed, instrument, settleIndex) — persisted in `contract` — a crash can
-   * always recover and settle idempotently (see recovery.ts).
+   * Two governance paths, mirroring openPosition exactly (docs/25):
+   *  - POOL PATH (brand pool_mode ON + non-marketer): the outcome is decided by the SAME
+   *    PoolController brain as rise/fall — decide → atomically RESERVE the fixed payout → commit at
+   *    settle. Fixed odds pay in full or lose; every clamp (pool cash fuse, no-scoop share, hard RTP
+   *    budget ⌊(1−houseEdge)×turnover⌋) is a loss, so digits and rise/fall share ONE central budget
+   *    per brand (withdrawal_pool row, turnover, position_decision audit). The displayed digit is
+   *    drawn (seeded) from the digits CONSISTENT with the decision.
+   *  - STATISTICAL PATH (pool off, or marketers/demo): provably-fair uniform digit
+   *    `digitAt(daySeed, instrument, settleIndex)`; RTP = digit payout factor. Marketers stake demo
+   *    funds and must never draw the real-cash pool (decision F).
+   * Admin overrides do NOT apply to digits. Stake+position+ledger persist atomically
+   * (fn_open_contract); settlement reuses fn_settle_position. One open digit contract per
+   * (user, instrument) — matches the single-in-flight UI and keeps per-user tick overrides coherent.
    */
-  async openDigitContract(input: { userId: string; stakeCents: number; kind: DigitKind; target?: number | undefined; instrumentId?: string | undefined; ticks?: number | undefined }): Promise<{ positionId: string; balance: number; entryRate: number; instrumentId: string; openIndex: number; settleIndex: number }> {
+  async openDigitContract(input: { userId: string; stakeCents: number; kind: DigitKind; target?: number | undefined; instrumentId?: string | undefined; ticks?: number | undefined; role?: string | undefined }): Promise<{ positionId: string; balance: number; entryRate: number; instrumentId: string; openIndex: number; settleIndex: number; poolControlled: boolean }> {
     if (!Number.isInteger(input.stakeCents)) throw new RangeError("stake must be integer cents");
     if (input.stakeCents < this.cfg.minStakeCents) throw new Error(`STAKE_BELOW_MIN: min ${this.cfg.minStakeCents}`);
     if (input.stakeCents > this.cfg.maxStakeCents) throw new Error(`STAKE_ABOVE_MAX: max ${this.cfg.maxStakeCents}`);
     const instrumentId = input.instrumentId ?? DEFAULT_INSTRUMENT_ID;
     if (!isKnownInstrument(instrumentId)) throw new Error("INVALID_INSTRUMENT");
+    for (const c of this.digitContracts.values()) {
+      if (c.userId === input.userId && c.instrumentId === instrumentId) throw new Error("CONTRACT_EXISTS: one open digit contract per instrument");
+    }
     const ticks = Math.max(1, Math.min(10, Math.trunc(input.ticks ?? 1)));
     const target = clampTargetDigit(input.target ?? 0);
     const ctx = this.getActiveContext();
@@ -315,20 +325,45 @@ export class GameServer {
     const settleIndex = openIndex + ticks;
     const entryRate = feed.tickAt(openIndex).quote;
     const nonce = (nonceCounter = (nonceCounter + 1) % Number.MAX_SAFE_INTEGER);
+
+    // Canonical marketer classification — identical to openPosition so pool exemption can never
+    // diverge from the money layer's demo routing (migration 0084).
+    const isMarketer = this.loadIsMarketer ? await this.loadIsMarketer(input.userId) : (input.role === "marketer");
+    const poolPath = (this.pool?.enabled() ?? false) && !isMarketer;
+
     const { positionId, newBalance } = await this.repo.openContract({
       userId: input.userId, stakeCents: input.stakeCents, direction: "buy", entryRate,
       durationS: 1, gameDayId: ctx.gameDayId, nonce, openedAtMs,
       configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
       kind: "digit", contract: { kind: input.kind, target, instrumentId, openIndex, settleIndex },
     });
-    this.digitContracts.set(positionId, { userId: input.userId, stakeCents: input.stakeCents, kind: input.kind, target, instrumentId, openIndex, settleIndex, siteId: ctx.siteId ?? null });
-    return { positionId, balance: newBalance, entryRate, instrumentId, openIndex, settleIndex };
+
+    let decided: { result: "win" | "loss"; payoutCents: number; digit: number } | null = null;
+    if (poolPath && this.pool) {
+      // Fixed-odds candidate payout: exactly what a win would cost (stake × factor / winProb).
+      const candidate = digitReturnCents(input.stakeCents, input.kind, input.kind === "over" || input.kind === "under" ? target : 0, this.digitFactor());
+      const po = await this.pool.controller.decideReserveFixed({
+        siteId: ctx.siteId ?? "", userId: input.userId, stakeCents: input.stakeCents,
+        payoutCents: candidate, positionId, nonce, openedAtMs, serverSeed: ctx.seed,
+        balanceAfterStakeCents: newBalance, minWithdrawalCents: this.cfg.minWithdrawalCents,
+        // Central RTP dial, identical to the rise/fall pool path: targetRtp = 1 − house_edge.
+        targetRtp: Math.min(0.95, Math.max(0.05, 1 - this.cfg.houseEdge)),
+      });
+      const digit = decisionDigit(ctx.seed, nonce, input.kind, target, po.result === "win");
+      // digitsForOutcome is non-empty for every grantable decision (a p=0 contract can never win);
+      // the fair feed digit is a defensive fallback only.
+      decided = { result: po.result, payoutCents: po.result === "win" ? po.payoutCents : 0, digit: digit ?? feed.tickAt(settleIndex).digit };
+    }
+
+    this.digitContracts.set(positionId, { userId: input.userId, stakeCents: input.stakeCents, kind: input.kind, target, instrumentId, openIndex, settleIndex, openedAtMs, siteId: ctx.siteId ?? null, decided });
+    return { positionId, balance: newBalance, entryRate, instrumentId, openIndex, settleIndex, poolControlled: decided !== null };
   }
 
   /**
-   * Settle an open DIGIT contract against its committed `settleIndex` digit (deterministic, so the
-   * result is identical whether settled live or on recovery). Payout uses the brand DIGIT factor.
-   * Idempotent via the repo (a second call is a no-op once settled).
+   * Settle an open DIGIT contract. Pool-decided contracts settle to their reserved decision (digit
+   * drawn from the decision seed, pool committed on a win, session advanced); statistical contracts
+   * settle against the committed `settleIndex` fair digit. Deterministic either way — the result is
+   * identical whether settled live or on recovery. Idempotent via the repo.
    */
   async settleDigitContract(positionId: string): Promise<{ positionId: string; digit: number; won: boolean; payoutCents: number; pnlCents: number; balance: number }> {
     const c = this.digitContracts.get(positionId);
@@ -336,13 +371,34 @@ export class GameServer {
     const ctx = this.getActiveContext();
     if (!ctx.seed) throw new Error("NO_SEED");
     const feed = this.feedFor(ctx.seed, c.instrumentId);
-    const settleTick = feed.tickAt(c.settleIndex);
-    const st = settleDigit(c.stakeCents, c.kind, c.target, settleTick.digit, this.digitFactor());
+    const fairTick = feed.tickAt(c.settleIndex);
+
+    if (c.decided) {
+      // ── Pool path: settle EXACTLY the controller's decision (never recomputed). ──
+      const won = c.decided.result === "win";
+      const digit = c.decided.digit;
+      const exitRate = withLastPip(fairTick.quote, digit);
+      const { newBalance } = await this.repo.settlePosition({
+        positionId, exitRate, result: won ? "win" : "loss", multiplier: 0, payoutCents: c.decided.payoutCents,
+      });
+      this.digitContracts.delete(positionId);
+      if (this.pool) {
+        this.pool.controller.settleSession(c.userId, poolEatDay(c.openedAtMs), won ? "win" : "loss", c.decided.payoutCents);
+        if (won) {
+          try { await this.pool.controller.commit(positionId); }
+          catch (err) { this.emitError(err as Error, `pool commit ${positionId}`); }
+        }
+      }
+      return { positionId, digit, won, payoutCents: c.decided.payoutCents, pnlCents: c.decided.payoutCents - c.stakeCents, balance: newBalance };
+    }
+
+    // ── Statistical path (pool off / marketers): provably-fair uniform digit. ──
+    const st = settleDigit(c.stakeCents, c.kind, c.target, fairTick.digit, this.digitFactor());
     const { newBalance } = await this.repo.settlePosition({
-      positionId, exitRate: settleTick.quote, result: st.won ? "win" : "loss", multiplier: 0, payoutCents: st.payoutCents,
+      positionId, exitRate: fairTick.quote, result: st.won ? "win" : "loss", multiplier: 0, payoutCents: st.payoutCents,
     });
     this.digitContracts.delete(positionId);
-    return { positionId, digit: settleTick.digit, won: st.won, payoutCents: st.payoutCents, pnlCents: st.pnlCents, balance: newBalance };
+    return { positionId, digit: fairTick.digit, won: st.won, payoutCents: st.payoutCents, pnlCents: st.pnlCents, balance: newBalance };
   }
 
   /** Instrument ids that currently have at least one open digit contract (for stream fan-out). */

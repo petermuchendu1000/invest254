@@ -5,6 +5,45 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #19 — Digits shipped POOL-BLIND: a fair 5%-edge book with no budget cap (the exact "huge losses" failure mode) — FIXED (branch `feat/issue1-digits-live`)
+- **Report (operator):** before merging digits, apply the pool-fund algorithm — "all clients have a
+  central control point of configurations… I had tested with the other algorithm, but made huge losses."
+- **Evidence / risk analysis:** the first digits increment settled EVERY trade on the provably-fair
+  uniform digit at factor 0.95 (5% edge), ignoring `pool_mode` entirely. That book is the exact shape
+  that loses money in practice:
+  * **Variance vs a thin edge:** even/odd at 1.9× and 5% edge swings wildly; on thin-volume days the
+    house is underwater a large fraction of days (the same hole docs/25 §14 closed for rise/fall).
+  * **Martingale extraction:** the built-in AUTO bot doubles on loss — against an uncapped fair book a
+    lucky streak cashes the whole float; nothing bounded daily payouts.
+  * **No central control:** daily pools, dynamic per-client distribution, `pool_mode`, and the
+    `house_edge` dial governed rise/fall only; digits bypassed all of it.
+- **Root cause:** digits were wired to the statistical engine only; the PoolController (docs/25 — the
+  managed-book brain with the hard cash cap + RTP-budget ceiling that already protects rise/fall) was
+  never consulted for contracts.
+- **Resolution (exact algorithm, fixed-odds adaptation):**
+  * `decidePoolOutcomeFixed` (shared) + `decideReserveFixed` (controller): the SAME brain — propensity
+    with base p = targetRtp/m (edge invariant E[RTP] ≤ 1 − house_edge), pool cash fuse, per-player
+    no-scoop share, hard ceiling `paid + reserved ≤ ⌊targetRtp × turnover⌋`, near-miss lever,
+    reserve→commit/release atomicity, persisted `position_decision` — with one fixed-odds rule: a win
+    pays exactly the contract return or the trade loses (no shrunk wins).
+  * `game.ts` routes digits exactly like rise/fall: pool path for non-marketers in pool-mode brands;
+    provably-fair statistical path for pool-off brands and marketers/demo. One open digit contract per
+    (user, instrument). Displayed digit is decision-consistent (seeded from the decision) and the
+    owner's settle-index tick is overridden to match (chart == result).
+  * **Shared central budget:** digits + rise/fall reserve from the SAME `withdrawal_pool` row,
+    turnover, and ledger per brand — so per-client pools, the dynamic all-client distribution
+    (docs/25 §15), and `pool_mode`/`house_edge` govern both surfaces with zero extra configuration.
+  * Recovery: pool-decided digit contracts recover from the stored decision (commit on win),
+    statistical ones from the seed. Idempotent.
+- **Operational note (caught by test):** the 15% no-scoop share must exceed the largest fixed payout
+  or players can never win — size a client's daily pool ≥ ~7× the largest digit payout (docs/34).
+- **Impact:** digit losses are now hard-capped by the same central pool that already protects
+  rise/fall; realized digit RTP ≤ 1 − house_edge at every volume. Tests: full suite **804/804**
+  (new: 7 fixed-odds brain invariants, 9 engine pool-digit scenarios incl. combined rise/fall+digits
+  budget + crash recovery, 1 WS pool-mode e2e); `tsc -b` + web `tsc` clean.
+
+---
+
 ## #18 — Deriv-style DIGIT contracts were unreachable AND mispriced (would return 0.5× a "win") — FIXED (branch `feat/issue1-digits-live`)
 - **Report (Issue 1):** the Phase-2 Deriv-style digits bot was built bottom-up (shared math + DB
   `fn_open_contract` + engine methods + a full web screen) but **no client could place a real digit
