@@ -1,4 +1,7 @@
-import { dateKeyUTC } from "@invest254/shared";
+import {
+  dateKeyUTC, settleDigit, type DigitKind,
+  InstrumentFeed, instrumentById, DEFAULT_INSTRUMENT_ID, digitPayoutFactor,
+} from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
 import type { SeedManager } from "./daycontext.js";
 import type { GameServer, Position, LoadOverride } from "./game.js";
@@ -56,6 +59,22 @@ export class RecoveryService {
         const ctx = await this.seeds.contextFor(dateKey, row.configVersion);
         const entryT = (row.openedAtMs - ctx.dayStartMs) / 1000;
         const expiresAtMs = row.openedAtMs + row.durationS * 1000;
+
+        // ── Phase 2 DIGIT contract: settle deterministically from the committed settleIndex ──────
+        // A digit outcome is a pure function of (daySeed, instrument, settleIndex) — all persisted in
+        // `contract` — so a crash between open and settle can never strand a debited stake: we
+        // recompute the exact same digit and settle idempotently (a racing settle is a no-op).
+        if ((row.kind ?? "rise_fall") === "digit") {
+          if (!ctx.seed) { report.failed++; continue; }
+          const c = (row.contract ?? {}) as { kind?: DigitKind; target?: number; instrumentId?: string; settleIndex?: number };
+          const feed = new InstrumentFeed(ctx.seed, instrumentById(c.instrumentId ?? DEFAULT_INSTRUMENT_ID));
+          const tick = feed.tickAt(Number(c.settleIndex ?? 0));
+          const st = settleDigit(row.stakeCents, c.kind ?? "even", c.target ?? 0, tick.digit, digitPayoutFactor(ctx.cfg));
+          const res = await this.repo.settlePosition({ positionId: row.id, exitRate: tick.quote, result: st.won ? "win" : "loss", multiplier: 0, payoutCents: st.payoutCents });
+          if (res.settled) report.settled++; else report.noop++;
+          continue;
+        }
+        // (Multiplier-contract recovery lands with the multiplier wiring; none can exist yet.)
 
         // ── Pool position (docs/25): recover from the STORED decision, never recomputed from the
         //    curve. On a recovered win, commit the reservation (reserved -> paid); the budget was

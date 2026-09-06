@@ -1,7 +1,8 @@
 import {
   CurveGenerator, SettlementEngine, type GameConfig, type VersionedGameConfig,
   type Direction, type Outcome, type Tick, presentOutcome, type OutcomePresentation,
-  lastDigit, settleDigit, type DigitKind,
+  settleDigit, type DigitKind,
+  InstrumentFeed, instrumentById, isKnownInstrument, DEFAULT_INSTRUMENT_ID, digitPayoutFactor,
   multiplierPnlCents, evaluateMultiplier, dealCancellationFeeCents,
   type MultiplierState, type MultDir, type MultCloseReason,
 } from "@invest254/shared";
@@ -65,7 +66,9 @@ function clampTargetDigit(d: number): number {
 export class GameServer {
   private positions = new Map<string, Position>();
   /** Phase 2: in-flight digit contracts awaiting their 1-tick settlement (server-side only). */
-  private digitContracts = new Map<string, { userId: string; stakeCents: number; kind: DigitKind; target: number; siteId: string | null }>();
+  private digitContracts = new Map<string, { userId: string; stakeCents: number; kind: DigitKind; target: number; instrumentId: string; openIndex: number; settleIndex: number; siteId: string | null }>();
+  /** Per-(daySeed, instrument) authoritative feed cache; feeds are pure/deterministic and cheap. */
+  private feeds = new Map<string, InstrumentFeed>();
   /** Phase 2: open (running) multiplier contracts, evaluated live against the authoritative quote. */
   private multiplierContracts = new Map<string, MultiplierState & { userId: string; siteId: string | null }>();
   private listeners = new Set<Listener>();
@@ -265,50 +268,108 @@ export class GameServer {
     return { position: p, balance: newBalance };
   }
 
+  /** The active brand's DIGIT payout factor (Deriv-style; NOT the rise/fall houseEdge). */
+  private digitFactor(): number { return digitPayoutFactor(this.cfg); }
+
+  /** Cached authoritative feed for (active day seed, instrument). Pure & deterministic. */
+  private feedFor(seed: string, instrumentId: string): InstrumentFeed {
+    const key = `${seed}:${instrumentId}`;
+    let f = this.feeds.get(key);
+    if (!f) { f = new InstrumentFeed(seed, instrumentById(instrumentId)); this.feeds.set(key, f); }
+    return f;
+  }
+
+  /** The authoritative tick for an instrument at the current wall clock (for streaming/preview). */
+  instrumentTick(instrumentId: string, index?: number) {
+    const ctx = this.getActiveContext();
+    if (!ctx.seed) throw new Error("NO_SEED");
+    const feed = this.feedFor(ctx.seed, instrumentId);
+    const i = index ?? feed.indexAt(this.now(), ctx.dayStartMs);
+    return { ...feed.tickAt(i), tickMs: feed.instrument.tickMs, dayStartMs: ctx.dayStartMs };
+  }
+
   /**
-   * Open a Deriv-style DIGIT contract (Phase 2). Fair fixed-payout: the outcome is the last digit of
-   * the authoritative seed-derived quote at settlement (provably fair), and RTP is the brand house
-   * edge via the payout factor — the pool controller / overrides do NOT apply (digits are pool-exempt).
-   * Stake + position + ledger are persisted atomically by the repo (fn_open_contract); settlement is
-   * reused from the rise/fall path (fn_settle_position).
+   * Open a Deriv-style DIGIT contract (Phase 2), server-authoritative & provably fair.
+   *
+   * The engine extends the daily-seed model to a PER-INSTRUMENT feed: the settling last digit is
+   * `digitAt(daySeed, instrument, settleIndex)` — exactly uniform, so the payout factor IS the edge
+   * (no distributional drift). `settleIndex = openIndex + ticks` (Deriv "ticks"; default 1). The
+   * pool controller / admin overrides do NOT apply (digits are pool-exempt). Stake+position+ledger
+   * persist atomically (fn_open_contract); settlement reuses fn_settle_position. Because the outcome
+   * is a pure function of (seed, instrument, settleIndex) — persisted in `contract` — a crash can
+   * always recover and settle idempotently (see recovery.ts).
    */
-  async openDigitContract(input: { userId: string; stakeCents: number; kind: DigitKind; target?: number }): Promise<{ positionId: string; balance: number; entryRate: number }> {
+  async openDigitContract(input: { userId: string; stakeCents: number; kind: DigitKind; target?: number | undefined; instrumentId?: string | undefined; ticks?: number | undefined }): Promise<{ positionId: string; balance: number; entryRate: number; instrumentId: string; openIndex: number; settleIndex: number }> {
     if (!Number.isInteger(input.stakeCents)) throw new RangeError("stake must be integer cents");
     if (input.stakeCents < this.cfg.minStakeCents) throw new Error(`STAKE_BELOW_MIN: min ${this.cfg.minStakeCents}`);
     if (input.stakeCents > this.cfg.maxStakeCents) throw new Error(`STAKE_ABOVE_MAX: max ${this.cfg.maxStakeCents}`);
+    const instrumentId = input.instrumentId ?? DEFAULT_INSTRUMENT_ID;
+    if (!isKnownInstrument(instrumentId)) throw new Error("INVALID_INSTRUMENT");
+    const ticks = Math.max(1, Math.min(10, Math.trunc(input.ticks ?? 1)));
     const target = clampTargetDigit(input.target ?? 0);
     const ctx = this.getActiveContext();
+    if (!ctx.seed) throw new Error("NO_SEED");
+    const feed = this.feedFor(ctx.seed, instrumentId);
     const openedAtMs = this.now();
-    const entryRate = ctx.curve.rate((openedAtMs - ctx.dayStartMs) / 1000);
+    const openIndex = feed.indexAt(openedAtMs, ctx.dayStartMs);
+    const settleIndex = openIndex + ticks;
+    const entryRate = feed.tickAt(openIndex).quote;
     const nonce = (nonceCounter = (nonceCounter + 1) % Number.MAX_SAFE_INTEGER);
     const { positionId, newBalance } = await this.repo.openContract({
       userId: input.userId, stakeCents: input.stakeCents, direction: "buy", entryRate,
       durationS: 1, gameDayId: ctx.gameDayId, nonce, openedAtMs,
       configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
-      kind: "digit", contract: { kind: input.kind, target },
+      kind: "digit", contract: { kind: input.kind, target, instrumentId, openIndex, settleIndex },
     });
-    this.digitContracts.set(positionId, { userId: input.userId, stakeCents: input.stakeCents, kind: input.kind, target, siteId: ctx.siteId ?? null });
-    return { positionId, balance: newBalance, entryRate };
+    this.digitContracts.set(positionId, { userId: input.userId, stakeCents: input.stakeCents, kind: input.kind, target, instrumentId, openIndex, settleIndex, siteId: ctx.siteId ?? null });
+    return { positionId, balance: newBalance, entryRate, instrumentId, openIndex, settleIndex };
   }
 
   /**
-   * Settle an open DIGIT contract against the authoritative quote NOW (Deriv 1-tick semantics). The
-   * last digit of that seed-derived quote decides win/loss; payout uses the brand house-edge factor
-   * (RTP = 1 − houseEdge). Idempotent via the repo (a second call is a no-op once settled).
+   * Settle an open DIGIT contract against its committed `settleIndex` digit (deterministic, so the
+   * result is identical whether settled live or on recovery). Payout uses the brand DIGIT factor.
+   * Idempotent via the repo (a second call is a no-op once settled).
    */
   async settleDigitContract(positionId: string): Promise<{ positionId: string; digit: number; won: boolean; payoutCents: number; pnlCents: number; balance: number }> {
     const c = this.digitContracts.get(positionId);
     if (!c) throw new Error("CONTRACT_NOT_FOUND");
     const ctx = this.getActiveContext();
-    const settleRate = ctx.curve.rate((this.now() - ctx.dayStartMs) / 1000);
-    const digit = lastDigit(settleRate);
-    const factor = Math.min(0.999, Math.max(0.5, 1 - this.cfg.houseEdge));
-    const st = settleDigit(c.stakeCents, c.kind, c.target, digit, factor);
+    if (!ctx.seed) throw new Error("NO_SEED");
+    const feed = this.feedFor(ctx.seed, c.instrumentId);
+    const settleTick = feed.tickAt(c.settleIndex);
+    const st = settleDigit(c.stakeCents, c.kind, c.target, settleTick.digit, this.digitFactor());
     const { newBalance } = await this.repo.settlePosition({
-      positionId, exitRate: settleRate, result: st.won ? "win" : "loss", multiplier: 0, payoutCents: st.payoutCents,
+      positionId, exitRate: settleTick.quote, result: st.won ? "win" : "loss", multiplier: 0, payoutCents: st.payoutCents,
     });
     this.digitContracts.delete(positionId);
-    return { positionId, digit, won: st.won, payoutCents: st.payoutCents, pnlCents: st.pnlCents, balance: newBalance };
+    return { positionId, digit: settleTick.digit, won: st.won, payoutCents: st.payoutCents, pnlCents: st.pnlCents, balance: newBalance };
+  }
+
+  /** Instrument ids that currently have at least one open digit contract (for stream fan-out). */
+  openDigitInstruments(): Set<string> {
+    const s = new Set<string>();
+    for (const c of this.digitContracts.values()) s.add(c.instrumentId);
+    return s;
+  }
+
+  /**
+   * Settle every open digit contract on `instrumentId` whose `settleIndex` has been reached
+   * (`currentIndex >= settleIndex`). The transport calls this on each authoritative instrument tick.
+   * Returns the settled results (with owning userId) for per-user fan-out.
+   */
+  async settleDueDigits(instrumentId: string, currentIndex: number): Promise<Array<{ positionId: string; userId: string; digit: number; won: boolean; payoutCents: number; pnlCents: number; balance: number }>> {
+    const due: string[] = [];
+    for (const [id, c] of this.digitContracts) if (c.instrumentId === instrumentId && currentIndex >= c.settleIndex) due.push(id);
+    const out: Array<{ positionId: string; userId: string; digit: number; won: boolean; payoutCents: number; pnlCents: number; balance: number }> = [];
+    for (const id of due) {
+      const c = this.digitContracts.get(id);
+      if (!c) continue;
+      try {
+        const r = await this.settleDigitContract(id);
+        out.push({ ...r, userId: c.userId });
+      } catch (err) { this.emitError(err as Error, `settle-digit ${id}`); }
+    }
+    return out;
   }
 
   /**
