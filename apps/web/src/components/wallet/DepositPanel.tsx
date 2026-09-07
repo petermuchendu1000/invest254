@@ -7,12 +7,12 @@ import { PayBillDeposit } from '@/components/wallet/PayBillDeposit';
 
 type Method = 'stk' | 'paybill';
 const METHODS: { id: Method; label: string }[] = [
-  { id: 'stk', label: 'Send to phone' },
+  { id: 'stk', label: 'STK Push' },
   { id: 'paybill', label: 'Pay Bill' },
 ];
 
 /**
- * Deposit surface with a method switch: "Send to phone" (STK push) and "Pay Bill" (manual C2B,
+ * Deposit surface with a method switch: "STK Push" (send an M-PESA prompt to the phone) and "Pay Bill"
  * auto-verified by confirmation code). Each body owns its own state; the key forces a clean remount
  * when switching so a half-typed amount/code never leaks across methods.
  */
