@@ -332,8 +332,8 @@ export function DigitsTradeScreen() {
             ) : null}
           </div>
 
-          {/* Instrument dropdown (wide toolbar variant) */}
-          <div className="min-w-0 flex-1">
+          {/* Instrument dropdown (wide toolbar variant) — dynamic width, hugs content */}
+          <div className="min-w-0">
             <VolatilitySelector
               wide
               instrument={instrument}
@@ -343,10 +343,10 @@ export function DigitsTradeScreen() {
             />
           </div>
 
-          {/* Live share badge (market-aware) */}
+          {/* Live share badge (market-aware) — pinned right */}
           <span
             title={`${shareLabel} over last ${WINDOW} ticks`}
-            className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[12.5px] font-bold tabular-nums text-fg"
+            className="ml-auto shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[12.5px] font-bold tabular-nums text-fg"
           >
             {Math.round(sharePct)}%
           </span>

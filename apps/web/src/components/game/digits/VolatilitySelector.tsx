@@ -61,7 +61,7 @@ export function VolatilitySelector({
   const leaf = instrument.short.replace(/^Vol\s*/, ''); // e.g. "10 (1s)"
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative min-w-0">
       {wide ? (
         <button
           type="button"
@@ -70,7 +70,7 @@ export function VolatilitySelector({
           aria-expanded={open}
           title={instrument.label}
           className={cn(
-            'flex h-10 w-full items-center gap-2.5 rounded-lg border bg-surface-2 px-2.5 text-left transition',
+            'flex h-10 min-w-0 max-w-full items-center gap-2 rounded-lg border bg-surface-2 pl-2 pr-2.5 text-left transition',
             open ? 'border-accent' : 'border-border hover:border-accent/60',
           )}
         >
@@ -88,9 +88,9 @@ export function VolatilitySelector({
               </span>
             </span>
           </span>
-          {/* edit / customise affordance (pencil) */}
-          <svg viewBox="0 0 24 24" className="ml-auto h-3.5 w-3.5 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M4 20h4L18.5 9.5a2.12 2.12 0 10-3-3L5 17v3z" strokeLinecap="round" strokeLinejoin="round" />
+          {/* dropdown chevron (rotates when open) */}
+          <svg viewBox="0 0 24 24" className={cn('h-4 w-4 shrink-0 text-muted transition-transform', open ? 'rotate-180' : '')} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
       ) : (
@@ -123,7 +123,7 @@ export function VolatilitySelector({
       {open ? (
         <div
           role="listbox"
-          className="absolute left-0 top-[calc(100%+6px)] z-30 max-h-80 w-72 overflow-y-auto rounded-xl border border-border bg-surface-2 p-1 shadow-2xl"
+          className="absolute left-0 top-[calc(100%+6px)] z-30 w-72 max-w-[85vw] rounded-xl border border-border bg-surface-2 p-1 shadow-2xl"
         >
           {INSTRUMENTS.map((inst) => {
             const active = inst.id === instrument.id;
@@ -142,10 +142,9 @@ export function VolatilitySelector({
                 <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-md', active ? 'bg-accent/20 text-accent' : 'bg-white/5 text-muted')}>
                   <BarsGlyph className="h-3.5 w-3.5" />
                 </span>
-                <span className={cn('min-w-0 flex-1 truncate text-sm', active ? 'text-fg' : 'text-muted')}>
+                <span className={cn('min-w-0 truncate text-sm', active ? 'text-fg' : 'text-muted')}>
                   <IndexLabel inst={inst} />
                 </span>
-                {active ? <span className="h-2 w-2 shrink-0 rounded-full bg-accent" /> : null}
               </button>
             );
           })}
