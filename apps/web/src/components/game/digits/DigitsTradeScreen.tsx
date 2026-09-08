@@ -256,7 +256,7 @@ export function DigitsTradeScreen() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-1 sm:gap-2.5">
+    <div className="flex h-full min-h-0 flex-col gap-1.5 p-0.5 sm:gap-2">
       {/* Trade type — Digits vs Multipliers (kept reachable as a slim switch; Multipliers is its own
           trade type, not a digit sub-market). */}
       <div className="flex justify-center">
@@ -286,7 +286,7 @@ export function DigitsTradeScreen() {
               type="button"
               onClick={() => { setMarket(m.id); if (running) setRunning(false); }}
               className={cn(
-                'min-w-0 flex-1 truncate rounded-full border px-1.5 py-2 text-[clamp(11px,3.4vw,14px)] font-semibold transition',
+                'min-w-0 flex-1 truncate rounded-full border px-1.5 py-1.5 text-[clamp(11px,3.4vw,14px)] font-semibold transition',
                 market === m.id
                   ? 'border-accent/55 bg-accent/15 text-fg shadow-[0_0_16px_-6px_var(--pp-accent)]'
                   : 'border-transparent text-muted hover:text-fg',
@@ -299,8 +299,8 @@ export function DigitsTradeScreen() {
       ) : null}
 
       {/* Chart card — toolbar (1T · instrument · Historical View · live share) + Deriv-style chart */}
-      <div className="relative flex min-h-[140px] flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
-        <div className="flex items-center gap-2 p-2.5 pb-1.5">
+      <div className="relative flex min-h-[124px] flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
+        <div className="flex items-center gap-1.5 p-2 pb-1">
           {/* 1T timeframe / zoom */}
           <div ref={tfRef} className="relative shrink-0">
             <button
@@ -308,7 +308,7 @@ export function DigitsTradeScreen() {
               onClick={() => setTfOpen((v) => !v)}
               aria-haspopup="listbox"
               aria-expanded={tfOpen}
-              className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface-2 text-[13px] font-bold text-accent transition hover:border-accent/60"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface-2 text-[13px] font-bold text-accent transition hover:border-accent/60"
             >
               {tf.label}
             </button>
@@ -350,7 +350,7 @@ export function DigitsTradeScreen() {
             onClick={() => setHistorical((v) => !v)}
             aria-pressed={historical}
             className={cn(
-              'shrink-0 rounded-full px-3.5 py-2 text-[13px] font-bold text-white transition',
+              'shrink-0 rounded-full px-3 py-1.5 text-[13px] font-bold text-white transition',
               historical ? 'bg-down ring-2 ring-down/40' : 'bg-down/90 hover:bg-down',
             )}
           >
@@ -360,7 +360,7 @@ export function DigitsTradeScreen() {
           {/* Live share badge (market-aware) */}
           <span
             title={`${shareLabel} over last ${WINDOW} ticks`}
-            className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-[12.5px] font-bold tabular-nums text-fg"
+            className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[12.5px] font-bold tabular-nums text-fg"
           >
             {Math.round(sharePct)}%
           </span>
@@ -412,7 +412,7 @@ export function DigitsTradeScreen() {
       ) : null}
 
       {/* Console */}
-      <div className="flex min-h-0 flex-col gap-2.5">
+      <div className="flex min-h-0 flex-col gap-1.5">
         {isMultipliers ? (
           <MultipliersPanel getLastTick={getLastInstrumentTick} resetKey={instrumentResetKey} instrumentId={instId} />
         ) : (
@@ -425,7 +425,7 @@ export function DigitsTradeScreen() {
                   type="button"
                   onClick={() => { setMode(m); if (running) setRunning(false); }}
                   className={cn(
-                    'flex-1 rounded-lg py-2.5 text-[15px] font-extrabold uppercase tracking-wide transition',
+                    'flex-1 rounded-lg py-2 text-[15px] font-extrabold uppercase tracking-wide transition',
                     mode === m ? 'bg-accent text-accent-fg shadow-[0_2px_16px_-4px_var(--pp-accent)]' : 'text-muted hover:text-fg',
                   )}
                 >
@@ -437,7 +437,7 @@ export function DigitsTradeScreen() {
             {/* Stake stepper */}
             <div className="flex items-center gap-3">
               <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease stake"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">−</button>
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">−</button>
               <div className="flex-1 text-center">
                 <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Stake</div>
                 <div className="flex items-baseline justify-center gap-1.5">
@@ -452,7 +452,7 @@ export function DigitsTradeScreen() {
                 </div>
               </div>
               <button type="button" onClick={() => stepStake(1)} aria-label="Increase stake"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">+</button>
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">+</button>
             </div>
 
             {/* Presets */}
@@ -465,7 +465,7 @@ export function DigitsTradeScreen() {
                     type="button"
                     onClick={() => setStake(String(q))}
                     className={cn(
-                      'rounded-lg border py-2 text-[clamp(11px,3vw,13px)] font-semibold tabular-nums transition',
+                      'rounded-lg border py-1.5 text-[clamp(11px,3vw,13px)] font-semibold tabular-nums transition',
                       active ? 'border-accent/55 bg-accent/15 text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg',
                     )}
                   >
@@ -497,7 +497,7 @@ export function DigitsTradeScreen() {
                     disabled={meta.disabled}
                     onClick={() => onCta(o.key)}
                     className={cn(
-                      'flex items-center justify-between rounded-xl border px-4 py-3 text-left transition disabled:opacity-40',
+                      'flex items-center justify-between rounded-xl border px-4 py-2.5 text-left transition disabled:opacity-40',
                       isUp ? 'border-up/40 bg-up/15 text-up hover:bg-up/25' : 'border-down/40 bg-down/15 text-down hover:bg-down/25',
                       active ? 'ring-2 ring-white/60' : '',
                     )}
@@ -515,8 +515,9 @@ export function DigitsTradeScreen() {
               })}
             </div>
 
-            {/* Session ledger */}
-            <div className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3 py-2">
+            {/* Session ledger — hidden on very short viewports (<=660px tall) so the chart + controls
+                keep their space on small devices; visible everywhere else. */}
+            <div className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3 py-1.5 [@media(max-height:660px)]:hidden">
               <div className="flex items-center gap-2 text-xs text-muted">
                 <span>Session P/L</span>
                 <span className={cn('text-sm font-bold tabular-nums', pnl >= 0 ? 'text-up' : 'text-down')}>
