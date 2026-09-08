@@ -23,6 +23,14 @@ type Market = (typeof MARKETS)[number]['id'];
 type TradeType = 'digits' | 'multipliers';
 type Outcome = 'even' | 'odd' | 'over' | 'under' | 'matches' | 'differs';
 
+// Chart timeframe / zoom presets (1T = default). barSpacing = pixels per bar on the time scale.
+const TIMEFRAMES = [
+  { label: '1T', barSpacing: 7 },
+  { label: '2T', barSpacing: 11 },
+  { label: '5T', barSpacing: 16 },
+  { label: '10T', barSpacing: 24 },
+] as const;
+
 // Display-only payout factor, mirroring the engine's DIGIT default (shared `digitPayoutFactor`,
 // 0.95 ⇒ 5% edge). The ENGINE is authoritative for the actual payout; this only renders the CTA
 // "return" and "% payout". Kept a local literal so the client bundle never pulls node:crypto via
@@ -76,6 +84,12 @@ export function DigitsTradeScreen() {
   const [barrier, setBarrier] = useState(5); // Over/Under
   const [pick, setPick] = useState(0); // Matches/Differs
 
+  // Chart toolbar UI state (presentational): timeframe/zoom, Historical View pause, 1T menu.
+  const [tf, setTf] = useState<(typeof TIMEFRAMES)[number]>(TIMEFRAMES[0]);
+  const [tfOpen, setTfOpen] = useState(false);
+  const [historical, setHistorical] = useState(false);
+  const tfRef = useRef<HTMLDivElement | null>(null);
+
   const presets = useMemo(() => (isForeign ? [1, 5, 10, 25, 50, 100] : [50, 100, 200, 500, 1000, 5000]), [isForeign]);
   const step = isForeign ? 1 : 50;
   const [stake, setStake] = useState<string>(String(isForeign ? 10 : 200));
@@ -118,6 +132,14 @@ export function DigitsTradeScreen() {
 
   // Subscribe the socket to the selected instrument's authoritative feed (re-subscribes on change).
   useEffect(() => { subscribeInstrument(instId); }, [instId, subscribeInstrument]);
+
+  // Close the timeframe menu on outside click.
+  useEffect(() => {
+    if (!tfOpen) return;
+    const onDoc = (e: MouseEvent) => { if (tfRef.current && !tfRef.current.contains(e.target as Node)) setTfOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [tfOpen]);
 
   // Resolve settlements authoritatively from the engine (single in-flight contract at a time).
   useEffect(() => {
@@ -194,6 +216,18 @@ export function DigitsTradeScreen() {
   const selectorValue = market === 'overunder' ? barrier : pick;
   const onSelectDigit = (d: number) => (market === 'overunder' ? setBarrier(d) : setPick(d));
 
+  // Live "share" stat for the chart badge: the probability-weighted frequency of the selected side
+  // across the recent tick window (even-share for Even/Odd, over-share for Over/Under, the picked
+  // digit's frequency for Matches/Differs). Purely a live read of `snap.freqs`.
+  const sharePct = useMemo(() => {
+    const f = snap.freqs;
+    if (market === 'evenodd') return f.reduce((a, v, i) => a + (i % 2 === 0 ? v : 0), 0);
+    if (market === 'overunder') return f.reduce((a, v, i) => a + (i > barrier ? v : 0), 0);
+    return f[pick] ?? 0;
+  }, [snap.freqs, market, barrier, pick]);
+  const shareLabel =
+    market === 'evenodd' ? 'Even share' : market === 'overunder' ? `Over ${barrier} share` : `Digit ${pick} share`;
+
   const stepStake = (dir: 1 | -1) => {
     const n = Math.max(0, (Number.parseFloat(stake) || 0) + dir * step);
     setStake(isForeign ? String(Math.round(n * 100) / 100) : String(Math.round(n)));
@@ -222,64 +256,40 @@ export function DigitsTradeScreen() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2.5 p-2.5 sm:gap-3 sm:p-3">
-      {/* Trade type — Digits vs Multipliers (Multipliers is its own type, not a digit sub-market) */}
-      <div className="flex gap-1 rounded-lg border border-border bg-surface-2 p-0.5">
-        {(['digits', 'multipliers'] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => { setTradeType(t); if (running) setRunning(false); }}
-            className={cn(
-              'flex-1 rounded-md py-1.5 text-[13px] font-semibold capitalize transition',
-              tradeType === t ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg',
-            )}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {/* Chart panel — Deriv-style axis chart with the volatility breadcrumb floating top-left */}
-      <div className="relative min-h-[168px] flex-1 overflow-hidden rounded-xl border border-border bg-surface-2">
-        <DerivChart getTicks={getInstrumentTicks} getLastTick={getLastInstrumentTick} resetKey={instrumentResetKey} />
-        <div className="absolute left-2 top-2 z-20">
-          <VolatilitySelector
-            instrument={instrument}
-            price={snap.price || null}
-            changePct={snap.changePct}
-            onSelect={(i) => { setInstId(i.id); if (running) setRunning(false); }}
-          />
+    <div className="flex h-full min-h-0 flex-col gap-2.5 p-1 sm:gap-3">
+      {/* Trade type — Digits vs Multipliers (kept reachable as a slim switch; Multipliers is its own
+          trade type, not a digit sub-market). */}
+      <div className="flex justify-center">
+        <div className="flex rounded-lg border border-border bg-surface-2 p-0.5">
+          {(['digits', 'multipliers'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => { setTradeType(t); if (running) setRunning(false); }}
+              className={cn(
+                'rounded-md px-4 py-1 text-[12px] font-semibold capitalize transition',
+                tradeType === t ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg',
+              )}
+            >
+              {t}
+            </button>
+          ))}
         </div>
-        {!isMultipliers && snap.digit !== null ? (
-          <span className="absolute right-2 bottom-2 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-accent/20 text-xs font-bold text-accent">
-            {snap.digit}
-          </span>
-        ) : null}
-        {flash ? (
-          <div
-            className={cn(
-              'pointer-events-none absolute inset-x-0 top-2 mx-auto w-fit rounded-full px-3.5 py-1 text-[13px] font-bold shadow-lg',
-              flash.won ? 'bg-up text-white' : 'bg-down text-white',
-            )}
-          >
-            {flash.won ? 'WON ' : 'LOST '}
-            {flash.won ? '+' : ''}{fmt(flash.delta)}
-          </div>
-        ) : null}
       </div>
 
-      {/* Digit sub-market (Digits type only) */}
+      {/* Market tabs (Digits only) — Matches/Differs · Even/Odd · Over/Under */}
       {!isMultipliers ? (
-        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-surface-2 p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex items-center gap-2">
           {MARKETS.map((m) => (
             <button
               key={m.id}
               type="button"
               onClick={() => { setMarket(m.id); if (running) setRunning(false); }}
               className={cn(
-                'shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-semibold transition',
-                market === m.id ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg',
+                'flex-1 whitespace-nowrap rounded-full border px-2 py-2.5 text-[13.5px] font-semibold transition',
+                market === m.id
+                  ? 'border-accent/55 bg-accent/15 text-fg shadow-[0_0_16px_-6px_var(--pp-accent)]'
+                  : 'border-transparent text-muted hover:text-fg',
               )}
             >
               {m.label}
@@ -288,7 +298,102 @@ export function DigitsTradeScreen() {
         </div>
       ) : null}
 
-      {/* Live digit heatmap (also the digit picker for Matches/Differs & Over/Under) */}
+      {/* Chart card — toolbar (1T · instrument · Historical View · live share) + Deriv-style chart */}
+      <div className="relative flex min-h-[180px] flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
+        <div className="flex items-center gap-2 p-2.5 pb-1.5">
+          {/* 1T timeframe / zoom */}
+          <div ref={tfRef} className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setTfOpen((v) => !v)}
+              aria-haspopup="listbox"
+              aria-expanded={tfOpen}
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface-2 text-[13px] font-bold text-accent transition hover:border-accent/60"
+            >
+              {tf.label}
+            </button>
+            {tfOpen ? (
+              <div role="listbox" className="absolute left-0 top-[calc(100%+6px)] z-30 w-28 rounded-lg border border-border bg-surface-2 p-1 shadow-2xl">
+                {TIMEFRAMES.map((o) => (
+                  <button
+                    key={o.label}
+                    type="button"
+                    role="option"
+                    aria-selected={o.label === tf.label}
+                    onClick={() => { setTf(o); setTfOpen(false); }}
+                    className={cn(
+                      'block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold transition',
+                      o.label === tf.label ? 'bg-accent/15 text-fg' : 'text-muted hover:text-fg',
+                    )}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Instrument dropdown (wide toolbar variant) */}
+          <div className="min-w-0 flex-1">
+            <VolatilitySelector
+              wide
+              instrument={instrument}
+              price={snap.price || null}
+              changePct={snap.changePct}
+              onSelect={(i) => { setInstId(i.id); if (running) setRunning(false); }}
+            />
+          </div>
+
+          {/* Historical View — freeze auto-follow and scroll back through buffered ticks */}
+          <button
+            type="button"
+            onClick={() => setHistorical((v) => !v)}
+            aria-pressed={historical}
+            className={cn(
+              'shrink-0 rounded-full px-3.5 py-2 text-[13px] font-bold text-white transition',
+              historical ? 'bg-down ring-2 ring-down/40' : 'bg-down/90 hover:bg-down',
+            )}
+          >
+            Historical View
+          </button>
+
+          {/* Live share badge (market-aware) */}
+          <span
+            title={`${shareLabel} over last ${WINDOW} ticks`}
+            className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-[12.5px] font-bold tabular-nums text-fg"
+          >
+            {Math.round(sharePct)}%
+          </span>
+        </div>
+
+        <div className="relative min-h-0 flex-1">
+          <DerivChart
+            getTicks={getInstrumentTicks}
+            getLastTick={getLastInstrumentTick}
+            resetKey={instrumentResetKey}
+            paused={historical}
+            barSpacing={tf.barSpacing}
+          />
+          {historical ? (
+            <span className="pointer-events-none absolute left-2 top-2 z-20 rounded-md bg-down/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+              Historical
+            </span>
+          ) : null}
+          {flash ? (
+            <div
+              className={cn(
+                'pointer-events-none absolute inset-x-0 top-2 mx-auto w-fit rounded-full px-3.5 py-1 text-[13px] font-bold shadow-lg',
+                flash.won ? 'bg-up text-white' : 'bg-down text-white',
+              )}
+            >
+              {flash.won ? 'WON ' : 'LOST '}
+              {flash.won ? '+' : ''}{fmt(flash.delta)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Digit row (Digits only) — also the picker for Matches/Differs & Over/Under */}
       {!isMultipliers ? (
         <>
           <DigitHeatmap
@@ -306,126 +411,152 @@ export function DigitsTradeScreen() {
         </>
       ) : null}
 
-      {/* Scrollable console */}
+      {/* Console */}
       <div className="flex min-h-0 flex-col gap-3">
         {isMultipliers ? (
           <MultipliersPanel getLastTick={getLastInstrumentTick} resetKey={instrumentResetKey} instrumentId={instId} />
         ) : (
-        <>
-        {/* AUTO / MANUAL */}
-        <div className="flex rounded-xl border border-border bg-surface-2 p-1">
-          {(['auto', 'manual'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => { setMode(m); if (running) setRunning(false); }}
-              className={cn(
-                'flex-1 rounded-lg py-2 text-sm font-semibold uppercase tracking-wide transition',
-                mode === m ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg',
-              )}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-
-        {/* Stake stepper */}
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease stake"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-2 text-base font-bold text-fg hover:border-accent/60">−</button>
-          <div className="flex-1 rounded-xl border border-border bg-surface-2 px-3 py-2 text-center">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-muted">Stake</div>
-            <div className="flex items-baseline justify-center gap-1">
-              <span className="text-sm font-bold text-muted">{symbol}</span>
-              <input
-                inputMode="decimal"
-                value={stake}
-                onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
-                aria-label="Stake amount"
-                className="w-24 bg-transparent text-center text-xl font-black tabular-nums text-fg outline-none"
-              />
+          <>
+            {/* AUTO / MANUAL */}
+            <div className="flex rounded-xl border border-border bg-surface p-1">
+              {(['auto', 'manual'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => { setMode(m); if (running) setRunning(false); }}
+                  className={cn(
+                    'flex-1 rounded-lg py-3 text-[15px] font-extrabold uppercase tracking-wide transition',
+                    mode === m ? 'bg-accent text-accent-fg shadow-[0_2px_16px_-4px_var(--pp-accent)]' : 'text-muted hover:text-fg',
+                  )}
+                >
+                  {m}
+                </button>
+              ))}
             </div>
-          </div>
-          <button type="button" onClick={() => stepStake(1)} aria-label="Increase stake"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-2 text-base font-bold text-fg hover:border-accent/60">+</button>
-        </div>
 
-        {/* Presets */}
-        <div className="grid grid-cols-6 gap-1.5">
-          {presets.map((q) => {
-            const active = Number(stake) === q;
-            return (
-              <button
-                key={q}
-                type="button"
-                onClick={() => setStake(String(q))}
-                className={cn(
-                  'rounded-lg border py-2 text-xs font-semibold tabular-nums transition',
-                  active ? 'border-accent bg-accent/15 text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg',
-                )}
-              >
-                {isForeign ? `${symbol}${q}` : q >= 1000 ? `${q / 1000}k` : q}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* AUTO-bot params */}
-        {mode === 'auto' ? (
-          <div className="grid grid-cols-3 gap-2">
-            <BotField label="Target profit" prefix={symbol} value={targetProfit} onChange={setTargetProfit} tone="up" />
-            <BotField label="Stop loss" prefix={symbol} value={stopLoss} onChange={setStopLoss} tone="down" />
-            <BotField label="Multiplier" prefix="×" value={multiplier} onChange={setMultiplier} />
-          </div>
-        ) : null}
-
-        {/* Dual payout CTAs */}
-        <div className="grid grid-cols-2 gap-2">
-          {[primary, secondary].map((o, i) => {
-            const meta = ctaMeta(o.key);
-            const isUp = i === 0;
-            const active = running && autoOutcomeRef.current === o.key;
-            return (
-              <button
-                key={o.key}
-                type="button"
-                disabled={meta.disabled}
-                onClick={() => onCta(o.key)}
-                className={cn(
-                  'flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-2.5 text-left text-white transition disabled:opacity-40',
-                  isUp ? 'bg-up hover:opacity-90' : 'bg-down hover:opacity-90',
-                  active ? 'ring-2 ring-white/70' : '',
-                )}
-              >
-                <div className="flex w-full items-center justify-between">
-                  <span className="text-sm font-extrabold">{mode === 'auto' && active ? 'Stop' : o.label}</span>
-                  <span className="text-[13px] font-bold tabular-nums">{fmt(meta.ret)}</span>
+            {/* Stake stepper */}
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease stake"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">−</button>
+              <div className="flex-1 text-center">
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Stake</div>
+                <div className="flex items-baseline justify-center gap-1.5">
+                  <span className="text-base font-bold text-muted">{symbol}</span>
+                  <input
+                    inputMode="decimal"
+                    value={stake}
+                    onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
+                    aria-label="Stake amount"
+                    className="w-28 bg-transparent text-center text-[22px] font-extrabold tabular-nums text-fg outline-none"
+                  />
                 </div>
-                <span className="text-[10px] font-semibold text-white/85">{meta.profitPct.toFixed(1)}% payout</span>
-              </button>
-            );
-          })}
-        </div>
+              </div>
+              <button type="button" onClick={() => stepStake(1)} aria-label="Increase stake"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">+</button>
+            </div>
 
-        {/* Session ledger */}
-        <div className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3 py-2">
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <span>Session P/L</span>
-            <span className={cn('text-sm font-bold tabular-nums', pnl >= 0 ? 'text-up' : 'text-down')}>
-              {pnl >= 0 ? '+' : ''}{fmt(pnl)}
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            {results.slice(0, 6).map((r) => (
-              <span key={r.id} className={cn('h-2.5 w-2.5 rounded-full', r.won ? 'bg-up' : 'bg-down')} title={`${r.label} · ${r.won ? '+' : ''}${fmt(r.delta)}`} />
-            ))}
-            {results.length === 0 ? <span className="text-[11px] text-muted">no trades yet</span> : null}
-          </div>
-        </div>
-        </>
+            {/* Presets */}
+            <div className="grid grid-cols-6 gap-2">
+              {presets.map((q) => {
+                const active = Number(stake) === q;
+                return (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => setStake(String(q))}
+                    className={cn(
+                      'rounded-lg border py-2.5 text-[12.5px] font-semibold tabular-nums transition',
+                      active ? 'border-accent/55 bg-accent/15 text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg',
+                    )}
+                  >
+                    {isForeign ? `${symbol}${q}` : q >= 1000 ? `${q / 1000}k` : q}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* AUTO-bot params (bot controls — only meaningful in AUTO mode) */}
+            {mode === 'auto' ? (
+              <div className="grid grid-cols-3 gap-2">
+                <BotField icon="target" label="Target" prefix={symbol} value={targetProfit} onChange={setTargetProfit} tone="up" />
+                <BotField icon="stop" label="Stop loss" prefix={symbol} value={stopLoss} onChange={setStopLoss} tone="down" />
+                <BotField icon="mult" label="Mult" prefix="×" value={multiplier} onChange={setMultiplier} />
+              </div>
+            ) : null}
+
+            {/* Dual payout CTAs */}
+            <div className="grid grid-cols-2 gap-3">
+              {[primary, secondary].map((o, i) => {
+                const meta = ctaMeta(o.key);
+                const isUp = i === 0;
+                const active = running && autoOutcomeRef.current === o.key;
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    disabled={meta.disabled}
+                    onClick={() => onCta(o.key)}
+                    className={cn(
+                      'flex items-center justify-between rounded-xl border px-4 py-3 text-left transition disabled:opacity-40',
+                      isUp ? 'border-up/40 bg-up/15 text-up hover:bg-up/25' : 'border-down/40 bg-down/15 text-down hover:bg-down/25',
+                      active ? 'ring-2 ring-white/60' : '',
+                    )}
+                  >
+                    <div>
+                      <div className="text-[17px] font-extrabold leading-tight">{mode === 'auto' && active ? 'Stop' : o.label}</div>
+                      <div className="text-[11px] font-semibold tabular-nums opacity-90">{meta.profitPct.toFixed(2)}%</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[15px] font-extrabold tabular-nums">{fmt(meta.ret)}</div>
+                      <div className="text-[11px] font-semibold opacity-75">Payout</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Session ledger */}
+            <div className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3 py-2">
+              <div className="flex items-center gap-2 text-xs text-muted">
+                <span>Session P/L</span>
+                <span className={cn('text-sm font-bold tabular-nums', pnl >= 0 ? 'text-up' : 'text-down')}>
+                  {pnl >= 0 ? '+' : ''}{fmt(pnl)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                {results.slice(0, 6).map((r) => (
+                  <span key={r.id} className={cn('h-2.5 w-2.5 rounded-full', r.won ? 'bg-up' : 'bg-down')} title={`${r.label} · ${r.won ? '+' : ''}${fmt(r.delta)}`} />
+                ))}
+                {results.length === 0 ? <span className="text-[11px] text-muted">no trades yet</span> : null}
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+function BotFieldIcon({ kind }: { kind: 'target' | 'stop' | 'mult' }) {
+  const cls = cn('h-3 w-3', kind === 'target' ? 'text-up' : kind === 'stop' ? 'text-down' : 'text-muted');
+  if (kind === 'target') {
+    return (
+      <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" />
+      </svg>
+    );
+  }
+  if (kind === 'stop') {
+    return (
+      <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <circle cx="12" cy="12" r="8" /><path d="M8 12h8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M12 3v18M3 12h18M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -435,16 +566,21 @@ function BotField({
   value,
   onChange,
   tone,
+  icon,
 }: {
   label: string;
   prefix: string;
   value: string;
   onChange: (v: string) => void;
   tone?: 'up' | 'down';
+  icon: 'target' | 'stop' | 'mult';
 }) {
   return (
-    <label className="flex flex-col gap-1 rounded-xl border border-border bg-surface-2 px-3 py-2">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</span>
+    <label className="flex flex-col gap-1 rounded-xl border border-border bg-surface px-3 py-2">
+      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted">
+        <BotFieldIcon kind={icon} />
+        {label}
+      </span>
       <div className="flex items-baseline gap-1">
         <span className="text-xs font-semibold text-muted">{prefix}</span>
         <input
