@@ -50,7 +50,19 @@ export function DigitsBottomNav() {
               {/* slow attention halo (respects reduced motion) */}
               <span aria-hidden className="absolute inline-flex h-11 w-11 rounded-full bg-accent/25 opacity-70 [animation-duration:2.4s] motion-safe:animate-ping motion-reduce:hidden" />
               <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent shadow-[0_0_22px_-3px_var(--pp-accent)] ring-1 ring-accent/40 transition duration-200 group-active:scale-95 group-hover:ring-accent/70">
-                <Icon path="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15l-1.9-4.1L5.5 9l4.6-1.4zM6 16l.9 2.1L9 19l-2.1.9L6 22l-.9-2.1L3 19l2.1-.9z" className="h-5 w-5 [animation-duration:2.6s] motion-safe:animate-pulse" />
+                {/* robot-face mark (accent line-art) with a gentle twinkle */}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-7 w-7 [animation-duration:2.6s] motion-safe:animate-pulse">
+                  <line x1="12" y1="2" x2="12" y2="4.6" />
+                  <circle cx="12" cy="1.9" r="1" fill="currentColor" stroke="none" />
+                  <rect x="4" y="4.6" width="16" height="13.8" rx="4" />
+                  <rect x="1.5" y="9.6" width="2" height="4" rx="1" />
+                  <rect x="20.5" y="9.6" width="2" height="4" rx="1" />
+                  <circle cx="9" cy="11" r="2.2" />
+                  <circle cx="15" cy="11" r="2.2" />
+                  <circle cx="9" cy="11" r="0.85" fill="currentColor" stroke="none" />
+                  <circle cx="15" cy="11" r="0.85" fill="currentColor" stroke="none" />
+                  <path d="M8.6 14.4c1 1.4 5.8 1.4 6.8 0" />
+                </svg>
               </span>
             </span>
             AI
