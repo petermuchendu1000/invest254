@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn';
 import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
 import { DerivChart } from '@/components/game/digits/DerivChart';
 import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector';
+import { EntryScanner, type ScanSuggestion } from '@/components/game/digits/EntryScanner';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
 import { useDisplayMoney } from '@/lib/money';
@@ -102,6 +103,8 @@ export function DigitsTradeScreen() {
   const [pnl, setPnl] = useState(0);
   const [flash, setFlash] = useState<{ won: boolean; delta: number } | null>(null);
   const [running, setRunning] = useState(false);
+  // Transiently highlights the CTA the Entry Scanner suggested after "Load Deep Scanner Bot".
+  const [loadedOutcome, setLoadedOutcome] = useState<Outcome | null>(null);
 
   const [snap, setSnap] = useState<{ price: number; digit: number | null; changePct: number; freqs: number[] }>({
     price: 0,
@@ -242,6 +245,19 @@ export function DigitsTradeScreen() {
     const ret = prob > 0 ? totalReturnCents(stakeCents, o) : 0;
     return { disabled, profitPct, ret };
   };
+
+  // Apply an Entry Scanner suggestion: switch instrument + market (+ barrier/pick), arm AUTO mode,
+  // and briefly highlight the suggested side so the user can start it with one tap.
+  const applyScan = useCallback((s: ScanSuggestion) => {
+    if (running) setRunning(false);
+    setInstId(s.instrumentId);
+    setMarket(s.market as Market);
+    if (s.market === 'overunder' && s.digit != null) setBarrier(s.digit);
+    if (s.market === 'matchesdiffers' && s.digit != null) setPick(s.digit);
+    setMode('auto');
+    setLoadedOutcome(s.side as Outcome);
+    window.setTimeout(() => setLoadedOutcome(null), 5000);
+  }, [running]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 p-0.5 sm:gap-2">
@@ -438,7 +454,7 @@ export function DigitsTradeScreen() {
                     className={cn(
                       'flex items-center justify-between rounded-xl border px-4 py-2.5 text-left transition disabled:opacity-40',
                       isUp ? 'border-up/40 bg-up/15 text-up hover:bg-up/25' : 'border-down/40 bg-down/15 text-down hover:bg-down/25',
-                      active ? 'ring-2 ring-white/60' : '',
+                      active ? 'ring-2 ring-white/60' : loadedOutcome === o.key ? 'ring-2 ring-accent' : '',
                     )}
                   >
                     <div>
@@ -454,6 +470,8 @@ export function DigitsTradeScreen() {
               })}
             </div>
       </div>
+
+      <EntryScanner currentInstrumentId={instId} busy={running} onApply={applyScan} />
     </div>
   );
 }
