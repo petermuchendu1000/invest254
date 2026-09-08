@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/cn';
 import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
 import { DerivChart } from '@/components/game/digits/DerivChart';
@@ -8,7 +9,9 @@ import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector'
 import { EntryScanner, type ScanSuggestion } from '@/components/game/digits/EntryScanner';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
-import { useDisplayMoney } from '@/lib/money';
+import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
+import { api } from '@/lib/api/endpoints';
+import { useBrand } from '@/lib/brand/BrandProvider';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useSession } from '@/lib/auth/session';
 import { useDepositUi } from '@/lib/wallet/depositUi';
@@ -70,11 +73,23 @@ export function DigitsTradeScreen() {
   const [instId, setInstId] = useState<string>(DEFAULT_INSTRUMENT_ID);
   const instrument: Instrument = instrumentById(instId);
   const { getInstrumentTicks, getLastInstrumentTick, instrumentResetKey, subscribeInstrument, openDigit, onDigitSettled } = useGameSocket();
-  const { fmt, symbol, isForeign, toKesCents } = useDisplayMoney();
+  const { fmt, both, symbol, isForeign, toKesCents, toDisplay, limit } = useDisplayMoney();
+  const brand = useBrand();
   const token = useSession((s) => s.token);
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const { data: wallet } = useWallet();
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
+
+  // Site stake limits. Money of record is KES cents; rendered in the brand's display currency.
+  // Foreign brands floor at USD_LIMITS.minStake ($5) and never below the site's KES min (mirrors
+  // BetPanel via `limit`). This is the SINGLE source of the min so the UI never shows raw cents.
+  const { data: gameConfig } = useQuery({
+    queryKey: ['gameConfig', brand.slug],
+    queryFn: () => api.gameConfig(brand.slug),
+    staleTime: 5 * 60_000,
+  });
+  const minStakeCents = limit(USD_LIMITS.minStake, gameConfig?.minStakeCents ?? 25000);
+  const maxStakeCents = gameConfig?.maxStakeCents;
 
   const [market, setMarket] = useState<Market>('evenodd');
   const [mode, setMode] = useState<'auto' | 'manual'>('manual');
@@ -88,11 +103,31 @@ export function DigitsTradeScreen() {
 
   const presets = useMemo(() => (isForeign ? [5, 10, 25, 50, 100, 250] : [50, 100, 200, 500, 1000, 5000]), [isForeign]);
   const step = isForeign ? 1 : 50;
-  const [stake, setStake] = useState<string>(String(isForeign ? 10 : 200));
+  const [stake, setStake] = useState<string>(String(isForeign ? USD_LIMITS.minStake : 200));
   const stakeCents = useMemo(() => {
     const n = Number.parseFloat(stake);
     return Number.isFinite(n) && n > 0 ? toKesCents(n) : 0;
   }, [stake, toKesCents]);
+
+  // Client-side stake validity (money of record is KES cents). Blocks below-min / above-max BEFORE
+  // hitting the engine, and drives a friendly currency-formatted hint (never raw cents).
+  const stakeValid =
+    Number.isFinite(stakeCents) && stakeCents >= minStakeCents && (maxStakeCents === undefined || stakeCents <= maxStakeCents);
+  const stakeHint =
+    stakeCents > 0 && stakeCents < minStakeCents
+      ? `Minimum stake is ${both(minStakeCents)}`
+      : maxStakeCents !== undefined && stakeCents > maxStakeCents
+        ? `Maximum stake is ${both(maxStakeCents)}`
+        : null;
+
+  // Once site config loads, raise the stake to the minimum so the default is never below it.
+  useEffect(() => {
+    if (!gameConfig) return;
+    const minU = isForeign ? Math.ceil(toDisplay(minStakeCents)) : Math.round(toDisplay(minStakeCents));
+    const cur = Number.parseFloat(stake);
+    if (!Number.isFinite(cur) || cur < minU) setStake(String(minU));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameConfig, minStakeCents, isForeign]);
 
   // AUTO-bot params (display-currency units for money, plain number for the multiplier).
   const [targetProfit, setTargetProfit] = useState(isForeign ? '20' : '2000');
@@ -155,6 +190,8 @@ export function DigitsTradeScreen() {
     (outcome: Outcome, cents: number): boolean => {
       if (!Number.isFinite(cents) || cents <= 0) return false;
       if (pendingRef.current) return false; // one contract in flight at a time
+      if (cents < minStakeCents) return false; // below the site minimum (hint shown in the UI)
+      if (maxStakeCents !== undefined && cents > maxStakeCents) return false; // above the site maximum
       if (!token || cents > spendable) {
         openDeposit({ amountCents: cents });
         return false;
@@ -165,7 +202,7 @@ export function DigitsTradeScreen() {
       openDigit({ instrumentId: instId, kind: outcome, target, stakeCents: cents });
       return true;
     },
-    [token, spendable, openDeposit, barrier, pick, instId, openDigit],
+    [token, spendable, openDeposit, barrier, pick, instId, openDigit, minStakeCents, maxStakeCents],
   );
 
   // Live snapshot (price / current digit / change% / heatmap) + AUTO-bot loop, off the tick stream.
@@ -195,7 +232,8 @@ export function DigitsTradeScreen() {
         }
         const mult = Math.max(1, Number.parseFloat(multiplier) || 1);
         const base = stakeCents;
-        const next = Math.min(Math.round(base * Math.pow(mult, lossStreakRef.current)), spendable || base);
+        const cap = Math.min(spendable || base, maxStakeCents ?? Number.POSITIVE_INFINITY);
+        const next = Math.min(Math.round(base * Math.pow(mult, lossStreakRef.current)), cap);
         place(autoOutcomeRef.current, next);
       }
     }, 250);
@@ -433,13 +471,15 @@ export function DigitsTradeScreen() {
             <div className="grid grid-cols-6 gap-1.5 xs:gap-2">
               {presets.map((q) => {
                 const active = Number(stake) === q;
+                const belowMin = toKesCents(q) < minStakeCents;
                 return (
                   <button
                     key={q}
                     type="button"
+                    disabled={belowMin}
                     onClick={() => setStake(String(q))}
                     className={cn(
-                      'rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12.5px)] font-semibold tabular-nums transition',
+                      'rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12.5px)] font-semibold tabular-nums transition disabled:cursor-not-allowed disabled:opacity-30',
                       active ? 'border-accent/55 bg-accent/15 text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg',
                     )}
                   >
@@ -448,6 +488,12 @@ export function DigitsTradeScreen() {
                 );
               })}
             </div>
+
+            {/* Min/max hint — always shows the site minimum (currency-formatted, never raw cents);
+                becomes a warning when the current stake is out of range. */}
+            <p className={cn('text-center text-[11px]', stakeHint ? 'text-warn' : 'text-muted')}>
+              {stakeHint ?? `Min ${both(minStakeCents)}${maxStakeCents !== undefined ? ` · Max ${both(maxStakeCents)}` : ''}`}
+            </p>
 
             {/* AUTO-bot params (bot controls — only meaningful in AUTO mode) */}
             {mode === 'auto' ? (
@@ -468,7 +514,7 @@ export function DigitsTradeScreen() {
                   <button
                     key={o.key}
                     type="button"
-                    disabled={meta.disabled}
+                    disabled={meta.disabled || (!running && !stakeValid)}
                     onClick={() => onCta(o.key)}
                     className={cn(
                       'flex items-center justify-between rounded-xl border px-4 py-2.5 text-left transition disabled:opacity-40',
