@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
-import { MultipliersPanel } from '@/components/game/digits/MultipliersPanel';
 import { DerivChart } from '@/components/game/digits/DerivChart';
 import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
@@ -20,7 +19,6 @@ const MARKETS = [
   { id: 'overunder', label: 'Over/Under' },
 ] as const;
 type Market = (typeof MARKETS)[number]['id'];
-type TradeType = 'digits' | 'multipliers';
 type Outcome = 'even' | 'odd' | 'over' | 'under' | 'matches' | 'differs';
 
 // Chart timeframe / zoom presets (1T = default). barSpacing = pixels per bar on the time scale.
@@ -65,7 +63,6 @@ const outcomesFor = (m: Market): [{ key: Outcome; label: string }, { key: Outcom
       : [{ key: 'matches', label: 'Matches' }, { key: 'differs', label: 'Differs' }];
 
 type Pending = { stakeCents: number; outcome: Outcome };
-type Result = { id: number; won: boolean; delta: number; label: string };
 
 /** Deriv-style binary/digits trade surface — trades REAL contracts against the authoritative engine. */
 export function DigitsTradeScreen() {
@@ -79,7 +76,6 @@ export function DigitsTradeScreen() {
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
 
   const [market, setMarket] = useState<Market>('evenodd');
-  const [tradeType, setTradeType] = useState<TradeType>('digits');
   const [mode, setMode] = useState<'auto' | 'manual'>('manual');
   const [barrier, setBarrier] = useState(5); // Over/Under
   const [pick, setPick] = useState(0); // Matches/Differs
@@ -104,7 +100,6 @@ export function DigitsTradeScreen() {
 
   // Session state (authoritative — driven by server digit_settled events).
   const [pnl, setPnl] = useState(0);
-  const [results, setResults] = useState<Result[]>([]);
   const [flash, setFlash] = useState<{ won: boolean; delta: number } | null>(null);
   const [running, setRunning] = useState(false);
 
@@ -120,7 +115,6 @@ export function DigitsTradeScreen() {
   runningRef.current = running;
   const lossStreakRef = useRef(0);
   const autoOutcomeRef = useRef<Outcome>('even');
-  const idRef = useRef(0);
   const pnlRef = useRef(0);
   pnlRef.current = pnl;
 
@@ -143,16 +137,12 @@ export function DigitsTradeScreen() {
   // Resolve settlements authoritatively from the engine (single in-flight contract at a time).
   useEffect(() => {
     const off = onDigitSettled((s: DigitSettledData) => {
-      const p = pendingRef.current;
       pendingRef.current = null;
       const won = s.won;
       const delta = s.pnlCents; // authoritative P/L in cents
       lossStreakRef.current = won ? 0 : lossStreakRef.current + 1;
       setPnl((x) => x + delta);
       setFlash({ won, delta });
-      idRef.current += 1;
-      const label = `${(p?.outcome ?? '').toString().toUpperCase()} · ${s.digit}`;
-      setResults((r) => [{ id: idRef.current, won, delta, label }, ...r].slice(0, 8));
       window.setTimeout(() => setFlash(null), 900);
     });
     return off;
@@ -210,8 +200,7 @@ export function DigitsTradeScreen() {
   }, [getInstrumentTicks, place, stakeCents, spendable, multiplier, targetProfit, stopLoss, toKesCents]);
 
   const [primary, secondary] = outcomesFor(market);
-  const isMultipliers = tradeType === 'multipliers';
-  const needsDigit = !isMultipliers && market !== 'evenodd';
+  const needsDigit = market !== 'evenodd';
   const selectorValue = market === 'overunder' ? barrier : pick;
   const onSelectDigit = (d: number) => (market === 'overunder' ? setBarrier(d) : setPick(d));
 
@@ -256,46 +245,24 @@ export function DigitsTradeScreen() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 p-0.5 sm:gap-2">
-      {/* Trade type — Digits vs Multipliers (kept reachable as a slim switch; Multipliers is its own
-          trade type, not a digit sub-market). */}
-      <div className="flex justify-center">
-        <div className="flex rounded-lg border border-border bg-surface-2 p-0.5">
-          {(['digits', 'multipliers'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => { setTradeType(t); if (running) setRunning(false); }}
-              className={cn(
-                'rounded-md px-4 py-1 text-[12px] font-semibold capitalize transition',
-                tradeType === t ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg',
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+      {/* Market tabs — Matches/Differs · Even/Odd · Over/Under (active = outlined accent pill) */}
+      <div className="flex items-center gap-1.5 xs:gap-2">
+        {MARKETS.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => { setMarket(m.id); if (running) setRunning(false); }}
+            className={cn(
+              'min-w-0 flex-1 truncate rounded-full border px-2 py-1.5 text-[clamp(11px,3.2vw,13px)] font-semibold transition',
+              market === m.id
+                ? 'border-accent bg-accent/10 text-fg'
+                : 'border-transparent text-muted hover:text-fg',
+            )}
+          >
+            {m.label}
+          </button>
+        ))}
       </div>
-
-      {/* Market tabs (Digits only) — Matches/Differs · Even/Odd · Over/Under */}
-      {!isMultipliers ? (
-        <div className="flex items-center gap-1.5 xs:gap-2">
-          {MARKETS.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => { setMarket(m.id); if (running) setRunning(false); }}
-              className={cn(
-                'min-w-0 flex-1 truncate rounded-full border px-1.5 py-1.5 text-[clamp(11px,3.4vw,14px)] font-semibold transition',
-                market === m.id
-                  ? 'border-accent/55 bg-accent/15 text-fg shadow-[0_0_16px_-6px_var(--pp-accent)]'
-                  : 'border-transparent text-muted hover:text-fg',
-              )}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
 
       {/* Chart card — toolbar (1T · instrument · live share) + Deriv-style chart */}
       <div className="relative flex min-h-[124px] flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
@@ -307,7 +274,7 @@ export function DigitsTradeScreen() {
               onClick={() => setTfOpen((v) => !v)}
               aria-haspopup="listbox"
               aria-expanded={tfOpen}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface-2 text-[13px] font-bold text-accent transition hover:border-accent/60"
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-[12px] font-bold text-accent transition hover:border-accent/60"
             >
               {tf.label}
             </button>
@@ -346,7 +313,7 @@ export function DigitsTradeScreen() {
           {/* Live share badge (market-aware) — pinned right */}
           <span
             title={`${shareLabel} over last ${WINDOW} ticks`}
-            className="ml-auto shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[12.5px] font-bold tabular-nums text-fg"
+            className="ml-auto shrink-0 self-center rounded-lg border border-border bg-surface-2 px-2 py-1 text-[11px] font-bold tabular-nums text-fg"
           >
             {Math.round(sharePct)}%
           </span>
@@ -373,39 +340,31 @@ export function DigitsTradeScreen() {
         </div>
       </div>
 
-      {/* Digit row (Digits only) — also the picker for Matches/Differs & Over/Under */}
-      {!isMultipliers ? (
-        <>
-          <DigitHeatmap
-            freqs={snap.freqs}
-            current={snap.digit}
-            selected={needsDigit ? selectorValue : null}
-            selectable={needsDigit}
-            onSelect={onSelectDigit}
-          />
-          {needsDigit ? (
-            <p className="-mt-1 text-center text-[11px] text-muted">
-              {market === 'overunder' ? 'Barrier digit' : 'Prediction digit'}: <span className="font-semibold text-fg">{selectorValue}</span> — tap a digit to change
-            </p>
-          ) : null}
-        </>
+      {/* Digit row — also the picker for Matches/Differs & Over/Under */}
+      <DigitHeatmap
+        freqs={snap.freqs}
+        current={snap.digit}
+        selected={needsDigit ? selectorValue : null}
+        selectable={needsDigit}
+        onSelect={onSelectDigit}
+      />
+      {needsDigit ? (
+        <p className="-mt-1 text-center text-[11px] text-muted">
+          {market === 'overunder' ? 'Barrier digit' : 'Prediction digit'}: <span className="font-semibold text-fg">{selectorValue}</span> — tap a digit to change
+        </p>
       ) : null}
 
       {/* Console */}
       <div className="flex min-h-0 flex-col gap-1.5">
-        {isMultipliers ? (
-          <MultipliersPanel getLastTick={getLastInstrumentTick} resetKey={instrumentResetKey} instrumentId={instId} />
-        ) : (
-          <>
-            {/* AUTO / MANUAL */}
-            <div className="flex rounded-xl border border-border bg-surface p-1">
+        {/* AUTO / MANUAL */}
+        <div className="flex rounded-xl border border-border bg-surface p-1">
               {(['auto', 'manual'] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => { setMode(m); if (running) setRunning(false); }}
                   className={cn(
-                    'flex-1 rounded-lg py-2 text-[15px] font-extrabold uppercase tracking-wide transition',
+                    'flex-1 rounded-lg py-2 text-[13px] font-extrabold uppercase tracking-wide transition',
                     mode === m ? 'bg-accent text-accent-fg shadow-[0_2px_16px_-4px_var(--pp-accent)]' : 'text-muted hover:text-fg',
                   )}
                 >
@@ -417,7 +376,7 @@ export function DigitsTradeScreen() {
             {/* Stake stepper */}
             <div className="flex items-center gap-3">
               <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease stake"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">−</button>
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border bg-surface text-xl font-light text-muted transition hover:border-accent/60 hover:text-fg">−</button>
               <div className="flex-1 text-center">
                 <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Stake</div>
                 <div className="flex items-baseline justify-center gap-1.5">
@@ -427,12 +386,12 @@ export function DigitsTradeScreen() {
                     value={stake}
                     onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
                     aria-label="Stake amount"
-                    className="w-28 bg-transparent text-center text-[22px] font-extrabold tabular-nums text-fg outline-none"
+                    className="w-28 bg-transparent text-center text-[20px] font-extrabold tabular-nums text-fg outline-none"
                   />
                 </div>
               </div>
               <button type="button" onClick={() => stepStake(1)} aria-label="Increase stake"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-surface text-2xl font-light text-muted transition hover:border-accent/60 hover:text-fg">+</button>
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border bg-surface text-xl font-light text-muted transition hover:border-accent/60 hover:text-fg">+</button>
             </div>
 
             {/* Presets */}
@@ -445,7 +404,7 @@ export function DigitsTradeScreen() {
                     type="button"
                     onClick={() => setStake(String(q))}
                     className={cn(
-                      'rounded-lg border py-1.5 text-[clamp(11px,3vw,13px)] font-semibold tabular-nums transition',
+                      'rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12.5px)] font-semibold tabular-nums transition',
                       active ? 'border-accent/55 bg-accent/15 text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg',
                     )}
                   >
@@ -494,25 +453,6 @@ export function DigitsTradeScreen() {
                 );
               })}
             </div>
-
-            {/* Session ledger — hidden on very short viewports (<=660px tall) so the chart + controls
-                keep their space on small devices; visible everywhere else. */}
-            <div className="flex items-center justify-between rounded-xl border border-border bg-surface-2 px-3 py-1.5 [@media(max-height:660px)]:hidden">
-              <div className="flex items-center gap-2 text-xs text-muted">
-                <span>Session P/L</span>
-                <span className={cn('text-sm font-bold tabular-nums', pnl >= 0 ? 'text-up' : 'text-down')}>
-                  {pnl >= 0 ? '+' : ''}{fmt(pnl)}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                {results.slice(0, 6).map((r) => (
-                  <span key={r.id} className={cn('h-2.5 w-2.5 rounded-full', r.won ? 'bg-up' : 'bg-down')} title={`${r.label} · ${r.won ? '+' : ''}${fmt(r.delta)}`} />
-                ))}
-                {results.length === 0 ? <span className="text-[11px] text-muted">no trades yet</span> : null}
-              </div>
-            </div>
-          </>
-        )}
       </div>
     </div>
   );
