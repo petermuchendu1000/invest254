@@ -10,8 +10,6 @@ import { useAuthUi } from '@/lib/auth/ui';
 import { useSession } from '@/lib/auth/session';
 import { useHydrated } from '@/lib/useHydrated';
 
-const MUTE_KEY = 'pp:muted';
-
 function Icon({ path, className = 'h-5 w-5' }: { path: string; className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
@@ -32,7 +30,7 @@ const NAV = [
 
 /**
  * Digits-brand top bar (matches the digits broker mock): hamburger nav drawer, brand wordmark,
- * balance pill, sound toggle, Deposit CTA and a notifications affordance. Only rendered for brands
+ * balance pill and Deposit CTA. Only rendered for brands
  * whose `trade_ui = 'digits'`; every other brand keeps the standard TopBar. Reuses the existing
  * wallet / auth / session stores so all behaviour is preserved.
  */
@@ -46,19 +44,6 @@ export function DigitsTopBar() {
   const openAuth = useAuthUi((s) => s.openAuth);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [muted, setMuted] = useState(false);
-
-  // Persisted mute flag (drives outcome/tick sound gating).
-  useEffect(() => {
-    try { setMuted(window.localStorage.getItem(MUTE_KEY) === '1'); } catch { /* SSR */ }
-  }, []);
-  const toggleMute = () => {
-    setMuted((m) => {
-      const next = !m;
-      try { window.localStorage.setItem(MUTE_KEY, next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
-  };
 
   // Lock body scroll while the drawer is open.
   useEffect(() => {
@@ -90,20 +75,6 @@ export function DigitsTopBar() {
           {authed ? <div className="ml-1"><BalancePill /></div> : null}
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-            <button
-              type="button"
-              onClick={toggleMute}
-              aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
-              aria-pressed={muted}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg"
-            >
-              {muted ? (
-                <Icon path="M11 5L6 9H3v6h3l5 4V5zM22 9l-6 6M16 9l6 6" />
-              ) : (
-                <Icon path="M11 5L6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" />
-              )}
-            </button>
-
             {authed ? (
               <button
                 type="button"
@@ -118,14 +89,6 @@ export function DigitsTopBar() {
                 <button type="button" onClick={() => openAuth('register')} className="rounded-full bg-accent px-4 py-2 text-sm font-bold text-accent-fg transition hover:brightness-105">Sign Up</button>
               </>
             )}
-
-            <Link
-              href="/account"
-              aria-label="Notifications"
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg"
-            >
-              <Icon path="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" />
-            </Link>
           </div>
         </div>
       </header>
