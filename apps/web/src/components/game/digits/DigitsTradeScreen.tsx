@@ -364,11 +364,12 @@ export function DigitsTradeScreen() {
         selectable={false}
       />
 
-      {/* DIGIT selector — barrier (Over/Under) or prediction (Match/Differ). Hidden for Even/Odd. */}
+      {/* DIGIT selector — barrier (Over/Under) or prediction (Match/Differ). Hidden for Even/Odd.
+          "DIGIT" hugs the left; the numbers group to the right with a clear gap between them. */}
       {needsDigit ? (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-2 py-1.5">
-          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-muted">Digit</span>
-          <div className="grid flex-1 grid-cols-10 gap-1">
+        <div className="flex items-center gap-4 rounded-lg border border-border bg-surface-2 px-3 py-2">
+          <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.15em] text-muted">Digit</span>
+          <div className="flex flex-1 items-center justify-between">
             {Array.from({ length: 10 }, (_, d) => (
               <button
                 key={d}
@@ -377,8 +378,8 @@ export function DigitsTradeScreen() {
                 aria-pressed={selectorValue === d}
                 aria-label={`${market === 'overunder' ? 'Barrier' : 'Prediction'} digit ${d}`}
                 className={cn(
-                  'flex aspect-square w-full items-center justify-center rounded-full border text-[clamp(11px,3vw,13px)] font-bold tabular-nums transition',
-                  selectorValue === d ? 'border-accent bg-accent/15 text-fg' : 'border-transparent text-muted hover:text-fg',
+                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[13px] font-bold tabular-nums transition',
+                  selectorValue === d ? 'border border-accent text-fg' : 'text-muted hover:text-fg',
                 )}
               >
                 {d}
