@@ -84,10 +84,9 @@ export function DigitsTradeScreen() {
   const [barrier, setBarrier] = useState(5); // Over/Under
   const [pick, setPick] = useState(0); // Matches/Differs
 
-  // Chart toolbar UI state (presentational): timeframe/zoom, Historical View pause, 1T menu.
+  // Chart toolbar UI state (presentational): timeframe/zoom + 1T menu.
   const [tf, setTf] = useState<(typeof TIMEFRAMES)[number]>(TIMEFRAMES[0]);
   const [tfOpen, setTfOpen] = useState(false);
-  const [historical, setHistorical] = useState(false);
   const tfRef = useRef<HTMLDivElement | null>(null);
 
   const presets = useMemo(() => (isForeign ? [1, 5, 10, 25, 50, 100] : [50, 100, 200, 500, 1000, 5000]), [isForeign]);
@@ -298,7 +297,7 @@ export function DigitsTradeScreen() {
         </div>
       ) : null}
 
-      {/* Chart card — toolbar (1T · instrument · Historical View · live share) + Deriv-style chart */}
+      {/* Chart card — toolbar (1T · instrument · live share) + Deriv-style chart */}
       <div className="relative flex min-h-[124px] flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
         <div className="flex items-center gap-1.5 p-2 pb-1">
           {/* 1T timeframe / zoom */}
@@ -344,19 +343,6 @@ export function DigitsTradeScreen() {
             />
           </div>
 
-          {/* Historical View — freeze auto-follow and scroll back through buffered ticks */}
-          <button
-            type="button"
-            onClick={() => setHistorical((v) => !v)}
-            aria-pressed={historical}
-            className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-[13px] font-bold text-white transition',
-              historical ? 'bg-down ring-2 ring-down/40' : 'bg-down/90 hover:bg-down',
-            )}
-          >
-            Historical View
-          </button>
-
           {/* Live share badge (market-aware) */}
           <span
             title={`${shareLabel} over last ${WINDOW} ticks`}
@@ -371,14 +357,8 @@ export function DigitsTradeScreen() {
             getTicks={getInstrumentTicks}
             getLastTick={getLastInstrumentTick}
             resetKey={instrumentResetKey}
-            paused={historical}
             barSpacing={tf.barSpacing}
           />
-          {historical ? (
-            <span className="pointer-events-none absolute left-2 top-2 z-20 rounded-md bg-down/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-              Historical
-            </span>
-          ) : null}
           {flash ? (
             <div
               className={cn(
