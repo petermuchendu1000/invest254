@@ -48,7 +48,7 @@ export function DigitHeatmap({
             aria-pressed={isSelected}
             aria-label={`Digit ${d}, ${f.toFixed(1)}%`}
             className={cn(
-              'flex min-w-0 flex-col items-center gap-1 transition',
+              'flex min-w-0 flex-col items-center gap-0.5 transition',
               selectable ? 'cursor-pointer' : 'cursor-default',
             )}
           >

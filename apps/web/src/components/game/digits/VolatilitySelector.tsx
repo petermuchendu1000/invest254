@@ -70,7 +70,7 @@ export function VolatilitySelector({
           aria-expanded={open}
           title={instrument.label}
           className={cn(
-            'flex h-11 w-full items-center gap-2.5 rounded-lg border bg-surface-2 px-2.5 text-left transition',
+            'flex h-10 w-full items-center gap-2.5 rounded-lg border bg-surface-2 px-2.5 text-left transition',
             open ? 'border-accent' : 'border-border hover:border-accent/60',
           )}
         >
