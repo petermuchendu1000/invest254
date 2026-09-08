@@ -356,18 +356,36 @@ export function DigitsTradeScreen() {
         </div>
       </div>
 
-      {/* Digit row — also the picker for Matches/Differs & Over/Under */}
+      {/* Live digit-frequency stats (read-only): current digit ringed, hottest green, coldest red */}
       <DigitHeatmap
         freqs={snap.freqs}
         current={snap.digit}
-        selected={needsDigit ? selectorValue : null}
-        selectable={needsDigit}
-        onSelect={onSelectDigit}
+        selected={null}
+        selectable={false}
       />
+
+      {/* DIGIT selector — barrier (Over/Under) or prediction (Match/Differ). Hidden for Even/Odd. */}
       {needsDigit ? (
-        <p className="-mt-1 text-center text-[11px] text-muted">
-          {market === 'overunder' ? 'Barrier digit' : 'Prediction digit'}: <span className="font-semibold text-fg">{selectorValue}</span> — tap a digit to change
-        </p>
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-2 py-1.5">
+          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-muted">Digit</span>
+          <div className="grid flex-1 grid-cols-10 gap-1">
+            {Array.from({ length: 10 }, (_, d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => onSelectDigit(d)}
+                aria-pressed={selectorValue === d}
+                aria-label={`${market === 'overunder' ? 'Barrier' : 'Prediction'} digit ${d}`}
+                className={cn(
+                  'flex aspect-square w-full items-center justify-center rounded-full border text-[clamp(11px,3vw,13px)] font-bold tabular-nums transition',
+                  selectorValue === d ? 'border-accent bg-accent/15 text-fg' : 'border-transparent text-muted hover:text-fg',
+                )}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>
       ) : null}
 
       {/* Console */}
