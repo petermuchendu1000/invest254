@@ -44,10 +44,14 @@ export function DigitsBottomNav() {
             type="button"
             onClick={() => openScanner(true)}
             aria-label="AI Entry Scanner"
-            className="flex flex-col items-center gap-1 text-[11px] font-semibold text-fg"
+            className="group flex flex-col items-center gap-1 text-[11px] font-semibold text-fg"
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent shadow-[0_0_18px_-4px_var(--pp-accent)] ring-1 ring-accent/30">
-              <Icon path="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15l-1.9-4.1L5.5 9l4.6-1.4zM6 16l.9 2.1L9 19l-2.1.9L6 22l-.9-2.1L3 19l2.1-.9z" />
+            <span className="relative flex h-12 w-12 items-center justify-center">
+              {/* slow attention halo (respects reduced motion) */}
+              <span aria-hidden className="absolute inline-flex h-11 w-11 rounded-full bg-accent/25 opacity-70 [animation-duration:2.4s] motion-safe:animate-ping motion-reduce:hidden" />
+              <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent shadow-[0_0_22px_-3px_var(--pp-accent)] ring-1 ring-accent/40 transition duration-200 group-active:scale-95 group-hover:ring-accent/70">
+                <Icon path="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15l-1.9-4.1L5.5 9l4.6-1.4zM6 16l.9 2.1L9 19l-2.1.9L6 22l-.9-2.1L3 19l2.1-.9z" className="h-5 w-5 [animation-duration:2.6s] motion-safe:animate-pulse" />
+              </span>
             </span>
             AI
           </button>
