@@ -86,7 +86,7 @@ export function DigitsTradeScreen() {
   const [tfOpen, setTfOpen] = useState(false);
   const tfRef = useRef<HTMLDivElement | null>(null);
 
-  const presets = useMemo(() => (isForeign ? [1, 5, 10, 25, 50, 100] : [50, 100, 200, 500, 1000, 5000]), [isForeign]);
+  const presets = useMemo(() => (isForeign ? [5, 10, 25, 50, 100, 250] : [50, 100, 200, 500, 1000, 5000]), [isForeign]);
   const step = isForeign ? 1 : 50;
   const [stake, setStake] = useState<string>(String(isForeign ? 10 : 200));
   const stakeCents = useMemo(() => {

@@ -167,7 +167,18 @@ export function EntryScanner({
         {/* header */}
         <div className="mb-3 flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/15 text-accent ring-1 ring-accent/30">
-            <Icon path="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15l-1.9-4.1L5.5 9l4.6-1.4zM6 16l.9 2.1L9 19l-2.1.9L6 22l-.9-2.1L3 19l2.1-.9z" className="h-4 w-4" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-5 w-5">
+              <line x1="12" y1="2" x2="12" y2="4.6" />
+              <circle cx="12" cy="1.9" r="1" fill="currentColor" stroke="none" />
+              <rect x="4" y="4.6" width="16" height="13.8" rx="4" />
+              <rect x="1.5" y="9.6" width="2" height="4" rx="1" />
+              <rect x="20.5" y="9.6" width="2" height="4" rx="1" />
+              <circle cx="9" cy="11" r="2.2" />
+              <circle cx="15" cy="11" r="2.2" />
+              <circle cx="9" cy="11" r="0.85" fill="currentColor" stroke="none" />
+              <circle cx="15" cy="11" r="0.85" fill="currentColor" stroke="none" />
+              <path d="M8.6 14.4c1 1.4 5.8 1.4 6.8 0" />
+            </svg>
           </span>
           <h2 className="text-base font-extrabold text-fg">Entry Scanner</h2>
           <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg">
@@ -274,9 +285,7 @@ export function EntryScanner({
 
         {busy ? (
           <p className="mt-2 text-center text-[11px] text-warn">Finish or stop the current trade before scanning.</p>
-        ) : (
-          <p className="mt-2 text-center text-[11px] text-muted">Based on recent tick history. Past patterns don’t guarantee future results.</p>
-        )}
+        ) : null}
       </div>
     </div>
   );
