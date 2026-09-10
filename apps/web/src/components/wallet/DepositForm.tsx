@@ -25,11 +25,10 @@ const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
 /**
  * Deposit body for the unified wallet sheet (no Modal/header — WalletModal provides those).
  * `provider` selects the gateway rail (migration 0116): 'mpesa' (Daraja, default) or 'megapay'.
- * Both share the identical STK-push UX (phone + amount → prompt → settle-by-poll); only the API
- * mutation and the provider label differ, so the player experience stays consistent across gateways.
+ * The gateway is intentionally NOT surfaced to players — the flow is a simple amount + phone +
+ * "Continue to Pay"; only the API mutation differs by provider.
  */
 export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'megapay' } = {}) {
-  const providerLabel = provider === 'megapay' ? 'Mega Pay' : 'M-Pesa';
   const close = useDepositUi((s) => s.close);
   const prefillAmountCents = useDepositUi((s) => s.prefillAmountCents);
   const pending = useDepositUi((s) => s.pending);
@@ -290,15 +289,15 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
 
       <p className="text-xs leading-relaxed text-muted">
         {token
-          ? 'You’ll get an STK push prompt on your phone — enter your M-Pesa PIN to confirm. Your PIN is never entered in this app.'
-          : 'Create your free account next, then approve the M-Pesa prompt to fund this deposit.'}
+          ? 'You’ll get a payment prompt on your phone — enter your M-Pesa PIN to confirm. Your PIN is never entered in this app.'
+          : 'Create your free account next, then approve the payment prompt to fund this deposit.'}
       </p>
       <Button type="submit" size="lg" fullWidth disabled={deposit.isPending}>
         {!token
           ? 'Sign up to deposit'
           : deposit.isPending
-            ? 'Sending STK push…'
-            : `Continue to ${providerLabel}`}
+            ? 'Sending payment prompt…'
+            : 'Continue to Pay'}
       </Button>
     </form>
   );
