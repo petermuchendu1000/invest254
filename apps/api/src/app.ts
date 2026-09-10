@@ -7,7 +7,7 @@ import {
 import type { Logger } from "@invest254/shared/logger";
 import type {
   FairnessRecord, PaymentService, AuthService, AffiliateService, AdminService, NotificationService, PushService, Verifier, PlatformService,
-  Page, PageQuery, LedgerEntry, PositionRecord, PositionDetail, PositionListQuery, TransactionRecord, TxListQuery,
+  Page, PageQuery, LedgerEntry, PositionRecord, PositionDetail, PositionListQuery, DigitHistoryRow, TransactionRecord, TxListQuery,
 } from "@invest254/engine";
 import { Router, ApiError, serverFrom, type Ctx } from "./http.js";
 import { registerProtectedRoutes } from "./app.payments.js";
@@ -199,6 +199,8 @@ export interface ApiDeps {
   // ── F2: player history reads (each scoped to the caller's own userId AND site) ──
   ledger(userId: string, q: PageQuery, siteId?: string): Promise<Page<LedgerEntry>>;
   positions(userId: string, q: PositionListQuery, siteId?: string): Promise<Page<PositionRecord>>;
+  /** A player's DIGIT contract history (receipt/review). Scoped to the caller's userId AND site. */
+  digitHistory(userId: string, q: PageQuery, siteId?: string): Promise<Page<DigitHistoryRow>>;
   positionDetail(userId: string, positionId: string, siteId?: string): Promise<PositionDetail | null>;
   transactions(userId: string, q: TxListQuery, siteId?: string): Promise<Page<TransactionRecord>>;
 

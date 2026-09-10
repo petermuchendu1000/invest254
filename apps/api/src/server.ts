@@ -683,6 +683,7 @@ async function buildDeps(): Promise<ApiDeps> {
     },
     ledger: (userId, qy, siteId) => repo.listLedger(userId, qy, siteId),
     positions: (userId, qy, siteId) => repo.listPositions(userId, qy, siteId),
+    digitHistory: (userId, qy, siteId) => repo.listDigitHistory(userId, qy, siteId),
     positionDetail: (userId, id, siteId) => repo.getPositionDetail(userId, id, siteId),
     transactions: (userId, qy, siteId) => payRepo.listTransactions(userId, qy, siteId),
     // Support chat (docs/11, migration 0057): enabled only when the free embedder + LLM creds

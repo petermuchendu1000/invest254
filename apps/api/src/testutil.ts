@@ -568,6 +568,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
       ({ real: await payRepo.getBalance(userId, siteId), bonus: bonus.get(userId) ?? 0, currency: "KES" }),
     ledger: (userId, q, siteId) => gameRepo.listLedger(userId, q, siteId),
     positions: (userId, q, siteId) => gameRepo.listPositions(userId, q, siteId),
+    digitHistory: (userId, q, siteId) => gameRepo.listDigitHistory(userId, q, siteId),
     positionDetail: (userId, id, siteId) => gameRepo.getPositionDetail(userId, id, siteId),
     transactions: (userId, q, siteId) => payRepo.listTransactions(userId, q, siteId),
     support: support.deps,
