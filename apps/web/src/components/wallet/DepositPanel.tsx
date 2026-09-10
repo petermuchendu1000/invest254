@@ -23,8 +23,8 @@ export function DepositPanel() {
   const megapayOn = (providers ?? []).some((p) => p.code === 'megapay');
 
   const methods: MethodDef[] = [
-    ...(mpesaOn ? [{ id: 'stk' as Method, label: 'STK Push' }] : []),
-    ...(megapayOn ? [{ id: 'megapay' as Method, label: 'Mega Pay' }] : []),
+    ...(mpesaOn ? [{ id: 'stk' as Method, label: 'M-Pesa' }] : []),
+    ...(megapayOn ? [{ id: 'megapay' as Method, label: mpesaOn ? 'M-Pesa (2)' : 'M-Pesa' }] : []),
     ...(mpesaOn ? [{ id: 'paybill' as Method, label: 'Pay Bill' }] : []),
   ];
 
