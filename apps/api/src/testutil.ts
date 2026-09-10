@@ -9,6 +9,7 @@ import {
   type FairnessRecord, type AuthClaims, type Verifier,
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance, type Brand } from "./app.js";
+import { createLogger } from "@invest254/shared/logger";
 import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
 import type { ReferralRepo, CommissionPayoutRow, AdminCommissionPayoutRow } from "./app.referral.js";
 import type { SupportDeps, SupportStore, SupportConversation, SupportMessageRow } from "./app.support.js";
@@ -521,6 +522,8 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const referralRepo = makeInMemoryReferralRepo();
   const deps: ApiDeps = {
     verifier: stubVerifier(),
+    // Silent logger in tests: exercises the request-logging path without spamming test output.
+    logger: createLogger({ level: "error", sink: () => {} }),
     auth,
     affiliate,
     admin,
