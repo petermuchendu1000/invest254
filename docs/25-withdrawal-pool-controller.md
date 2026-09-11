@@ -426,5 +426,12 @@ legacy `min_withdrawal` (KES cents) remains the authoritative fallback.
   validates natively so the client floor matches the server exactly.
 - **Verified:** shared unit tests (`money.currency.test.ts`), platform-console e2e (setter + guard), and a
   live-rate check — muchwins ($100) rejects $50/$99.99 and accepts $100; KES brands unchanged at KES 2,000.
-- **Note:** the pool near-miss lever (§docs/25 near-miss) still reads the legacy KES `min_withdrawal`; aligning
-  it to the native line is a separate follow-up tracked with the near-miss calibration review.
+- **Near-miss alignment (dynamic, all game types):** the pool near-miss lever now uses the SAME
+  currency-native line. The engine's `SiteGameConfigStore` resolves `minWithdrawalEffectiveCents`
+  (`minWithdrawalNative` → KES cents at the live rate via the shared `@invest254/shared/fx` module) at
+  config load, and `game.ts` feeds it to the pool controller for BOTH engines — rise/fall (curve &
+  candlestick, variable payout: the win is held just below the line) and digits (deriv, fixed payout:
+  a threshold-crossing win becomes a near-miss loss). So on a USD brand the psychological line is
+  $200, not the legacy KES value. KES brands are unchanged (rate 1 ⇒ effective == legacy); if FX is
+  unavailable the engine safely falls back to `minWithdrawalCents`. Verified in `pool.test.ts`
+  ("near-miss honours the currency-native $200 line across rise/fall AND digits").
