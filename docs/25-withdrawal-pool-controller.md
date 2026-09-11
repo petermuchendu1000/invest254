@@ -317,6 +317,10 @@ staying responsive (activation lag 2–8 days) and stable (churn ~6.5%). Steps, 
 - Re-run daily (manually or on a schedule) so allocations track demand; a newly-active brand is picked
   up within the EMA window. A brand set to 0 pays nobody until the next run — acceptable for idle brands
   and resolved by a daily cadence.
+- **Outage caveat (see §15.6):** the EMA demand metric of §15.1 is *reactive* — a sustained demand
+  interruption (e.g. a payment outage that stops deposits, hence pool turnover) decays `forecast → 0`,
+  which collapses `required` and, via the §15.2 cap, the whole allocation. This starved every brand to
+  ~zero after the Aug 26–Sep 10 paybill outage (BUGLOG #12). The §15.6 floor closes this.
 - The allocation only sets pool CAPS; it never moves player money. Fully audited via the existing
   `platform_pool_distributions` + `admin_actions` trail.
 
@@ -327,3 +331,47 @@ staying responsive (activation lag 2–8 days) and stable (churn ~6.5%). Steps, 
 the repo variable `POOL_DAILY_TOTAL_CENTS` (the global envelope, integer cents); without it the script
 cleanly no-ops (never spends unallocated money). `Σ alloc ≤ envelope` by construction, fully audited.
 Manual `workflow_dispatch` supports a `dry_run` preview. Requires the existing `DATABASE_URL` repo secret.
+
+### 15.6 Anti-starvation floor (outage-proof) — the fix for BUGLOG #12
+The §15.1 EMA is deliberately reactive, which is the right behaviour for *demand tracking* but the wrong
+behaviour for *anti-starvation*: when real player demand is interrupted by an EXTERNAL failure (a paybill
+outage stops deposits → players cannot fund trades → pool turnover → 0 for days), the EMA decays toward 0,
+so `required = targetRtp × forecast → 0`, the per-brand cap `capMult × required → 0`, and the §15.2 floor
+(which is itself clamped by that cap) collapses too. The brand's `default_daily_pool_cents` is then set to
+~zero and, because every payout gate in the controller scales with the pool `amount` (the cash fuse
+`available`, and the per-player no-scoop share `playerShare × amount`), **every decided win clamps to a
+loss → 100% loss** even though the edge invariant would happily pay. This is exactly what happened live
+(BUGLOG #12): after the outage, invest254's daily pool fell to KES 47 and all brands paid 0 wins.
+
+**Fix — a guaranteed floor decoupled from the reactive forecast.** Each ACTIVE brand (one with any recent
+forecast OR a positive robust baseline) is funded to at least
+
+    floor_i = max(configuredFloorCents, round(targetRtp_i × expectedTurnover_i))
+
+BEFORE the demand-based water-fill runs, where `expectedTurnover_i` is an **outage-proof** estimate of the
+brand's demonstrated daily turnover:
+
+    expectedTurnover_i = max( emaForecast(recent) , robustExpectedTurnover(baseline) )
+    robustExpectedTurnover(series) = max( p75(non-zero days) , mean(last 7 non-zero days) )
+
+Only NON-ZERO days count, so idle/outage days can never drag the floor down — this is what *decouples
+payouts from a deposit outage*. `p75` favours demonstrated busy-day demand (robust to a slow ramp-up and
+one-day spikes); the recent-active mean tracks the current healthy level. A brand that has **never** had
+turnover still gets 0 (no capital wasted on permanently-idle brands). The floor is rationed proportionally
+only if `Σ floors > G`, so `Σ alloc ≤ G` still holds. Because a larger pool `amount` is only a *ceiling*
+(the controller's hard cap `paid + reserved ≤ ⌊targetRtp × turnover⌋` bounds actual payout to
+`targetRtp × today's turnover` regardless of pool size), the floor **cannot** cause overpayment and the
+positive edge (realized RTP ≤ 1 − house_edge) is preserved unchanged.
+
+- **Pure core:** `robustExpectedTurnover()` + the floor phase in `distributeDynamicPool()`
+  (`packages/shared/src/pooldistribution.ts`); new `BrandDemand.expectedTurnoverCents` and
+  `DistributeParams.configuredFloorCents`. Unit-tested in `pooldistribution.test.ts` (outage-collapse,
+  huge-envelope-no-longer-clamps, ration-when-Σfloor>G, floor-is-a-minimum, back-compat no-op).
+- **Feed:** `PlatformService.poolDemand()` computes `expectedTurnover` over a wider `baselineDays`
+  window (default 45, only non-zero days) and passes it plus `configuredFloorCents` (env
+  `POOL_MIN_FLOOR_CENTS`, default 0) into the allocator; the preview row now carries
+  `expectedTurnoverCents` + `floorCents` for audit. Legacy behaviour is byte-for-byte preserved when
+  neither field is supplied.
+- **Operational:** because the console `POST /platform/pool/distribute-dynamic` runs the *deployed*
+  engine, redeploy engine/api after merge so operator-triggered distributions also use the floor; the
+  scheduled workflow (§15.5) runs the repo script directly, so it picks up the floor on merge to main.
