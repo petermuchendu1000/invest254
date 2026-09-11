@@ -395,9 +395,11 @@ export function DigitsTradeScreen() {
       </div>
 
       {/* Chart card — toolbar (1T · instrument · live share) + Deriv-style chart.
-          NOTE: the card must NOT clip (overflow-visible) so the toolbar dropdowns (timeframe /
-          volatility) can extend beyond it; clipping is applied to the chart canvas only, below. */}
-      <div className="relative flex min-h-[124px] flex-1 flex-col rounded-xl border border-border bg-surface">
+          STABLE HEIGHT (not flex-1): a fixed share of the viewport so toggling AUTO/MANUAL or
+          returning from the AI scanner (which grows the console) can NEVER squeeze the chart — the
+          root scrolls instead. Also must NOT clip (overflow-visible) so the toolbar dropdowns
+          (timeframe / volatility) can extend beyond it; clipping is on the chart canvas only, below. */}
+      <div className="relative flex h-[42vh] min-h-[220px] shrink-0 flex-col rounded-xl border border-border bg-surface">
         <div className="flex items-center gap-1.5 p-2 pb-1">
           {/* 1T timeframe / zoom */}
           <div ref={tfRef} className="relative shrink-0">
