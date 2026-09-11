@@ -374,7 +374,7 @@ export function DigitsTradeScreen() {
   }, [running]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1.5 p-0.5 sm:gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain p-0.5 pb-2 sm:gap-2">
       {/* Market tabs — Matches/Differs · Even/Odd · Over/Under (active = outlined accent pill) */}
       <div className="flex items-center gap-1.5 xs:gap-2">
         {MARKETS.map((m) => (
@@ -394,8 +394,10 @@ export function DigitsTradeScreen() {
         ))}
       </div>
 
-      {/* Chart card — toolbar (1T · instrument · live share) + Deriv-style chart */}
-      <div className="relative flex min-h-[124px] flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
+      {/* Chart card — toolbar (1T · instrument · live share) + Deriv-style chart.
+          NOTE: the card must NOT clip (overflow-visible) so the toolbar dropdowns (timeframe /
+          volatility) can extend beyond it; clipping is applied to the chart canvas only, below. */}
+      <div className="relative flex min-h-[124px] flex-1 flex-col rounded-xl border border-border bg-surface">
         <div className="flex items-center gap-1.5 p-2 pb-1">
           {/* 1T timeframe / zoom */}
           <div ref={tfRef} className="relative shrink-0">
@@ -449,7 +451,7 @@ export function DigitsTradeScreen() {
           </span>
         </div>
 
-        <div className="relative min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1 overflow-hidden rounded-b-xl">
           <DerivChart
             getTicks={getInstrumentTicks}
             getLastTick={getLastInstrumentTick}
