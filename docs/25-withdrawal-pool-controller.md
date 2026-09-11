@@ -404,3 +404,27 @@ recurrence (from that cause or any other) effectively impossible:
 
 Together: (A)/(B) make starvation structurally impossible to *create*, and (C) guarantees any residual
 or novel failure is *caught within ~30 minutes and paged*, instead of surfacing only via player complaints.
+
+## 16. Currency-native minimum withdrawal (migration 0120)
+The money of record is always integer KES cents; `sites.currency` is a DISPLAY currency rendered at the
+live FX rate (`packages/shared/src/money.ts`, `apps/api/src/fx.ts`). A single KES-cents minimum therefore
+reads oddly on a non-KES brand (KES 2,000 ≈ $15) and can't express an operator intent like "min $100".
+
+`site_game_config.min_withdrawal_native` (numeric) holds the per-brand minimum in the brand's **display
+currency major units** (e.g. `100` ⇒ $100 for a USD brand, `2000` ⇒ KES 2,000 for a KES brand). The
+legacy `min_withdrawal` (KES cents) remains the authoritative fallback.
+
+- **Enforcement (drift-free):** the API resolver `siteMinWithdrawalCents` (apps/api) converts the native
+  minimum to KES cents at the SAME live FX rate the withdrawal amount is converted with
+  (`effectiveMinWithdrawalCents`), so the comparison is exactly "amount ≥ native" in display terms. KES
+  brands (rate 1) are numerically identical to before; a foreign brand with no usable rate falls back to
+  the KES-cents floor (never opens below it). Chokepoint feeds `paymentservice.minWithdrawalForSite`, so
+  both `GET /game/config` (client validation) and the withdrawal money path enforce the identical floor.
+- **UI:** the platform console per-brand economy editor (`ClientDetail`) shows a currency-aware
+  "Min withdrawal ({currency})" field that writes `min_withdrawal_native` via the audited
+  `fn_platform_set_site_config` patch RPC; the player `WithdrawForm` reads it (`minWithdrawalNative`) and
+  validates natively so the client floor matches the server exactly.
+- **Verified:** shared unit tests (`money.currency.test.ts`), platform-console e2e (setter + guard), and a
+  live-rate check — muchwins ($100) rejects $50/$99.99 and accepts $100; KES brands unchanged at KES 2,000.
+- **Note:** the pool near-miss lever (§docs/25 near-miss) still reads the legacy KES `min_withdrawal`; aligning
+  it to the native line is a separate follow-up tracked with the near-miss calibration review.

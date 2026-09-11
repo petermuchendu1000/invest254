@@ -15,6 +15,13 @@ export interface GameConfig {
   minStakeCents: Cents;     // 25000 (KES 250)
   maxStakeCents: Cents;     // 5_000_000
   minWithdrawalCents: Cents; // 25000 (KES 250) — smallest cash-out an admin allows
+  /**
+   * Currency-native minimum withdrawal in the brand's DISPLAY currency major units (docs/25 §16),
+   * e.g. 100 => $100 on a USD brand, 2000 => KES 2,000 on a KES brand. Optional: when unset the
+   * engine/API use `minWithdrawalCents` (KES cents) verbatim. The API converts this to the effective
+   * KES-cents floor at the live FX rate (see `effectiveMinWithdrawalCents`).
+   */
+  minWithdrawalNative?: number | null;
   defaultDurationS: number; // 10
   tickRateMs: number;       // 150
   driftBias: number;        // visual green bias (does NOT affect fairness; see settlement)

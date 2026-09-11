@@ -25,6 +25,8 @@ export interface SiteRow {
 }
 export interface SiteConfigRow {
   houseEdge: number; maxMultiplier: number; minStakeCents: number; maxStakeCents: number; minWithdrawalCents: number;
+  /** Currency-native minimum withdrawal in the brand's display currency major units (docs/25 §16). */
+  minWithdrawalNative?: number | null;
   defaultDurationS: number; tickRateMs: number; driftBias: number; volatility: number; targetWinRate: number; version: number;
 }
 export interface SiteWithConfig extends SiteRow { config: SiteConfigRow }
@@ -175,7 +177,9 @@ function mapSiteRow(x: Record<string, unknown>): SiteRow {
 function mapConfigRow(x: Record<string, unknown>): SiteConfigRow {
   return {
     houseEdge: num(x.house_edge), maxMultiplier: num(x.max_multiplier), minStakeCents: num(x.min_stake), maxStakeCents: num(x.max_stake),
-    minWithdrawalCents: num(x.min_withdrawal), defaultDurationS: num(x.default_duration_s), tickRateMs: num(x.tick_rate_ms),
+    minWithdrawalCents: num(x.min_withdrawal),
+    minWithdrawalNative: x.min_withdrawal_native == null ? null : num(x.min_withdrawal_native),
+    defaultDurationS: num(x.default_duration_s), tickRateMs: num(x.tick_rate_ms),
     driftBias: num(x.drift_bias), volatility: num(x.volatility), targetWinRate: num(x.target_win_rate), version: num(x.version),
   };
 }
@@ -201,7 +205,7 @@ export class PgPlatformRepository implements PlatformRepository {
 
   async listSites(): Promise<SiteWithConfig[]> {
     const r = await this.q.query(
-      `select s.*, c.house_edge, c.max_multiplier, c.min_stake, c.max_stake, c.min_withdrawal,
+      `select s.*, c.house_edge, c.max_multiplier, c.min_stake, c.max_stake, c.min_withdrawal, c.min_withdrawal_native,
               c.default_duration_s, c.tick_rate_ms, c.drift_bias, c.volatility, c.target_win_rate, c.version
          from sites s left join site_game_config c on c.site_id = s.id
         order by s.created_at asc`, []);
