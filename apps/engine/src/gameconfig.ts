@@ -65,6 +65,7 @@ export function mapConfigRow(x: Record<string, unknown>): VersionedGameConfig {
     minStakeCents: Math.round(toNum(x.min_stake)),
     maxStakeCents: Math.round(toNum(x.max_stake)),
     minWithdrawalCents: Math.round(toNum(x.min_withdrawal)),
+    minWithdrawalNative: x.min_withdrawal_native == null ? null : toNum(x.min_withdrawal_native),
     defaultDurationS: Math.round(toNum(x.default_duration_s)),
     tickRateMs: Math.round(toNum(x.tick_rate_ms)),
     driftBias: toNum(x.drift_bias),
