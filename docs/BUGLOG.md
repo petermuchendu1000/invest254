@@ -557,3 +557,24 @@ entry: what, evidence, root cause, impact, and resolution.
 - **Operational follow-ups:** (1) redeploy engine/api so the console `distribute-dynamic` uses the floor
   (the scheduled §15.5 workflow picks it up on merge to main); (2) until deployed, do NOT run a manual
   dynamic distribution on the old deployed code — it would re-starve. Revisit #43 next.
+
+## #12b — Defense-in-depth so pool starvation can never silently re-occur (docs/25 §15.7)
+Follow-up to #12. The §15.6 allocation floor removes the *cause*; these three independent layers
+guarantee a silent recurrence (from that cause or any other) is effectively impossible:
+- **(A) Absolute allocation floor** — `POOL_MIN_FLOOR_CENTS` (repo var) → `configuredFloorCents`, wired
+  into `pool-distribute.yml`. A hard global minimum for cases the robust baseline can't cover (outage
+  longer than `baselineDays`, brand-new brands). Operator dial; default off.
+- **(B) DB safety valve — ALWAYS ON (migration 0119, applied to prod).** `fn_pool_ensure_day` now seeds
+  a pool-mode brand's day at `greatest(default_daily_pool_cents, ⌈min_stake × max_multiplier ÷ 0.15⌉)`,
+  so a zero/mis-set/starved default can never again force 100% losses — independent of any allocator
+  run. Money-safe (amount is only a ceiling; controller still caps payout at ⌊targetRtp × turnover⌋).
+  Verified live (rolled-back tx): safitraders default 95k → seed 833,334; invest254 default 7.01M wins.
+- **(C) Active monitor — closes the detection gap.** `scripts/pool_health_monitor.py` +
+  `.github/workflows/pool-health.yml` (every 30 min). Unlike `winrate_monitor.py` (needs ≥50 samples —
+  and starvation suppresses volume, so it stayed silent during #12), this watches the STRUCTURAL signal
+  over a rolling 2h window (`POOL_STARVED`: available < one min stake with live trades; `ALL_LOSS`: ≥8
+  live trades, 0 wins; `BELOW_VIABLE` warning) and pages Telegram. Verified against live prod: after the
+  #12 re-fund it reports ✅ healthy and shows invest254 already paying wins again (1 win / 2 recent
+  trades; avail 7,012,995 → 6,987,681).
+- **APIs redeployed** (fly.io `invest254-engine-pm` + `invest254-api`, remote build from merged main) so
+  the console `distribute-dynamic` path also uses the §15.6 floor; API health 200, engine WS up.

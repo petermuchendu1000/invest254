@@ -375,3 +375,32 @@ positive edge (realized RTP ≤ 1 − house_edge) is preserved unchanged.
 - **Operational:** because the console `POST /platform/pool/distribute-dynamic` runs the *deployed*
   engine, redeploy engine/api after merge so operator-triggered distributions also use the floor; the
   scheduled workflow (§15.5) runs the repo script directly, so it picks up the floor on merge to main.
+
+### 15.7 Defense-in-depth — "never silently re-occur" (BUGLOG #12 follow-up)
+The §15.6 floor removes the *cause* of incident #12. Three additional, independent layers make a silent
+recurrence (from that cause or any other) effectively impossible:
+
+- **(A) Absolute allocation floor** — the daily allocator/console accept `configuredFloorCents`
+  (env/repo var `POOL_MIN_FLOOR_CENTS`), a hard global minimum applied on top of the demand floor. Use
+  it to guarantee funding even for a brand whose robust baseline window is *entirely* zero (e.g. an
+  outage longer than `baselineDays`, or a brand-new brand). Optional operator dial.
+
+- **(B) DB safety valve (`fn_pool_ensure_day`, migration 0119)** — the ALWAYS-ON guarantee, independent
+  of whether any allocator runs. When a pool-mode brand's EAT day is first seeded, its
+  `withdrawal_pool.amount` is floored at the **min-viable** pool
+  `⌈min_stake × max_multiplier ÷ playerShare⌉` — enough for one maximum-multiplier win at the minimum
+  stake to clear the per-player no-scoop share. A mis-set/zero/starved `default_daily_pool_cents` can
+  therefore never again force 100% losses. Money-safe: `amount` is only a ceiling; the controller's
+  `paid + reserved ≤ ⌊targetRtp × turnover⌋` cap still bounds actual payout, so the house edge is
+  untouched. Idle brands (no trade → no row) and statistical brands are unaffected.
+
+- **(C) Active monitor (`scripts/pool_health_monitor.py`, workflow `pool-health.yml`, every 30 min)** —
+  closes the detection gap that let #12 run unnoticed. `winrate_monitor.py` only alerts on windows with
+  ≥50 samples, but starvation *suppresses* volume, so a starved brand rarely reaches 50 trades. This
+  monitor instead watches the STRUCTURAL signal over a rolling 2-hour window and pages Telegram (same
+  bot as payout approvals, `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_IDS`) on:
+  `POOL_STARVED` (available < one min stake while trades are happening) or `ALL_LOSS` (≥8 live trades,
+  zero wins), with a `BELOW_VIABLE` warning below the min-viable pool. Read-only; non-zero exit on alert.
+
+Together: (A)/(B) make starvation structurally impossible to *create*, and (C) guarantees any residual
+or novel failure is *caught within ~30 minutes and paged*, instead of surfacing only via player complaints.
