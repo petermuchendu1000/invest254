@@ -578,3 +578,28 @@ guarantee a silent recurrence (from that cause or any other) is effectively impo
   trades; avail 7,012,995 → 6,987,681).
 - **APIs redeployed** (fly.io `invest254-engine-pm` + `invest254-api`, remote build from merged main) so
   the console `distribute-dynamic` path also uses the §15.6 floor; API health 200, engine WS up.
+
+## #15 — Deriv/digits ~80% player losses: near-miss fired even for above-line players — FIXED (docs/25 §16)
+- **What:** the deriv (digits) game paid ~7–20% wins (≈80–93% losses) — far below the ~50% an even/odd
+  contract should pay (RTP 0.95 ⇒ ~50/50). Reported as "deriv bot making 80% losses".
+- **Evidence (read-only prod + deterministic replay):** muchwins digits last 24h = 5 wins / 67 (7.5%).
+  Replaying the 29 most-recent decisions from their stored `seed+nonce`: mean propensity roll 0.529
+  (RNG **fair**), propensity losses 15/29 (52% ≈ fair 50/50), and **14/29 were would-be WINS** (roll < p)
+  — of which the near-miss voided 12, cutting the win rate from ~48% to ~7%. Not RNG, not the pool
+  (funded), not propensity: the near-miss lever.
+- **Root cause:** the min-withdrawal near-miss (docs/25 goal-gradient) fired whenever
+  `bal + payout ≥ W`, **regardless of whether the player was already at/above the withdrawal line**. So
+  any player/bot trading with a funded balance ≥ W had ~85% of wins voided (fixed-odds digits) or held
+  (rise/fall) — a blanket win-suppression instead of the intended "hold a player JUST BELOW the line as
+  they approach it". Worsened by the pre-§16 line being the low legacy KES value (KES 2,000 ≈ $15), which
+  nearly every funded player exceeded.
+- **Fix:** the near-miss now engages ONLY on the crossing trade — `bal < W && bal + payout ≥ W` — in BOTH
+  engines (`decidePoolOutcome` variable / curve+candlestick, and `decidePoolOutcomeFixed` fixed / deriv).
+  A player already at/above the line wins normally and can withdraw (real withdrawals = social proof, as
+  intended). Combined with §16's currency-native line ($200 for USD), the lever now engages only in the
+  genuine goal-gradient band. The house edge is untouched (the RTP-budget cap `paid+reserved ≤ ⌊target×
+  turnover⌋` still bounds payout).
+- **Verification:** `pool.test.ts` — "near-miss fires ONLY on the crossing trade; above-line players win
+  normally" (asserts above-line near-miss count == 0 and ~base win rate for BOTH engines; crossing still
+  triggers; far-below unaffected). Existing crossing/far-below near-miss tests still pass. 17/17 pool,
+  30/30 engine pool/game, engine+api typecheck clean.
