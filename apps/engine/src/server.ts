@@ -15,7 +15,19 @@ import { DepositNotifier, type DepositListenClient } from "./platformlive.js";
 import { PgPlatformRepository } from "./platform.js";
 import { PoolRealtimeDistributor } from "./poolrealtime.js";
 import { makeVerifier } from "./auth.js";
-import { DEFAULT_VERSIONED_CONFIG, PlatformGate } from "@invest254/shared";
+import { DEFAULT_VERSIONED_CONFIG, DEFAULT_POOL_KNOBS, PlatformGate } from "@invest254/shared";
+
+/**
+ * Pool-controller retune (product decision): honour threshold-crossing wins instead of holding most
+ * of them just below the withdrawal line. The min-withdrawal "near-miss" lever defaulted to
+ * letThroughProb=0.15 (85% of a player's would-be wins near the cash-out line were flipped to
+ * losses), which drove realized RTP far below the target and made players lose ~100% once they
+ * neared the withdrawal line. Setting letThroughProb=1 disables that suppression so realized RTP
+ * converges to the target the pacing loop already aims for. The EDGE INVARIANT is untouched: win
+ * propensity is still capped at base = targetRtp/meanMultiplier, so E[RTP] ≤ 1 − house_edge (users
+ * win, but never beyond the house edge), and the daily pool cap still bounds total payouts.
+ */
+const POOL_KNOBS = { ...DEFAULT_POOL_KNOBS, letThroughProb: 1 };
 
 /**
  * Multiplexed engine entrypoint (multi-tenant).
@@ -92,7 +104,7 @@ if (usingDb) {
     if (r.master_seed_ref && process.env[String(r.master_seed_ref)]) masterRefBySite.set(id, process.env[String(r.master_seed_ref)]!);
   }
   masterSeedFor = (siteId) => masterRefBySite.get(siteId);
-  poolController = new PoolController(new PgPoolRepo(q));
+  poolController = new PoolController(new PgPoolRepo(q), POOL_KNOBS);
   // Live pool_mode: LISTEN sites_changed (migration 0088) + poll fallback, so toggles / new brands
   // apply without a redeploy. Uses the session pooler for LISTEN, like the per-brand config stores.
   sitesStore = new SitesStore(q, {
