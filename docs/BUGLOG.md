@@ -505,3 +505,55 @@ entry: what, evidence, root cause, impact, and resolution.
 - **Verification:** rolled-back e2e against the live schema — unreferred→owner 25%; sub-marketer
   referral→recruiter 20% + default 5%; owner self-deposit→no pay; sub-marketer self-deposit→default
   25%; idempotent re-run→0 new rows; all marketer totals == 25%. Referral + affiliate TS suites green.
+
+
+## #12 — Post-outage pool starvation: every brand paid 100% losses — FIXED (anti-starvation floor, docs/25 §15.6)
+- **What:** starting the day trading resumed after the Aug 26–Sep 10 paybill outage, **every** pool-mode
+  brand paid **0 wins** — players lost 100% of trades. invest254's daily withdrawal pool had fallen to
+  **KES 47.49** (4,749 cents), far below a single 250-KES minimum stake.
+- **Evidence (read-only, production):**
+  * `position_decision ⨝ positions` by EAT day: invest254 win rates were healthy before the outage
+    (Aug 24–27: 66–77%, large payouts) then **0 wins** on Sep 10–11 (10 decisions). Same 0-win pattern
+    on madolar (32 dec), muchwins (45 dec, all `digit`), 33traders, safitraders.
+  * `withdrawal_pool` for invest254 collapsed 8.25M (Aug 25) → 3.2M (Sep 1–9) → **34,173 (Sep 10) →
+    4,749 (Sep 11)** cents. `sites.default_daily_pool_cents` history mirrored it.
+  * Reproduced the demand allocator exactly (muchwins/safitraders/33traders matched to the cent):
+    invest254's EMA forecast had decayed to ~85k cents (from millions), and the per-brand cap
+    `2.5 × required` meant **even a KES 10M envelope would fund invest254 only ~KES 2,023**.
+  * Player **@bill** (invest254): on the funded day Aug 27 he had 45 trades, **35 wins (77.8%)** yet
+    RTP **0.870** — confirming the edge invariant works when the pool is funded (players win, house
+    still edges out); the failure was funding, not the edge.
+- **Root cause:** the demand-based pool allocator (docs/25 §15) forecasts demand with a **reactive EMA**
+  over recent daily pool turnover. The ~2-week payment outage drove turnover to ~0, decaying the EMA →
+  `required = targetRtp × forecast → 0`, which (via the `capMult × required` cap and the cap-clamped
+  §15.2 floor) starved each brand's `default_daily_pool_cents` to ~zero. In the controller, **every
+  payout gate scales with the pool `amount`** — the cash fuse `available = amount − paid − reserved`
+  and the per-player no-scoop share `playerShare × amount` — so a starved amount forces every decided
+  win to clamp to a loss (`reserved ≤ stake → loss`, and for fixed-odds `digit` contracts `payout >
+  playerShare × amount → loss`). A self-reinforcing death spiral: starved pool → 100% loss → players
+  leave → turnover stays 0 → forecast stays 0.
+- **Resolution:**
+  * **Immediate (production, audited RPCs, never-reduce `max(current, floor)`):** re-funded today's
+    `withdrawal_pool.amount` and `default_daily_pool_cents` for all 7 active-with-demand brands to
+    `round(targetRtp × robust expected daily turnover)` — invest254 → **KES 70,130**, muchwins → KES
+    44,752 (default kept at its higher 61,144), madolar → 19,755, 33traders → 12,307, safitraders →
+    950, tamutraders → 1,306, cpfmarket → 238. Verified the structural clamp is gone (avail ≫ any win,
+    `playerShare×amount` ≫ payouts).
+  * **Code (branch `fix/pool-allocation-floor`):** added a guaranteed anti-starvation floor decoupled
+    from the reactive forecast — `floor_i = max(configuredFloorCents, targetRtp × expectedTurnover_i)`,
+    `expectedTurnover = max(EMA, robustExpectedTurnover(baseline))`, where `robustExpectedTurnover =
+    max(p75(non-zero days), mean(last 7 non-zero days))`. Allocated before the water-fill, rationed only
+    if `Σ floors > envelope` (`Σ alloc ≤ G` preserved). Floors gate on demonstrated demand, so
+    never-active brands stay 0. Safe by construction: pool `amount` is only a ceiling — the controller's
+    `paid + reserved ≤ ⌊targetRtp × turnover⌋` cap still bounds payout to `targetRtp × turnover`, so the
+    edge invariant (RTP ≤ 1 − house_edge) is unchanged. `PlatformService.poolDemand` feeds the robust
+    baseline over `baselineDays` (default 45) + `POOL_MIN_FLOOR_CENTS`; daily script surfaces the floor.
+- **Verification:** shared pool suites green (40/40, incl. 7 new incident-scenario tests: outage-collapse,
+  huge-envelope-no-longer-clamps, Σfloor>G rationing, floor-is-a-minimum, configured-floor gating,
+  back-compat byte-for-byte no-op); engine pool/controller/game suites green (35/35); engine typecheck
+  clean. **Live read-only dry-run** of the new allocator over production history: invest254 forecast
+  still KES 851.8 but floor lifts suggested to **KES 70,130** (was KES 835 under the old allocator);
+  muchwins floored at 44,752 then demand-topped to 61,144; dead brands 0; Σ ≤ envelope.
+- **Operational follow-ups:** (1) redeploy engine/api so the console `distribute-dynamic` uses the floor
+  (the scheduled §15.5 workflow picks it up on merge to main); (2) until deployed, do NOT run a manual
+  dynamic distribution on the old deployed code — it would re-starve. Revisit #43 next.
