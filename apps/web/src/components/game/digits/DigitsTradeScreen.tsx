@@ -7,7 +7,6 @@ import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
 import { DerivChart } from '@/components/game/digits/DerivChart';
 import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector';
 import { EntryScanner, type ScanSuggestion } from '@/components/game/digits/EntryScanner';
-import { DigitHistoryPanel } from '@/components/game/digits/DigitHistoryPanel';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
@@ -557,9 +556,6 @@ export function DigitsTradeScreen() {
       </div>
 
       <EntryScanner currentInstrumentId={instId} busy={running} onApply={applyScan} />
-
-      {/* Persisted, reviewable receipts: type, stake, entry/settle spot + tick, settled digit, payout, P/L. */}
-      <DigitHistoryPanel />
     </div>
   );
 }
