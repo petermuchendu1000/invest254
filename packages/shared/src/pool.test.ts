@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { displayToKesCents } from "./money.js";
 import {
-  decidePoolOutcome, winProbability, paceTarget, available, poolLiveMultiplier, poolPnlPath,
+  decidePoolOutcome, decidePoolOutcomeFixed, winProbability, paceTarget, available, poolLiveMultiplier, poolPnlPath,
   sessionWinProbability, DEFAULT_POOL_KNOBS, type PoolState, type PoolKnobs, type PlayerSession,
 } from "./pool.js";
 
@@ -243,4 +244,38 @@ test("1000-PLAYER DAY: budget invariant holds every step, no player scoops, per-
   assert.ok(maxWinner <= Math.floor(k.playerShare * amount) + 100000, `no scoop: max winner ${maxWinner} within share cap`);
   assert.ok(covered > 0, "some players won");
   assert.ok(netLosers / active.length > 0.7, `most active players net a loss (got ${(netLosers / active.length).toFixed(2)})`);
+});
+
+// ── Currency-native near-miss line (docs/25 §16) ──────────────────────────────────────────────────
+// The near-miss lever engages on the WITHDRAWAL LINE `W` (KES cents). For a USD brand the engine feeds
+// the currency-native line ($200 → KES cents at the live FX rate), so the lever holds/fails wins around
+// $200 — dynamically, and identically across BOTH engines: rise/fall (curve & candlestick, variable
+// payout) and digits (deriv, fixed payout). Below the line the lever never engages (players build up).
+test("near-miss honours the currency-native $200 line across rise/fall AND digits (docs/25 §16)", () => {
+  const USD_PER_KES = 1 / 129.5;
+  const W = displayToKesCents(200, USD_PER_KES);           // $200 expressed in KES cents (~2.59M)
+  assert.ok(W > 2_400_000 && W < 2_800_000, `\$200 line resolved to ${W} KES cents`);
+  const st: PoolState = { amountCents: 50_000_000, paidCents: 0, reservedCents: 0, turnoverCents: 80_000_000 };
+  const sess: PlayerSession = { stakedCents: 0, returnedCents: 0, trades: 0, wins: 0, lossStreak: 0 };
+  const stake = 25000;
+  // digits/deriv: fixed payout m=1.9 (even/odd). knobs mirror decideReserveFixed's derivation.
+  const kFixed: PoolKnobs = { ...DEFAULT_POOL_KNOBS, meanMultiplier: 1.9, pCap: 0.95 / 1.9, targetSessionRtp: 0.95, maxMultiplier: 1.9 };
+
+  let aboveNearMiss = 0, belowWins = 0, rfAboveNearMiss = 0;
+  for (let n = 0; n < 500; n++) {
+    // ABOVE the $200 line (whale): digit wins are (mostly) voided to near-miss losses.
+    const fixAbove = decidePoolOutcomeFixed({ stakeCents: stake, payoutCents: Math.round(stake * 1.9), pool: st, dayFraction: 0.5, knobs: kFixed, serverSeed: "usd", nonce: n, session: sess, balanceAfterStakeCents: W + 1_000_000, minWithdrawalCents: W });
+    if (fixAbove.reason === "near_miss") aboveNearMiss++;
+    // BELOW the line: near-miss never engages → normal wins occur.
+    const fixBelow = decidePoolOutcomeFixed({ stakeCents: stake, payoutCents: Math.round(stake * 1.9), pool: st, dayFraction: 0.5, knobs: kFixed, serverSeed: "usd", nonce: n, session: sess, balanceAfterStakeCents: 5_000, minWithdrawalCents: W });
+    if (fixBelow.result === "win") belowWins++;
+    // rise/fall (curve/candlestick), variable payout: a threshold-crossing win is held just below $200.
+    const rfAbove = decidePoolOutcome({ stakeCents: stake, pool: st, dayFraction: 0.5, knobs: DEFAULT_POOL_KNOBS, serverSeed: "usd", nonce: n, session: sess, balanceAfterStakeCents: W + 1_000_000, minWithdrawalCents: W });
+    if (rfAbove.reason === "near_miss") rfAboveNearMiss++;
+  }
+  // The two engines pass propensity at different base rates (digits base=targetRtp/1.9≈0.5; rise/fall
+  // base=targetSessionRtp/meanMultiplier≈0.33), so the near-miss count differs — both are well above zero.
+  assert.ok(aboveNearMiss > 120, `digits: above-$200 whale should hit near-miss often, got ${aboveNearMiss}`);
+  assert.ok(rfAboveNearMiss > 80, `rise/fall: above-$200 whale should hit near-miss often, got ${rfAboveNearMiss}`);
+  assert.ok(belowWins > 50, `below-$200 player should still win, got ${belowWins}`);
 });

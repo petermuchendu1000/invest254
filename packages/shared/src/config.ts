@@ -22,6 +22,13 @@ export interface GameConfig {
    * KES-cents floor at the live FX rate (see `effectiveMinWithdrawalCents`).
    */
   minWithdrawalNative?: number | null;
+  /**
+   * RESOLVED near-miss withdrawal line in KES cents (docs/25 §16): the currency-native minimum
+   * (`minWithdrawalNative`) converted to KES cents at the live FX rate, computed by the engine's
+   * config store at load. Drives the pool near-miss lever for ALL game types (rise/fall + digits) so
+   * a USD brand's line is $200-in-KES, not the legacy KES value. Absent ⇒ use `minWithdrawalCents`.
+   */
+  minWithdrawalEffectiveCents?: number;
   defaultDurationS: number; // 10
   tickRateMs: number;       // 150
   driftBias: number;        // visual green bias (does NOT affect fairness; see settlement)
