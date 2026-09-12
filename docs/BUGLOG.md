@@ -5,6 +5,33 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #24 — Migration 0118 (real-time pool top-up) was NEVER applied to prod, yet the live engine calls it — FIXED (migration 0118 applied + ledger reconciled)
+- **Caught while** reconciling the migration ledger during the BUGLOG #23 rollout: the CI `migrations-ledger`
+  gate had been RED for 6+ consecutive runs on `main` (i.e. before the #23 merge), flagging 0117–0120 as
+  UNRECORDED.
+- **Investigation (no assumptions — checked the LIVE DB, not just the files):**
+  * 0117 (`fn_pay_referral_commissions` rail-agnostic + `v_owner` root), 0119 (`fn_pool_ensure_day`) and
+    0120 (`site_game_config.min_withdrawal_native`) were APPLIED but never `--record`ed in
+    `schema_migrations` → recorded them (metadata only, no behaviour change).
+  * **0118 (`fn_pool_topup_today`) was genuinely ABSENT from prod.** But the deployed engine calls it on
+    every deposit-triggered reallocation (`apps/engine/src/server.ts:265`), and the platform envelope is
+    LIVE (`platform_global_config.global_daily_pool_cents = 20,000,000` = KES 200k), so the gate was open.
+- **Impact:** each real-time pool reallocation threw `undefined_function` (caught by the engine's
+  `onError`, logged, non-fatal), so **intra-day withdrawal-pool top-ups to under-served brands silently
+  never happened** (docs/25 §15.1) — the daily distributor's once-a-day budget was the only allocation,
+  degrading payout headroom for brands seeing live demand.
+- **Verification before applying (rollback-only txn against the real pool row, site 000…001, today):**
+  never-clawback (request < current ⇒ unchanged 7,012,995), raise (request > current ⇒ set to request),
+  role-gate (non-superadmin ⇒ `NOT_AUTHORIZED`). Confirmed ZERO persistence from the test (amount
+  restored, function absent) before the real apply.
+- **Resolution:** applied migration 0118 to prod (additive, idempotent, revertible, money-safe by
+  construction — only ever raises via `greatest()`), recorded it + 0117/0119/0120/0121 in
+  `schema_migrations`. Ledger now reconciles exactly (121 files = 121 rows, 0 problems), so the
+  `migrations-ledger` CI gate goes green.
+- **Follow-up:** the ledger drift means migrations were being applied to prod without running
+  `migrations_status.mts --record`. Recommend wiring `--record` into the deploy step so the ledger can
+  never silently drift from what's actually applied.
+
 ## #23 — Marketer "Net after expenses" didn't reconcile with withdrawable; expense TOTAL summed a capped page — FIXED (branch `fix/marketer-net-after-expense`, migration 0121)
 - **Report (operator):** "fix the bug in the calculation of Marketers net after expense."
 - **Root cause (three distinct defects, banker's ledger view):** the marketer's money is one ledger —
