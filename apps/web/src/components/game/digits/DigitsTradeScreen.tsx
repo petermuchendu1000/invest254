@@ -7,6 +7,7 @@ import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
 import { DerivChart } from '@/components/game/digits/DerivChart';
 import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector';
 import { EntryScanner, type ScanSuggestion } from '@/components/game/digits/EntryScanner';
+import { DigitResultModal, type DigitResult } from '@/components/game/digits/DigitResultModal';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
@@ -161,6 +162,8 @@ export function DigitsTradeScreen() {
   const [settleMarker, setSettleMarker] = useState<{ digit: number; won: boolean; tSec: number } | null>(null);
   // Transiently highlights the CTA the Entry Scanner suggested after "Load Deep Scanner Bot".
   const [loadedOutcome, setLoadedOutcome] = useState<Outcome | null>(null);
+  // Settled MANUAL trade shown as a focused result card (receipt). Null = no card open.
+  const [result, setResult] = useState<DigitResult | null>(null);
 
   const [snap, setSnap] = useState<{ price: number; digit: number | null; changePct: number; freqs: number[] }>({
     price: 0,
@@ -205,16 +208,21 @@ export function DigitsTradeScreen() {
       setFlash({ won, delta });
       setSettleMarker({ digit: s.digit, won, tSec: Math.floor((getLastInstrumentTick()?.t ?? Date.now()) / 1000) });
       invalidateHistory(); // persist-backed receipt now exists → refresh the history panel
-      // Professional result notification for MANUAL trades (the AUTO bot reports P/L via its own HUD).
+      // MANUAL trades open a focused result card (receipt); the AUTO bot reports P/L via its own HUD.
       if (settled?.manual) {
-        const detail = `${settled.label} · settled on digit ${s.digit}`;
-        if (won) toast.push({ tone: 'success', title: `You won +${fmt(delta)}`, description: detail });
-        else toast.push({ tone: 'error', title: `Lost ${fmt(settled.stakeCents)}`, description: detail });
+        setResult({
+          won,
+          label: settled.label,
+          digit: s.digit,
+          stakeCents: settled.stakeCents,
+          payoutCents: s.payoutCents,
+          pnlCents: delta,
+        });
       }
       window.setTimeout(() => setFlash(null), 900);
     });
     return off;
-  }, [onDigitSettled, invalidateHistory, getLastInstrumentTick, toast, fmt]);
+  }, [onDigitSettled, invalidateHistory, getLastInstrumentTick]);
 
   const place = useCallback(
     (outcome: Outcome, cents: number, manual = false): boolean => {
@@ -618,6 +626,8 @@ export function DigitsTradeScreen() {
       </div>
 
       <EntryScanner currentInstrumentId={instId} busy={running} onApply={applyScan} />
+
+      <DigitResultModal result={result} onClose={() => setResult(null)} />
     </div>
   );
 }
