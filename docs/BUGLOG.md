@@ -28,9 +28,15 @@ entry: what, evidence, root cause, impact, and resolution.
   construction — only ever raises via `greatest()`), recorded it + 0117/0119/0120/0121 in
   `schema_migrations`. Ledger now reconciles exactly (121 files = 121 rows, 0 problems), so the
   `migrations-ledger` CI gate goes green.
-- **Follow-up:** the ledger drift means migrations were being applied to prod without running
-  `migrations_status.mts --record`. Recommend wiring `--record` into the deploy step so the ledger can
-  never silently drift from what's actually applied.
+- **Follow-up (DONE — `chore/auto-apply-migrations-on-deploy`):** the root cause was that migrations
+  were applied to prod out-of-band, decoupled from recording. Added `scripts/migrate.mts` — an
+  idempotent runner that APPLIES each unrecorded migration and RECORDS it in the SAME transaction
+  (apply+record atomic ⇒ the ledger physically cannot drift), refuses to touch a CHANGED (edited-after-
+  apply) file, and aborts on first failure. Wired into `deploy.yml` as a gate: `verify → migrate →
+  deploy`, so prod schema is always current before the new code boots. (A plain `migrations_status
+  --record` was rejected: it stamps files as applied WITHOUT running them, which would mask exactly this
+  class of gap.) Validated e2e against the live DB (apply / idempotent / CHANGED-abort / FAILED-rollback,
+  then cleaned up).
 
 ## #23 — Marketer "Net after expenses" didn't reconcile with withdrawable; expense TOTAL summed a capped page — FIXED (branch `fix/marketer-net-after-expense`, migration 0121)
 - **Report (operator):** "fix the bug in the calculation of Marketers net after expense."
