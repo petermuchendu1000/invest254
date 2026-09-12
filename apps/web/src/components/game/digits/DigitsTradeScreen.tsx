@@ -12,6 +12,7 @@ import { InsufficientBalanceModal, type InsufficientFundsInfo } from '@/componen
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
+import { payoutForStake, stakeForPayout } from '@/lib/game/digitPayout';
 import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { api } from '@/lib/api/endpoints';
 import { useBrand } from '@/lib/brand/BrandProvider';
@@ -123,10 +124,20 @@ export function DigitsTradeScreen() {
   const presets = useMemo(() => (isForeign ? [5, 10, 25, 50, 100, 250] : [50, 100, 200, 500, 1000, 5000]), [isForeign]);
   const step = isForeign ? 1 : 50;
   const [stake, setStake] = useState<string>(String(isForeign ? USD_LIMITS.minStake : 200));
+  // Stake <-> Payout entry. In 'payout' mode the input is a TARGET gross payout and the stake is
+  // derived from the PRIMARY outcome's odds (mirrors the reference, whose readout tracks the green
+  // side). `stake`/`stakeCents` stay the single source of truth for place()/onCta/AUTO.
+  const [amountMode, setAmountMode] = useState<'stake' | 'payout'>('stake');
+  const [payoutInput, setPayoutInput] = useState<string>('');
+  const primaryProb = winProbability(outcomesFor(market)[0].key, barrier);
   const stakeCents = useMemo(() => {
+    if (amountMode === 'payout') {
+      const p = Number.parseFloat(payoutInput);
+      return Number.isFinite(p) && p > 0 ? stakeForPayout(toKesCents(p), primaryProb, PAYOUT_FACTOR) : 0;
+    }
     const n = Number.parseFloat(stake);
     return Number.isFinite(n) && n > 0 ? toKesCents(n) : 0;
-  }, [stake, toKesCents]);
+  }, [amountMode, stake, payoutInput, primaryProb, toKesCents]);
 
   // Client-side stake validity (money of record is KES cents). Blocks below-min / above-max BEFORE
   // hitting the engine, and drives a friendly currency-formatted hint (never raw cents).
@@ -187,7 +198,7 @@ export function DigitsTradeScreen() {
   pnlRef.current = pnl;
 
   const totalReturnCents = useCallback(
-    (cents: number, outcome: Outcome) => Math.round((cents * PAYOUT_FACTOR) / winProbability(outcome, barrier)),
+    (cents: number, outcome: Outcome) => payoutForStake(cents, winProbability(outcome, barrier), PAYOUT_FACTOR),
     [barrier],
   );
 
@@ -339,9 +350,15 @@ export function DigitsTradeScreen() {
   const shareLabel =
     market === 'evenodd' ? 'Even share' : market === 'overunder' ? `Over ${barrier} share` : `Digit ${pick} share`;
 
+  // Round a cents figure into the input's display-currency string (whole units for KES brands).
+  const toAmountStr = (cents: number) =>
+    isForeign ? String(Math.round(toDisplay(cents) * 100) / 100) : String(Math.round(toDisplay(cents)));
+
   const stepStake = (dir: 1 | -1) => {
-    const n = Math.max(0, (Number.parseFloat(stake) || 0) + dir * step);
-    setStake(isForeign ? String(Math.round(n * 100) / 100) : String(Math.round(n)));
+    const cur = amountMode === 'payout' ? payoutInput : stake;
+    const setter = amountMode === 'payout' ? setPayoutInput : setStake;
+    const n = Math.max(0, (Number.parseFloat(cur) || 0) + dir * step);
+    setter(isForeign ? String(Math.round(n * 100) / 100) : String(Math.round(n)));
   };
 
   const onCta = (outcome: Outcome) => {
@@ -539,38 +556,64 @@ export function DigitsTradeScreen() {
               ))}
             </div>
 
-            {/* Stake stepper */}
+            {/* Amount mode: enter a STAKE or a target PAYOUT (resolved against the primary side). */}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Amount</span>
+              <div className="flex rounded-lg border border-border bg-surface p-0.5 text-[11px] font-bold">
+                {(['stake', 'payout'] as const).map((mm) => (
+                  <button
+                    key={mm}
+                    type="button"
+                    aria-pressed={amountMode === mm}
+                    onClick={() => {
+                      if (mm === amountMode) return;
+                      if (mm === 'payout') setPayoutInput(toAmountStr(payoutForStake(stakeCents, primaryProb, PAYOUT_FACTOR)));
+                      else setStake(toAmountStr(stakeCents));
+                      setAmountMode(mm);
+                    }}
+                    className={cn('rounded-md px-2.5 py-1 capitalize transition', amountMode === mm ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg')}
+                  >
+                    {mm}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Amount stepper — edits the active quantity (stake, or target payout in payout mode) */}
             <div className="flex items-center gap-3">
-              <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease stake"
+              <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease amount"
                 className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border bg-surface text-xl font-light text-muted transition hover:border-accent/60 hover:text-fg">−</button>
               <div className="flex-1 text-center">
-                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Stake</div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{amountMode === 'payout' ? 'Payout' : 'Stake'}</div>
                 <div className="flex items-baseline justify-center gap-1.5">
                   <span className="text-base font-bold text-muted">{symbol}</span>
                   <input
                     inputMode="decimal"
-                    value={stake}
-                    onChange={(e) => setStake(e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
-                    aria-label="Stake amount"
+                    value={amountMode === 'payout' ? payoutInput : stake}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                      if (amountMode === 'payout') setPayoutInput(v); else setStake(v);
+                    }}
+                    aria-label={amountMode === 'payout' ? 'Target payout' : 'Stake amount'}
                     className="w-28 bg-transparent text-center text-[20px] font-extrabold tabular-nums text-fg outline-none"
                   />
                 </div>
               </div>
-              <button type="button" onClick={() => stepStake(1)} aria-label="Increase stake"
+              <button type="button" onClick={() => stepStake(1)} aria-label="Increase amount"
                 className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border bg-surface text-xl font-light text-muted transition hover:border-accent/60 hover:text-fg">+</button>
             </div>
 
             {/* Presets */}
             <div className="grid grid-cols-6 gap-1.5 xs:gap-2">
               {presets.map((q) => {
-                const active = Number(stake) === q;
-                const belowMin = toKesCents(q) < minStakeCents;
+                const active = Number(amountMode === 'payout' ? payoutInput : stake) === q;
+                const belowMin = amountMode === 'stake' && toKesCents(q) < minStakeCents;
                 return (
                   <button
                     key={q}
                     type="button"
                     disabled={belowMin}
-                    onClick={() => setStake(String(q))}
+                    onClick={() => (amountMode === 'payout' ? setPayoutInput(String(q)) : setStake(String(q)))}
                     className={cn(
                       'rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12.5px)] font-semibold tabular-nums transition disabled:cursor-not-allowed disabled:opacity-30',
                       active ? 'border-accent/55 bg-accent/15 text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg',
@@ -580,6 +623,13 @@ export function DigitsTradeScreen() {
                   </button>
                 );
               })}
+            </div>
+
+            {/* Resolved readout: the OTHER quantity — potential payout in Stake mode, required stake
+                in Payout mode — computed against the primary side (Even/Over/Match), like the reference. */}
+            <div className="flex items-center justify-between rounded-lg border border-border bg-surface-2 px-3 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{amountMode === 'payout' ? 'Stake' : 'Payout'}</span>
+              <span className="text-sm font-bold tabular-nums text-fg">{fmt(amountMode === 'payout' ? stakeCents : payoutForStake(stakeCents, primaryProb, PAYOUT_FACTOR))}</span>
             </div>
 
             {/* Min/max hint — always shows the site minimum (currency-formatted, never raw cents);
