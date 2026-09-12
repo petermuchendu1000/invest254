@@ -205,16 +205,11 @@ export function MarketerDashboardView() {
         <div className="flex flex-col gap-5">
           {/* Share your link (link-first — easiest to share) */}
           {referralLink ? (
-            <section className="rounded-2xl border border-accent/30 bg-accent/5 p-4">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Your referral link</p>
-              <p className="mt-1 truncate text-sm text-fg">{referralLink}</p>
-              <div className="mt-3 flex gap-2">
-                <button onClick={copyLink} className="flex-1 rounded-xl bg-accent py-2.5 text-sm font-bold text-black transition hover:brightness-105">
-                  {copied ? 'Copied!' : 'Copy link'}
-                </button>
-                <span className="grid place-items-center rounded-xl border border-border px-3 font-mono text-xs text-muted">{referralCode}</span>
-              </div>
-              <p className="mt-2 text-[11px] text-muted">Earn 25% of every deposit from players you refer (20%/17% deeper in your team).</p>
+            <section className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2">
+              <span className="min-w-0 flex-1 truncate text-sm text-fg" title={referralLink}>{referralLink}</span>
+              <button onClick={copyLink} className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-black transition hover:brightness-105">
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
             </section>
           ) : null}
 
