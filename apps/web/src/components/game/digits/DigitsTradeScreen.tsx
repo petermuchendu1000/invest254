@@ -8,6 +8,7 @@ import { DerivChart } from '@/components/game/digits/DerivChart';
 import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector';
 import { EntryScanner, type ScanSuggestion } from '@/components/game/digits/EntryScanner';
 import { DigitResultModal, type DigitResult } from '@/components/game/digits/DigitResultModal';
+import { InsufficientBalanceModal, type InsufficientFundsInfo } from '@/components/game/digits/InsufficientBalanceModal';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
@@ -164,6 +165,8 @@ export function DigitsTradeScreen() {
   const [loadedOutcome, setLoadedOutcome] = useState<Outcome | null>(null);
   // Settled MANUAL trade shown as a focused result card (receipt). Null = no card open.
   const [result, setResult] = useState<DigitResult | null>(null);
+  // A MANUAL trade blocked for lack of funds -> explicit top-up modal (current/required/shortfall).
+  const [needFunds, setNeedFunds] = useState<InsufficientFundsInfo | null>(null);
 
   const [snap, setSnap] = useState<{ price: number; digit: number | null; changePct: number; freqs: number[] }>({
     price: 0,
@@ -252,10 +255,7 @@ export function DigitsTradeScreen() {
         return false;
       }
       if (cents > spendable) {
-        if (manual) {
-          toast.push({ tone: 'error', title: 'Not enough balance', description: `You need ${fmt(cents)} to place this trade — tap to top up.` });
-          openDeposit({ amountCents: cents });
-        }
+        if (manual) setNeedFunds({ requiredCents: cents, currentCents: spendable });
         return false;
       }
       if (winProbability(outcome, barrier) <= 0) {
@@ -628,6 +628,12 @@ export function DigitsTradeScreen() {
       <EntryScanner currentInstrumentId={instId} busy={running} onApply={applyScan} />
 
       <DigitResultModal result={result} onClose={() => setResult(null)} />
+
+      <InsufficientBalanceModal
+        info={needFunds}
+        onClose={() => setNeedFunds(null)}
+        onDeposit={(shortfallCents) => { setNeedFunds(null); openDeposit({ amountCents: shortfallCents }); }}
+      />
     </div>
   );
 }
