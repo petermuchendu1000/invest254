@@ -9,6 +9,7 @@ import { VolatilitySelector } from '@/components/game/digits/VolatilitySelector'
 import { EntryScanner, type ScanSuggestion } from '@/components/game/digits/EntryScanner';
 import { DigitResultModal, type DigitResult } from '@/components/game/digits/DigitResultModal';
 import { InsufficientBalanceModal, type InsufficientFundsInfo } from '@/components/game/digits/InsufficientBalanceModal';
+import { DigitHistoryPanel } from '@/components/game/digits/DigitHistoryPanel';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
@@ -397,7 +398,14 @@ export function DigitsTradeScreen() {
   }, [running]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain p-0.5 pb-2 sm:gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain p-0.5 pb-2 sm:gap-2 lg:flex-row lg:gap-3 lg:overflow-hidden lg:p-1">
+      {/* Left rail (desktop only): persisted trade history. Mobile keeps history on its own page. */}
+      <aside className="hidden lg:flex lg:w-[300px] lg:shrink-0 lg:min-h-0 lg:flex-col lg:overflow-y-auto">
+        <DigitHistoryPanel />
+      </aside>
+
+      {/* Center pane: market tabs + chart + heatmap + digit selector (chart flex-fills on desktop) */}
+      <div className="flex min-h-0 flex-col gap-1.5 sm:gap-2 lg:min-w-0 lg:flex-1 lg:overflow-hidden">
       {/* Market tabs — Matches/Differs · Even/Odd · Over/Under (active = outlined accent pill) */}
       <div className="flex items-center gap-1.5 xs:gap-2">
         {MARKETS.map((m) => (
@@ -422,7 +430,7 @@ export function DigitsTradeScreen() {
           returning from the AI scanner (which grows the console) can NEVER squeeze the chart — the
           root scrolls instead. Also must NOT clip (overflow-visible) so the toolbar dropdowns
           (timeframe / volatility) can extend beyond it; clipping is on the chart canvas only, below. */}
-      <div className="relative flex h-[42vh] min-h-[220px] shrink-0 flex-col rounded-xl border border-border bg-surface">
+      <div className="relative flex h-[42vh] min-h-[220px] shrink-0 flex-col rounded-xl border border-border bg-surface lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink">
         <div className="flex items-center gap-1.5 p-2 pb-1">
           {/* 1T timeframe / zoom */}
           <div ref={tfRef} className="relative shrink-0">
@@ -536,7 +544,10 @@ export function DigitsTradeScreen() {
           </div>
         </div>
       ) : null}
+      </div>
 
+      {/* Right pane: the trade console + AI Entry Scanner (fixed-width rail on desktop) */}
+      <div className="flex min-h-0 flex-col gap-1.5 sm:gap-2 lg:w-[380px] lg:shrink-0 lg:overflow-y-auto">
       {/* Console */}
       <div className="flex min-h-0 flex-col gap-1.5">
         {/* AUTO / MANUAL */}
@@ -680,6 +691,7 @@ export function DigitsTradeScreen() {
       </div>
 
       <EntryScanner currentInstrumentId={instId} busy={running} onApply={applyScan} />
+      </div>
 
       <DigitResultModal result={result} onClose={() => setResult(null)} />
 
