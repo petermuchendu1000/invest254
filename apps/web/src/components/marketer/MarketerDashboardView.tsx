@@ -106,14 +106,14 @@ export function MarketerDashboardView() {
   const requestPayout = () => {
     setPayoutMsg(null);
     payout.mutate(undefined, {
-      onSuccess: (r) => setPayoutMsg({ tone: 'up', text: `Payout of ${formatKes(r.amountCents)} requested — pending admin approval.` }),
+      onSuccess: (r) => setPayoutMsg({ tone: 'up', text: `${formatKes(r.amountCents)} requested · pending approval.` }),
       onError: (e) => {
         const code = e instanceof ApiError ? e.code : '';
         const text = code === 'BELOW_MIN'
-          ? `You need at least ${formatKes(minPayoutCents)} to request a payout.`
+          ? `Min ${formatKes(minPayoutCents)} to withdraw.`
           : code === 'PAYOUT_PENDING'
-            ? 'You already have a payout awaiting approval.'
-            : 'Could not request payout. Try again shortly.';
+            ? 'Payout already pending.'
+            : 'Could not request. Try again.';
         setPayoutMsg({ tone: 'down', text });
       },
     });
@@ -129,10 +129,10 @@ export function MarketerDashboardView() {
     requestAdvance.mutate(
       { amountCents, ...(advReason.trim() ? { reason: advReason.trim() } : {}) },
       {
-        onSuccess: () => { setAdvAmount(''); setAdvReason(''); setAdvMsg({ tone: 'up', text: 'Advance requested — an admin will review it shortly. You’ll be notified of the decision.' }); setTab('advances'); setPage(1); },
+        onSuccess: () => { setAdvAmount(''); setAdvReason(''); setAdvMsg({ tone: 'up', text: 'Requested · pending review.' }); setTab('advances'); setPage(1); },
         onError: (e) => {
           const code = e instanceof ApiError ? e.code : '';
-          setAdvMsg({ tone: 'down', text: code === 'ADVANCE_PENDING' ? 'You already have a pending advance request.' : 'Could not submit your request. Try again shortly.' });
+          setAdvMsg({ tone: 'down', text: code === 'ADVANCE_PENDING' ? 'Advance already pending.' : 'Could not submit. Try again.' });
         },
       },
     );
@@ -227,7 +227,7 @@ export function MarketerDashboardView() {
             {payoutMsg ? (
               <p className={`mt-2 text-xs ${payoutMsg.tone === 'up' ? 'text-up' : 'text-down'}`}>{payoutMsg.text}</p>
             ) : (
-              <p className="mt-2 text-[11px] text-muted">Paid to M-Pesa after admin approval · min {formatKes(minPayoutCents)}.</p>
+              <p className="mt-2 text-[11px] text-muted">M-Pesa · min {formatKes(minPayoutCents)}.</p>
             )}
           </section>
 
@@ -248,33 +248,30 @@ export function MarketerDashboardView() {
 
           {/* Commission statement — the reconciling trust anchor (earned → −expenses → −paid → available) */}
           <section>
-            <div className="mb-2 flex items-center justify-between">
-              <SectionTitle>Commission statement</SectionTitle>
-              <span className="text-xs font-semibold tabular-nums text-down">Expenses −{formatKes(expTotal)}</span>
-            </div>
+            <SectionTitle>Statement</SectionTitle>
             <div className="flex flex-col gap-1.5 rounded-2xl border border-border bg-surface-2 px-4 py-3">
-              <StatementRow label="Earned (commission)" value={formatKes(earnedAllTime)} />
-              <StatementRow label="Expenses & advances" value={`\u2212${formatKes(expTotal)}`} tone="down" />
+              <StatementRow label="Earned" value={formatKes(earnedAllTime)} />
+              <StatementRow label="Expenses" value={`\u2212${formatKes(expTotal)}`} tone="down" />
               <div className="my-0.5 border-t border-border" />
-              <StatementRow label="Net after expenses" value={formatKes(netAfterExpenses)} strong tone={netAfterExpenses >= 0 ? undefined : 'down'} />
-              {paidOutCents > 0 ? <StatementRow label="Already paid out" value={`\u2212${formatKes(paidOutCents)}`} tone="down" /> : null}
-              {heldCents > 0 ? <StatementRow label="Pending payout" value={`\u2212${formatKes(heldCents)}`} tone="down" /> : null}
+              <StatementRow label="Net" value={formatKes(netAfterExpenses)} strong tone={netAfterExpenses >= 0 ? undefined : 'down'} />
+              {paidOutCents > 0 ? <StatementRow label="Paid out" value={`\u2212${formatKes(paidOutCents)}`} tone="down" /> : null}
+              {heldCents > 0 ? <StatementRow label="Pending" value={`\u2212${formatKes(heldCents)}`} tone="down" /> : null}
               <div className="my-0.5 border-t border-border" />
-              <StatementRow label="Available to withdraw" value={formatKes(availableCents)} strong tone="up" />
+              <StatementRow label="Available" value={formatKes(availableCents)} strong tone="up" />
             </div>
             {netPosition < 0 ? (
               <p className="mt-1.5 text-[11px] leading-snug text-muted">
-                You&apos;ve received {formatKes(paidOutCents + heldCents)} against {formatKes(netAfterExpenses)} earned net of expenses. Upcoming commission clears this balance before a new payout becomes available.
+                Received {formatKes(paidOutCents + heldCents)} of {formatKes(netAfterExpenses)} net. Upcoming commission clears the balance.
               </p>
             ) : null}
           </section>
 
           {/* Request an advance — the action lives with the money; its history is in Activity ▸ Advances */}
           <section>
-            <SectionTitle>Request an advance</SectionTitle>
+            <SectionTitle>Advance</SectionTitle>
             <div className="rounded-2xl border border-border bg-surface-2 p-3">
               <p className="text-[11px] leading-snug text-muted">
-                Need cash before payday? Request an advance against your upcoming commission. An admin reviews every request &mdash; approved advances appear in your statement above (so your withdrawable already reflects them) and are recovered from future earnings. You&apos;ll be notified of the decision.
+                Cash against upcoming commission. Admin-reviewed, recovered from earnings.
               </p>
               <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
                 <input
@@ -289,7 +286,7 @@ export function MarketerDashboardView() {
                   value={advReason}
                   onChange={(e) => setAdvReason(e.target.value)}
                   maxLength={200}
-                  placeholder="Reason (optional)"
+                  placeholder="Reason"
                   aria-label="Advance reason"
                   className="w-full flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
                 />
@@ -321,7 +318,7 @@ export function MarketerDashboardView() {
                 commissions.isLoading && commRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : commRows.length === 0 ? (
-                  <EmptyRow>No commission yet. Share your link to start earning.</EmptyRow>
+                  <EmptyRow>No earnings yet.</EmptyRow>
                 ) : (
                   <>
                     <ul className="flex flex-col gap-1.5">
@@ -345,7 +342,7 @@ export function MarketerDashboardView() {
                 expenses.isLoading && expRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : expRows.length === 0 ? (
-                  <EmptyRow>No expenses logged. Everything you earn is yours.</EmptyRow>
+                  <EmptyRow>No expenses.</EmptyRow>
                 ) : (
                   <>
                     <ul className="flex flex-col gap-1.5">
@@ -373,7 +370,7 @@ export function MarketerDashboardView() {
                 referrals.isLoading && refRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : refRows.length === 0 ? (
-                  <EmptyRow>Share your code to start building your team.</EmptyRow>
+                  <EmptyRow>No referrals yet.</EmptyRow>
                 ) : (
                   <>
                     <ul className="flex flex-col gap-1.5">
@@ -401,7 +398,7 @@ export function MarketerDashboardView() {
                         disabled={referrals.isFetchingNextPage}
                         className="mt-2 w-full rounded-lg border border-border py-2 text-xs font-medium text-fg transition hover:bg-surface-2 disabled:opacity-50"
                       >
-                        {referrals.isFetchingNextPage ? 'Loading…' : `Load more referrals (${refRows.length} of ${referralsTotal} loaded)`}
+                        {referrals.isFetchingNextPage ? 'Loading…' : `Load more (${refRows.length}/${referralsTotal})`}
                       </button>
                     ) : null}
                   </>
@@ -413,7 +410,7 @@ export function MarketerDashboardView() {
                 advances.isLoading && advRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : advRows.length === 0 ? (
-                  <EmptyRow>No advance requests yet. Use “Request an advance” above.</EmptyRow>
+                  <EmptyRow>No advances yet.</EmptyRow>
                 ) : (
                   <>
                     <ul className="flex flex-col gap-1.5">
@@ -446,7 +443,7 @@ export function MarketerDashboardView() {
             </div>
           </section>
 
-          <p className="pb-1 text-center text-[11px] text-muted">Live · updates every 5s · full transparency</p>
+          <p className="pb-1 text-center text-[11px] text-muted">Live · 5s</p>
         </div>
       )}
     </section>
@@ -501,7 +498,7 @@ function Pager({ info, onPrev, onNext }: { info: PageInfo; onPrev: () => void; o
   if (info.total === 0 || info.pageCount <= 1) return null;
   return (
     <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted">
-      <span className="tabular-nums">Showing {info.start + 1}-{info.end} of {info.total}</span>
+      <span className="tabular-nums">{info.start + 1}-{info.end} of {info.total}</span>
       <div className="flex items-center gap-1">
         <button onClick={onPrev} disabled={!info.hasPrev} className="rounded-lg border border-border px-2.5 py-1 font-medium text-fg transition hover:bg-surface-2 disabled:opacity-40" aria-label="Previous page">Prev</button>
         <span className="px-1 tabular-nums">{info.page}/{info.pageCount}</span>
