@@ -5,6 +5,47 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #23 — Marketer "Net after expenses" didn't reconcile with withdrawable; expense TOTAL summed a capped page — FIXED (branch `fix/marketer-net-after-expense`, migration 0121)
+- **Report (operator):** "fix the bug in the calculation of Marketers net after expense."
+- **Root cause (three distinct defects, banker's ledger view):** the marketer's money is one ledger —
+  `E` = accrued marketer commission, `X` = Σ logged expenses/advances, `P` = paid commission payouts,
+  `H` = held (requested/approved) payouts, and the authoritative withdrawable is
+  `Available = max(E − X − P − H, 0)` (`fn_commission_balance`, migration 0105). The dashboard broke that ledger in three ways:
+  1. **"Net after expenses" = `earned − expenses`** (`MarketerDashboardView.tsx`) ignored `P` and `H`, so
+     it overstated the position of any marketer who had been paid. Evidence (prod, read-only): *jake*
+     showed **+KES 410** "net" while his real `Available` was **0** (E 850 − X 440 − P 562.50 → floored 0).
+  2. **Expense TOTAL summed a limit-capped page**, not all rows. `GET /affiliate/expenses` and
+     `GET /admin/affiliate/expenses` returned `totalCents = reduce(items)` where `items` is capped at
+     `limit` (default 100), while `fn_commission_balance` nets the FULL SQL sum. Rollback-txn e2e: 150
+     expense rows → the page-sum reported **10,000** vs the true **59,000** (a 49,000 undercount) — the
+     displayed total silently diverges from what actually reduces the withdrawable.
+  3. **`earned` was defined two ways.** `myReferral` computed `earnedCents` as an UNFILTERED sum of all
+     the user's `deposit_commissions`, but pulled `held/paid/available` from `fn_commission_balance`
+     (accrued-marketer only). For a player (instant 5% `status='paid'` rows) later promoted to marketer,
+     "Earned all-time"/"Net after expenses" would include already-paid player commission and diverge
+     from `Available`. Latent (0 cases in prod today) but a real correctness defect.
+- **Operator direction:** think like a banker; find and fix ALL the miscalculations; no guesswork; test e2e.
+- **Resolution (branch `fix/marketer-net-after-expense`):**
+  * **Migration 0121:** `fn_marketer_expenses_total(uuid)` — the authoritative full sum, mirroring the
+    `ex` term in `fn_commission_balance`. Additive, idempotent, read-only, `service_role`-only.
+  * **API:** `MarketerExpensesDeps.total()` (pg + test fake); both expenses endpoints now return
+    `totalCents` from the full sum, never the page. `ReferralSummary` gains `marketerEarnedCents`
+    (= `fn_commission_balance.earned_cents`) so the marketer balance context uses one consistent `earned`.
+  * **Web:** the dashboard's Expenses section is now a **reconciling statement** —
+    `Earned → −Expenses (= Net after expenses) → −Paid out → −Pending → = Available to withdraw` — that
+    ends on the exact figure the hero/KPI show. "Net after expenses" is kept as a labelled subtotal (now
+    on the FULL expense sum) and can no longer mislead because the ladder continues to the true withdrawable.
+    `ReferralCommissionsCard` shows `marketerEarnedCents` for marketers (players keep `earnedCents`).
+- **Verification:** typecheck clean; 880/880 unit tests pass (incl. a new regression test proving
+  `totalCents` is the full sum with `limit` < row count). Rollback-only DB e2e against the LIVE functions:
+  for every marketer `max(E−X−P−H,0) == fn_commission_balance.available` AND `fn_marketer_expenses_total == SUM(expenses)`; the 150-row divergence proof above; ROLLBACK verified (function absent post-rollback, no rows written).
+- **Known follow-up (not changed here — money-flow gating needs sign-off):** `fn_approve_commission_payout`
+  / `fn_mark_commission_payout_paid` don't re-validate the payout against a balance reduced by an expense
+  logged AFTER the request. The hold is locked at request time, so an expense added between request and
+  pay is only recovered from FUTURE commission (the ledger stays floored ≥ 0, never negative). Payouts are
+  human-gated (admin approval + superadmin password), so exposure is low. Recommend a re-check at
+  approve-time as a separate, reviewed change.
+
 ## #22 — Deposit page + API ignored the `mpesa` gateway switch (Daraja always shown) — FIXED (branch `fix/deposit-gateway-switch-gating`)
 - **Evidence:** in the first cut of the gateway switches (0116), `DepositPanel` rendered the "STK Push"
   and "Pay Bill" (Daraja) tabs **unconditionally**, and the API `/deposits` + `/deposits/paybill/claim`
