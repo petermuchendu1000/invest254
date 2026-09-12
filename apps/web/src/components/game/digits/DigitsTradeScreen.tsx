@@ -156,6 +156,9 @@ export function DigitsTradeScreen() {
   // Session state (authoritative — driven by server digit_settled events).
   const [pnl, setPnl] = useState(0);
   const [flash, setFlash] = useState<{ won: boolean; delta: number } | null>(null);
+  // Reactive mirror of the in-flight contract (pendingRef is a ref, so it can't drive render). Drives
+  // the "trade in play" chip over the chart; set on place, cleared on settle.
+  const [pendingView, setPendingView] = useState<{ label: string; stakeCents: number } | null>(null);
   const [running, setRunning] = useState(false);
   // Persisted trade-history feed invalidation + chart entry/settle markers for the current contract.
   const invalidateHistory = useInvalidateDigitHistory();
@@ -204,6 +207,7 @@ export function DigitsTradeScreen() {
     const off = onDigitSettled((s: DigitSettledData) => {
       const settled = pendingRef.current; // capture BEFORE clearing (label + manual flag)
       pendingRef.current = null;
+      setPendingView(null); // contract resolved -> drop the "in play" chip
       const won = s.won;
       const delta = s.pnlCents; // authoritative P/L in cents
       lossStreakRef.current = won ? 0 : lossStreakRef.current + 1;
@@ -265,16 +269,10 @@ export function DigitsTradeScreen() {
       const target = outcome === 'over' || outcome === 'under' ? barrier : outcome === 'matches' || outcome === 'differs' ? pick : 0;
       const label = contractLabel(outcome, barrier, pick);
       pendingRef.current = { stakeCents: cents, outcome, manual, label };
+      setPendingView({ label, stakeCents: cents });
       setEntryMarker({ tSec: Math.floor((getLastInstrumentTick()?.t ?? Date.now()) / 1000) });
       setSettleMarker(null);
       openDigit({ instrumentId: instId, kind: outcome, target, stakeCents: cents });
-      if (manual) {
-        toast.push({
-          tone: 'info',
-          title: `Trade placed · ${fmt(cents)}`,
-          description: `${label} on ${instrument.short} · Potential payout ${fmt(totalReturnCents(cents, outcome))}`,
-        });
-      }
       return true;
     },
     [token, spendable, openDeposit, openAuth, toast, barrier, pick, instId, instrument, openDigit, minStakeCents, maxStakeCents, getLastInstrumentTick, fmt, both, totalReturnCents],
@@ -469,6 +467,12 @@ export function DigitsTradeScreen() {
             barSpacing={tf.barSpacing}
             markers={chartMarkers}
           />
+          {pendingView ? (
+            <div className="pointer-events-none absolute inset-x-0 top-2 mx-auto flex w-fit items-center gap-2 rounded-full border border-accent/40 bg-surface-2/90 px-3 py-1 text-[12px] font-semibold text-fg shadow-lg backdrop-blur">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+              {pendingView.label} · {fmt(pendingView.stakeCents)}
+            </div>
+          ) : null}
           {flash ? (
             <div
               className={cn(
