@@ -7,6 +7,7 @@ import type {
   BulkActionResult,
   AdminBulkResult,
   AdminAuditRow,
+  AdminSystemLogRow,
   AdminNotificationRow,
   NotificationInput,
   NotificationTemplateRow,
@@ -236,6 +237,19 @@ export const adminApi = {
     apiFetch<Paginated<AdminAuditRow>>('/admin/audit', {
       token: t,
       query: { cursor: p.cursor ?? undefined, limit: p.limit },
+    }),
+  // Owner-only System logs (docs/36). Persisted structured log lines with filters.
+  systemLogs: (
+    t: string,
+    p: Page & { level?: string; status?: number; q?: string; requestId?: string; sinceMs?: number } = {},
+  ) =>
+    apiFetch<Paginated<AdminSystemLogRow>>('/admin/logs', {
+      token: t,
+      query: {
+        cursor: p.cursor ?? undefined, limit: p.limit,
+        level: p.level || undefined, status: p.status, q: p.q || undefined,
+        requestId: p.requestId || undefined, sinceMs: p.sinceMs,
+      },
     }),
 
   // Marketers — special players who RECEIVE payments; wallet, Fuliza, airtime, PIN, status.

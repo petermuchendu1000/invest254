@@ -37,6 +37,36 @@ const PORT = Number(process.env.PORT ?? 8081);
  *  child (see http.ts); background jobs and boot use module-scoped children of this. */
 const log = createLogger({ bindings: { app: "api" } });
 
+/** Severity weights for the persistence threshold (mirrors the shared logger's levels). */
+const LOG_LEVEL_WEIGHT: Record<string, number> = { debug: 10, info: 20, warn: 30, error: 40 };
+
+/**
+ * A logger sink that keeps the normal stdout/stderr line (Fly captures it) AND persists lines at
+ * >= LOG_PERSIST_LEVEL (default 'warn') to `system_logs` for the owner-only System logs UI (docs/36,
+ * BUGLOG #33). The DB write is fire-and-forget: a logging fault can never block or fail a request.
+ */
+function makeDbLogSink(pool: { query: (sql: string, params?: unknown[]) => Promise<{ rows?: unknown[] }> }):
+  (line: string, level: string) => void {
+  const persistLevel = (process.env.LOG_PERSIST_LEVEL ?? "warn").toLowerCase();
+  const threshold = LOG_LEVEL_WEIGHT[persistLevel] ?? 30;
+  return (line, level) => {
+    if (level === "error") process.stderr.write(line + "\n"); else process.stdout.write(line + "\n");
+    if ((LOG_LEVEL_WEIGHT[level] ?? 0) < threshold) return;
+    try {
+      const r = JSON.parse(line) as Record<string, unknown>;
+      const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+      const s = (v: unknown): string | null => (v == null ? null : String(v));
+      const { t, level: _lv, msg, requestId, method, path, status, durationMs, ip, userId, role, siteId, ...rest } = r as Record<string, unknown>;
+      void pool.query(
+        `insert into system_logs(t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)`,
+        [s(t), level, String(msg ?? ""), s(requestId), s(method), s(path), num(status), num(durationMs),
+         s(ip), s(userId), s(role), s(siteId), JSON.stringify(rest ?? {})],
+      ).catch(() => { /* logging must never affect a request */ });
+    } catch { /* non-JSON (LOG_PRETTY) or bad shape — skip persistence, stdout already has it */ }
+  };
+}
+
 /** Map a marketer_expenses row (from the 0068 RPCs) to the MarketerExpenseRow DTO. */
 function mapExpenseRow(x: Record<string, unknown>) {
   const created = x.created_at;
@@ -89,6 +119,20 @@ async function buildDeps(): Promise<ApiDeps> {
   const { queryPool, listenPool } = makePgPools(Pool, (m) => console.log(`[api] ${m}`));
   const pool = queryPool;
   const q = pool as unknown as Querier;
+
+  // Owner-visible System logs (docs/36, BUGLOG #33): this logger persists warn/error lines (env
+  // LOG_PERSIST_LEVEL) to `system_logs` in addition to stdout. Used as the app + background logger.
+  const dbLog = createLogger({ bindings: { app: "api" }, sink: makeDbLogSink(pool as unknown as { query: (sql: string, params?: unknown[]) => Promise<{ rows?: unknown[] }> }) });
+  // Retention: prune old rows so the store stays bounded (env LOG_RETENTION_DAYS, default 30).
+  const LOG_PRUNE_MS = Number(process.env.LOG_PRUNE_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
+  const LOG_KEEP_DAYS = Number(process.env.LOG_RETENTION_DAYS ?? 30);
+  if (Number.isFinite(LOG_PRUNE_MS) && LOG_PRUNE_MS > 0) {
+    const prune = (): void => void q.query("select public.fn_prune_system_logs($1) as n", [LOG_KEEP_DAYS])
+      .then((r: { rows?: Array<{ n?: number }> }) => { const n = Number(r.rows?.[0]?.n ?? 0); if (n > 0) dbLog.info("system_logs pruned", { pruned: n, keepDays: LOG_KEEP_DAYS }); })
+      .catch(() => { /* non-fatal */ });
+    const t = setInterval(prune, LOG_PRUNE_MS); t.unref();
+    setTimeout(prune, 60_000).unref();
+  }
 
   // Live game configuration for the public GET /game/config. Same store the WS engine uses,
   // so the limits the browser validates against are the limits the engine enforces.
@@ -590,7 +634,7 @@ async function buildDeps(): Promise<ApiDeps> {
     telegramTopics: { approved: telegramTopics.approved, rejected: telegramTopics.rejected },
     onCommissionRequested: commissionRequestedAlert,
     corsAllowOrigin: (origin: string) => brandCors.allows(origin),
-    logger: log,
+    logger: dbLog,
     marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
     referral: referralRepo,
     marketerExpenses: {
@@ -774,7 +818,7 @@ server.listen(PORT, () => {
 // deposit is left stranded and no unpaid one is credited. Set to 0 to disable.
 const RECONCILE_MS = Number(process.env.DEPOSIT_RECONCILE_INTERVAL_MS ?? 300_000);
 if (Number.isFinite(RECONCILE_MS) && RECONCILE_MS > 0) {
-  const recLog = log.child({ module: "payments.reconcile" });
+  const recLog = (deps.logger ?? log).child({ module: "payments.reconcile" });
   const timer = setInterval(() => {
     void deps.payments
       .reconcileDeposits()
