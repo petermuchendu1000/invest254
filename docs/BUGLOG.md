@@ -5,6 +5,49 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #27 — Impersonation was invisible: the console showed "OWNER · FULL AUTHORITY" while fenced to one brand, and logout didn't clear the fence — FIXED (branch `fix/impersonation-clarity`)
+- **Report:** as the platform owner (`@zrinok`), every write on a `mark_mumo` (brand **66investors**)
+  page failed with `SITE_SCOPE_FORBIDDEN`, even after logout + hard refresh.
+- **Root cause (NOT a security bug — a clarity/lifecycle bug):** `/platform/sites/:id/impersonate`
+  deliberately mints a **brand-scoped `superadmin`** token (`site` = target brand) so the owner acts
+  only within that client's brand. That enforcement is correct. But:
+  1. **Invisible fence.** `AdminShell` derived its identity from the live `/auth/me` role
+     (`platform_superadmin`), so it displayed "invest254 Console · Owner · full authority / ★ System
+     owner" *even while impersonating another brand*. The owner couldn't tell the session was fenced,
+     so a cross-brand write looked like a broken permission rather than the wrong brand.
+  2. **Sticky after logout.** `logout()` cleared the session token but not the impersonation
+     sessionStorage (`pp-impersonating-brand` / `pp-platform-return-token`), and `SessionBootstrap`
+     deliberately suppresses the token drift-refresh while `isImpersonating()`. So the fence could
+     survive a logout, and a stale brand scope leaked into the next view.
+  3. **Dead-end nav.** The cross-brand "All brands" (platform) nav stayed visible while impersonating,
+     but the brand-scoped token 403s against `/platform/*`.
+- **Fix (`fix/impersonation-clarity`):**
+  * Extracted the impersonation state machine into a **framework-free core** (`impersonate.core.ts`)
+    with strict validation (fail-closed on a corrupt/tampered brand blob or malformed mint result) and
+    a new `clearImpersonation()`; `impersonate.ts` is now a thin sessionStorage/session/window wrapper.
+  * **Logout and forced-401 now clear the fence** (`useAuthActions.logout`, `SessionBootstrap`) — a
+    brand scope can never outlive the session that created it.
+  * **AdminShell reflects the fence:** while impersonating it shows "{Brand} Console · Impersonating ·
+    superadmin" and a warn "◉ Impersonating {slug}" badge instead of "Owner · full authority / ★ System
+    owner", and it hides the cross-brand "All brands" nav (return via the banner's "Exit to platform").
+  * **Banner** made unmistakable: "Impersonating {Brand} as superadmin · {domain} · actions are fenced
+    to this brand" with a warn-accented Exit.
+- **Tests (tested + retested across different brands):**
+  * `impersonate.core.test.ts` — 13 pure unit tests: parse/validation, begin/read/end round-trips,
+    switching between brands A→B→C, independent round-trips per brand, clear/idempotency, and
+    fail-closed on malformed input / null storage.
+  * `app.platform.impersonate.test.ts` — 7 server tests proving the real ENFORCEMENT: the route is
+    platform-only; it mints a superadmin token fenced to the TARGET brand for two distinct brands; an
+    impersonation-shaped token (`site=B`) can write to B but NOT A, and swapped (`site=A`) can write to
+    A but NOT B (SITE_SCOPE_FORBIDDEN), including the default-marketer routes; and an un-fenced session
+    is unrestricted on both brands (the exit state).
+  * Full suites green: shared 219, engine 303, API 326; web lib 71 (incl. 13 new); backend + web
+    typecheck clean; web `next build` clean.
+- **Note:** frontend chrome (banner/sidebar) is presentational over the unit-tested core; the
+  security-relevant scoping is enforced server-side and covered by the API suite above.
+
+---
+
 ## #26 — A brand's DEFAULT marketer could be demoted to 'player', stranding it un-removable + dashboard-less — FIXED (branch `fix/default-marketer-role-lock`, migration 0124)
 - **Report (Issue 1):** "the admin must be able to remove a default marketer" and "some marketers cannot
   see their dashboard."
