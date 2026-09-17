@@ -5,6 +5,33 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #28 — Platform owner couldn't manage a brand's default marketer while impersonating it (Issue-1 control unreachable via impersonation) — FIXED (branch `fix/impersonation-default-marketer-scope`, migration 0125)
+- **Report:** while impersonating **66investors**, `Make brand default` / `Remove as default` on a
+  66investors marketer (`mark_mumo`) failed `SITE_SCOPE_FORBIDDEN` — a *same-brand* action that should
+  succeed.
+- **Root cause:** `fn_admin_set_site_owner` (0104/0124) was the ONLY RPC that fenced by the ACTOR's own
+  `profiles.site_id`. Impersonation mints a token `role='superadmin', site=<brand>` but keeps the
+  SUBJECT = the platform owner (for audit). So `p_actor` is the owner (home brand = the platform's own
+  site), while the acted-on brand is the impersonated one. The RPC's actor-home check therefore raised
+  `SITE_SCOPE_FORBIDDEN` on every make-/clear-default while impersonating any brand other than the
+  owner's home — making the admin-panel default-marketer control (Issue 1) unreachable exactly the way
+  the operator uses it. The API's own `ensureUserInScope` (token-scoped) had already allowed it; the
+  redundant DB actor-home check contradicted the token.
+- **Reproduced (read-only local PG, all migrations):** actor home=SITE_A, `fn_admin_set_site_owner(owner,
+  'superadmin', <SITE_B marketer>, true)` → `SITE_SCOPE_FORBIDDEN`.
+- **Fix (migration 0125, same 4-arg signature — CREATE OR REPLACE, no call-site/engine change, no
+  deploy window):** skip the RPC's actor-home fence when the actor's PROFILE role is
+  `platform_superadmin` (the platform owner is inherently cross-brand even via an impersonation
+  superadmin token). The impersonation fence stays enforced at the API/token layer
+  (`assertTargetSiteInScope` on the token's `site` claim). A REAL per-brand admin/superadmin remains
+  home-fenced (defence in depth). The RPC still validates active-marketer-on-site for ASSIGN.
+- **Tests:** `e2e_default_marketer_lock.py` extended to **35 scenarios** — owner impersonating SITE_B can
+  make + clear a SITE_B default (was forbidden); a real SITE_A superadmin still cannot reach SITE_B; owner
+  impersonating their home brand still works. Backend typecheck clean; API 326/326; migration idempotent.
+  (The API in-memory harness mocks this RPC, so the DB e2e is the authoritative coverage.)
+
+---
+
 ## #27 — Impersonation was invisible: the console showed "OWNER · FULL AUTHORITY" while fenced to one brand, and logout didn't clear the fence — FIXED (branch `fix/impersonation-clarity`)
 - **Report:** as the platform owner (`@zrinok`), every write on a `mark_mumo` (brand **66investors**)
   page failed with `SITE_SCOPE_FORBIDDEN`, even after logout + hard refresh.
