@@ -5,6 +5,30 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #35 — Engine starved the session pooler: one LISTEN connection per brand for a GLOBAL channel — FIXED (branch `fix/engine-config-listen-multiplex`)
+- **Surfaced by #34:** with system logs now capturing the engine, `[config] listen-connect [site …]:
+  timeout exceeded when trying to connect` was firing ~49×/30min across brands.
+- **Root cause:** the engine opened a **dedicated session-pooler LISTEN connection per brand** for the
+  per-site config store (`configFor` → `SiteGameConfigStore({ connect })`), each held forever
+  (`idleTimeoutMillis: 0`). But `listenPool` `max = 4` and there were **10 active brands** (plus the
+  sites-store + deposit-feed LISTENs), so the first few brands permanently occupied the pool and every
+  other brand's `connect()` timed out at 10s — forever — leaving those brands on the 15s poll fallback
+  and spamming errors. `site_game_config_changed` is a **GLOBAL** channel (payload = the changed
+  site_id), so N connections all listening to the same channel was pure waste.
+- **Fix:** a `SharedSiteConfigListener` — **ONE** session connection LISTENing on the global channel,
+  fanning each notification out to the matching brand's `refresh()` by payload (refresh-all when a
+  notification carries no payload). Per-brand stores are now **poll-only** (the 15s fallback stays as a
+  safety net), so a dropped shared connection degrades to polling, not silence; the shared listener
+  reconnects with backoff. Engine session-LISTEN usage drops from ~12 → 3 (shared-config + sites +
+  deposit) regardless of brand count. Also raised `PG_LISTEN_POOL_MAX` default 4 → 6 for reconnect
+  headroom. No migration, no per-request/hot-path change.
+- **Tests:** `siteconfiglisten.test.ts` (5 unit — one connection for many brands, payload dispatch,
+  refresh-all on no payload, unknown-brand no-op, a throwing handler doesn't break others, reconnect
+  after error re-arms LISTEN, `stop()` halts reconnects). Suites green: engine 311 / API 333; typecheck
+  clean. Verified post-deploy that the timeout errors stop.
+
+---
+
 ## #34 — System logs were only half-wired: the WS engine + all direct console.* were never captured — FIXED (branch `fix/system-logs-wire-all`, migration 0129)
 - **Report (follow-up to #33):** "map and wire the ENTIRE logs" — #33 only persisted API request/error
   lines; the rest of the system was still invisible.
