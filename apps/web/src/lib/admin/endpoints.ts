@@ -130,6 +130,10 @@ export const adminApi = {
     apiFetch<unknown>(`/admin/withdrawals/${id}/approve`, { method: 'POST', token: t, body: { password } }),
   rejectWithdrawal: (t: string, id: string) =>
     apiFetch<unknown>(`/admin/withdrawals/${id}/reject`, { method: 'POST', token: t }),
+  // Manually finalize a stuck (pending/processing) withdrawal as PAID when the provider result callback
+  // never arrived (Mega Pay / Daraja). Same superadmin-password gate as approve; the client then shows paid.
+  markWithdrawalPaid: (t: string, id: string, password: string) =>
+    apiFetch<unknown>(`/admin/withdrawals/${id}/mark-paid`, { method: 'POST', token: t, body: { password } }),
   // Bulk withdrawal moderation (partial success per row; approve dispatches M-Pesa B2C each).
   // A single superadmin password authorizes the whole approve batch.
   bulkWithdrawals: (t: string, body: { action: 'approve' | 'reject'; txIds: string[]; password?: string }) =>

@@ -213,8 +213,10 @@ export function useWithdrawalAction() {
   const t = useTok();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: string; action: 'approve' | 'reject'; password?: string }) =>
-      v.action === 'approve' ? adminApi.approveWithdrawal(t, v.id, v.password ?? '') : adminApi.rejectWithdrawal(t, v.id),
+    mutationFn: (v: { id: string; action: 'approve' | 'reject' | 'mark-paid'; password?: string }) =>
+      v.action === 'approve' ? adminApi.approveWithdrawal(t, v.id, v.password ?? '')
+        : v.action === 'mark-paid' ? adminApi.markWithdrawalPaid(t, v.id, v.password ?? '')
+          : adminApi.rejectWithdrawal(t, v.id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'withdrawals'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });

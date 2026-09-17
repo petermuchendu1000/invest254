@@ -5,6 +5,35 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #32 — Approved withdrawals stuck in "processing" forever; no way to mark a payout paid when the B2C callback fails — FIXED (branch `fix/admin-mark-withdrawal-paid`, migration 0127)
+- **Report:** approved/paid withdrawals still show "processing"; the admin needs to mark a payment paid
+  manually when the rail (e.g. Mega Pay) fails to reflect it, and that must show as paid on the client.
+- **Root cause:** the withdrawal lifecycle debits the wallet at request (`fn_create_withdrawal`), flips to
+  `processing` on approval (B2C dispatched), and only reaches `success` when the provider's async result
+  callback arrives (`fn_complete_withdrawal`). When that callback never lands — a known Mega Pay / Daraja
+  failure mode — the row is stranded in `processing`: the money already left the wallet, the player was
+  paid out-of-band, but the client shows "processing" indefinitely and there was **no admin action** to
+  finalise it (only approve/reject existed). 4 live rows were stuck (invest254 ×2, madolar ×2).
+- **Fix:**
+  * **DB (migration 0127):** `fn_admin_mark_withdrawal_paid(tx, admin, receipt)` transitions a
+    pending/processing withdrawal → `success` with a manual receipt + an `admin_actions` audit row.
+    **No wallet change** (money already debited at request). Idempotent on an already-paid row; **refuses**
+    a failed/reversed row (`WITHDRAWAL_ALREADY_REVERSED`) so a returned payout is never double-paid.
+  * **API:** `POST /admin/withdrawals/:id/mark-paid` — same guards as approve: `requireRole('admin')` +
+    superadmin approval-password + `assertTargetSiteInScope` (brand-scoped). Threaded through
+    PaymentService/PaymentRepository (pg + in-memory) → fires the same success event as the B2C path so
+    the activity feed reflects it.
+  * **Web:** a password-gated **"Mark paid"** action in the Withdrawals queue for `pending`/`processing`
+    rows; the player's client then shows the withdrawal as paid (reads the same tx status).
+- **Tests:** `e2e_admin_mark_withdrawal_paid.py` (17 DB scenarios: processing→paid with wallet unchanged,
+  idempotent, pending→paid, reversed refused, unknown tx, audit row) + `app.approvalgate.e2e.test.ts` +4
+  (password gate, processing→success + idempotent, brand-scope, reversed→409). Full suites green:
+  engine 303 / API 332; backend + web typecheck clean; `next build` clean; migration idempotent.
+- **Note:** the 4 currently-stuck rows are left for the operator to mark paid (or reject) per-row via the
+  new control — only the operator knows whether each recipient was actually paid out-of-band.
+
+---
+
 ## #31 — A soft-DELETED same-phone account shadowed a marketer's login; @jake locked out of the mpesa app — FIXED (branch `fix/marketer-login-deleted-shadow`)
 - **Report:** @jake (marketer) still could not log into the mpesa app after the #30 PIN fix.
 - **Investigation (live data, no guessing):** jake has 5 same-phone (`0113488568`) accounts across brands,

@@ -225,7 +225,7 @@ export interface ApiDeps {
   // ── E2: player + payments + admin ──
   /** Deposit/withdrawal orchestration over the atomic 0014 RPCs + Daraja. */
   payments: Pick<PaymentService,
-    "initiateDeposit" | "requestWithdrawal" | "handleStkCallback" | "handleB2cResult" | "approveWithdrawal" | "rejectWithdrawal" | "reconcileDeposits"
+    "initiateDeposit" | "requestWithdrawal" | "handleStkCallback" | "handleB2cResult" | "approveWithdrawal" | "rejectWithdrawal" | "markWithdrawalPaid" | "reconcileDeposits"
     | "ingestC2b" | "claimPaybillDeposit" | "paybillConfig"
     | "initiateMegaPayDeposit" | "handleMegaPayCallback" | "reconcileMegaPayDeposits" | "listDepositProviders">;
   /** Resolve a player's display handle (falls back to a guest handle). */
