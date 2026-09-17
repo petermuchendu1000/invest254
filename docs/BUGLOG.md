@@ -5,6 +5,35 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #36 — Daraja B2C payouts failed SILENTLY when initiator/credential unset → withdrawals stranded in `processing` — FIXED (branch `fix/daraja-b2c-fail-loud`)
+- **Surfaced by log analysis (post-#34/#35):** the only recurring non-4xx warning was
+  `[payments] Daraja credentials not configured … using StubDarajaClient`. That specific line is benign
+  (a boot-time ENV fallback; the API immediately loads the real STK creds from `mpesa_config` — "mpesa_config
+  loaded from database"). But investigating it exposed a real latent gap.
+- **Root cause:** `missingDarajaCredentials` only validates the **STK-4** (consumerKey/secret/shortcode/passkey).
+  Live `mpesa_config` has those set, so the API builds a real `HttpDarajaClient` — but `b2c_initiator`
+  and `b2c_security_credential` were **EMPTY**. `HttpDarajaClient.b2cPayment` POSTed those empty fields
+  straight to Safaricom, which rejects the payout with no usable ConversationID/result callback. Because
+  `fn_approve_withdrawal` flips the row to `processing` **before** the API dispatches, a rejected B2C left
+  the withdrawal **stuck in `processing` with `conversation_id = NULL`** — the exact stranded-withdrawal
+  state the operator had to clear by hand, with nothing in the logs explaining why.
+- **Fix (code — surfaces the misconfig; the credentials themselves are operator config):**
+  - New `missingB2cCredentials(cfg)` (b2cInitiator, b2cSecurityCredential, b2cResultUrl, b2cTimeoutUrl) —
+    B2C readiness is now checked **independently** of STK.
+  - `HttpDarajaClient.b2cPayment` now **fails loudly** with `MPESA_B2C_NOT_CONFIGURED:<missing>` *before*
+    any network call, instead of POSTing empty creds and getting a silent Safaricom rejection.
+  - `makeDarajaClientFromConfig` logs a clear **warning at every build/reload** when STK is ready but B2C
+    is not — so the gap shows up proactively in the System logs UI (thanks to #34), not only when a
+    withdrawal is attempted.
+  - API `DOMAIN_STATUS`: `MPESA_B2C_NOT_CONFIGURED → 503`, so an admin approve returns a clear message.
+- **Operator action still required:** set **B2C Initiator Name** + **B2C Security Credential** (Safaricom
+  Daraja) in Admin → M-Pesa. STK deposits are unaffected and already live.
+- **Tests:** `daraja.b2c.test.ts` (3 — missing-creds detection independent of STK; b2cPayment fails loud
+  with no network; STK-only config still yields a usable deposit client with B2C guarded). Suites green:
+  engine 314 / API 333; typecheck clean. No migration, no web change.
+
+---
+
 ## #35 — Engine starved the session pooler: one LISTEN connection per brand for a GLOBAL channel — FIXED (branch `fix/engine-config-listen-multiplex`)
 - **Surfaced by #34:** with system logs now capturing the engine, `[config] listen-connect [site …]:
   timeout exceeded when trying to connect` was firing ~49×/30min across brands.

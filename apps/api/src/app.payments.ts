@@ -39,6 +39,7 @@ const DOMAIN_STATUS: Readonly<Record<string, number>> = {
   MEGAPAY_NOT_CONFIGURED: 503,
   MEGAPAY_INITIATE_REJECTED: 502,
   MEGAPAY_VERIFY_PENDING: 409,   // callback arrived but status not yet final -> caller/retry + reconcile settles it
+  MPESA_B2C_NOT_CONFIGURED: 503, // withdrawal payout attempted but Daraja B2C initiator/credential unset
 };
 
 /** Run a domain call, translating known service errors to controlled ApiErrors. */
