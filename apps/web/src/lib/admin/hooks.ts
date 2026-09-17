@@ -460,7 +460,7 @@ export function useAudit() {
 }
 
 /** Owner-only System logs (docs/36) with server-side filters; refetches when a filter changes. */
-export function useSystemLogs(filters: { level?: string; status?: number; q?: string; requestId?: string; sinceMs?: number } = {}) {
+export function useSystemLogs(filters: { app?: string; level?: string; status?: number; q?: string; requestId?: string; sinceMs?: number } = {}) {
   const t = useTok();
   return useInfiniteQuery({
     queryKey: ['admin', 'logs', filters],

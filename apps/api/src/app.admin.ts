@@ -606,7 +606,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
     };
     return deps.admin.listSystemLogs({
       limit: num("limit"), cursor: ctx.query.get("cursor"),
-      level: str("level"), status: num("status"), q: str("q"), requestId: str("requestId"), sinceMs: num("sinceMs"),
+      app: str("app"), level: str("level"), status: num("status"), q: str("q"), requestId: str("requestId"), sinceMs: num("sinceMs"),
     });
   });
 

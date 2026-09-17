@@ -15,6 +15,7 @@ import { DepositNotifier, type DepositListenClient } from "./platformlive.js";
 import { PgPlatformRepository } from "./platform.js";
 import { PoolRealtimeDistributor } from "./poolrealtime.js";
 import { makeVerifier } from "./auth.js";
+import { makeSystemLogPersister } from "./systemlog.js";
 import { DEFAULT_VERSIONED_CONFIG, PlatformGate } from "@invest254/shared";
 
 /**
@@ -75,6 +76,10 @@ if (usingDb) {
   const pool = queryPool;
   const q = pool as unknown as Querier;
   realtimeQuery = q;
+  // Owner-visible System logs (docs/36, BUGLOG #34): the engine has no structured logger — its boot,
+  // crash-recovery, seed-rotation, pool and payments/Daraja/MegaPay events are all console.*. Capture
+  // them (tagged app='engine') so the System logs UI shows the WHOLE system, not just the API.
+  makeSystemLogPersister(pool as unknown as { query: (sql: string, params?: unknown[]) => Promise<{ rows?: unknown[] }> }, { app: "engine" }).captureConsole();
   platformGate = new PlatformGate((sql: string, p?: unknown[]) => q.query(sql, p ?? []));
   repo = new PgGameRepository(q);
   overridesRepo = new PgUserOverridesRepository(q);
