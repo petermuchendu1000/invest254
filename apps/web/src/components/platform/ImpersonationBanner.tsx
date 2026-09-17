@@ -21,11 +21,10 @@ export function ImpersonationBanner() {
       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-fg">
         <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-warn animate-pulse" />
         <span>
-          Impersonating <strong className="font-semibold">{brand.name}</strong> as{' '}
-          <strong className="font-semibold">superadmin</strong>
+          Logged in as <strong className="font-semibold">superadmin</strong> · accessing{' '}
+          <strong className="font-semibold">{brand.name}</strong>
         </span>
         <span className="font-mono text-xs text-muted">{brand.primaryDomain ?? brand.slug}</span>
-        <span className="text-muted">· actions are fenced to this brand</span>
       </span>
       <button
         type="button"
