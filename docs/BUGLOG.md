@@ -5,6 +5,34 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #33 — System logging was implemented but had no UI (owner couldn't view logs) — FIXED (branch `fix/system-logs-ui`, migration 0128)
+- **Report:** "I don't have a UI to see all system logs — it was implemented but the UI was never."
+- **State found:** the shared structured logger + per-request logging (docs/36) were implemented, but
+  emitted **stdout only** (Fly). There was no queryable store, no API and no UI — distinct from the
+  business **Audit log** (`admin_actions`, which already has `/admin/audit`). So system/request/error
+  logs could only be seen via `fly logs`.
+- **Fix (end-to-end):**
+  * **DB (migration 0128):** append-only `system_logs` table (promoted queryable columns + `fields`
+    jsonb) with keyset + filter indexes, and `fn_prune_system_logs(keep_days)` for retention.
+  * **API sink (`server.ts`):** a logger sink that keeps the stdout line AND persists lines at
+    `>= LOG_PERSIST_LEVEL` (default `warn`) to `system_logs` — fire-and-forget, so logging can never
+    block/fail a request. Wired as the app + reconcile-sweep logger (so money-path errors persist too),
+    plus a periodic retention prune (`LOG_RETENTION_DAYS`, default 30).
+  * **Read path:** `GET /admin/logs` — **platform_superadmin only** (system logs are cross-brand
+    operational data) — via `AdminService.listSystemLogs` with filters (level, status, q on msg|path,
+    requestId, since) + cursor pagination; in-memory harness returns an empty page.
+  * **Web:** a **System logs** page (`/admin/logs`) under the owner Platform nav — level filter,
+    debounced message/path search, level/status badges, request-id correlation, load-more.
+- **Tests:** `e2e_system_logs.py` (11 DB scenarios: newest-first, level/status/requestId/since/text
+  filters, keyset paging, retention prune) + `app.admin.test.ts` +1 (owner-only gate: admin/superadmin
+  403, anon 401, platform_superadmin 200 page shape). Full suites green: engine 303 / API 333; backend
+  + web typecheck clean; `next build` clean (`/admin/logs` builds); migration idempotent.
+- **Scope note:** persists API logs (requests, errors, money-path, Mega Pay/Daraja reconcile) — the
+  actionable set. Engine (WS) logs can be wired to the same sink as a follow-up. Default persist level
+  is `warn` (errors + rejections); set `LOG_PERSIST_LEVEL=info` to capture the full request stream.
+
+---
+
 ## #32 — Approved withdrawals stuck in "processing" forever; no way to mark a payout paid when the B2C callback fails — FIXED (branch `fix/admin-mark-withdrawal-paid`, migration 0127)
 - **Report:** approved/paid withdrawals still show "processing"; the admin needs to mark a payment paid
   manually when the rail (e.g. Mega Pay) fails to reflect it, and that must show as paid on the client.
