@@ -5,6 +5,51 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #30 — Marketer PIN login (mpesa_2 quick-login) failed on any non-07 phone format, on every brand — FIXED (branch `fix/marketer-login-phone-sig9`, migration 0126)
+- **Report:** "some marketers cannot log into one or both apps" (mpesa_2 / truecaller).
+- **Root cause:** `fn_marketer_login` (PIN path, `POST /marketers/auth/login`) matched `marketers.phone =
+  v_phone` EXACTLY (btrim only) — the ONE marketer lookup never migrated to the canonical
+  `fn_phone_sig9` (right-9-digits) rule that `profileByPhone`, `fn_marketer_game_withdraw`,
+  `fn_is_marketer_account` (0086/0100) all use. The apps send the phone exactly as typed
+  (mpesa_2 `PinLoginScreen` reuses `AppState.phone` captured at first sign-in), so a marketer who
+  entered `+254…`/`254…`/bare `7…` could sign in with a PASSWORD (`login-web` → `profileByPhone`
+  normalizes) but then FAILED the PIN quick-login on relaunch (exact match vs stored `07…`), on ANY
+  brand. truecaller uses password-only, so it was unaffected — hence "one or both apps".
+- **NOT the default-marketer bug:** marketer login resolves the `marketers` wallet + `marketer_credentials`
+  PIN / website password — never `profiles.role` or `sites.owner_user_id`. Verified the two are
+  independent code paths.
+- **Fix (migration 0126, same 3-arg signature — CREATE OR REPLACE, no app/engine change, no deploy
+  window):** match candidates AND the failed-attempt throttle on `fn_phone_sig9(phone)=fn_phone_sig9(input)`
+  with a length-9 validity guard; PIN verify, per-account lockout, active-status and optional site scope
+  unchanged. Fixes both apps for every marketer on every brand with no APK rebuild (server-side).
+- **Also confirmed correct (no change needed):** the mpesa_2 "hardcode SITE=33traders on login" commit
+  was rightly REVERTED (a single generic build must not name a brand); the apps send no site and the
+  server resolves the brand from the credential (`login-web` via `auth.login anyBrand`; PIN via
+  `fn_marketer_login` cross-brand). Those server fixes were already live (deployed 2026-09-12).
+- **Tests:** `e2e_marketer_login_phone.py` — 14 scenarios (07/254/+254/bare/spaced all resolve;
+  wrong-PIN + 5-miss lockout; cross-brand no leakage; site-hint scoping; malformed phone). Idempotent;
+  backend typecheck clean. Read-only prod check: all 8 active marketers now match under 254-format entry.
+
+---
+
+## #29 — Default marketers on brands that lacked a default when deposits happened showed zero stats — FIXED (data backfill)
+- **Report:** "the dashboard isn't populating accurate figures — e.g. the 66investors default marketer
+  can't see his statistics."
+- **Root cause:** `fn_pay_referral_commissions` roots the 25% at the brand's default marketer
+  (`sites.owner_user_id`). Brands that had NO default marketer when deposits occurred (66investors,
+  tamutraders never assigned; invest254 partially) accrued NO commission, so the (now-assigned) default
+  marketer's dashboard read zero — a DATA gap, not a query bug (33traders/invest254/madolar/safitraders
+  with defaults at deposit time were accurate).
+- **Fix (data):** replayed the idempotent production accrual RPC over the 373 uncredited successful
+  deposits. Result (all `accrued`, zero wallet-affecting rows — no depositor had a referrer so the 5%
+  player perk never fired): joy +2,157,175¢ (invest254), mark_mumo +577,500¢ (66investors),
+  Blessing.21 +50,000¢ (tamutraders). Every brand gap closed to ≤1¢ (float rounding). cpfmarket's 25%
+  was already paid to its prior owner, so its new default legitimately starts at 0. Committed inside a
+  transaction that asserted wallets untouched and gaps closed. Recurrence is prevented by the default
+  now being set on every brand plus the 0104/0124/0125 default-marketer guards.
+
+---
+
 ## #28 — Platform owner couldn't manage a brand's default marketer while impersonating it (Issue-1 control unreachable via impersonation) — FIXED (branch `fix/impersonation-default-marketer-scope`, migration 0125)
 - **Report:** while impersonating **66investors**, `Make brand default` / `Remove as default` on a
   66investors marketer (`mark_mumo`) failed `SITE_SCOPE_FORBIDDEN` — a *same-brand* action that should
