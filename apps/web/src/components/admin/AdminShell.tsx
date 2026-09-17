@@ -132,7 +132,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 {impersonating ? impersonating.name : 'invest254'} {isSuper ? 'Console' : 'Admin'}
               </span>
               <span className={cn('text-[10px] font-medium uppercase tracking-wide', isSuper ? 'text-warn' : 'text-muted')}>
-                {impersonating ? 'Impersonating · superadmin' : isSuper ? 'Owner · full authority' : 'Operations'}
+                {impersonating ? 'Logged in as superadmin' : isSuper ? 'Owner · full authority' : 'Operations'}
               </span>
             </span>
           </Link>
@@ -206,9 +206,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                     'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
                     impersonating ? 'bg-warn/20 text-warn' : isSuper ? 'bg-warn/15 text-warn' : 'bg-surface-2 text-muted',
                   )}
-                  title={impersonating ? `Brand-scoped superadmin session for ${impersonating.name}` : undefined}
+                  title={impersonating ? `Logged in as superadmin, accessing ${impersonating.name}` : undefined}
                 >
-                  {impersonating ? `◉ Impersonating ${impersonating.slug}` : isSuper ? '★ System owner' : 'Operator'}
+                  {impersonating ? `Accessing ${impersonating.slug}` : isSuper ? '★ System owner' : 'Operator'}
                 </span>
               </div>
               <Button variant="secondary" size="sm" onClick={logout}>
