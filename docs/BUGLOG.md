@@ -5,7 +5,54 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
-## #25 — Marketer dashboard: demo-balance card removed + bank-standard information architecture; latent `bg-card` no-op token caught — FIXED (branch `feat/marketer-dashboard-bank-standard`)
+## #26 — A brand's DEFAULT marketer could be demoted to 'player', stranding it un-removable + dashboard-less — FIXED (branch `fix/default-marketer-role-lock`, migration 0124)
+- **Report (Issue 1):** "the admin must be able to remove a default marketer" and "some marketers cannot
+  see their dashboard."
+- **Evidence (read-only, production):** three brands had a default marketer (`sites.owner_user_id`)
+  whose role had been demoted to **`player`**: `1000wins → @claudia`, `cpfmarket → @marketer001`,
+  `muchwins → @sheila`. The `admin_actions` audit shows each was promoted to `marketer`, assigned as
+  the brand default, then a superadmin ran `user.set_role` → `player` (claudia 2026-09-13, marketer001
+  2026-09-14, sheila 2026-09-15). All three still hold active `affiliates` rows and were still being
+  credited deposit commission (marketer001 had KES 100 accrued, sheila KES 194.15) — money routed to
+  accounts that can no longer open the marketer dashboard.
+- **Root cause:** migration 0104 locked *status* changes (ban/suspend) on a brand default
+  (`fn_admin_set_user_status` → `DEFAULT_MARKETER_LOCKED`) but **never locked *role* demotion**.
+  `fn_admin_set_user_role` freely moved a brand default out of `'marketer'`, producing an invalid
+  state the guarded assign RPCs can't even create. That state then wedged two ways:
+  1. **Un-removable:** `fn_admin_set_site_owner` validated `role='marketer'` for BOTH the assign AND
+     the clear path, so clearing a now-`player` owner raised `OWNER_NOT_MARKETER`; and the admin panel
+     hid the whole control because it was gated on `q.data.role === 'marketer'`.
+  2. **Dashboard-less:** `/dashboard` (and the marketer HUD) require `role === 'marketer'`, so a
+     demoted default is redirected home even though it is, in substance, the brand's earning marketer.
+- **Fix (migration 0124 + web):**
+  * **DB:** split `fn_admin_set_site_owner` validation — ASSIGN still requires an ACTIVE marketer on
+    the actor's own brand; CLEAR now works for ANY current owner (role/status irrelevant) and derives
+    the cleared brand from the ownership row itself, so a corrupt default is always removable. Added
+    the symmetric **role-demotion lock** to `fn_admin_set_user_role`: a brand default cannot be moved
+    out of `'marketer'` until removed/reassigned (`DEFAULT_MARKETER_LOCKED`); setting/keeping
+    `'marketer'` and auto-enroll-on-promotion are unchanged.
+  * **Web (`admin/users/[id]/view.tsx`):** render the default-marketer control whenever the account
+    *is* a brand default (even if its role drifted off `marketer`) so the Remove action is reachable;
+    only offer "Make brand default" for an actual marketer; warn on a stale (non-marketer) default;
+    and surface a plain-language `DEFAULT_MARKETER_LOCKED` message on the role control ("remove them as
+    the brand default first, then change their role").
+- **Why this is the once-for-all fix:** the DB RPC is the authoritative production guard (the API and
+  in-memory dev mirror sit behind it). GAP 1 makes removal always possible for every current/future
+  corrupt row; GAP 2 stops the corruption from ever being re-created. The pre-existing three rows are
+  repaired by a separate operator-confirmed data step and are now also removable directly in the panel.
+- **Tests:** new `packages/db/_testkit/e2e_default_marketer_lock.py` — 28 adversarial scenarios on a
+  real PG17 with ALL 124 migrations (auth gate, assign active-marketer-only, suspended/​player rejects,
+  demotion lock for admin+superadmin, keep-marketer allowed, site-scope on clear, removal, re-enable
+  after removal, repair of a forged player-owner default, idempotent no-op clear, platform cross-brand
+  clear). Full suites green: shared 219, engine 303, API 319; backend + web typecheck clean; web
+  `next build` clean. Migration re-applies idempotently.
+- **Note:** the DB-e2e harness's `reset_and_migrate()` globs `00*.sql`, which silently stops at 0099
+  (misses 0100–0124); the new test uses `[0-9]*.sql`. Pre-existing suites `e2e_platform_console.py` and
+  `e2e_affiliate_sites.py` fail on stale test bodies (a removed `min_withdrawal_native` column; a
+  `config_version` FK) independent of this change — logged for a follow-up test-maintenance pass.
+
+---
+
 - **Request (operator, Issue 1):** remove the "Demo balance (for showcasing the game)" card from the
   marketer dashboard, then reorganise the dashboard to bank standards — "if we have 50 expenses, do we
   really list all of them? pages? tables?"
