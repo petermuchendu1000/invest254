@@ -15,6 +15,12 @@ const LEVELS = [
   { value: 'info', label: 'Info' },
 ];
 
+const APPS = [
+  { value: '', label: 'All services' },
+  { value: 'api', label: 'API' },
+  { value: 'engine', label: 'Engine (WS)' },
+];
+
 const levelBadge = (level: string): string =>
   level === 'error' ? 'bg-down/15 text-down'
     : level === 'warn' ? 'bg-warn/15 text-warn'
@@ -27,6 +33,7 @@ function fieldsText(fields: unknown): string {
 }
 
 export default function SystemLogsPage() {
+  const [app, setApp] = useState('');
   const [level, setLevel] = useState('');
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
@@ -36,7 +43,7 @@ export default function SystemLogsPage() {
     return () => clearTimeout(id);
   }, [qInput]);
 
-  const query = useSystemLogs({ ...(level ? { level } : {}), ...(q ? { q } : {}) });
+  const query = useSystemLogs({ ...(app ? { app } : {}), ...(level ? { level } : {}), ...(q ? { q } : {}) });
   const rows = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
 
   return (
@@ -48,6 +55,7 @@ export default function SystemLogsPage() {
 
       <Section>
         <Toolbar>
+          <FilterSelect label="Service" value={app} onChange={setApp} options={APPS} />
           <FilterSelect label="Level" value={level} onChange={setLevel} options={LEVELS} />
           <input
             value={qInput}
@@ -110,7 +118,10 @@ function Row({ r }: { r: AdminSystemLogRow }) {
       </Td>
       <Td className="text-xs">
         <div className="flex flex-col gap-0.5">
-          <span className="font-mono text-fg">{r.method ? `${r.method} ` : ''}{r.path ?? '—'}</span>
+          <span className="flex items-center gap-1 font-mono text-fg">
+            {r.app ? <span className="rounded bg-surface-2 px-1 py-0.5 text-[9px] font-semibold uppercase text-muted">{r.app}</span> : null}
+            <span>{r.method ? `${r.method} ` : ''}{r.path ?? ''}</span>
+          </span>
           <span className="text-muted">
             {r.requestId ? <span className="font-mono">{r.requestId.slice(0, 8)}</span> : null}
             {r.userId ? <span className="ml-1.5">{r.role ?? 'user'} {r.userId.slice(0, 8)}</span> : null}

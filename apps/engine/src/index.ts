@@ -31,6 +31,7 @@ export * from "./payments.js";
 export * from "./paymentservice.js";
 export * from "./admin.js";
 export * from "./adminservice.js";
+export * from "./systemlog.js";
 export * from "./platform.js";
 export * from "./notifications.js";
 export * from "./push.js";

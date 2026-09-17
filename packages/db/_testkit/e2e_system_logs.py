@@ -34,7 +34,7 @@ def reset_and_migrate():
     return conn
 
 # The listSystemLogs query, verbatim from PgAdminRepository.listSystemLogs.
-LIST = """select id, t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields
+LIST = """select id, t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields, app
   from system_logs
  where (%(cur_t)s::timestamptz is null or (t, id) < (%(cur_t)s::timestamptz, %(cur_id)s::bigint))
    and (%(level)s::text is null or level = %(level)s)
@@ -42,21 +42,22 @@ LIST = """select id, t, level, msg, request_id, method, path, status, duration_m
    and (%(req)s::text is null or request_id = %(req)s)
    and (%(since)s::timestamptz is null or t >= %(since)s)
    and (%(q)s::text is null or (msg ilike '%%'||%(q)s||'%%' or path ilike '%%'||%(q)s||'%%'))
+   and (%(app)s::text is null or app = %(app)s)
  order by t desc, id desc
  limit %(limit)s"""
 def q(cur, **kw):
-    p = dict(cur_t=None, cur_id=None, level=None, status=None, req=None, since=None, q=None, limit=100); p.update(kw)
+    p = dict(cur_t=None, cur_id=None, level=None, status=None, req=None, since=None, q=None, app=None, limit=100); p.update(kw)
     cur.execute(LIST, p); return cur.fetchall()
 
 def main():
     conn = reset_and_migrate(); conn.autocommit = True; cur = conn.cursor()
-    ins = ("insert into system_logs(t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields) "
-           "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)")
-    # 3 fresh rows (newest last) + 1 old row (45 days ago).
-    cur.execute(ins, ["2026-09-17T10:00:00Z","info","request","r1","GET","/api/v1/wallet",200,12,"1.1.1.1","u1","player","siteA",json.dumps({"module":"http"})])
-    cur.execute(ins, ["2026-09-17T10:01:00Z","warn","request rejected","r2","POST","/api/v1/withdrawals",402,8,"1.1.1.2","u2","player","siteA",json.dumps({"code":"INSUFFICIENT_FUNDS"})])
-    cur.execute(ins, ["2026-09-17T10:02:00Z","error","request failed","r3","POST","/api/v1/admin/withdrawals/x/approve",500,30,"1.1.1.3","adm","admin","siteB",json.dumps({"err":{"message":"boom"}})])
-    cur.execute(ins, ["2026-08-03T10:00:00Z","error","old failure","r0","GET","/api/v1/x",500,1,"1.1.1.9","u0","player","siteA",json.dumps({})])
+    ins = ("insert into system_logs(t, app, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields) "
+           "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)")
+    # 3 fresh rows (newest last) + 1 old row (45 days ago). r3 is an engine line; the rest are API.
+    cur.execute(ins, ["2026-09-17T10:00:00Z","api","info","request","r1","GET","/api/v1/wallet",200,12,"1.1.1.1","u1","player","siteA",json.dumps({"module":"http"})])
+    cur.execute(ins, ["2026-09-17T10:01:00Z","api","warn","request rejected","r2","POST","/api/v1/withdrawals",402,8,"1.1.1.2","u2","player","siteA",json.dumps({"code":"INSUFFICIENT_FUNDS"})])
+    cur.execute(ins, ["2026-09-17T10:02:00Z","engine","error","request failed","r3","POST","/api/v1/admin/withdrawals/x/approve",500,30,"1.1.1.3","adm","admin","siteB",json.dumps({"err":{"message":"boom"}})])
+    cur.execute(ins, ["2026-08-03T10:00:00Z","api","error","old failure","r0","GET","/api/v1/x",500,1,"1.1.1.9","u0","player","siteA",json.dumps({})])
 
     print("\n== newest-first ordering ==")
     rows = q(cur)
@@ -69,6 +70,8 @@ def main():
     check("q='withdrawals' (path) -> r3,r2", [r[4] for r in q(cur, q="withdrawals")] == ["r3","r2"])
     check("q='failed' (msg) -> r3", [r[4] for r in q(cur, q="failed")] == ["r3"])
     check("since 2026-09-17 -> the 3 fresh", [r[4] for r in q(cur, since="2026-09-17T00:00:00Z")] == ["r3","r2","r1"])
+    check("app=engine -> only r3", [r[4] for r in q(cur, app="engine")] == ["r3"])
+    check("app=api -> r2,r1,r0 (excludes the engine line)", [r[4] for r in q(cur, app="api")] == ["r2","r1","r0"])
 
     print("\n== keyset cursor: page size 2 then next ==")
     p1 = q(cur, limit=2)

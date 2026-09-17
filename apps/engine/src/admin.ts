@@ -90,12 +90,13 @@ export interface AdminAuditRow {
 }
 /** One persisted system-log line (docs/36) surfaced to the owner-only System logs UI. */
 export interface AdminSystemLogRow {
-  id: string; tMs: number; level: string; msg: string;
+  id: string; tMs: number; app: string | null; level: string; msg: string;
   requestId: string | null; method: string | null; path: string | null;
   status: number | null; durationMs: number | null; ip: string | null;
   userId: string | null; role: string | null; siteId: string | null; fields: unknown;
 }
 export interface AdminSystemLogQuery extends PageQuery {
+  app?: string | undefined;         // which process ('api' | 'engine')
   level?: string | undefined;       // exact level (debug|info|warn|error)
   status?: number | undefined;      // exact HTTP status
   q?: string | undefined;           // substring match on msg/path
@@ -894,7 +895,7 @@ export class PgAdminRepository implements AdminRepository {
     const limit = clampLimit(query.limit);
     const cur = decodeKeyset(query.cursor);
     const r = await this.q.query(
-      `select id, t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields
+      `select id, t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields, app
          from system_logs
         where ($1::timestamptz is null or (t, id) < ($1::timestamptz, $2::bigint))
           and ($4::text is null or level = $4)
@@ -902,13 +903,14 @@ export class PgAdminRepository implements AdminRepository {
           and ($6::text is null or request_id = $6)
           and ($7::timestamptz is null or t >= $7)
           and ($8::text is null or (msg ilike '%'||$8||'%' or path ilike '%'||$8||'%'))
+          and ($9::text is null or app = $9)
         order by t desc, id desc
         limit $3`,
       [cur ? new Date(cur.tsMs).toISOString() : null, cur ? Number(cur.id) : null, limit + 1,
        query.level ?? null, query.status ?? null, query.requestId ?? null,
-       query.sinceMs ? new Date(query.sinceMs).toISOString() : null, query.q ?? null]);
+       query.sinceMs ? new Date(query.sinceMs).toISOString() : null, query.q ?? null, query.app ?? null]);
     const rows: AdminSystemLogRow[] = r.rows.map((x) => ({
-      id: String(x.id), tMs: ms(x.t), level: String(x.level), msg: String(x.msg),
+      id: String(x.id), tMs: ms(x.t), app: x.app == null ? null : String(x.app), level: String(x.level), msg: String(x.msg),
       requestId: x.request_id == null ? null : String(x.request_id),
       method: x.method == null ? null : String(x.method), path: x.path == null ? null : String(x.path),
       status: x.status == null ? null : Number(x.status), durationMs: x.duration_ms == null ? null : Number(x.duration_ms),

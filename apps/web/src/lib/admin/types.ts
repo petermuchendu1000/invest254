@@ -355,6 +355,7 @@ export interface AdminDayReport {
 export interface AdminSystemLogRow {
   id: string;
   tMs: number;
+  app: string | null;
   level: string;
   msg: string;
   requestId: string | null;

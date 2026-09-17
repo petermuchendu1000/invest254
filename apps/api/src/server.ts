@@ -3,7 +3,7 @@ import {
   PaymentService, AuthService, AffiliateService, AdminService, PgAdminRepository, PlatformService, PgPlatformRepository, DarajaConfigStore, makeVerifier,
   NotificationService, PgNotificationRepository,
   PushService, PgPushSubscriptionRepository,
-  GameConfigStore, mapConfigRow, makePgPools,
+  GameConfigStore, mapConfigRow, makePgPools, makeSystemLogPersister,
   makeMegaPayClient,
   verifyPassword,
   type GameRepository, type EngagementRepository, type PaymentRepository,
@@ -36,36 +36,6 @@ const PORT = Number(process.env.PORT ?? 8081);
 /** Base API logger (env-driven: LOG_LEVEL, LOG_PRETTY). Every request logs through a per-request
  *  child (see http.ts); background jobs and boot use module-scoped children of this. */
 const log = createLogger({ bindings: { app: "api" } });
-
-/** Severity weights for the persistence threshold (mirrors the shared logger's levels). */
-const LOG_LEVEL_WEIGHT: Record<string, number> = { debug: 10, info: 20, warn: 30, error: 40 };
-
-/**
- * A logger sink that keeps the normal stdout/stderr line (Fly captures it) AND persists lines at
- * >= LOG_PERSIST_LEVEL (default 'warn') to `system_logs` for the owner-only System logs UI (docs/36,
- * BUGLOG #33). The DB write is fire-and-forget: a logging fault can never block or fail a request.
- */
-function makeDbLogSink(pool: { query: (sql: string, params?: unknown[]) => Promise<{ rows?: unknown[] }> }):
-  (line: string, level: string) => void {
-  const persistLevel = (process.env.LOG_PERSIST_LEVEL ?? "warn").toLowerCase();
-  const threshold = LOG_LEVEL_WEIGHT[persistLevel] ?? 30;
-  return (line, level) => {
-    if (level === "error") process.stderr.write(line + "\n"); else process.stdout.write(line + "\n");
-    if ((LOG_LEVEL_WEIGHT[level] ?? 0) < threshold) return;
-    try {
-      const r = JSON.parse(line) as Record<string, unknown>;
-      const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-      const s = (v: unknown): string | null => (v == null ? null : String(v));
-      const { t, level: _lv, msg, requestId, method, path, status, durationMs, ip, userId, role, siteId, ...rest } = r as Record<string, unknown>;
-      void pool.query(
-        `insert into system_logs(t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)`,
-        [s(t), level, String(msg ?? ""), s(requestId), s(method), s(path), num(status), num(durationMs),
-         s(ip), s(userId), s(role), s(siteId), JSON.stringify(rest ?? {})],
-      ).catch(() => { /* logging must never affect a request */ });
-    } catch { /* non-JSON (LOG_PRETTY) or bad shape — skip persistence, stdout already has it */ }
-  };
-}
 
 /** Map a marketer_expenses row (from the 0068 RPCs) to the MarketerExpenseRow DTO. */
 function mapExpenseRow(x: Record<string, unknown>) {
@@ -120,9 +90,12 @@ async function buildDeps(): Promise<ApiDeps> {
   const pool = queryPool;
   const q = pool as unknown as Querier;
 
-  // Owner-visible System logs (docs/36, BUGLOG #33): this logger persists warn/error lines (env
-  // LOG_PERSIST_LEVEL) to `system_logs` in addition to stdout. Used as the app + background logger.
-  const dbLog = createLogger({ bindings: { app: "api" }, sink: makeDbLogSink(pool as unknown as { query: (sql: string, params?: unknown[]) => Promise<{ rows?: unknown[] }> }) });
+  // Owner-visible System logs (docs/36, BUGLOG #33/#34): persist structured request/event lines AND
+  // capture every direct console.* call in this process, tagged app='api'. Fire-and-forget; never
+  // blocks a request. Level is env-driven (LOG_PERSIST_LEVEL, default 'info' -> all requests + events).
+  const logPersister = makeSystemLogPersister(pool as unknown as { query: (sql: string, params?: unknown[]) => Promise<{ rows?: unknown[] }> }, { app: "api" });
+  const dbLog = createLogger({ bindings: { app: "api" }, sink: logPersister.loggerSink });
+  logPersister.captureConsole();
   // Retention: prune old rows so the store stays bounded (env LOG_RETENTION_DAYS, default 30).
   const LOG_PRUNE_MS = Number(process.env.LOG_PRUNE_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
   const LOG_KEEP_DAYS = Number(process.env.LOG_RETENTION_DAYS ?? 30);

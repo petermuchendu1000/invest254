@@ -5,6 +5,32 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #34 — System logs were only half-wired: the WS engine + all direct console.* were never captured — FIXED (branch `fix/system-logs-wire-all`, migration 0129)
+- **Report (follow-up to #33):** "map and wire the ENTIRE logs" — #33 only persisted API request/error
+  lines; the rest of the system was still invisible.
+- **Map (exhaustive, no assumptions):** grepped every `createLogger` and every `console.*` in the
+  backend. Findings: (a) the **WS engine has NO structured logger** — its boot, **crash recovery**,
+  **daily-seed rotation**, **pool top-ups**, **payments/Daraja/MegaPay**, and WS error reporting are all
+  `console.*` → stdout only; (b) the **API had 22 `console.*`** (boot/pool via `makePgPools`) bypassing
+  the sink; (c) all these are low-frequency events — no per-tick/per-message hot path — so safe to persist.
+- **Fix (both processes, one shared module):** new `systemlog.ts` `makeSystemLogPersister(pool,{app})`
+  provides (1) a `loggerSink` for the structured logger and (2) `captureConsole()` that monkey-patches
+  `console.{log,info,warn,error,debug}` so EVERY direct console call is persisted too — fully guarded
+  (fire-and-forget, re-entrancy-safe, never throws/blocks/recurses). The **API** uses it as its logger
+  sink AND captures console (`app='api'`); the **engine** installs `captureConsole()` (`app='engine'`)
+  right after its pool is created. Added migration 0129 (`app` column + index, backfilled `'api'`) so
+  the UI can filter by process; the read path, `GET /admin/logs`, and the UI gained an `app` filter +
+  per-row service badge. Default persist level raised to **`info`** (captures the full request stream +
+  every event; `debug`/health excluded); retention prune unchanged.
+- **Coverage now:** API requests + errors + money-path (reconcile) + boot console; engine boot + crash
+  recovery + seed rotation + pool realtime + platform live-feed + payments (Daraja/MegaPay) + WS errors.
+- **Tests:** `systemlog.test.ts` (4 unit: sink promotes columns + drops below-threshold; console capture
+  maps level, tags app, serializes Errors, marks `via:console`, restores originals; null-pool no-op;
+  idempotent install) + `e2e_system_logs.py` extended to 13 (adds `app` filter). Suites green: engine
+  307 / API 333; backend + web typecheck clean; `next build` clean; migrations idempotent.
+
+---
+
 ## #33 — System logging was implemented but had no UI (owner couldn't view logs) — FIXED (branch `fix/system-logs-ui`, migration 0128)
 - **Report:** "I don't have a UI to see all system logs — it was implemented but the UI was never."
 - **State found:** the shared structured logger + per-request logging (docs/36) were implemented, but
