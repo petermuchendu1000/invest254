@@ -5,6 +5,32 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #31 — A soft-DELETED same-phone account shadowed a marketer's login; @jake locked out of the mpesa app — FIXED (branch `fix/marketer-login-deleted-shadow`)
+- **Report:** @jake (marketer) still could not log into the mpesa app after the #30 PIN fix.
+- **Investigation (live data, no guessing):** jake has 5 same-phone (`0113488568`) accounts across brands,
+  oldest-first: **`@dave` player invest254 `status=deleted` (has password)**, `@jake` marketer safitraders
+  active, `@boyz` tamutraders banned, `@jake` madolar player active, `@boyz` 33traders active. His marketer
+  wallet is on safitraders (active). The app's non-PIN path is `login-web` (password) → `auth.login({anyBrand:true})`.
+- **Root cause:** `AuthService.login` built the candidate list oldest-first, **broke on the FIRST password
+  match, then rejected it if `deleted`**. Since jake reuses one password, the first match was his OLDEST
+  account — the soft-deleted `@dave` — so login threw `INVALID_CREDENTIALS` and never reached his active
+  safitraders marketer account. A soft-deleted account was **shadowing** a valid same-phone account in the
+  cross-brand (marketer-app) path. (Not the default-marketer bug — verified independent code paths.)
+- **Fix (`apps/engine/src/authservice.ts`):** SKIP `deleted` candidates during password matching, so a
+  soft-deleted account can never shadow a valid same-phone account; keep the hard "deleted can't sign in"
+  rule (a deleted-ONLY phone still 401s) and constant-time behaviour (a dummy verify when every candidate
+  was skipped). Single-account (normal per-brand web) login is unchanged. Code-only (no migration); ships
+  on the next Fly deploy.
+- **Ripple checked:** callers of `auth.login` are the per-brand web login (single candidate — unchanged)
+  and the marketer `login-web` (`anyBrand` — fixed). After the fix jake resolves via ANY non-deleted match
+  (his safitraders marketer directly, or a player/banned account → `profileByPhone` any-brand fallback →
+  safitraders wallet). Combined with #30 (PIN sig-9) and his now-present marketer PIN, BOTH app login paths
+  work. If a marketer's password matches ONLY a deleted account, that is a password-reset case, not this bug.
+- **Tests:** `app.marketers.webauth.test.ts` +2 — the deleted-shadow scenario now logs in (was 401), and a
+  deleted-ONLY phone still 401s. Full suites green: shared 219 / engine 303 / API 328; typecheck clean.
+
+---
+
 ## #30 — Marketer PIN login (mpesa_2 quick-login) failed on any non-07 phone format, on every brand — FIXED (branch `fix/marketer-login-phone-sig9`, migration 0126)
 - **Report:** "some marketers cannot log into one or both apps" (mpesa_2 / truecaller).
 - **Root cause:** `fn_marketer_login` (PIN path, `POST /marketers/auth/login`) matched `marketers.phone =
