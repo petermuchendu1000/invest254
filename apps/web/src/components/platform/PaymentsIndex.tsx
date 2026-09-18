@@ -27,9 +27,13 @@ export function PaymentsIndex() {
                   <div className="text-[11px] text-muted">{code}</div>
                 </div>
               </div>
-              <span className={['rounded-full border px-2 py-0.5 text-[11px] font-medium', enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-border/30 text-muted'].join(' ')}>
-                {enabled ? 'Live' : 'Hidden'}
-              </span>
+              {schema.playerAvailable ? (
+                <span className={['rounded-full border px-2 py-0.5 text-[11px] font-medium', enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-border/30 text-muted'].join(' ')}>
+                  {enabled ? 'Live' : 'Hidden'}
+                </span>
+              ) : (
+                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-500">Config only</span>
+              )}
             </div>
             <p className="line-clamp-2 text-xs text-muted">{schema.blurb}</p>
             <div className="mt-auto flex items-center justify-between pt-1">

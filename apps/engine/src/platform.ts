@@ -4,7 +4,7 @@ import {
   type CohortEconomy, type PaymentsEconomy,
 } from "@invest254/shared";
 import type { Querier } from "./wallet.js";
-import { GATEWAY_SCHEMAS, getSchema, splitSubmission, validateConfig, type GatewaySchema, type ValidationIssue } from "./gatewayschema.js";
+import { GATEWAY_SCHEMAS, getSchema, splitSubmission, validateConfig, PLAYER_DEPOSIT_RAILS, type GatewaySchema, type ValidationIssue } from "./gatewayschema.js";
 import { encryptSecrets, decryptSecrets, isEncryptionConfigured } from "./providercrypto.js";
 import { testConnection, type ConnResult } from "./gatewaytest.js";
 
@@ -892,12 +892,15 @@ export class PlatformService {
   setProviderGlobal(actorId: string, actorRole: string, code: string, enabled: boolean): Promise<void> {
     if (!code || typeof code !== "string") throw new Error("INVALID_PROVIDER");
     if (typeof enabled !== "boolean") throw new Error("INVALID_ENABLED");
+    // A gateway with no player deposit rail (config-only) can never be switched live for players.
+    if (enabled && !PLAYER_DEPOSIT_RAILS.has(code)) throw new Error("PROVIDER_NOT_PLAYER_READY");
     return this.repo.setProviderGlobal(actorId, actorRole, code, enabled);
   }
   setProviderSite(actorId: string, actorRole: string, siteId: string, code: string, enabled: boolean): Promise<void> {
     if (!siteId || typeof siteId !== "string") throw new Error("INVALID_SITE");
     if (!code || typeof code !== "string") throw new Error("INVALID_PROVIDER");
     if (typeof enabled !== "boolean") throw new Error("INVALID_ENABLED");
+    if (enabled && !PLAYER_DEPOSIT_RAILS.has(code)) throw new Error("PROVIDER_NOT_PLAYER_READY");
     return this.repo.setProviderSite(actorId, actorRole, siteId, code, enabled);
   }
   clearProviderSite(actorId: string, actorRole: string, siteId: string, code: string): Promise<void> {

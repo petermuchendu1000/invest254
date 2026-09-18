@@ -100,7 +100,7 @@ export interface GatewayFieldDto {
   secret: boolean; required: boolean; placeholder?: string; help?: string;
   options?: { value: string; label: string }[]; default?: string; pattern?: string; group?: string;
 }
-export interface GatewaySchemaDto { code: string; displayName: string; docsUrl: string; blurb: string; fields: GatewayFieldDto[] }
+export interface GatewaySchemaDto { code: string; displayName: string; docsUrl: string; blurb: string; playerAvailable: boolean; fields: GatewayFieldDto[] }
 export interface GatewayConfigDto {
   providerCode: string; siteId: string | null;
   settings: Record<string, string>;

@@ -38,8 +38,22 @@ export interface GatewaySchema {
   docsUrl: string;
   /** Short, human summary shown atop the config card. */
   blurb: string;
+  /**
+   * True only when a real PLAYER deposit rail is implemented for this gateway (an initiate endpoint +
+   * a deposit-page tab). When false the gateway is CONFIG-ONLY: an admin can store & test credentials,
+   * but it can NOT be switched "Live for players" and never appears on the player deposit sheet — so
+   * the console never promises a deposit path the system can't actually serve.
+   */
+  playerAvailable: boolean;
   fields: GatewayField[];
 }
+
+/**
+ * Provider codes with a working PLAYER deposit rail (initiate + settle + a deposit-page tab). Only these
+ * may be enabled for players or returned by GET /deposits/providers. `mpesa` (Daraja) + `megapay` ship
+ * today; paystack/binance/payhero are config-only until their rails land.
+ */
+export const PLAYER_DEPOSIT_RAILS = new Set<string>(["mpesa", "megapay"]);
 
 const ENV_SANDBOX_PROD: GatewayField["options"] = [
   { value: "sandbox", label: "Sandbox (test)" },
@@ -51,6 +65,7 @@ export const GATEWAY_SCHEMAS: Record<string, GatewaySchema> = {
     code: "megapay",
     displayName: "Mega Pay",
     docsUrl: "https://megapay.co.ke",
+    playerAvailable: true,
     blurb: "M-Pesa STK deposit rail via Mega Pay. Both the API key and the account email travel in every request.",
     fields: [
       { key: "env", label: "Environment", kind: "select", secret: false, required: true, default: "sandbox", options: ENV_SANDBOX_PROD, help: "Production sends real STK prompts and moves real money." },
@@ -64,6 +79,7 @@ export const GATEWAY_SCHEMAS: Record<string, GatewaySchema> = {
     code: "paystack",
     displayName: "Paystack",
     docsUrl: "https://docs-v2.paystack.com/docs/api/authentication",
+    playerAvailable: false,
     blurb: "Cards, bank & mobile-money via Paystack. The secret key authenticates every server call and signs webhooks (HMAC-SHA512); the public key is safe for the browser.",
     fields: [
       { key: "env", label: "Environment", kind: "select", secret: false, required: true, default: "test", options: [ { value: "test", label: "Test" }, { value: "live", label: "Live" } ], help: "Must match your key prefixes (sk_test_/pk_test_ vs sk_live_/pk_live_)." },
@@ -76,6 +92,7 @@ export const GATEWAY_SCHEMAS: Record<string, GatewaySchema> = {
     code: "binance",
     displayName: "Binance Pay",
     docsUrl: "https://developers.binance.com",
+    playerAvailable: false,
     blurb: "Crypto checkout via Binance Pay Merchant API. Requests are signed with HMAC-SHA512 using your merchant API key + secret.",
     fields: [
       { key: "env", label: "Environment", kind: "select", secret: false, required: true, default: "production", options: [ { value: "production", label: "Production" }, { value: "testnet", label: "Testnet" } ] },
@@ -89,6 +106,7 @@ export const GATEWAY_SCHEMAS: Record<string, GatewaySchema> = {
     code: "payhero",
     displayName: "PayHero",
     docsUrl: "https://docs.payhero.co.ke/docs/authorization",
+    playerAvailable: false,
     blurb: "M-Pesa STK / bank / paybill routing via PayHero (the Lipwa API). Requests use Basic Auth — a token generated from your API Username + API Password (docs.payhero.co.ke/docs/authorization).",
     fields: [
       { key: "basic_auth_token", label: "Basic Auth token", kind: "secret", secret: true, required: true, placeholder: "Basic WHBpV0hE…", help: "PayHero dashboard → API Keys → Add new API Key → copy the Basic Authorization token. Sent verbatim as 'Authorization: Basic <token>'." },

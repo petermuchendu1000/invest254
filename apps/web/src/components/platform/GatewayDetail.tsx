@@ -120,9 +120,13 @@ function Detail({ code, schema, config }: { code: string; schema: import('@/lib/
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={['rounded-full border px-2.5 py-1 text-xs font-medium', enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-border/30 text-muted'].join(' ')}>
-              {enabled ? 'Live for players' : 'Hidden'}
-            </span>
+            {schema.playerAvailable ? (
+              <span className={['rounded-full border px-2.5 py-1 text-xs font-medium', enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-border/30 text-muted'].join(' ')}>
+                {enabled ? 'Live for players' : 'Hidden'}
+              </span>
+            ) : (
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-500">Config only</span>
+            )}
             <span className={['rounded-full border px-2.5 py-1 text-xs font-medium', config.exists ? 'border-accent/30 bg-accent/10 text-accent' : 'border-border text-muted'].join(' ')}>
               {config.hasSecret ? 'Configured' : config.exists ? 'Settings only' : 'Not configured'}
             </span>
@@ -167,6 +171,8 @@ function Detail({ code, schema, config }: { code: string; schema: import('@/lib/
         <div className="flex flex-col gap-5">
           <section className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-2 p-5">
             <h2 className="text-base font-semibold text-fg">Availability</h2>
+            {schema.playerAvailable ? (
+              <>
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-fg">Show to all clients</div>
@@ -194,6 +200,16 @@ function Detail({ code, schema, config }: { code: string; schema: import('@/lib/
               )}
               <p className="text-[11px] text-muted">“Inherit” follows the global switch; On/Off forces it for this client only.</p>
             </div>
+              </>
+            ) : (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                <div className="text-sm font-medium text-amber-500">Player deposits not available yet</div>
+                <p className="mt-1 text-xs text-muted">
+                  {schema.displayName} has no live deposit rail in the app yet, so it can’t be switched “Live for players”.
+                  Store &amp; test its credentials here now — it will be offered to players automatically once its rail ships.
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="flex flex-col gap-2 rounded-2xl border border-border bg-surface-2 p-5 text-xs text-muted">

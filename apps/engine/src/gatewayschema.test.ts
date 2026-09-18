@@ -1,8 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  GATEWAY_SCHEMAS, GATEWAY_CODES, getSchema, fieldKinds, splitSubmission, validateConfig,
+  GATEWAY_SCHEMAS, GATEWAY_CODES, getSchema, fieldKinds, splitSubmission, validateConfig, PLAYER_DEPOSIT_RAILS,
 } from "./gatewayschema.js";
+
+test("playerAvailable: only megapay has a live player rail among configurable gateways", () => {
+  assert.equal(GATEWAY_SCHEMAS.megapay!.playerAvailable, true);
+  assert.equal(GATEWAY_SCHEMAS.paystack!.playerAvailable, false);
+  assert.equal(GATEWAY_SCHEMAS.binance!.playerAvailable, false);
+  assert.equal(GATEWAY_SCHEMAS.payhero!.playerAvailable, false);
+  assert.equal(PLAYER_DEPOSIT_RAILS.has("mpesa"), true);
+  assert.equal(PLAYER_DEPOSIT_RAILS.has("megapay"), true);
+  assert.equal(PLAYER_DEPOSIT_RAILS.has("payhero"), false);
+});
 
 test("all four gateways are registered with a stable shape", () => {
   assert.deepEqual(GATEWAY_CODES.sort(), ["binance", "megapay", "payhero", "paystack"]);
