@@ -23,6 +23,8 @@ export interface OnboardResult { siteId: string; brand: OnboardBrand; domain: Pr
 export interface PlatformOnboardDeps {
   /** True when the Cloudflare + Namecheap secrets are present so a domain can be auto-provisioned. */
   domainConfigured: boolean;
+  /** True when a registrar API (Namecheap) is configured to auto-set nameservers; false => manual NS. */
+  registrarConfigured: boolean;
   onboard(input: OnboardInput): Promise<OnboardResult>;
   domainStatus(domain: string): Promise<DomainStatus>;
 }
@@ -167,6 +169,14 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     if (!d || !d.trim()) throw new ApiError("VALIDATION", "domain is required", 400);
     return domain(() => deps.platformOnboard!.domainStatus(d.trim()));
   });
+
+  // Onboarding capabilities so the console can be HONEST up-front about what will happen:
+  //   domainConfigured   — Cloudflare is set up (zone + DNS + Pages custom domain run automatically)
+  //   registrarConfigured — a registrar API is set up to auto-point nameservers (else the operator sets them)
+  router.get(`${BASE}/platform/onboard/capabilities`, auth, platform, async () => ({
+    domainConfigured: Boolean(deps.platformOnboard?.domainConfigured),
+    registrarConfigured: Boolean(deps.platformOnboard?.registrarConfigured),
+  }));
 
   router.get(`${BASE}/platform/overview`, auth, platform, async (ctx: Ctx) =>
     ({ sites: await domain(() => deps.platform.overview(ctx.claims!.role ?? "player")) }));

@@ -147,6 +147,12 @@ export function useCreateSite() {
   return useMutation({ mutationFn: (body: CreateSiteBody) => platformApi.createSite(t, body), onSuccess: invalidate });
 }
 
+/** Onboarding capabilities: is Cloudflare provisioning on, and are nameservers auto-set (else manual)? */
+export function useOnboardCapabilities() {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'onboard-caps'], queryFn: () => platformApi.onboardCapabilities(t), enabled: !!t, staleTime: 300_000 });
+}
+
 /** Instant client onboarding: brand + economy (+ optional domain provisioning) in one call. */
 export function useOnboardClient() {
   const t = useTok();

@@ -552,6 +552,7 @@ async function buildDeps(): Promise<ApiDeps> {
   if (provisioner) console.log(`[api] domain provisioning enabled (Cloudflare Pages project '${provisioner.pagesProject}')`);
   const platformOnboard: PlatformOnboardDeps = {
     domainConfigured: Boolean(provisioner),
+    registrarConfigured: provisioner?.registrarConfigured ?? false,
     async onboard(input: OnboardInput): Promise<OnboardResult> {
       const f = {
         name: input.name,

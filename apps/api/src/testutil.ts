@@ -503,6 +503,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const onboardCalls: OnboardInput[] = [];
   const onboardDeps: PlatformOnboardDeps = {
     domainConfigured: true,
+    registrarConfigured: true,
     async onboard(input: OnboardInput): Promise<OnboardResult> {
       onboardCalls.push(input);
       const host = input.primaryDomain ? input.primaryDomain.trim().toLowerCase() : null;

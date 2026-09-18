@@ -144,6 +144,7 @@ export const platformApi = {
   marketerRollup: (t: string) => apiFetch<{ marketers: MarketerRollupGroup[] }>('/platform/marketers/rollup', { token: t }),
   // Instant client onboarding (brand + economy + optional domain provisioning).
   onboard: (t: string, body: OnboardBody) => apiFetch<OnboardResult>('/platform/onboard', { method: 'POST', token: t, body }),
+  onboardCapabilities: (t: string) => apiFetch<{ domainConfigured: boolean; registrarConfigured: boolean }>('/platform/onboard/capabilities', { token: t }),
   domainStatus: (t: string, domain: string) => apiFetch<DomainStatus>('/platform/onboard/domain-status', { token: t, query: { domain } }),
   // Phase 2 — per-brand players + audit (cross-brand via explicit site id).
   siteUsers: (t: string, id: string, params?: Record<string, string | undefined>) => {

@@ -53,6 +53,24 @@ test("provisionDomain: normalizes a leading www and tolerates duplicate records"
   assert.ok(res.pages.length === 2);
 });
 
+test("provisionDomain: registrar=null (manual NS) still sets up Cloudflare + returns the nameservers to set", async () => {
+  const { cdn } = fakes();
+  const res = await provisionDomain(cdn, null, { domain: "shikafx.com", pagesProject: "invest254" });
+  assert.equal(res.nameserversUpdated, false);               // no registrar -> not auto-updated
+  assert.ok(res.nameServers.length > 0);                     // but the CF nameservers are returned
+  assert.match(res.note, /Action needed/i);                  // clear manual instruction
+  assert.match(res.note, new RegExp(res.nameServers[0]!.replace(/\./g, "\\.")));
+  assert.equal(res.pages.length, 2);                          // apex + www Pages domains still attached
+});
+
+test("provisionDomain: a registrar failure degrades to manual NS, not a hard error", async () => {
+  const { cdn } = fakes();
+  const failing: RegistrarClient = { setNameservers: async () => { throw new Error("namecheap 401"); } };
+  const res = await provisionDomain(cdn, failing, { domain: "shikafx.com", pagesProject: "invest254" });
+  assert.equal(res.nameserversUpdated, false);
+  assert.match(res.note, /Action needed/i);
+});
+
 test("getDomainStatus: active only when zone active and all pages domains active", async () => {
   const { cdn } = fakes();
   await cdn.addPagesDomain("invest254", "tamutraders.com");

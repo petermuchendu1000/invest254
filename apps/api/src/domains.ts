@@ -61,14 +61,18 @@ export interface ProvisionResult {
  */
 export async function provisionDomain(
   cdn: CdnClient,
-  registrar: RegistrarClient,
+  registrar: RegistrarClient | null,
   opts: { domain: string; pagesProject: string; pagesTarget?: string },
 ): Promise<ProvisionResult> {
   const domain = opts.domain.trim().toLowerCase().replace(/^www\./, "");
   const target = opts.pagesTarget ?? `${opts.pagesProject}.pages.dev`;
 
   const zone = await cdn.ensureZone(domain);
-  const nsUpdated = await registrar.setNameservers(domain, zone.nameServers);
+  // Registrar (nameserver) step is OPTIONAL. With a registrar we auto-point the domain's nameservers at
+  // Cloudflare; without one (or on failure) we degrade gracefully — Cloudflare zone + DNS + Pages are
+  // still set up, and the result returns exactly which nameservers the operator must set at the registrar.
+  let nsUpdated = false;
+  if (registrar) { try { nsUpdated = await registrar.setNameservers(domain, zone.nameServers); } catch { nsUpdated = false; } }
 
   // apex + www -> the Pages project (proxied so Cloudflare terminates TLS and routes to Pages).
   for (const name of [domain, `www.${domain}`]) {
@@ -81,6 +85,13 @@ export async function provisionDomain(
     catch { pages.push({ name, status: "exists_or_pending" }); }
   }
 
+  const nsList = zone.nameServers.join(" and ");
+  const note = zone.status === "active"
+    ? "Zone active; Pages custom domains validate and SSL issues shortly."
+    : nsUpdated
+      ? "Nameservers pointed at Cloudflare automatically; the zone activates once they propagate (minutes–few hours), then SSL auto-issues."
+      : `Action needed: at the domain's registrar, set its nameservers to ${nsList || "the Cloudflare nameservers shown"}. The zone activates once they propagate, then SSL auto-issues.`;
+
   return {
     domain,
     zoneId: zone.zoneId,
@@ -88,9 +99,7 @@ export async function provisionDomain(
     zoneStatus: zone.status,
     nameserversUpdated: nsUpdated,
     pages,
-    note: zone.status === "active"
-      ? "Zone active; Pages will validate and SSL will issue shortly."
-      : "Nameservers set; the zone activates once they propagate, then SSL auto-issues.",
+    note,
   };
 }
 
@@ -178,20 +187,27 @@ export interface DomainProvisioner {
   provision(domain: string): Promise<ProvisionResult>;
   status(domain: string): Promise<DomainStatus>;
   readonly pagesProject: string;
+  /** True when a registrar API (Namecheap) is configured to auto-set nameservers; false => manual NS. */
+  readonly registrarConfigured: boolean;
 }
 export function makeDomainProvisioner(): DomainProvisioner | null {
   const token = process.env.CF_DNS_API_TOKEN ?? process.env.CF_API_TOKEN;
   const accountId = process.env.CF_ACCOUNT_ID;
   const pagesProject = process.env.CF_PAGES_PROJECT ?? "invest254";
+  // Cloudflare is the ESSENTIAL requirement (zone + DNS + Pages custom domain). Without it there's no
+  // provisioning at all; with it, provisioning works standalone and returns the nameservers to set.
+  if (!token || !accountId) return null;
+  const cdn = makeCloudflareCdn({ token, accountId });
+  // Namecheap is OPTIONAL — only used to auto-point nameservers. Absent => operator sets NS manually.
   const apiUser = process.env.NAMECHEAP_API_USER;
   const userName = process.env.NAMECHEAP_USERNAME ?? apiUser;
   const apiKey = process.env.NAMECHEAP_API_KEY;
   const clientIp = process.env.NAMECHEAP_CLIENT_IP;
-  if (!token || !accountId || !apiUser || !userName || !apiKey || !clientIp) return null;
-  const cdn = makeCloudflareCdn({ token, accountId });
-  const registrar = makeNamecheapRegistrar({ apiUser, userName, apiKey, clientIp });
+  const registrar = (apiUser && userName && apiKey && clientIp)
+    ? makeNamecheapRegistrar({ apiUser, userName, apiKey, clientIp }) : null;
   return {
     pagesProject,
+    registrarConfigured: registrar != null,
     provision: (domain) => provisionDomain(cdn, registrar, { domain, pagesProject }),
     status: (domain) => getDomainStatus(cdn, { domain, pagesProject }),
   };
