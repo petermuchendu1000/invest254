@@ -114,14 +114,32 @@ verifier (`auth.ts`) surfaces `AuthClaims.platform`. `/auth/login` returns `plat
 - **Migrations 0131–0134 are additive + idempotent.** Apply BEFORE deploying new code (the migrate
   runner enforces this ordering). On apply: nothing changes operationally — all sites sit in the
   default platform owned by the system owner, who still sees everything; no platform admins exist yet.
-- **Staged next increments (own PRs, own test cycles):**
-  1. Thread `platform_admin` through the EXISTING per-site admin routes/services (overview, finance
-     reports, RTP, seeds, payouts, users) so a platform admin can drill into ANY of its sites — the
-     service layer today scopes to one site or all, and needs a platform-set filter. The DB + RLS +
-     guards for this are already in place; only the service queries need the `platform_id IN (…)` /
-     platform-set wiring.
-  2. The Platform-admin's OWN console view (its sites/settings/economy/site-admins), reusing the
-     admin surfaces with a platform switcher.
+- **Staged next increments:**
+  1. ✅ DONE — platform_admin can operate its OWN platform's sites via `/platform/*` (see §11).
+  2. Deeper per-site money tools for platform admins (balance adjust / user overrides) — these RPCs
+     (`fn_admin_adjust_balance`, `fn_admin_set_user_overrides`) still gate on
+     `admin/superadmin/platform_superadmin`; intentionally NOT extended to platform_admin yet
+     (money/PII-sensitive; deserves its own tested pass). A platform admin manages site-admins
+     (role/status) and site settings/economy today.
+
+## 11. Platform-admin console scoping (shipped in this branch)
+
+- **`/platform/*` is now platform-scoped**, not system-only. A `platform_admin` (JWT `role` +
+  `platform` claim) may: read its platform overview + brands (`GET /platform/overview`,
+  `GET /platform/sites` — filtered to its platform), create/edit/tune its brands
+  (`POST /platform/sites`, `PATCH /platform/sites/:id`, `/:id/config`), and manage its brands'
+  users (`/:id/users`, `/:id/audit`, `/:id/users/:uid`, `.../status`, `.../role`).
+- **Enforcement:** `adminScopeSite` returns null for a platform_admin (not single-site-bound);
+  `adminScopePlatform` + a `scopeSiteParam` middleware refuse any `/platform/sites/:id` whose site
+  is outside the caller's platform (403 `PLATFORM_SCOPE_FORBIDDEN`); the user drill-downs
+  additionally platform-check the target user's own brand. System-only tools (platforms CRUD,
+  appoint admins, onboard, payments, global config, pool, marketers, impersonate, owner/theme,
+  balance, overrides) stay `platform_superadmin`-gated.
+- **Web:** the operator shell admits platform_admin with a SCOPED nav (system-only items hidden);
+  Overview + brand drill-downs render only the caller's platform.
+- **Tests:** `apps/api/src/app.platform.scope.test.ts` (sees only own platform; cross-platform →
+  403; system-only → 403; system unrestricted). Full suite: DB 18/18, engine+api 719/719, web build
+  clean.
 
 ## 10. Console (shipped in this branch)
 

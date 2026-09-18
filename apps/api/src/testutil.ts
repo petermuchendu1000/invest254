@@ -354,11 +354,12 @@ export function makeSupportHarness(brandOf: (siteId: string) => SupportBrandInfo
 export function stubVerifier(): Verifier {
   return async (token: string): Promise<AuthClaims> => {
     if (!token) throw new Error("TOKEN_REQUIRED");
-    // `<userId>` | `<userId>:<role>` | `<userId>:<role>:<siteId>` — the optional 3rd segment
-    // lets tests exercise the JWT `site` claim that requireSite reads.
-    const [userId, role, site] = token.split(":");
+    // `<userId>` | `<userId>:<role>` | `<userId>:<role>:<siteId>` | `<userId>:<role>:<siteId>:<platformId>`
+    // — the optional 3rd/4th segments exercise the JWT `site` (requireSite) and `platform`
+    // (adminScopePlatform, Issue 1) claims.
+    const [userId, role, site, platform] = token.split(":");
     if (!userId) throw new Error("TOKEN_INVALID");
-    return { userId, role: role || "player", ...(site ? { site } : {}), raw: {} };
+    return { userId, role: role || "player", ...(site ? { site } : {}), ...(platform ? { platform } : {}), raw: {} };
   };
 }
 

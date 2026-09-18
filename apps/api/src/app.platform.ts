@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, adminScopePlatform, assertTargetPlatformInScope, type Ctx, type Middleware } from "./http.js";
 import { COHORT_KEYS, PAYMENT_KEYS } from "@invest254/shared";
 import type { MarketerRollupRow } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
@@ -144,7 +144,19 @@ function groupMarketerRollup(rows: MarketerRollupRow[]): MarketerGroup[] {
 
 export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   const auth = requireAuth(deps.verifier);
-  const platform = requireRole("platform_superadmin");
+  const platform = requireRole("platform_superadmin");        // SYSTEM owner only
+  const platformAdmin = requireRole("platform_admin");        // PLATFORM admin (+ system, higher rank)
+
+  // Platform-scope guard for any /platform/sites/:id route: a platform_admin may only act on a site
+  // in ITS OWN platform (system owner is unrestricted). Reads the site's platform and refuses a
+  // cross-platform target with 403 PLATFORM_SCOPE_FORBIDDEN. The platform-aware DB RPCs are the deeper
+  // guard; this stops a platform_admin at the door of the per-site drill-downs (users/audit/etc.).
+  const scopeSiteParam: Middleware = async (ctx: Ctx) => {
+    if (adminScopePlatform(ctx) === null) return;             // system: unrestricted
+    const siteId = ctx.params.id;
+    if (!siteId) return;
+    assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite(siteId));
+  };
 
   const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/;
 
@@ -251,8 +263,10 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.platform.revokePlatformAdmin(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.uid!, newRole));
   });
 
-  router.get(`${BASE}/platform/overview`, auth, platform, async (ctx: Ctx) =>
-    ({ sites: await domain(() => deps.platform.overview(ctx.claims!.role ?? "player")) }));
+  // Per-brand KPIs — platform-scoped: a platform_admin sees only ITS platform's sites (the 2-arg
+  // RPC resolves the actor's platform); the system owner sees every brand.
+  router.get(`${BASE}/platform/overview`, auth, platformAdmin, async (ctx: Ctx) =>
+    ({ sites: await domain(() => deps.platform.overview(ctx.claims!.userId, ctx.claims!.role ?? "player")) }));
 
   // Per-brand performance within a [from, to) window (docs/24 performance filters). `from`/`to` are
   // epoch-ms (or ISO); defaults to the last 24h when omitted. Read-only; platform_superadmin-gated.
@@ -270,8 +284,9 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return { fromMs, toMs, sites: await domain(() => deps.platform.performance(fromMs, toMs)) };
   });
 
-  router.get(`${BASE}/platform/sites`, auth, platform, async () =>
-    ({ sites: await deps.platform.listSites() }));
+  // Brands + economy — platform-scoped: a platform_admin sees only ITS platform's brands.
+  router.get(`${BASE}/platform/sites`, auth, platformAdmin, async (ctx: Ctx) =>
+    ({ sites: await deps.platform.listSites(adminScopePlatform(ctx)) }));
 
   // Impersonation (docs/24 §370): the platform owner "logs into" any client's admin console AS its
   // superadmin — no signup, no per-brand credential. We mint a superadmin JWT whose SUBJECT stays the
@@ -295,7 +310,8 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     };
   });
 
-  router.post(`${BASE}/platform/sites`, auth, platform, async (ctx: Ctx) => {
+  // Create a brand — a platform_admin's new brand is stamped into ITS platform (enforced by the RPC).
+  router.post(`${BASE}/platform/sites`, auth, platformAdmin, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const slug = body.slug, name = body.name;
     if (typeof slug !== "string" || typeof name !== "string") throw new ApiError("VALIDATION", "slug and name are required", 400);
@@ -308,12 +324,12 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return { status: 201, body: { siteId } };
   });
 
-  router.patch(`${BASE}/platform/sites/:id`, auth, platform, async (ctx: Ctx) => {
+  router.patch(`${BASE}/platform/sites/:id`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     const patch = asObject(ctx.body);
     return domain(() => deps.platform.updateSite(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
   });
 
-  router.patch(`${BASE}/platform/sites/:id/config`, auth, platform, async (ctx: Ctx) => {
+  router.patch(`${BASE}/platform/sites/:id/config`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     const patch = asObject(ctx.body);
     return domain(() => deps.platform.setSiteConfig(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
   });
@@ -521,7 +537,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   const actorOf = (ctx: Ctx) => [ctx.claims!.userId, ctx.claims!.role ?? "player"] as const;
 
   // Players in a brand (reuses the site-scoped admin list with an explicit target site).
-  router.get(`${BASE}/platform/sites/:id/users`, auth, platform, async (ctx: Ctx) => {
+  router.get(`${BASE}/platform/sites/:id/users`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     const num = (k: string) => { const r = ctx.query.get(k); const n = r == null || r === "" ? NaN : Number(r); return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined; };
     return deps.admin.listUsers({
       ...pageQ(ctx),
@@ -535,14 +551,19 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     });
   });
 
-  router.get(`${BASE}/platform/sites/:id/users/:uid`, auth, platform, async (ctx: Ctx) =>
-    domain(() => deps.admin.getUserDetail(ctx.params.uid!)));
+  router.get(`${BASE}/platform/sites/:id/users/:uid`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    // The user must belong to a site in the caller's platform (uid is not covered by scopeSiteParam,
+    // which only validates the :id site) — resolve the user's brand and platform-check it.
+    assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite((await deps.admin.siteOfUser(ctx.params.uid!)) ?? ""));
+    return domain(() => deps.admin.getUserDetail(ctx.params.uid!));
+  });
 
   // Per-brand audit trail (admin_actions filtered by site).
-  router.get(`${BASE}/platform/sites/:id/audit`, auth, platform, async (ctx: Ctx) =>
+  router.get(`${BASE}/platform/sites/:id/audit`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) =>
     deps.admin.listAudit(pageQ(ctx), ctx.params.id));
 
-  router.post(`${BASE}/platform/sites/:id/users/:uid/status`, auth, platform, async (ctx: Ctx) => {
+  router.post(`${BASE}/platform/sites/:id/users/:uid/status`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite((await deps.admin.siteOfUser(ctx.params.uid!)) ?? ""));
     const b = asObject(ctx.body);
     const status = String(b.status ?? "");
     if (!["active", "suspended", "banned"].includes(status)) throw new ApiError("VALIDATION", "status must be active|suspended|banned", 400);
@@ -550,10 +571,11 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.admin.setUserStatus(a, r, ctx.params.uid!, status, typeof b.reason === "string" ? b.reason : ""));
   });
 
-  router.post(`${BASE}/platform/sites/:id/users/:uid/role`, auth, platform, async (ctx: Ctx) => {
+  router.post(`${BASE}/platform/sites/:id/users/:uid/role`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     const b = asObject(ctx.body);
     const role = String(b.role ?? "");
     if (!["player", "marketer", "admin"].includes(role)) throw new ApiError("VALIDATION", "role must be player|marketer|admin", 400);
+    assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite((await deps.admin.siteOfUser(ctx.params.uid!)) ?? ""));
     const [a, r] = actorOf(ctx);
     return domain(() => deps.admin.setUserRole(a, r, ctx.params.uid!, role));
   });
