@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useGatewayConfigs, usePaymentProviders } from '@/lib/platform/hooks';
+import { GatewayLogo } from '@/components/platform/GatewayLogo';
 
 /** Payments hub: one card per gateway, each linking to its dedicated configuration page. */
 export function PaymentsIndex() {
@@ -20,7 +21,7 @@ export function PaymentsIndex() {
             className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface-2 p-5 transition hover:border-accent/50 hover:bg-surface">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-surface text-base font-bold text-fg">{schema.displayName.charAt(0)}</div>
+                <GatewayLogo code={code} name={schema.displayName} />
                 <div>
                   <div className="text-sm font-semibold text-fg">{schema.displayName}</div>
                   <div className="text-[11px] text-muted">{code}</div>

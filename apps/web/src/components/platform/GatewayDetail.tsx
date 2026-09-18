@@ -7,6 +7,7 @@ import {
   usePaymentProviders, useSetProviderGlobal, useSetProviderSite, usePlatformSites,
 } from '@/lib/platform/hooks';
 import type { GatewayFieldDto, ConnResultDto } from '@/lib/platform/endpoints';
+import { GatewayLogo } from '@/components/platform/GatewayLogo';
 
 const STATUS_STYLES: Record<ConnResultDto['status'], string> = {
   valid: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
@@ -112,7 +113,7 @@ function Detail({ code, schema, config }: { code: string; schema: import('@/lib/
         <Link href="/platform/payments" className="text-xs text-muted hover:text-fg">← Payments</Link>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-surface-2 text-lg font-bold text-fg">{schema.displayName.charAt(0)}</div>
+            <GatewayLogo code={code} name={schema.displayName} size="lg" />
             <div>
               <h1 className="text-xl font-semibold tracking-tight text-fg">{schema.displayName}</h1>
               <p className="text-xs text-muted">{schema.blurb}</p>
