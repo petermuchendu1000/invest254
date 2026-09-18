@@ -13,6 +13,7 @@ import {
 import type { GlobalConfigDto } from '@/lib/platform/endpoints';
 import { CohortEconomySection, PaymentsEconomySection } from '@/components/platform/GlobalEconomy';
 import { PaymentGatewaysSection } from '@/components/platform/PaymentGateways';
+import { GatewayConfigSection } from '@/components/platform/GatewayConfig';
 
 const money = (cents: number, cur = 'KES') => `${cur} ${(cents / 100).toLocaleString()}`;
 
@@ -172,6 +173,8 @@ export default function GlobalConfigPage() {
       <PaymentsEconomySection server={cfg.payments} activeCount={activeSites.length} setCfg={setCfg} />
 
       <PaymentGatewaysSection />
+
+      <GatewayConfigSection />
 
       {/* ── Global withdrawal-pool distributor ── */}
       <Section title="Global withdrawal pool — distribute to all clients">
