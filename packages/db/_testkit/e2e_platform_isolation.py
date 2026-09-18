@@ -97,6 +97,11 @@ def main():
     p1 = q1(cur, "select fn_platform_create_platform(%s,%s,%s,%s)", [ACTOR, SYS, "alpha", "Alpha Platform"])[0]
     p2 = q1(cur, "select fn_platform_create_platform(%s,%s,%s,%s)", [ACTOR, SYS, "beta",  "Beta Platform"])[0]
     check("system created two platforms", p1 != p2)
+    # This suite tests ISOLATION, not billing: put both platforms on Enterprise/active so the
+    # subscription site/user quotas (migration 0138) don't constrain the multi-site fixtures.
+    for pid in (p1, p2):
+        q1(cur, "select fn_subscription_set_plan(%s,%s,%s,%s)", [ACTOR, SYS, pid, "enterprise"])
+        q1(cur, "select fn_subscription_set_status(%s,%s,%s,%s,%s)", [ACTOR, SYS, pid, "active", "test"])
 
     a1 = seed_site(cur, ACTOR, "a1site", "A1"); a2 = seed_site(cur, ACTOR, "a2site", "A2"); b1 = seed_site(cur, ACTOR, "b1site", "B1")
     q1(cur, "select fn_platform_assign_site(%s,%s,%s,%s)", [ACTOR, SYS, a1, p1])

@@ -24,6 +24,8 @@ function Icon({ d }: { d: string }) {
 
 const NAV = [
   { href: '/platform', label: 'Overview', exact: true, icon: <Icon d="M3 13h8V3H3zM13 21h8V3h-8zM3 21h8v-6H3z" /> },
+  { href: '/platform/tickets', label: 'Tickets', icon: <Icon d="M4 5h16v6a2 2 0 000 2v6H4v-6a2 2 0 000-2zM9 5v14" /> },
+  { href: '/platform/billing', label: 'Billing', icon: <Icon d="M3 10h18M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2zM7 15h4" /> },
   // system: true = System owner only (hidden from a scoped Platform admin).
   { href: '/platform/platforms', label: 'Platforms', system: true, icon: <Icon d="M12 2l9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /> },
   { href: '/platform/onboard', label: 'Onboard client', system: true, icon: <Icon d="M12 5v14M5 12h14" /> },
