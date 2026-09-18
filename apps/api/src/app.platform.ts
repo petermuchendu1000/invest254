@@ -580,19 +580,21 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.admin.setUserRole(a, r, ctx.params.uid!, role));
   });
 
-  router.post(`${BASE}/platform/sites/:id/users/:uid/balance`, auth, platform, async (ctx: Ctx) => {
+  router.post(`${BASE}/platform/sites/:id/users/:uid/balance`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     const b = asObject(ctx.body);
     const amount = Number(b.amountCents);
     if (!Number.isFinite(amount) || amount === 0) throw new ApiError("VALIDATION", "amountCents must be a non-zero integer", 400);
     const reason = typeof b.reason === "string" ? b.reason : "";
     const kind = b.kind === "bonus" ? "bonus" : b.kind === "real" ? "real" : undefined;
+    assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite((await deps.admin.siteOfUser(ctx.params.uid!)) ?? ""));
     const [a, r] = actorOf(ctx);
     if (kind) return domain(() => deps.admin.adjustBalanceKind(a, r, ctx.params.uid!, Math.round(amount), kind, reason));
     return domain(() => deps.admin.adjustBalance(a, r, ctx.params.uid!, Math.round(amount), reason));
   });
 
-  router.patch(`${BASE}/platform/sites/:id/users/:uid/overrides`, auth, platform, async (ctx: Ctx) => {
+  router.patch(`${BASE}/platform/sites/:id/users/:uid/overrides`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     const patch = asObject(ctx.body);
+    assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite((await deps.admin.siteOfUser(ctx.params.uid!)) ?? ""));
     const [a, r] = actorOf(ctx);
     return domain(() => deps.admin.setUserOverrides(a, r, ctx.params.uid!, patch));
   });

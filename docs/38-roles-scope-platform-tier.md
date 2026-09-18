@@ -116,11 +116,7 @@ verifier (`auth.ts`) surfaces `AuthClaims.platform`. `/auth/login` returns `plat
   default platform owned by the system owner, who still sees everything; no platform admins exist yet.
 - **Staged next increments:**
   1. ✅ DONE — platform_admin can operate its OWN platform's sites via `/platform/*` (see §11).
-  2. Deeper per-site money tools for platform admins (balance adjust / user overrides) — these RPCs
-     (`fn_admin_adjust_balance`, `fn_admin_set_user_overrides`) still gate on
-     `admin/superadmin/platform_superadmin`; intentionally NOT extended to platform_admin yet
-     (money/PII-sensitive; deserves its own tested pass). A platform admin manages site-admins
-     (role/status) and site settings/economy today.
+  2. ✅ DONE — money/PII levers extended to platform admins, platform-bounded (see §12).
 
 ## 11. Platform-admin console scoping (shipped in this branch)
 
@@ -140,6 +136,22 @@ verifier (`auth.ts`) surfaces `AuthClaims.platform`. `/auth/login` returns `plat
 - **Tests:** `apps/api/src/app.platform.scope.test.ts` (sees only own platform; cross-platform →
   403; system-only → 403; system unrestricted). Full suite: DB 18/18, engine+api 719/719, web build
   clean.
+
+## 12. Money/PII levers for platform admins (shipped in this branch)
+
+- Migration `0135` extends `fn_admin_adjust_balance`, `fn_admin_adjust_balance_kind`, and
+  `fn_admin_set_user_overrides` to accept a `platform_admin` actor, **bounded to its own platform**
+  in-definer (`fn_user_platform(target)` = actor's `platform_id`, else `PLATFORM_SCOPE_FORBIDDEN`).
+  Every existing guard is preserved: `OVERRIDE_FAVORS_PLAYER`/range checks, `INSUFFICIENT_FUNDS`,
+  `REASON_REQUIRED`, and platform-tier staff-wallet protection (`SUPERADMIN_PROTECTED` now also
+  covers `platform_admin` targets). Also fixed a latent gap where `fn_admin_adjust_balance_kind`
+  rejected even `platform_superadmin`.
+- API: `POST /platform/sites/:id/users/:uid/balance` and `PATCH .../overrides` are now
+  `platform_admin`-reachable (+ `scopeSiteParam` + target-user platform check). The existing client
+  drill-down UI consumes them unchanged.
+- Tests: `e2e_platform_isolation.py` now 39 scenarios (in-platform balance/bonus/override OK;
+  cross-platform → `PLATFORM_SCOPE_FORBIDDEN`; favors-player guard still enforced for a platform
+  admin). Full suite: DB 18/18 (39-scenario isolation), engine+api 719/719.
 
 ## 10. Console (shipped in this branch)
 

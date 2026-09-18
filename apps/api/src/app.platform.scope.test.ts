@@ -44,6 +44,7 @@ test("platform-admin console is bounded to its own platform", async () => {
     assert.equal(crossEdit.status, 403);
     assert.equal((await json(crossEdit)).error.code, "PLATFORM_SCOPE_FORBIDDEN");
     assert.equal((await req(api, "GET", `/api/v1/platform/sites/${b1}/users`, PA)).status, 403, "cross-platform user list blocked");
+    assert.equal((await req(api, "POST", `/api/v1/platform/sites/${b1}/users/someuid/balance`, PA, { amountCents: 100, reason: "x" })).status, 403, "cross-platform balance adjust blocked");
 
     // 4. System-only tools are refused (403).
     assert.equal((await req(api, "GET", "/api/v1/platform/platforms", PA)).status, 403, "platforms CRUD is system-only");

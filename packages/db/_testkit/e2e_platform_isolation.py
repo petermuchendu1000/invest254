@@ -157,6 +157,15 @@ def main():
     expect_error(cur, "select * from fn_admin_set_user_status(%s,%s,%s,%s,%s)", [pa1,"platform_admin",plB1,"banned","t"], "PLATFORM_SCOPE_FORBIDDEN", "PA1 CANNOT change a P2 user's status")
     ok(cur, "select * from fn_admin_set_user_role(%s,%s,%s,%s)", [pa1,"platform_admin",saA1,"marketer"], "PA1 can manage a site admin in its platform")
 
+    print("\n== Money/PII levers are platform-bounded (Issue 1 final scope) ==")
+    ok(cur, "select * from fn_admin_adjust_balance(%s,%s,%s,%s,%s)", [pa1,"platform_admin",plA1,1000,"topup"], "PA1 adjusts a P1 player's balance")
+    ok(cur, "select * from fn_admin_adjust_balance_kind(%s,%s,%s,%s,%s,%s)", [pa1,"platform_admin",plA1,500,"bonus","promo"], "PA1 adjusts a P1 player's bonus balance")
+    ok(cur, "select * from fn_admin_set_user_overrides(%s,%s,%s,%s)", [pa1,"platform_admin",plA1,'{"win_rate":"0.1"}'], "PA1 sets a P1 player's (punitive) override")
+    expect_error(cur, "select * from fn_admin_adjust_balance(%s,%s,%s,%s,%s)", [pa1,"platform_admin",plB1,1000,"topup"], "PLATFORM_SCOPE_FORBIDDEN", "PA1 CANNOT adjust a P2 player's balance")
+    expect_error(cur, "select * from fn_admin_adjust_balance_kind(%s,%s,%s,%s,%s,%s)", [pa1,"platform_admin",plB1,500,"bonus","x"], "PLATFORM_SCOPE_FORBIDDEN", "PA1 CANNOT adjust a P2 player's bonus")
+    expect_error(cur, "select * from fn_admin_set_user_overrides(%s,%s,%s,%s)", [pa1,"platform_admin",plB1,'{"win_rate":"0.1"}'], "PLATFORM_SCOPE_FORBIDDEN", "PA1 CANNOT override a P2 player")
+    expect_error(cur, "select * from fn_admin_set_user_overrides(%s,%s,%s,%s)", [pa1,"platform_admin",plA1,'{"house_edge":"0.01"}'], "OVERRIDE_FAVORS_PLAYER", "favors-player guard still enforced for PA1")
+
     print("\n== Protections ==")
     expect_error(cur, "select * from fn_admin_set_user_role(%s,%s,%s,%s)", [ACTOR,SYS,pa1,"player"], "PLATFORM_ADMIN_PROTECTED", "platform_admin cannot be demoted via generic role RPC")
     ok(cur, "select * from fn_platform_revoke_platform_admin(%s,%s,%s,%s)", [ACTOR,SYS,pa2,"admin"], "system revokes a platform_admin via dedicated RPC")
