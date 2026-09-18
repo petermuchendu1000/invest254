@@ -14,9 +14,10 @@ const SA = "00000000-0000-0000-0000-0000000000a1";
 const ctx = (claims: Record<string, unknown> | undefined): Ctx => ({ claims } as unknown as Ctx);
 
 test("ROLE_RANK: platform_admin sits ABOVE site admin and BELOW the system owner", () => {
-  assert.ok(ROLE_RANK.admin < ROLE_RANK.platform_admin, "site admin < platform admin");
-  assert.ok(ROLE_RANK.superadmin < ROLE_RANK.platform_admin, "per-brand superadmin < platform admin");
-  assert.ok(ROLE_RANK.platform_admin < ROLE_RANK.platform_superadmin, "platform admin < system owner");
+  const rank = (r: string): number => ROLE_RANK[r] ?? 0;
+  assert.ok(rank("admin") < rank("platform_admin"), "site admin < platform admin");
+  assert.ok(rank("superadmin") < rank("platform_admin"), "per-brand superadmin < platform admin");
+  assert.ok(rank("platform_admin") < rank("platform_superadmin"), "platform admin < system owner");
 });
 
 test("adminScopeSite: platform_admin is NOT bound to a single site (its bound is the platform)", () => {

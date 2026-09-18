@@ -207,6 +207,50 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.platformOnboard!.domainHealth());
   });
 
+  // ── Platform tier governance (Issue 1) — SYSTEM owner only (platform_superadmin). ──────────────
+  // Manage platforms (the grouping above sites) and appoint/revoke the platform admins that run them.
+  router.get(`${BASE}/platform/platforms`, auth, platform, async () =>
+    ({ platforms: await domain(() => deps.platform.listPlatforms()) }));
+
+  router.get(`${BASE}/platform/platforms/overview`, auth, platform, async (ctx: Ctx) =>
+    ({ platforms: await domain(() => deps.platform.platformsOverview(ctx.claims!.role ?? "player")) }));
+
+  router.post(`${BASE}/platform/platforms`, auth, platform, async (ctx: Ctx) => {
+    const b = asObject(ctx.body);
+    if (typeof b.slug !== "string" || !SLUG_RE.test(b.slug)) throw new ApiError("VALIDATION", "slug must be lowercase letters, digits and hyphens", 400);
+    if (typeof b.name !== "string" || !b.name.trim()) throw new ApiError("VALIDATION", "name is required", 400);
+    const owner = typeof b.ownerUserId === "string" && b.ownerUserId.trim() ? b.ownerUserId.trim() : null;
+    const id = await domain(() => deps.platform.createPlatform(ctx.claims!.userId, ctx.claims!.role ?? "player", b.slug as string, (b.name as string).trim(), owner));
+    return { status: 201, body: { platformId: id } };
+  });
+
+  router.patch(`${BASE}/platform/platforms/:id`, auth, platform, async (ctx: Ctx) => {
+    const patch = asObject(ctx.body) as Record<string, unknown>;
+    return domain(() => deps.platform.updatePlatform(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
+  });
+
+  // Re-parent a brand into a platform.
+  router.post(`${BASE}/platform/sites/:id/assign`, auth, platform, async (ctx: Ctx) => {
+    const b = asObject(ctx.body);
+    if (typeof b.platformId !== "string" || !b.platformId) throw new ApiError("VALIDATION", "platformId is required", 400);
+    return domain(() => deps.platform.assignSiteToPlatform(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, b.platformId as string));
+  });
+
+  // Appoint a user as platform_admin of a platform.
+  router.post(`${BASE}/platform/platform-admins`, auth, platform, async (ctx: Ctx) => {
+    const b = asObject(ctx.body);
+    if (typeof b.userId !== "string" || !b.userId) throw new ApiError("VALIDATION", "userId is required", 400);
+    if (typeof b.platformId !== "string" || !b.platformId) throw new ApiError("VALIDATION", "platformId is required", 400);
+    return { status: 201, body: await domain(() => deps.platform.appointPlatformAdmin(ctx.claims!.userId, ctx.claims!.role ?? "player", b.userId as string, b.platformId as string)) };
+  });
+
+  // Revoke a platform_admin back to a site-level role (default 'admin').
+  router.post(`${BASE}/platform/platform-admins/:uid/revoke`, auth, platform, async (ctx: Ctx) => {
+    const b = asObject(ctx.body);
+    const newRole = typeof b.newRole === "string" && b.newRole ? b.newRole : "admin";
+    return domain(() => deps.platform.revokePlatformAdmin(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.uid!, newRole));
+  });
+
   router.get(`${BASE}/platform/overview`, auth, platform, async (ctx: Ctx) =>
     ({ sites: await domain(() => deps.platform.overview(ctx.claims!.role ?? "player")) }));
 
