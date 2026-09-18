@@ -45,12 +45,18 @@ test("paystack: 401 -> invalid", async () => {
 // ── PayHero ─────────────────────────────────────────────────────────────────────────────────────
 test("payhero: 200 -> valid; strips a leading 'Basic ' if present", async () => {
   let seen: any = {};
-  const r = await testConnection("payhero", { auth_token: "Basic dXNlcjpwYXNz" }, fakeFetch({ status: 200, body: { payment_channels: [] }, capture: (_u, i) => (seen = i) }));
+  const r = await testConnection("payhero", { basic_auth_token: "Basic dXNlcjpwYXNz" }, fakeFetch({ status: 200, body: { payment_channels: [] }, capture: (_u, i) => (seen = i) }));
   assert.equal(r.status, "valid");
   assert.equal(seen.headers.Authorization, "Basic dXNlcjpwYXNz"); // exactly one 'Basic ' prefix
 });
+test("payhero: derives the Basic token from api_username + api_password when no token is given", async () => {
+  let seen: any = {};
+  const r = await testConnection("payhero", { api_username: "user", api_password: "pass" }, fakeFetch({ status: 200, body: { payment_channels: [] }, capture: (_u, i) => (seen = i) }));
+  assert.equal(r.status, "valid");
+  assert.equal(seen.headers.Authorization, `Basic ${Buffer.from("user:pass").toString("base64")}`);
+});
 test("payhero: 401 -> invalid", async () => {
-  const r = await testConnection("payhero", { auth_token: "dXNlcjpwYXNz" }, fakeFetch({ status: 401 }));
+  const r = await testConnection("payhero", { basic_auth_token: "dXNlcjpwYXNz" }, fakeFetch({ status: 401 }));
   assert.equal(r.status, "invalid");
 });
 

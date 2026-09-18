@@ -62,15 +62,18 @@ async function testPaystack(cfg: Record<string, string>, f: Fetch): Promise<Conn
   } catch (e) { return { ok: false, status: "unreachable", detail: `Paystack unreachable: ${String((e as Error).message).slice(0, 120)}` }; }
 }
 
-/** PayHero: GET /payment_channels with the Basic token. 200 ⇒ valid, 401 ⇒ bad token. */
+/** PayHero: GET /payment_channels with the Basic token. 200 ⇒ valid, 401/403 ⇒ bad token. */
 async function testPayhero(cfg: Record<string, string>, f: Fetch): Promise<ConnResult> {
-  if (!cfg.auth_token) return missing(["auth_token"]);
+  // Prefer the ready-made Basic Auth token; else derive it from API username + password (PayHero's own scheme).
+  let token = (cfg.basic_auth_token || "").trim();
+  if (!token && cfg.api_username && cfg.api_password) token = Buffer.from(`${cfg.api_username}:${cfg.api_password}`).toString("base64");
+  if (!token) return missing(["basic_auth_token"]);
+  const bare = /^basic\s+/i.test(token) ? token.replace(/^basic\s+/i, "") : token;
   const base = stripSlash(cfg.base_url || "https://backend.payhero.co.ke/api/v2");
-  const token = /^basic\s+/i.test(cfg.auth_token) ? cfg.auth_token.replace(/^basic\s+/i, "") : cfg.auth_token;
   try {
-    const res = await f(`${base}/payment_channels`, { method: "GET", headers: { Authorization: `Basic ${token}`, "Content-Type": "application/json" } });
-    if (res.status === 401 || res.status === 403) return { ok: false, status: "invalid", detail: "PayHero rejected the Basic auth token." };
-    if (res.ok) return { ok: true, status: "valid", detail: "PayHero auth token is valid (payment channels read)." };
+    const res = await f(`${base}/payment_channels`, { method: "GET", headers: { Authorization: `Basic ${bare}`, "Content-Type": "application/json" } });
+    if (res.status === 401 || res.status === 403) return { ok: false, status: "invalid", detail: "PayHero rejected the Basic Auth token." };
+    if (res.ok) return { ok: true, status: "valid", detail: "PayHero token is valid (payment channels read)." };
     return { ok: false, status: "unreachable", detail: `PayHero HTTP ${res.status}` };
   } catch (e) { return { ok: false, status: "unreachable", detail: `PayHero unreachable: ${String((e as Error).message).slice(0, 120)}` }; }
 }

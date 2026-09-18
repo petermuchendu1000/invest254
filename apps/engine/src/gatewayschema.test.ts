@@ -19,7 +19,7 @@ test("fieldKinds splits secret vs non-secret keys per provider", () => {
   assert.deepEqual(fieldKinds("megapay").secretKeys, ["api_key"]);
   assert.deepEqual(fieldKinds("paystack").secretKeys, ["secret_key"]);
   assert.deepEqual(fieldKinds("binance").secretKeys.sort(), ["api_key", "api_secret"]);
-  assert.deepEqual(fieldKinds("payhero").secretKeys, ["auth_token"]);
+  assert.deepEqual(fieldKinds("payhero").secretKeys, ["basic_auth_token", "api_username", "api_password"]);
   assert.ok(fieldKinds("megapay").settingKeys.includes("email"));
 });
 
@@ -61,8 +61,8 @@ test("validateConfig: email, url, select and key-prefix patterns are checked", (
   assert.deepEqual(paystackOk, []);
 });
 
-test("validateConfig: payhero requires auth_token + channel_id", () => {
-  const issues = validateConfig("payhero", { settings: { env: "sandbox" }, secrets: {} });
+test("validateConfig: payhero requires the Basic Auth token", () => {
+  const issues = validateConfig("payhero", { settings: {}, secrets: {} });
   const fields = issues.map((i) => i.field).sort();
-  assert.deepEqual(fields, ["auth_token", "channel_id"]);
+  assert.deepEqual(fields, ["basic_auth_token"]);
 });
