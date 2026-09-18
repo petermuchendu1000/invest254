@@ -26,9 +26,14 @@ export interface CdnClient {
   pagesDomains(project: string): Promise<PagesDomainInfo[]>;
 }
 
+/** A domain as reported by the registrar (Namecheap) account. */
+export interface RegistrarDomain { domain: string; expires: string | null; usingRegistrarDns: boolean }
+
 export interface RegistrarClient {
   /** Set the domain's authoritative nameservers (moves DNS to the CDN). */
   setNameservers(domain: string, nameservers: string[]): Promise<boolean>;
+  /** List every domain in the registrar account (paginated internally). */
+  listDomains(): Promise<RegistrarDomain[]>;
 }
 
 // ── Domain <-> SLD/TLD ─────────────────────────────────────────────────────────────────────
@@ -163,18 +168,42 @@ export function makeCloudflareCdn(cfg: { token: string; accountId: string }): Cd
 }
 
 export function makeNamecheapRegistrar(cfg: { apiUser: string; userName: string; apiKey: string; clientIp: string }): RegistrarClient {
+  const base = (params: Record<string, string>) => {
+    const url = new URL("https://api.namecheap.com/xml.response");
+    url.search = new URLSearchParams({
+      ApiUser: cfg.apiUser, ApiKey: cfg.apiKey, UserName: cfg.userName, ClientIp: cfg.clientIp, ...params,
+    }).toString();
+    return url;
+  };
   return {
     async setNameservers(domain, nameservers) {
       const { sld, tld } = splitDomain(domain);
-      const url = new URL("https://api.namecheap.com/xml.response");
-      url.search = new URLSearchParams({
-        ApiUser: cfg.apiUser, ApiKey: cfg.apiKey, UserName: cfg.userName, ClientIp: cfg.clientIp,
-        Command: "namecheap.domains.dns.setCustom", SLD: sld, TLD: tld, Nameservers: nameservers.join(","),
-      }).toString();
-      const res = await fetch(url, { headers: { "user-agent": UA } });
+      const res = await fetch(base({ Command: "namecheap.domains.dns.setCustom", SLD: sld, TLD: tld, Nameservers: nameservers.join(",") }), { headers: { "user-agent": UA } });
       const xml = await res.text();
       if (/ApiResponse\s+Status="ERROR"/.test(xml)) throw new Error(`Namecheap error: ${(xml.match(/<Error[^>]*>([^<]+)</)?.[1] ?? "unknown").slice(0, 160)}`);
       return /Updated="true"/i.test(xml);
+    },
+    async listDomains() {
+      const out: RegistrarDomain[] = [];
+      const pageSize = 100;
+      for (let page = 1; page <= 50; page++) { // safety cap: 5000 domains
+        const res = await fetch(base({ Command: "namecheap.domains.getList", PageSize: String(pageSize), Page: String(page), SortBy: "NAME" }), { headers: { "user-agent": UA } });
+        const xml = await res.text();
+        if (/ApiResponse\s+Status="ERROR"/.test(xml)) throw new Error(`Namecheap error: ${(xml.match(/<Error[^>]*>([^<]+)</)?.[1] ?? "unknown").slice(0, 160)}`);
+        const tags = xml.match(/<Domain\b[^>]*>/g) ?? [];
+        for (const tag of tags) {
+          const name = tag.match(/\bName="([^"]+)"/)?.[1];
+          if (!name) continue;
+          out.push({
+            domain: name.trim().toLowerCase(),
+            expires: tag.match(/\bExpires="([^"]+)"/)?.[1] ?? null,
+            usingRegistrarDns: /\bIsOurDNS="true"/i.test(tag),
+          });
+        }
+        const total = Number(xml.match(/TotalItems>(\d+)</)?.[1] ?? out.length);
+        if (tags.length === 0 || out.length >= total) break;
+      }
+      return out;
     },
   };
 }
@@ -189,6 +218,8 @@ export interface DomainProvisioner {
   readonly pagesProject: string;
   /** True when a registrar API (Namecheap) is configured to auto-set nameservers; false => manual NS. */
   readonly registrarConfigured: boolean;
+  /** List all domains in the registrar account (empty when no registrar is configured). */
+  listRegistrarDomains(): Promise<RegistrarDomain[]>;
 }
 export function makeDomainProvisioner(): DomainProvisioner | null {
   const token = process.env.CF_DNS_API_TOKEN ?? process.env.CF_API_TOKEN;
@@ -198,7 +229,7 @@ export function makeDomainProvisioner(): DomainProvisioner | null {
   // provisioning at all; with it, provisioning works standalone and returns the nameservers to set.
   if (!token || !accountId) return null;
   const cdn = makeCloudflareCdn({ token, accountId });
-  // Namecheap is OPTIONAL — only used to auto-point nameservers. Absent => operator sets NS manually.
+  // Namecheap is OPTIONAL — used to auto-point nameservers AND to import the account's domain list.
   const apiUser = process.env.NAMECHEAP_API_USER;
   const userName = process.env.NAMECHEAP_USERNAME ?? apiUser;
   const apiKey = process.env.NAMECHEAP_API_KEY;
@@ -210,5 +241,6 @@ export function makeDomainProvisioner(): DomainProvisioner | null {
     registrarConfigured: registrar != null,
     provision: (domain) => provisionDomain(cdn, registrar, { domain, pagesProject }),
     status: (domain) => getDomainStatus(cdn, { domain, pagesProject }),
+    listRegistrarDomains: () => (registrar ? registrar.listDomains() : Promise.resolve([])),
   };
 }

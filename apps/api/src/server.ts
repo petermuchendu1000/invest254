@@ -605,6 +605,25 @@ async function buildDeps(): Promise<ApiDeps> {
       if (!provisioner) throw new Error("NOT_CONFIGURED: domain provisioning is not configured");
       return provisioner.status(d);
     },
+    async listRegistrarDomains() {
+      if (!provisioner || !provisioner.registrarConfigured) return { registrarConfigured: false, domains: [] };
+      const regDomains = await provisioner.listRegistrarDomains();
+      const rows = await q.query("select lower(primary_domain) as d, slug from sites where primary_domain is not null", []);
+      const claimed = new Set(rows.rows.map((r: { d: string }) => String(r.d)));
+      const domains = regDomains.map((rd) => {
+        const apex = rd.domain.replace(/^www\./, "");
+        const sld = apex.split(".")[0] ?? apex;
+        const suggestedSlug = (sld.toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "").slice(0, 40)) || "brand";
+        const suggestedName = sld.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        return {
+          domain: apex, expires: rd.expires ?? null, usingRegistrarDns: Boolean(rd.usingRegistrarDns),
+          alreadyClient: claimed.has(apex), suggestedSlug, suggestedName,
+        };
+      });
+      // Available (not-yet-clients) first, then alphabetical — the operator's action list is up top.
+      domains.sort((a, b) => (Number(a.alreadyClient) - Number(b.alreadyClient)) || a.domain.localeCompare(b.domain));
+      return { registrarConfigured: true, domains };
+    },
   };
 
   // Multi-tenant CORS (GAP 3): allow every ACTIVE brand domain automatically. Cached in memory and

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { provisionDomain, getDomainStatus, splitDomain, type CdnClient, type RegistrarClient, type PagesDomainInfo } from "./domains.js";
+import { provisionDomain, getDomainStatus, splitDomain, makeNamecheapRegistrar, type CdnClient, type RegistrarClient, type PagesDomainInfo } from "./domains.js";
 
 function fakes() {
   const calls: string[] = [];
@@ -14,6 +14,7 @@ function fakes() {
   };
   const registrar: RegistrarClient = {
     async setNameservers(domain, ns) { calls.push(`ns:${domain}:${ns.join(",")}`); return true; },
+    async listDomains() { return []; },
   };
   return { cdn, registrar, calls };
 }
@@ -65,7 +66,7 @@ test("provisionDomain: registrar=null (manual NS) still sets up Cloudflare + ret
 
 test("provisionDomain: a registrar failure degrades to manual NS, not a hard error", async () => {
   const { cdn } = fakes();
-  const failing: RegistrarClient = { setNameservers: async () => { throw new Error("namecheap 401"); } };
+  const failing: RegistrarClient = { setNameservers: async () => { throw new Error("namecheap 401"); }, listDomains: async () => [] };
   const res = await provisionDomain(cdn, failing, { domain: "shikafx.com", pagesProject: "invest254" });
   assert.equal(res.nameserversUpdated, false);
   assert.match(res.note, /Action needed/i);
@@ -81,4 +82,36 @@ test("getDomainStatus: active only when zone active and all pages domains active
   const cdn2: CdnClient = { ...cdn, pagesDomains: async () => [{ name: "tamutraders.com", status: "active" }] };
   const s2 = await getDomainStatus(cdn2, { domain: "tamutraders.com", pagesProject: "invest254" });
   assert.equal(s2.active, true);
+});
+
+test("makeNamecheapRegistrar.listDomains: parses getList (lowercases, reads Expires + IsOurDNS)", async () => {
+  const xml = `<?xml version="1.0"?><ApiResponse Status="OK"><CommandResponse>
+    <DomainGetListResult>
+      <Domain ID="1" Name="Alpha.com" User="muchendu" Expires="01/01/2027" IsExpired="false" IsOurDNS="true"/>
+      <Domain ID="2" Name="beta.co.ke" User="muchendu" Expires="02/02/2028" IsExpired="false" IsOurDNS="false"/>
+    </DomainGetListResult>
+    <Paging><TotalItems>2</TotalItems><CurrentPage>1</CurrentPage><PageSize>100</PageSize></Paging>
+  </CommandResponse></ApiResponse>`;
+  const orig = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => { calls++; return new Response(xml, { status: 200 }); }) as unknown as typeof fetch;
+  try {
+    const reg = makeNamecheapRegistrar({ apiUser: "u", userName: "u", apiKey: "k", clientIp: "1.2.3.4" });
+    const doms = await reg.listDomains();
+    assert.deepEqual(doms, [
+      { domain: "alpha.com", expires: "01/01/2027", usingRegistrarDns: true },
+      { domain: "beta.co.ke", expires: "02/02/2028", usingRegistrarDns: false },
+    ]);
+    assert.equal(calls, 1); // out.length(2) >= TotalItems(2) -> single page
+  } finally { globalThis.fetch = orig; }
+});
+
+test("makeNamecheapRegistrar.listDomains: surfaces a Namecheap API error (e.g. IP not whitelisted)", async () => {
+  const xml = `<ApiResponse Status="ERROR"><Errors><Error Number="1011150">Invalid request IP: 1.2.3.4</Error></Errors></ApiResponse>`;
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(xml, { status: 200 })) as unknown as typeof fetch;
+  try {
+    const reg = makeNamecheapRegistrar({ apiUser: "u", userName: "u", apiKey: "k", clientIp: "1.2.3.4" });
+    await assert.rejects(() => reg.listDomains(), /Invalid request IP/);
+  } finally { globalThis.fetch = orig; }
 });

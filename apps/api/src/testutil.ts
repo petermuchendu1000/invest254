@@ -519,6 +519,15 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     async domainStatus(d: string) {
       return { domain: d, zoneStatus: "pending", pages: [{ name: d, status: "initializing" }], active: false };
     },
+    async listRegistrarDomains() {
+      return {
+        registrarConfigured: true,
+        domains: [
+          { domain: "newbrand.com", expires: "01/01/2027", usingRegistrarDns: true, alreadyClient: false, suggestedSlug: "newbrand", suggestedName: "Newbrand" },
+          { domain: "tamutraders.com", expires: "01/01/2027", usingRegistrarDns: false, alreadyClient: true, suggestedSlug: "tamutraders", suggestedName: "Tamutraders" },
+        ],
+      };
+    },
   };
 
   const referralRepo = makeInMemoryReferralRepo();

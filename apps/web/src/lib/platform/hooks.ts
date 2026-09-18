@@ -153,6 +153,12 @@ export function useOnboardCapabilities() {
   return useQuery({ queryKey: ['platform', 'onboard-caps'], queryFn: () => platformApi.onboardCapabilities(t), enabled: !!t, staleTime: 300_000 });
 }
 
+/** List the registrar (Namecheap) account's domains, annotated with which are already clients. */
+export function useRegistrarDomains(enabled = true) {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'registrar-domains'], queryFn: () => platformApi.registrarDomains(t), enabled: !!t && enabled, staleTime: 60_000 });
+}
+
 /** Instant client onboarding: brand + economy (+ optional domain provisioning) in one call. */
 export function useOnboardClient() {
   const t = useTok();

@@ -20,6 +20,14 @@ export interface OnboardBrand {
   status: string; resolvesByHost: boolean;
 }
 export interface OnboardResult { siteId: string; brand: OnboardBrand; domain: ProvisionResult | null }
+
+/** One domain from the registrar account, annotated with whether it's already a client + suggestions. */
+export interface RegistrarDomainRow {
+  domain: string; expires: string | null; usingRegistrarDns: boolean;
+  alreadyClient: boolean; suggestedSlug: string; suggestedName: string;
+}
+export interface RegistrarDomainsView { registrarConfigured: boolean; domains: RegistrarDomainRow[] }
+
 export interface PlatformOnboardDeps {
   /** True when the Cloudflare + Namecheap secrets are present so a domain can be auto-provisioned. */
   domainConfigured: boolean;
@@ -27,6 +35,8 @@ export interface PlatformOnboardDeps {
   registrarConfigured: boolean;
   onboard(input: OnboardInput): Promise<OnboardResult>;
   domainStatus(domain: string): Promise<DomainStatus>;
+  /** List the registrar account's domains, annotated with which are already clients. */
+  listRegistrarDomains(): Promise<RegistrarDomainsView>;
 }
 
 /**
@@ -177,6 +187,13 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     domainConfigured: Boolean(deps.platformOnboard?.domainConfigured),
     registrarConfigured: Boolean(deps.platformOnboard?.registrarConfigured),
   }));
+
+  // Import: list the registrar (Namecheap) account's domains, annotated with which are already clients,
+  // so the console can offer bulk onboarding of the not-yet-used domains.
+  router.get(`${BASE}/platform/domains/registrar`, auth, platform, async () => {
+    if (!deps.platformOnboard) throw new ApiError("NOT_CONFIGURED", "onboarding is not configured on this deployment", 503);
+    return domain(() => deps.platformOnboard!.listRegistrarDomains());
+  });
 
   router.get(`${BASE}/platform/overview`, auth, platform, async (ctx: Ctx) =>
     ({ sites: await domain(() => deps.platform.overview(ctx.claims!.role ?? "player")) }));

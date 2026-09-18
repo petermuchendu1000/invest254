@@ -5,6 +5,7 @@ import { PageHeader, Section } from '@/components/admin/ui';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useOnboardClient, useDomainStatus, useOnboardCapabilities } from '@/lib/platform/hooks';
+import { DomainImport } from '@/components/platform/DomainImport';
 import type { OnboardResult } from '@/lib/platform/endpoints';
 
 /**
@@ -50,7 +51,9 @@ export default function OnboardPage() {
         </div>
       ) : null}
 
-      <Section title="New brand">
+      {registrarConfigured ? <DomainImport /> : null}
+
+      <Section title="Add one brand manually">
         <form
           className="grid grid-cols-1 gap-3 rounded-2xl border border-border bg-surface p-4 sm:grid-cols-2 md:grid-cols-3"
           onSubmit={(e) => {
