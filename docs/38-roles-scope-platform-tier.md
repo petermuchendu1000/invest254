@@ -120,6 +120,17 @@ verifier (`auth.ts`) surfaces `AuthClaims.platform`. `/auth/login` returns `plat
      service layer today scopes to one site or all, and needs a platform-set filter. The DB + RLS +
      guards for this are already in place; only the service queries need the `platform_id IN (…)` /
      platform-set wiring.
-  2. The **web console**: a System console (platforms list + appoint platform admins + all-platforms
-     overview) and a Platform console (its sites + site settings/economy + its site-admins), reusing
-     `apps/web/src/app/platform/*` with a platform switcher. Professional UI, per Issue 1.
+  2. The Platform-admin's OWN console view (its sites/settings/economy/site-admins), reusing the
+     admin surfaces with a platform switcher.
+
+## 10. Console (shipped in this branch)
+
+- **API (system-gated):** `GET/POST /platform/platforms`, `GET /platform/platforms/overview`,
+  `PATCH /platform/platforms/:id`, `POST /platform/sites/:id/assign`,
+  `POST /platform/platform-admins`, `POST /platform/platform-admins/:uid/revoke` — all wrap the 0133
+  RPCs (`PlatformService` + repo, Pg + in-memory). Tests: `app.platform.platforms.test.ts`.
+- **Web (System console):** `apps/web/src/app/platform/platforms/page.tsx` + a "Platforms" nav item —
+  per-platform KPI table, create platform, re-parent a site, appoint/revoke platform admins. Built on
+  the existing operator design system (React Query hooks + shared UI). `next build` clean.
+  UX/psychology: scope framing to prevent mode-errors, pre-attentive status colour, consequence-salient
+  confirmation copy on appoint/revoke/suspend, single-CTA empty states.
