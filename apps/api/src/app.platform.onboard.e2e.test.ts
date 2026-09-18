@@ -101,3 +101,16 @@ test("GET /platform/domains/registrar: superadmin-only; lists domains flagged al
     assert.equal(taken?.alreadyClient, true);
   } finally { await api.close(); }
 });
+
+test("GET /platform/domains/health: superadmin-only; returns real per-domain Cloudflare status", async () => {
+  const api = await startTestApi();
+  try {
+    assert.equal((await req(api, "GET", "/api/v1/platform/domains/health", { token: `${TEST_ADMIN}:admin` })).status, 403);
+    const res = await req(api, "GET", "/api/v1/platform/domains/health", { token: SUPER });
+    assert.equal(res.status, 200);
+    const body = await res.json() as { configured: boolean; statuses: Record<string, string> };
+    assert.equal(body.configured, true);
+    assert.equal(body.statuses["tamutraders.com"], "active");   // truly live
+    assert.equal(body.statuses["shikafx.com"], "pending");       // NOT "active" — no fake ✓ Domain
+  } finally { await api.close(); }
+});

@@ -624,6 +624,18 @@ async function buildDeps(): Promise<ApiDeps> {
       domains.sort((a, b) => (Number(a.alreadyClient) - Number(b.alreadyClient)) || a.domain.localeCompare(b.domain));
       return { registrarConfigured: true, domains };
     },
+    async domainHealth() {
+      if (!provisioner) return { configured: false, statuses: {} };
+      try {
+        const pages = await provisioner.pagesDomains();
+        const statuses: Record<string, string> = {};
+        for (const p of pages) statuses[p.name.trim().toLowerCase()] = p.status;
+        return { configured: true, statuses };
+      } catch (e) {
+        console.warn("[api] domainHealth failed:", (e as Error).message);
+        return { configured: true, statuses: {} };
+      }
+    },
   };
 
   // Multi-tenant CORS (GAP 3): allow every ACTIVE brand domain automatically. Cached in memory and

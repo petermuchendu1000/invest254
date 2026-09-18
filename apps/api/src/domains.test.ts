@@ -112,6 +112,6 @@ test("makeNamecheapRegistrar.listDomains: surfaces a Namecheap API error (e.g. I
   globalThis.fetch = (async () => new Response(xml, { status: 200 })) as unknown as typeof fetch;
   try {
     const reg = makeNamecheapRegistrar({ apiUser: "u", userName: "u", apiKey: "k", clientIp: "1.2.3.4" });
-    await assert.rejects(() => reg.listDomains(), /Invalid request IP/);
+    await assert.rejects(() => reg.listDomains(), /NAMECHEAP_IP_NOT_WHITELISTED: 1\.2\.3\.4/);
   } finally { globalThis.fetch = orig; }
 });

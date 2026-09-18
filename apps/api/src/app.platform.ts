@@ -28,6 +28,9 @@ export interface RegistrarDomainRow {
 }
 export interface RegistrarDomainsView { registrarConfigured: boolean; domains: RegistrarDomainRow[] }
 
+/** Real per-domain health from Cloudflare Pages: { "<domain>": "active" | "pending" | ... }. */
+export interface DomainHealthView { configured: boolean; statuses: Record<string, string> }
+
 export interface PlatformOnboardDeps {
   /** True when the Cloudflare + Namecheap secrets are present so a domain can be auto-provisioned. */
   domainConfigured: boolean;
@@ -37,6 +40,8 @@ export interface PlatformOnboardDeps {
   domainStatus(domain: string): Promise<DomainStatus>;
   /** List the registrar account's domains, annotated with which are already clients. */
   listRegistrarDomains(): Promise<RegistrarDomainsView>;
+  /** Real domain health (Cloudflare Pages custom-domain statuses) so the console never fakes "live". */
+  domainHealth(): Promise<DomainHealthView>;
 }
 
 /**
@@ -193,6 +198,13 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/platform/domains/registrar`, auth, platform, async () => {
     if (!deps.platformOnboard) throw new ApiError("NOT_CONFIGURED", "onboarding is not configured on this deployment", 503);
     return domain(() => deps.platformOnboard!.listRegistrarDomains());
+  });
+
+  // Real per-domain health (Cloudflare Pages custom-domain status), so the Clients table shows the TRUE
+  // state (Live / Pending / Not provisioned) instead of a fake "✓ Domain" just because a string is set.
+  router.get(`${BASE}/platform/domains/health`, auth, platform, async () => {
+    if (!deps.platformOnboard) return { configured: false, statuses: {} };
+    return domain(() => deps.platformOnboard!.domainHealth());
   });
 
   router.get(`${BASE}/platform/overview`, auth, platform, async (ctx: Ctx) =>

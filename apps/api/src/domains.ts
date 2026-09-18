@@ -12,6 +12,22 @@
 
 const UA = "invest254-onboarding/1.0";
 
+/**
+ * Detect this server's public egress IP (cached). Used as the Namecheap ClientIp when NAMECHEAP_CLIENT_IP
+ * isn't pinned, so the ClientIp always matches the real source — the operator only manages the whitelist,
+ * and if the egress drifts the error names the exact IP to add.
+ */
+let cachedEgressIp: string | null = null;
+export async function detectEgressIp(): Promise<string | null> {
+  if (cachedEgressIp) return cachedEgressIp;
+  try {
+    const r = await fetch("https://api.ipify.org", { headers: { "user-agent": UA } });
+    const ip = (await r.text()).trim();
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) cachedEgressIp = ip;
+  } catch { /* offline / blocked — caller falls back to the configured IP */ }
+  return cachedEgressIp;
+}
+
 // ── Ports ────────────────────────────────────────────────────────────────────────────────
 export interface ZoneInfo { zoneId: string; nameServers: string[]; status: string }
 export interface DnsRecord { type: "CNAME" | "A"; name: string; content: string; proxied: boolean }
@@ -168,28 +184,31 @@ export function makeCloudflareCdn(cfg: { token: string; accountId: string }): Cd
 }
 
 export function makeNamecheapRegistrar(cfg: { apiUser: string; userName: string; apiKey: string; clientIp: string }): RegistrarClient {
-  const base = (params: Record<string, string>) => {
+  // ClientIp: prefer the pinned value, else auto-detect the egress IP so it always matches the source.
+  const resolveClientIp = async () => cfg.clientIp || (await detectEgressIp()) || cfg.clientIp || "";
+  const call = async (params: Record<string, string>): Promise<string> => {
+    const clientIp = await resolveClientIp();
     const url = new URL("https://api.namecheap.com/xml.response");
-    url.search = new URLSearchParams({
-      ApiUser: cfg.apiUser, ApiKey: cfg.apiKey, UserName: cfg.userName, ClientIp: cfg.clientIp, ...params,
-    }).toString();
-    return url;
+    url.search = new URLSearchParams({ ApiUser: cfg.apiUser, ApiKey: cfg.apiKey, UserName: cfg.userName, ClientIp: clientIp, ...params }).toString();
+    const res = await fetch(url, { headers: { "user-agent": UA } });
+    const xml = await res.text();
+    if (/ApiResponse\s+Status="ERROR"/.test(xml)) {
+      const ipErr = xml.match(/Invalid request IP:\s*([0-9.]+)/i);
+      if (ipErr) throw new Error(`NAMECHEAP_IP_NOT_WHITELISTED: ${ipErr[1]} — add this IP in Namecheap → Profile → Tools → API Access → Whitelisted IPs, then update NAMECHEAP_CLIENT_IP.`);
+      throw new Error(`Namecheap error: ${(xml.match(/<Error[^>]*>([^<]+)</)?.[1] ?? "unknown").slice(0, 160)}`);
+    }
+    return xml;
   };
   return {
     async setNameservers(domain, nameservers) {
       const { sld, tld } = splitDomain(domain);
-      const res = await fetch(base({ Command: "namecheap.domains.dns.setCustom", SLD: sld, TLD: tld, Nameservers: nameservers.join(",") }), { headers: { "user-agent": UA } });
-      const xml = await res.text();
-      if (/ApiResponse\s+Status="ERROR"/.test(xml)) throw new Error(`Namecheap error: ${(xml.match(/<Error[^>]*>([^<]+)</)?.[1] ?? "unknown").slice(0, 160)}`);
+      const xml = await call({ Command: "namecheap.domains.dns.setCustom", SLD: sld, TLD: tld, Nameservers: nameservers.join(",") });
       return /Updated="true"/i.test(xml);
     },
     async listDomains() {
       const out: RegistrarDomain[] = [];
-      const pageSize = 100;
       for (let page = 1; page <= 50; page++) { // safety cap: 5000 domains
-        const res = await fetch(base({ Command: "namecheap.domains.getList", PageSize: String(pageSize), Page: String(page), SortBy: "NAME" }), { headers: { "user-agent": UA } });
-        const xml = await res.text();
-        if (/ApiResponse\s+Status="ERROR"/.test(xml)) throw new Error(`Namecheap error: ${(xml.match(/<Error[^>]*>([^<]+)</)?.[1] ?? "unknown").slice(0, 160)}`);
+        const xml = await call({ Command: "namecheap.domains.getList", PageSize: "100", Page: String(page), SortBy: "NAME" });
         const tags = xml.match(/<Domain\b[^>]*>/g) ?? [];
         for (const tag of tags) {
           const name = tag.match(/\bName="([^"]+)"/)?.[1];
@@ -220,6 +239,8 @@ export interface DomainProvisioner {
   readonly registrarConfigured: boolean;
   /** List all domains in the registrar account (empty when no registrar is configured). */
   listRegistrarDomains(): Promise<RegistrarDomain[]>;
+  /** The Pages custom-domain list (real domain health: active vs pending), one CF call. */
+  pagesDomains(): Promise<PagesDomainInfo[]>;
 }
 export function makeDomainProvisioner(): DomainProvisioner | null {
   const token = process.env.CF_DNS_API_TOKEN ?? process.env.CF_API_TOKEN;
@@ -242,5 +263,6 @@ export function makeDomainProvisioner(): DomainProvisioner | null {
     provision: (domain) => provisionDomain(cdn, registrar, { domain, pagesProject }),
     status: (domain) => getDomainStatus(cdn, { domain, pagesProject }),
     listRegistrarDomains: () => (registrar ? registrar.listDomains() : Promise.resolve([])),
+    pagesDomains: () => cdn.pagesDomains(pagesProject),
   };
 }

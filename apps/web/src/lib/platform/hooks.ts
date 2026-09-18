@@ -159,6 +159,12 @@ export function useRegistrarDomains(enabled = true) {
   return useQuery({ queryKey: ['platform', 'registrar-domains'], queryFn: () => platformApi.registrarDomains(t), enabled: !!t && enabled, staleTime: 60_000 });
 }
 
+/** Real per-domain health (Cloudflare Pages custom-domain statuses) for a truthful Clients table. */
+export function useDomainHealth() {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'domain-health'], queryFn: () => platformApi.domainHealth(t), enabled: !!t, staleTime: 60_000 });
+}
+
 /** Instant client onboarding: brand + economy (+ optional domain provisioning) in one call. */
 export function useOnboardClient() {
   const t = useTok();

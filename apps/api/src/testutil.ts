@@ -528,6 +528,10 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
         ],
       };
     },
+    async domainHealth() {
+      // tamutraders live; shikafx pending (zone not yet active) — mirrors real, truthful states.
+      return { configured: true, statuses: { "tamutraders.com": "active", "www.tamutraders.com": "active", "shikafx.com": "pending" } };
+    },
   };
 
   const referralRepo = makeInMemoryReferralRepo();

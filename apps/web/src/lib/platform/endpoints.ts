@@ -148,6 +148,7 @@ export const platformApi = {
   onboard: (t: string, body: OnboardBody) => apiFetch<OnboardResult>('/platform/onboard', { method: 'POST', token: t, body }),
   onboardCapabilities: (t: string) => apiFetch<{ domainConfigured: boolean; registrarConfigured: boolean }>('/platform/onboard/capabilities', { token: t }),
   registrarDomains: (t: string) => apiFetch<RegistrarDomainsDto>('/platform/domains/registrar', { token: t }),
+  domainHealth: (t: string) => apiFetch<{ configured: boolean; statuses: Record<string, string> }>('/platform/domains/health', { token: t }),
   domainStatus: (t: string, domain: string) => apiFetch<DomainStatus>('/platform/onboard/domain-status', { token: t, query: { domain } }),
   // Phase 2 — per-brand players + audit (cross-brand via explicit site id).
   siteUsers: (t: string, id: string, params?: Record<string, string | undefined>) => {
