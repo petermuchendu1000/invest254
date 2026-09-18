@@ -975,6 +975,20 @@ export class PlatformService {
     return testConnection(code, cfg);
   }
 
+  /**
+   * ENGINE-INTERNAL: resolve a provider's effective config with DECRYPTED secrets (site → global),
+   * for building a live client. Not role-gated (service-role/engine path). Returns null when there is
+   * no config row, and empty secrets when the ciphertext is missing/corrupt (caller falls back to env).
+   */
+  async resolveDecryptedConfig(code: string, siteId: string | null = null):
+    Promise<{ settings: Record<string, string>; secrets: Record<string, string> } | null> {
+    const r = await this.repo.resolveProviderConfig(code, siteId);
+    if (!r) return null;
+    let secrets: Record<string, string> = {};
+    if (r.secretCiphertext) { try { secrets = decryptSecrets(r.secretCiphertext); } catch { secrets = {}; } }
+    return { settings: r.settings ?? {}, secrets };
+  }
+
   // ── Dynamic (demand-based) pool distribution (docs/25 §15) ──
   poolDemand(opts: PoolDemandOpts): Promise<PoolDemandPreview> { return this.repo.poolDemand(opts ?? {}); }
   distributePoolDynamic(actorId: string, actorRole: string, opts: PoolDemandOpts): Promise<DistributeDynamicResult> {
