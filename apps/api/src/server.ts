@@ -6,6 +6,7 @@ import {
   GameConfigStore, mapConfigRow, makePgPools, makeSystemLogPersister,
   makeMegaPayClient,
   ConfiguredMegaPayClient,
+  ConfiguredPayHeroClient,
   verifyPassword,
   type GameRepository, type EngagementRepository, type PaymentRepository,
   type Querier, type FairnessRecord, type ListenClient,
@@ -160,6 +161,22 @@ async function buildDeps(): Promise<ApiDeps> {
     return over;
   });
   log.info("mega pay client ready", { env: process.env.MEGAPAY_ENV ?? "sandbox", configured: Boolean(process.env.MEGAPAY_API_KEY && process.env.MEGAPAY_EMAIL), dbConfigLayered: true });
+
+  // PayHero (Lipwa) client — the third rail. Config comes from the encrypted DB store (migration 0130);
+  // env is the fallback. Absent config => a fail-loud/stub client, so it stays dormant until configured.
+  const payhero = new ConfiguredPayHeroClient(async () => {
+    const c = await platform.resolveDecryptedConfig("payhero", null);
+    if (!c) return null;
+    const token = c.secrets.basic_auth_token
+      || (c.secrets.api_username && c.secrets.api_password ? Buffer.from(`${c.secrets.api_username}:${c.secrets.api_password}`).toString("base64") : "");
+    const over: { baseUrl?: string; basicAuthToken?: string; channelId?: string; callbackUrl?: string } = {};
+    if (token) over.basicAuthToken = token;
+    if (c.settings.channel_id) over.channelId = c.settings.channel_id;
+    if (c.settings.base_url) over.baseUrl = c.settings.base_url;
+    if (c.settings.callback_url) over.callbackUrl = c.settings.callback_url;
+    return over;
+  });
+  log.info("payhero client ready", { dbConfigLayered: true });
 
   // Site-aware minimum withdrawal (multi-tenant). GET /game/config serves each brand its own
   // `site_game_config.min_withdrawal` (via gameConfigForSite below), so the browser validates
@@ -462,6 +479,7 @@ async function buildDeps(): Promise<ApiDeps> {
     // Mega Pay rail (0116): its callback handler ALWAYS re-queries Mega Pay before crediting, so
     // forged Mega Pay callbacks can't mint balance either.
     megapay,
+    payhero,
     // Site-aware STK AccountReference (multi-tenant): "Account no. <Brand>" per depositing brand.
     accountRefForSite: (siteId) => siteAccountRef(siteId),
     // Per-brand withdrawal floor: enforce the withdrawing site's own min so client and server agree.
@@ -826,4 +844,14 @@ if (Number.isFinite(RECONCILE_MS) && RECONCILE_MS > 0) {
       .catch((err: unknown) => recLog.error("megapay reconcile sweep failed", err as Error));
   }, RECONCILE_MS);
   megaTimer.unref();
+
+  // PayHero rail: the SAME sweep for provider='payhero', using PayHero's authoritative transaction-status
+  // query. Isolated per-provider; a no-op when PayHero isn't configured.
+  const payheroTimer = setInterval(() => {
+    void deps.payments
+      .reconcilePayHeroDeposits()
+      .then((r) => { if (r.settled || r.errors) recLog.info("payhero reconcile sweep", { provider: "payhero", ...r }); })
+      .catch((err: unknown) => recLog.error("payhero reconcile sweep failed", err as Error));
+  }, RECONCILE_MS);
+  payheroTimer.unref();
 }

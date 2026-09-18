@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { DEFAULT_CONFIG, normalizeHost, type Cents } from "@invest254/shared";
 import {
-  InMemoryEngagementRepository, InMemoryPaymentRepository, InMemoryGameRepository, StubDarajaClient, StubMegaPayClient,
+  InMemoryEngagementRepository, InMemoryPaymentRepository, InMemoryGameRepository, StubDarajaClient, StubMegaPayClient, StubPayHeroClient,
   InMemoryIdentityRepository, PaymentService, AuthService, AffiliateService, AdminService, InMemoryAdminRepository, PlatformService, InMemoryPlatformRepository, maskHandle,
   NotificationService, InMemoryNotificationRepository,
   PushService, InMemoryPushSubscriptionRepository,
@@ -461,6 +461,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
 
   const payments = new PaymentService(payRepo, daraja, {
     megapay: new StubMegaPayClient(), // Mega Pay rail (0116): deterministic offline client for route tests
+    payhero: new StubPayHeroClient(), // PayHero rail: deterministic offline client for route tests
     withdrawalsEnabledForSite: async (siteId) =>
       adminRepoRef ? adminRepoRef.getWithdrawalsEnabled(siteId ?? TU_DEFAULT_SITE_ID) : true,
     events: {
