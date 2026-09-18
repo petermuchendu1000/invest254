@@ -149,7 +149,9 @@ export interface ApiDeps {
     | "getGlobalConfig" | "setGlobalConfig" | "distributePool" | "listPoolDistributions"
     | "poolDemand" | "distributePoolDynamic"
     | "listPaymentProviders" | "setProviderGlobal" | "setProviderSite" | "clearProviderSite"
-    | "gatewaySchemas" | "getProviderConfig" | "setProviderConfig" | "testProviderConnection">;
+    | "gatewaySchemas" | "getProviderConfig" | "setProviderConfig" | "testProviderConnection"
+    | "listPlatforms" | "platformsOverview" | "createPlatform" | "updatePlatform" | "assignSiteToPlatform"
+    | "appointPlatformAdmin" | "revokePlatformAdmin" | "platformOfSite">;
   /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory" | "listTemplates" | "audienceCount" | "broadcast" | "resolveCategory">;
   /** Admin Web Push subscriptions (Issue 1): opt-in real-time withdrawal-request alerts. Absent when
