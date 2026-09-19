@@ -349,7 +349,9 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   });
 
   // Persist a brand's full design-token palette (from the console's seed-hue → derived palette).
-  router.patch(`${BASE}/platform/sites/:id/theme`, auth, platform, async (ctx: Ctx) => {
+  // A platform admin may theme brands in ITS OWN platform (scopeSiteParam + fn_platform_site_in_scope);
+  // brand OWNERSHIP above stays system-only.
+  router.patch(`${BASE}/platform/sites/:id/theme`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const tokens = body.tokens ?? body;
     if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) throw new ApiError("VALIDATION", "tokens object is required", 400);

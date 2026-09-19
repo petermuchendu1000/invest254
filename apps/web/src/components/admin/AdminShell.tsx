@@ -12,7 +12,7 @@ import { AdminSignIn } from '@/components/auth/AdminSignIn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { useSidebarCollapsed } from '@/lib/useSidebarCollapsed';
-import { getImpersonatingBrand, type ImpersonatedBrand } from '@/lib/platform/impersonate';
+import { getImpersonatingBrand } from '@/lib/platform/impersonate';
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 type NavSection = { title: string; items: NavItem[]; superadmin?: boolean; platform?: boolean };
@@ -69,12 +69,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const user = useSession((s) => s.user);
   const { logout } = useAuthActions();
   const { collapsed, toggle } = useSidebarCollapsed('admin-sidebar-collapsed');
-  // Impersonation fence (sessionStorage — client-only; read after mount to avoid an SSR/CSR
-  // hydration mismatch). While set, this session is a brand-scoped superadmin, NOT the platform
-  // owner's own account, so the chrome below must say so and drop the cross-brand nav.
-  const [impersonating, setImpersonating] = React.useState<ImpersonatedBrand | null>(null);
-  React.useEffect(() => { setImpersonating(getImpersonatingBrand()); }, []);
-
   if (!hydrated) {
     return (
       <div className="mx-auto w-full max-w-app p-4">
@@ -84,24 +78,43 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!token) {
-    // Unified operator sign-in (Issue 1): identity-based, brand-agnostic. Same entry point as the
-    // platform console so every admin authenticates the same way, regardless of host brand.
+    // Unified operator sign-in (Issue 1): identity-based, brand-agnostic.
     return <AdminSignIn />;
   }
-  if (user && user.role !== 'admin' && user.role !== 'superadmin' && user.role !== 'platform_superadmin') {
+
+  // Impersonation fence — safe to read synchronously now we're past hydration (client-only, no SSR
+  // mismatch, and no useEffect race that could briefly authorise off the wrong role).
+  const impersonating = getImpersonatingBrand();
+
+  // EFFECTIVE session role. During impersonation the ACTIVE TOKEN's role (admin/superadmin) is what
+  // the API authorises against; /auth/me instead returns the ACTOR's own role (e.g. platform_admin,
+  // because the impersonation token's SUBJECT stays the actor for audit). Authorising off /me would
+  // wrongly 404 an impersonating platform admin (the reported bug) — so use the token role while
+  // impersonating, and the live /me role otherwise.
+  const tokenRole = roleFromToken(token);
+  const effectiveRole = impersonating ? (tokenRole ?? '') : (user?.role ?? '');
+
+  // When NOT impersonating, wait for /auth/me before deciding (prevents a wrong-role flash).
+  if (!impersonating && !user) {
+    return (
+      <div className="mx-auto w-full max-w-app p-4">
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+  const ADMIN_ROLES = ['admin', 'superadmin', 'platform_superadmin'];
+  if (!ADMIN_ROLES.includes(effectiveRole)) {
     // Wrong role: reveal nothing.
     return <Gate title="404" body="This page could not be found." action={null} />;
   }
 
-  const isPlatform = user?.role === 'platform_superadmin';
-  const isSuper = user?.role === 'superadmin' || isPlatform;
-  // While impersonating, the ACTIVE token's role is what the session actually is: 'superadmin' for the
-  // system owner, 'admin' for a platform admin (scoped). Label by it so a platform admin is never
-  // mislabelled as a superadmin.
-  const impRoleLabel = roleFromToken(token) === 'superadmin' ? 'superadmin' : 'admin';
-  // While impersonating a brand the active token is only a brand-scoped superadmin — the cross-brand
-  // "All brands" (platform) nav would 403 against it, so hide it and route back via the banner's
-  // "Exit to platform". Superadmin (brand-scoped) sections remain valid for the impersonated brand.
+  const isPlatform = effectiveRole === 'platform_superadmin';
+  const isSuper = effectiveRole === 'superadmin' || isPlatform;
+  // Label the impersonation by the ACTIVE token role: 'superadmin' for the system owner, 'admin' for
+  // a platform admin (scoped) — never mislabel a platform admin as superadmin.
+  const impRoleLabel = tokenRole === 'superadmin' ? 'superadmin' : 'admin';
+  // The cross-brand "All brands" (platform) nav would 403 against a brand-scoped impersonation token,
+  // so hide it while impersonating; return via the banner's "Exit to platform".
   const showPlatformNav = isPlatform && !impersonating;
   const sections = SECTIONS.filter((s) => (!s.superadmin || isSuper) && (!s.platform || showPlatformNav));
   const active = (href: string) => (href === '/admin' ? pathname === '/admin' : pathname?.startsWith(href));

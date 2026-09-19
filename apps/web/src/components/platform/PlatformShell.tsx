@@ -71,6 +71,14 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
   // Platform admins see a SCOPED console (their platform's sites only); system-only tools are hidden.
   const isSystem = user?.role === 'platform_superadmin';
 
+  // Defense-in-depth: hide-from-nav is not enough. A platform admin typing a System-only URL must get
+  // a plain 404 (reveal nothing), not a broken page that 403s every call. The API + RPCs already gate
+  // these, this is the matching client guard.
+  const SYSTEM_ONLY_PREFIXES = ['/platform/platforms', '/platform/onboard', '/platform/payments', '/platform/config'];
+  if (!isSystem && SYSTEM_ONLY_PREFIXES.some((p) => pathname?.startsWith(p))) {
+    return <Gate title="404" body="This page could not be found." action={null} />;
+  }
+
   const active = (href: string, exact?: boolean) => (exact ? pathname === href : pathname?.startsWith(href));
 
   return (
@@ -144,7 +152,7 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
             <>
               <div className="flex flex-col gap-1">
                 <span className="truncate text-sm font-medium">@{user?.username}</span>
-                <span className="inline-flex w-fit items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">◆ Platform owner</span>
+                <span className="inline-flex w-fit items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">{isSystem ? '◆ System owner' : '◆ Platform admin'}</span>
               </div>
               <Link href="/admin" className="text-xs text-muted hover:text-fg">← Admin back office</Link>
               <Button variant="secondary" size="sm" onClick={logout}>Log out</Button>
