@@ -158,19 +158,38 @@ export default function PlatformsPage() {
       </Section>
 
       {/* Create platform */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New platform">
-        <div className="flex flex-col gap-4">
-          <Input label="Slug" placeholder="acme" value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())} hint="Lowercase letters, digits and hyphens." />
-          <Input label="Name" placeholder="Acme Group" value={name} onChange={(e) => setName(e.target.value)} />
-          <div className="flex justify-end gap-2">
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="New platform"
+        description="A platform groups brands under one Platform Admin."
+        chrome
+        footer={
+          <>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={createPlatform} disabled={createMut.isPending}>{createMut.isPending ? 'Creating…' : 'Create platform'}</Button>
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-5">
+          <Input label="Slug" placeholder="acme" value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())} hint="Lowercase letters, digits and hyphens." />
+          <Input label="Name" placeholder="Acme Group" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
       </Modal>
 
       {/* Edit platform */}
-      <Modal open={!!edit} onClose={() => setEdit(null)} title={edit ? `Edit ${edit.name}` : 'Edit'}>
+      <Modal
+        open={!!edit}
+        onClose={() => setEdit(null)}
+        title={edit ? `Edit ${edit.name}` : 'Edit'}
+        chrome
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={updateMut.isPending}>Save</Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-4">
           <Input label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
           <label className="flex flex-col gap-1 text-sm">
@@ -180,17 +199,13 @@ export default function PlatformsPage() {
             </select>
           </label>
           <p className="text-xs text-muted">Suspending a platform is a scope-wide action — its brands stay live but the platform is flagged for review.</p>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
-            <Button onClick={saveEdit} disabled={updateMut.isPending}>Save</Button>
-          </div>
         </div>
       </Modal>
 
       {/* Platform admins */}
-      <Modal open={adminsOpen} onClose={() => setAdminsOpen(false)} title="Platform admins">
+      <Modal open={adminsOpen} onClose={() => setAdminsOpen(false)} title="Platform admins" chrome>
         <div className="flex flex-col gap-5">
-          <div className="rounded-xl border border-border bg-surface-2 p-3 text-xs text-muted">
+          <div className="rounded-xl border border-border bg-surface-2 p-3 text-xs leading-relaxed text-muted">
             A Platform Admin runs ONE platform and can never see or touch another platform's sites, users, or finances.
             Get a user's id from a brand's Users page. Appointing moves them out of any site role.
           </div>
@@ -215,7 +230,18 @@ export default function PlatformsPage() {
       </Modal>
 
       {/* Re-parent a site */}
-      <Modal open={assignOpen} onClose={() => setAssignOpen(false)} title="Re-parent a site">
+      <Modal
+        open={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        title="Re-parent a site"
+        chrome
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
+            <Button onClick={assign} disabled={assignMut.isPending}>Re-parent</Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-4">
           <p className="text-xs text-muted">Move a brand into a platform. Its data moves with it — the platform's admin will then see it, and other platforms will not.</p>
           <label className="flex flex-col gap-1 text-sm">
@@ -232,10 +258,6 @@ export default function PlatformsPage() {
               {platforms.map((p) => <option key={p.platformId} value={p.platformId}>{p.name} ({p.slug})</option>)}
             </select>
           </label>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
-            <Button onClick={assign} disabled={assignMut.isPending}>Re-parent</Button>
-          </div>
         </div>
       </Modal>
 

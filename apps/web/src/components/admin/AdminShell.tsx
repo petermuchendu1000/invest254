@@ -7,7 +7,7 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useSession } from '@/lib/auth/session';
-import { useAuthUi } from '@/lib/auth/ui';
+import { AdminSignIn } from '@/components/auth/AdminSignIn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { LogoMark } from '@/components/layout/Logo';
@@ -67,7 +67,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const token = useSession((s) => s.token);
   const user = useSession((s) => s.user);
-  const openAuth = useAuthUi((s) => s.openAuth);
   const { logout } = useAuthActions();
   const { collapsed, toggle } = useSidebarCollapsed('admin-sidebar-collapsed');
   // Impersonation fence (sessionStorage — client-only; read after mount to avoid an SSR/CSR
@@ -85,13 +84,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!token) {
-    return (
-      <Gate
-        title="Admin sign-in required"
-        body="Log in with an administrator account to access the back office."
-        action={<Button onClick={() => openAuth('login')}>Log in</Button>}
-      />
-    );
+    // Unified operator sign-in (Issue 1): identity-based, brand-agnostic. Same entry point as the
+    // platform console so every admin authenticates the same way, regardless of host brand.
+    return <AdminSignIn />;
   }
   if (user && user.role !== 'admin' && user.role !== 'superadmin' && user.role !== 'platform_superadmin') {
     return (

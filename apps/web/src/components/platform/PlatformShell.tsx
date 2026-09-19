@@ -7,7 +7,7 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useSession } from '@/lib/auth/session';
-import { useAuthUi } from '@/lib/auth/ui';
+import { AdminSignIn } from '@/components/auth/AdminSignIn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { LogoMark } from '@/components/layout/Logo';
@@ -43,7 +43,6 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const token = useSession((s) => s.token);
   const user = useSession((s) => s.user);
-  const openAuth = useAuthUi((s) => s.openAuth);
   const { logout } = useAuthActions();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const { collapsed, toggle } = useSidebarCollapsed('platform-sidebar-collapsed');
@@ -62,10 +61,9 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
     return <div className="mx-auto w-full max-w-app p-4"><Skeleton className="h-64 w-full" /></div>;
   }
   if (!token) {
-    return (
-      <Gate title="Platform sign-in required" body="Log in with the platform owner account to access the operator console."
-        action={<Button onClick={() => openAuth('login')}>Log in</Button>} />
-    );
+    // Unified operator sign-in (Issue 1): identity-based, brand-agnostic, so a platform_admin can
+    // sign in here regardless of which host serves the console.
+    return <AdminSignIn />;
   }
   if (user && user.role !== 'platform_superadmin' && user.role !== 'platform_admin') {
     return (
