@@ -10,7 +10,6 @@ import { useSession } from '@/lib/auth/session';
 import { AdminSignIn } from '@/components/auth/AdminSignIn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
-import { LogoMark } from '@/components/layout/Logo';
 import { useSidebarCollapsed } from '@/lib/useSidebarCollapsed';
 import { CommandPalette } from '@/components/platform/CommandPalette';
 
@@ -66,10 +65,8 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
     return <AdminSignIn />;
   }
   if (user && user.role !== 'platform_superadmin' && user.role !== 'platform_admin') {
-    return (
-      <Gate title="Platform console" body="This console is for the System owner and Platform admins."
-        action={<Link href="/admin"><Button variant="outline">Back to admin</Button></Link>} />
-    );
+    // Wrong role: reveal nothing — no hint that an operator console exists here.
+    return <Gate title="404" body="This page could not be found." action={null} />;
   }
   // Platform admins see a SCOPED console (their platform's sites only); system-only tools are hidden.
   const isSystem = user?.role === 'platform_superadmin';
@@ -81,9 +78,12 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
       <aside className={cn('flex shrink-0 flex-col border-b border-border bg-surface transition-[width] duration-200 md:h-dvh md:border-b-0 md:border-r md:sticky md:top-0', collapsed ? 'md:w-16' : 'md:w-60')}>
         <div className={cn('flex items-center gap-2 py-3', collapsed ? 'justify-between px-4 md:justify-center md:px-2' : 'px-4')}>
           <span className={cn('flex items-center gap-2', collapsed && 'md:hidden')}>
-            <LogoMark className="h-7 w-7 shrink-0" />
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white ring-1 ring-black/5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/triocodes-mark.png" alt="TrioCodes" className="h-6 w-6 object-contain" />
+            </span>
             <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold tracking-tight">invest254 Platform</span>
+              <span className="text-sm font-semibold tracking-tight">TrioCodes</span>
               <span className="text-[10px] font-medium uppercase tracking-wide text-accent">Operator console</span>
             </span>
           </span>

@@ -3,7 +3,6 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminSignIn } from '@/components/auth/AdminSignIn';
-import { Button } from '@/components/ui/Button';
 import { useSession } from '@/lib/auth/session';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
@@ -46,16 +45,13 @@ export default function ConsoleEntryPage() {
     );
   }
 
-  // Signed in but not an operator account.
+  // Signed in but not an operator account → reveal nothing beyond a 404.
   if (token && user && !dest) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg px-6 text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-fg">No console access</h1>
-        <p className="max-w-sm text-sm text-muted">
-          The account <span className="font-medium text-fg">@{user.username}</span> is not an operator account.
-          If you believe this is a mistake, contact the system owner.
-        </p>
-        <Button variant="outline" onClick={logout}>Sign out</Button>
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-2 bg-bg px-6 text-center">
+        <h1 className="text-3xl font-semibold tracking-tight text-fg">404</h1>
+        <p className="text-sm text-muted">This page could not be found.</p>
+        <button onClick={logout} className="mt-2 text-xs text-muted underline underline-offset-2 hover:text-fg">Sign out</button>
       </div>
     );
   }

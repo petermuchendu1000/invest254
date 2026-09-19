@@ -11,7 +11,6 @@ import { roleFromToken } from '@/lib/auth/token';
 import { AdminSignIn } from '@/components/auth/AdminSignIn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
-import { LogoMark } from '@/components/layout/Logo';
 import { useSidebarCollapsed } from '@/lib/useSidebarCollapsed';
 import { getImpersonatingBrand, type ImpersonatedBrand } from '@/lib/platform/impersonate';
 
@@ -90,17 +89,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     return <AdminSignIn />;
   }
   if (user && user.role !== 'admin' && user.role !== 'superadmin' && user.role !== 'platform_superadmin') {
-    return (
-      <Gate
-        title="Not authorised"
-        body="This area is for administrators only."
-        action={
-          <Link href="/">
-            <Button variant="outline">Back to app</Button>
-          </Link>
-        }
-      />
-    );
+    // Wrong role: reveal nothing.
+    return <Gate title="404" body="This page could not be found." action={null} />;
   }
 
   const isPlatform = user?.role === 'platform_superadmin';
@@ -128,10 +118,13 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       >
         <div className={cn('flex items-center gap-2 py-3', collapsed ? 'justify-between px-4 md:justify-center md:px-2' : 'justify-between px-4')}>
           <Link href="/admin" className={cn('flex min-w-0 items-center gap-2', collapsed && 'md:hidden')}>
-            <LogoMark className="h-7 w-7 shrink-0" />
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white ring-1 ring-black/5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/triocodes-mark.png" alt="TrioCodes" className="h-6 w-6 object-contain" />
+            </span>
             <span className="flex flex-col leading-tight">
               <span className="text-sm font-semibold tracking-tight">
-                {impersonating ? impersonating.name : 'invest254'} {isSuper ? 'Console' : 'Admin'}
+                {impersonating ? impersonating.name : 'TrioCodes'} {isSuper ? 'Console' : 'Admin'}
               </span>
               <span className={cn('text-[10px] font-medium uppercase tracking-wide', isSuper ? 'text-warn' : 'text-muted')}>
                 {impersonating ? `Logged in as ${impRoleLabel}` : isSuper ? 'Owner · full authority' : 'Operations'}
