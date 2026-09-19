@@ -19,6 +19,7 @@ import { PageHeader, StatCard, Section, TableWrap, Th, Td } from '@/components/a
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/lib/toast/ToastProvider';
 import {
@@ -192,12 +193,11 @@ export default function PlatformsPage() {
       >
         <div className="flex flex-col gap-4">
           <Input label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-muted">Status</span>
-            <select className="rounded-brand border border-border bg-surface px-3 py-2" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
-              <option value="active">active</option><option value="suspended">suspended</option><option value="archived">archived</option>
-            </select>
-          </label>
+          <Select label="Status" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
+            <option value="active">active</option>
+            <option value="suspended">suspended</option>
+            <option value="archived">archived</option>
+          </Select>
           <p className="text-xs text-muted">Suspending a platform is a scope-wide action — its brands stay live but the platform is flagged for review.</p>
         </div>
       </Modal>
@@ -212,13 +212,10 @@ export default function PlatformsPage() {
           <div className="flex flex-col gap-3">
             <h3 className="text-sm font-semibold">Appoint</h3>
             <Input label="User id" placeholder="uuid" value={appointUserId} onChange={(e) => setAppointUserId(e.target.value)} />
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted">Platform</span>
-              <select className="rounded-brand border border-border bg-surface px-3 py-2" value={appointPlatformId} onChange={(e) => setAppointPlatformId(e.target.value)}>
-                <option value="">Select a platform…</option>
-                {platforms.map((p) => <option key={p.platformId} value={p.platformId}>{p.name} ({p.slug})</option>)}
-              </select>
-            </label>
+            <Select label="Platform" value={appointPlatformId} onChange={(e) => setAppointPlatformId(e.target.value)}>
+              <option value="">Select a platform…</option>
+              {platforms.map((p) => <option key={p.platformId} value={p.platformId}>{p.name} ({p.slug})</option>)}
+            </Select>
             <div><Button onClick={appoint} disabled={appointMut.isPending}>Appoint platform admin</Button></div>
           </div>
           <div className="flex flex-col gap-3 border-t border-border pt-4">
@@ -244,20 +241,14 @@ export default function PlatformsPage() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-xs text-muted">Move a brand into a platform. Its data moves with it — the platform's admin will then see it, and other platforms will not.</p>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-muted">Site</span>
-            <select className="rounded-brand border border-border bg-surface px-3 py-2" value={assignSiteId} onChange={(e) => setAssignSiteId(e.target.value)}>
-              <option value="">Select a site…</option>
-              {sites.map((s) => <option key={s.siteId} value={s.siteId}>{s.name} ({s.slug})</option>)}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-muted">Platform</span>
-            <select className="rounded-brand border border-border bg-surface px-3 py-2" value={assignPlatformId} onChange={(e) => setAssignPlatformId(e.target.value)}>
-              <option value="">Select a platform…</option>
-              {platforms.map((p) => <option key={p.platformId} value={p.platformId}>{p.name} ({p.slug})</option>)}
-            </select>
-          </label>
+          <Select label="Site" value={assignSiteId} onChange={(e) => setAssignSiteId(e.target.value)}>
+            <option value="">Select a site…</option>
+            {sites.map((s) => <option key={s.siteId} value={s.siteId}>{s.name} ({s.slug})</option>)}
+          </Select>
+          <Select label="Platform" value={assignPlatformId} onChange={(e) => setAssignPlatformId(e.target.value)}>
+            <option value="">Select a platform…</option>
+            {platforms.map((p) => <option key={p.platformId} value={p.platformId}>{p.name} ({p.slug})</option>)}
+          </Select>
         </div>
       </Modal>
 
