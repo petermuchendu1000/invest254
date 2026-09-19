@@ -7,7 +7,8 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useSession } from '@/lib/auth/session';
-import { useAuthUi } from '@/lib/auth/ui';
+import { roleFromToken } from '@/lib/auth/token';
+import { AdminSignIn } from '@/components/auth/AdminSignIn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { LogoMark } from '@/components/layout/Logo';
@@ -67,7 +68,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const token = useSession((s) => s.token);
   const user = useSession((s) => s.user);
-  const openAuth = useAuthUi((s) => s.openAuth);
   const { logout } = useAuthActions();
   const { collapsed, toggle } = useSidebarCollapsed('admin-sidebar-collapsed');
   // Impersonation fence (sessionStorage — client-only; read after mount to avoid an SSR/CSR
@@ -85,13 +85,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!token) {
-    return (
-      <Gate
-        title="Admin sign-in required"
-        body="Log in with an administrator account to access the back office."
-        action={<Button onClick={() => openAuth('login')}>Log in</Button>}
-      />
-    );
+    // Unified operator sign-in (Issue 1): identity-based, brand-agnostic. Same entry point as the
+    // platform console so every admin authenticates the same way, regardless of host brand.
+    return <AdminSignIn />;
   }
   if (user && user.role !== 'admin' && user.role !== 'superadmin' && user.role !== 'platform_superadmin') {
     return (
@@ -109,6 +105,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   const isPlatform = user?.role === 'platform_superadmin';
   const isSuper = user?.role === 'superadmin' || isPlatform;
+  // While impersonating, the ACTIVE token's role is what the session actually is: 'superadmin' for the
+  // system owner, 'admin' for a platform admin (scoped). Label by it so a platform admin is never
+  // mislabelled as a superadmin.
+  const impRoleLabel = roleFromToken(token) === 'superadmin' ? 'superadmin' : 'admin';
   // While impersonating a brand the active token is only a brand-scoped superadmin — the cross-brand
   // "All brands" (platform) nav would 403 against it, so hide it and route back via the banner's
   // "Exit to platform". Superadmin (brand-scoped) sections remain valid for the impersonated brand.
@@ -134,7 +134,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 {impersonating ? impersonating.name : 'invest254'} {isSuper ? 'Console' : 'Admin'}
               </span>
               <span className={cn('text-[10px] font-medium uppercase tracking-wide', isSuper ? 'text-warn' : 'text-muted')}>
-                {impersonating ? 'Logged in as superadmin' : isSuper ? 'Owner · full authority' : 'Operations'}
+                {impersonating ? `Logged in as ${impRoleLabel}` : isSuper ? 'Owner · full authority' : 'Operations'}
               </span>
             </span>
           </Link>
@@ -208,7 +208,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                     'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
                     impersonating ? 'bg-warn/20 text-warn' : isSuper ? 'bg-warn/15 text-warn' : 'bg-surface-2 text-muted',
                   )}
-                  title={impersonating ? `Logged in as superadmin, accessing ${impersonating.name}` : undefined}
+                  title={impersonating ? `Logged in as ${impRoleLabel}, accessing ${impersonating.name}` : undefined}
                 >
                   {impersonating ? `Accessing ${impersonating.slug}` : isSuper ? '★ System owner' : 'Operator'}
                 </span>
