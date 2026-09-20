@@ -15,6 +15,7 @@ import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, Wit
 import type { ReferralRepo, CommissionPayoutRow, AdminCommissionPayoutRow } from "./app.referral.js";
 import type { SupportDeps, SupportStore, SupportConversation, SupportMessageRow } from "./app.support.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult, RegistrarConfigDeps } from "./app.platform.js";
+import type { AddonDeps } from "./app.addons.js";
 import type { EmbedFn, KbHit, LlmFn, LlmMessage, SupportBrandInfo } from "@invest254/shared";
 import { createHash } from "node:crypto";
 
@@ -571,8 +572,32 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     },
   };
 
-  const referralRepo = makeInMemoryReferralRepo();
+  // In-memory add-on stub (Issue 2): canned catalog/brand-view so the API endpoints + role guards can
+  // be tested without a DB. Real catalog/entitlement/scope logic is proven by e2e_addon_entitlements.py.
+  const addons: AddonDeps = {
+    async catalog() {
+      return [
+        { category: "chart", key: "line", display_name: "Line graph", price_cents: 0, is_default: true, active: true, sort_order: 10 },
+        { category: "chart", key: "candlestick", display_name: "Candlesticks", price_cents: 0, is_default: false, active: true, sort_order: 30 },
+        { category: "payment_gateway", key: "paystack", display_name: "Paystack", price_cents: 1000000, is_default: false, active: true, sort_order: 30 },
+      ];
+    },
+    async setPrice(_a, _r, category, key, priceCents) { return { category, key, price_cents: priceCents }; },
+    async brandView() {
+      return [
+        { category: "chart", key: "line", display_name: "Line graph", price_cents: 0, is_default: true, entitled: true, active: true, pending: false },
+        { category: "chart", key: "candlestick", display_name: "Candlesticks", price_cents: 0, is_default: false, entitled: false, active: false, pending: false },
+        { category: "payment_gateway", key: "paystack", display_name: "Paystack", price_cents: 1000000, is_default: false, entitled: false, active: false, pending: false },
+      ];
+    },
+    async request(_a, _r, site, category, key) { return { id: 1, site_id: site, category, key, status: "requested" }; },
+    async listRequests() { return []; },
+    async decideRequest(_a, _r, id, decision) { return { id, status: `${decision}d` }; },
+    async grant(_a, _r, site, category, key) { return { site_id: site, category, key, entitled: true }; },
+    async revoke(_a, _r, site, category, key) { return { site_id: site, category, key, entitled: false }; },
+  };
 
+  const referralRepo = makeInMemoryReferralRepo();
   // Hoisted so the advance fake can log an expense on approval (mirrors fn_admin_decide_advance).
   const marketerExpensesFake = (() => {
     const rows: Array<{ id: string; marketerUserId: string; category: string; amountCents: number; note: string | null; createdBy: string | null; createdAtMs: number }> = [];
@@ -677,6 +702,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     support: support.deps,
     platformOnboard: onboardDeps,
     registrarConfig,
+    addons,
     ...opts.depsOverrides,
   };
 

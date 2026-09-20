@@ -20,6 +20,7 @@ import { makePgReferralRepo } from "./referral.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
 import { makeDomainProvisioner, type DomainProvisioner } from "./domains.js";
 import { RegistrarConfigService } from "./registrarconfig.js";
+import { AddonService } from "./addonservice.js";
 import { makeWebPushTransport } from "./webpush.js";
 import { makeResendSender, buildPayoutEmail } from "./email.js";
 import { makeTelegramClient, type PayoutAlert, type PayoutDecisionRecord } from "./telegram.js";
@@ -486,6 +487,13 @@ async function buildDeps(): Promise<ApiDeps> {
     payhero,
     // Site-aware STK AccountReference (multi-tenant): "Account no. <Brand>" per depositing brand.
     accountRefForSite: (siteId) => siteAccountRef(siteId),
+    // Per-brand entitled gateways (Issue 2): a brand only surfaces deposit rails it OWNS (mpesa always).
+    // No brand context => null (fail-open, no restriction). mpesa is included by fn_site_entitled_gateways.
+    entitledGatewaysForSite: async (siteId) => {
+      if (!siteId) return null;
+      const r = await q.query("select fn_site_entitled_gateways($1) as v", [siteId]);
+      return (r.rows[0]?.v as string[] | null) ?? null;
+    },
     // Per-brand withdrawal floor: enforce the withdrawing site's own min so client and server agree.
     minWithdrawalForSite: (siteId) => siteMinWithdrawalCents(siteId),
     // Per-brand withdrawal kill switch: refuse ALL withdrawal initiations for a site when disabled.
@@ -557,6 +565,7 @@ async function buildDeps(): Promise<ApiDeps> {
   // Instant client onboarding: upsert the brand + economy (service_role SQL, works without the
   // platform-console RPCs) and optionally provision its domain across Cloudflare + Namecheap.
   const registrarConfig = new RegistrarConfigService(q);
+  const addons = new AddonService(q);
   const envProvisioner = makeDomainProvisioner();
   if (envProvisioner) console.log(`[api] domain provisioning enabled (Cloudflare Pages project '${envProvisioner.pagesProject}')`);
   // Resolve the registrar PER PLATFORM (Issue 1 #3): a platform admin uses its OWN Namecheap; the
@@ -879,6 +888,7 @@ async function buildDeps(): Promise<ApiDeps> {
     ...(support ? { support } : {}),
     platformOnboard,
     registrarConfig,
+    addons,
   };
 }
 
