@@ -145,7 +145,9 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
         <div className={cn('mt-auto hidden flex-col gap-2 border-t border-border py-3 md:flex', collapsed ? 'px-2' : 'px-4')}>
           {collapsed ? (
             <>
-              <Link href="/admin" title="Admin back office" aria-label="Admin back office" className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:text-fg"><Icon d="M14 6l-6 6 6 6" /></Link>
+              {/* Only the SYSTEM owner has a single-brand back office at /admin; a platform admin
+                  drills into a brand via impersonation, so the link would 404 for them (Issue 1). */}
+              {isSystem && <Link href="/admin" title="Admin back office" aria-label="Admin back office" className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:text-fg"><Icon d="M14 6l-6 6 6 6" /></Link>}
               <button type="button" onClick={logout} title="Log out" aria-label="Log out" className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-muted transition hover:text-fg"><Icon d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" /></button>
             </>
           ) : (
@@ -154,7 +156,7 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
                 <span className="truncate text-sm font-medium">@{user?.username}</span>
                 <span className="inline-flex w-fit items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">{isSystem ? '◆ System owner' : '◆ Platform admin'}</span>
               </div>
-              <Link href="/admin" className="text-xs text-muted hover:text-fg">← Admin back office</Link>
+              {isSystem && <Link href="/admin" className="text-xs text-muted hover:text-fg">← Admin back office</Link>}
               <Button variant="secondary" size="sm" onClick={logout}>Log out</Button>
             </>
           )}
