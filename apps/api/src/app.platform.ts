@@ -204,8 +204,11 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
       ...(game ? { game } : {}),
       provisionDomain: b.provisionDomain === true,
     };
-    // A platform admin's new client is stamped into ITS platform; the system owner's => default platform.
-    const res = await domain(() => deps.platformOnboard!.onboard(input, adminScopePlatform(ctx)));
+    // A platform admin's new client is stamped into ITS platform (body ignored — secure); the system
+    // owner may target a specific platform via body.platformId (else the default platform).
+    const scoped = adminScopePlatform(ctx);
+    const targetPlatform = scoped ?? (typeof b.platformId === "string" && b.platformId.trim() ? b.platformId.trim() : null);
+    const res = await domain(() => deps.platformOnboard!.onboard(input, targetPlatform));
     return { status: 201, body: res };
   });
 

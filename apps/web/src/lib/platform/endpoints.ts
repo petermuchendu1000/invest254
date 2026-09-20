@@ -55,7 +55,7 @@ export interface MarketerRollupGroup {
 export interface OnboardColors { primary?: string; bg?: string; accent?: string }
 export interface OnboardBody {
   slug: string; name: string; primaryDomain?: string; currency?: string; supportEmail?: string;
-  colors?: OnboardColors; provisionDomain?: boolean;
+  colors?: OnboardColors; provisionDomain?: boolean; platformId?: string;
 }
 export interface ProvisionResult {
   domain: string; zoneId: string; nameServers: string[]; zoneStatus: string;
