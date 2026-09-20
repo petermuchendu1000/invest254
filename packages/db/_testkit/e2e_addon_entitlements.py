@@ -121,6 +121,15 @@ def main():
     q1(cur, "select fn_addon_revoke(%s,%s,%s,%s,%s)", [sysu, SYS, a1, "chart", "candlestick"])
     check("revoke active chart resets to line", q1(cur,"select chart_style from sites where id=%s",[a1])[0]=="line" and q1(cur,"select count(*) from brand_entitlements where site_id=%s and key='candlestick'",[a1])[0]==0)
 
+    print("\n== Grandfather: existing brands keep currently-enabled gateways (0149) ==")
+    cur.execute("update payment_providers set enabled_global = true where code='megapay'")
+    cur.execute("""insert into brand_entitlements (site_id, category, key)
+                   select s.id, 'payment_gateway', p.code from sites s
+                   cross join lateral fn_list_effective_providers(s.id) p where p.enabled=true
+                   on conflict (site_id, category, key) do nothing""")
+    check("grandfather entitles a1 to the globally-enabled megapay",
+          q1(cur,"select count(*) from brand_entitlements where site_id=%s and category='payment_gateway' and key='megapay'",[a1])[0]==1)
+
     print(f"\n==== RESULT: {len(PASS)} passed, {len(FAIL)} failed ====")
     if FAIL: print("FAILED:", ", ".join(FAIL)); sys.exit(1)
     print("ALL ADDON-ENTITLEMENT E2E SCENARIOS PASSED")
