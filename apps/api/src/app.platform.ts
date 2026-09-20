@@ -36,12 +36,30 @@ export interface PlatformOnboardDeps {
   domainConfigured: boolean;
   /** True when a registrar API (Namecheap) is configured to auto-set nameservers; false => manual NS. */
   registrarConfigured: boolean;
-  onboard(input: OnboardInput): Promise<OnboardResult>;
+  /** Per-platform capabilities (a platform admin may have its OWN registrar even if env has none). */
+  capabilities(platformId: string | null): Promise<{ domainConfigured: boolean; registrarConfigured: boolean }>;
+  /** Create/upsert a brand. platformId stamps the new site into the caller's platform (null = default). */
+  onboard(input: OnboardInput, platformId: string | null): Promise<OnboardResult>;
   domainStatus(domain: string): Promise<DomainStatus>;
-  /** List the registrar account's domains, annotated with which are already clients. */
-  listRegistrarDomains(): Promise<RegistrarDomainsView>;
+  /** List the registrar account's domains for the caller's platform, annotated with which are clients. */
+  listRegistrarDomains(platformId: string | null): Promise<RegistrarDomainsView>;
   /** Real domain health (Cloudflare Pages custom-domain statuses) so the console never fakes "live". */
   domainHealth(): Promise<DomainHealthView>;
+}
+
+/** Per-platform registrar (Namecheap) config surface (Issue 1 #3). Implemented by RegistrarConfigService. */
+export interface RegistrarConfigDeps {
+  get(actorId: string, actorRole: string, platformId: string): Promise<{
+    platformId: string; providerCode: string; settings: Record<string, string>;
+    secretMeta: Record<string, { set: boolean; last4: string }>; hasSecret: boolean; encVersion: number;
+    updatedAt: string | null; exists: boolean; egressIp: string | null; encryptionConfigured: boolean;
+  }>;
+  set(actorId: string, actorRole: string, platformId: string, values: {
+    apiUser?: string; userName?: string; clientIp?: string; apiKey?: string;
+  }): Promise<{ platformId: string; hasSecret: boolean; settings: Record<string, string>; exists: boolean }>;
+  test(actorId: string, actorRole: string, platformId: string, draft: {
+    apiUser?: string; userName?: string; clientIp?: string; apiKey?: string;
+  }): Promise<{ ok: boolean; detail: string; egressIp: string | null }>;
 }
 
 /**
@@ -159,10 +177,11 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   };
 
   const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/;
+  const DEFAULT_PLATFORM_ID = "10000000-0000-0000-0000-000000000001";
 
   // Instant client onboarding: create/upsert the brand + economy and optionally provision its
   // domain (Cloudflare zone + DNS + Pages custom domain, Namecheap nameservers) in one call.
-  router.post(`${BASE}/platform/onboard`, auth, platform, async (ctx: Ctx) => {
+  router.post(`${BASE}/platform/onboard`, auth, platformAdmin, async (ctx: Ctx) => {
     if (!deps.platformOnboard) throw new ApiError("NOT_CONFIGURED", "onboarding is not configured on this deployment", 503);
     const b = asObject(ctx.body);
     if (typeof b.slug !== "string" || !SLUG_RE.test(b.slug)) throw new ApiError("VALIDATION", "slug must be lowercase letters, digits and hyphens", 400);
@@ -185,38 +204,68 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
       ...(game ? { game } : {}),
       provisionDomain: b.provisionDomain === true,
     };
-    const res = await domain(() => deps.platformOnboard!.onboard(input));
+    // A platform admin's new client is stamped into ITS platform; the system owner's => default platform.
+    const res = await domain(() => deps.platformOnboard!.onboard(input, adminScopePlatform(ctx)));
     return { status: 201, body: res };
   });
 
   // Poll a domain's provisioning status (zone active + Pages custom domains validated).
-  router.get(`${BASE}/platform/onboard/domain-status`, auth, platform, async (ctx: Ctx) => {
+  router.get(`${BASE}/platform/onboard/domain-status`, auth, platformAdmin, async (ctx: Ctx) => {
     if (!deps.platformOnboard) throw new ApiError("NOT_CONFIGURED", "onboarding is not configured on this deployment", 503);
     const d = ctx.query.get("domain");
     if (!d || !d.trim()) throw new ApiError("VALIDATION", "domain is required", 400);
     return domain(() => deps.platformOnboard!.domainStatus(d.trim()));
   });
 
-  // Onboarding capabilities so the console can be HONEST up-front about what will happen:
-  //   domainConfigured   — Cloudflare is set up (zone + DNS + Pages custom domain run automatically)
-  //   registrarConfigured — a registrar API is set up to auto-point nameservers (else the operator sets them)
-  router.get(`${BASE}/platform/onboard/capabilities`, auth, platform, async () => ({
-    domainConfigured: Boolean(deps.platformOnboard?.domainConfigured),
-    registrarConfigured: Boolean(deps.platformOnboard?.registrarConfigured),
-  }));
+  // Onboarding capabilities so the console can be HONEST up-front about what will happen — per platform
+  // (a platform admin may have configured its OWN registrar even when the global env has none).
+  router.get(`${BASE}/platform/onboard/capabilities`, auth, platformAdmin, async (ctx: Ctx) => {
+    if (!deps.platformOnboard) return { domainConfigured: false, registrarConfigured: false };
+    return domain(() => deps.platformOnboard!.capabilities(adminScopePlatform(ctx)));
+  });
 
-  // Import: list the registrar (Namecheap) account's domains, annotated with which are already clients,
-  // so the console can offer bulk onboarding of the not-yet-used domains.
-  router.get(`${BASE}/platform/domains/registrar`, auth, platform, async () => {
+  // Import: list the registrar (Namecheap) account's domains for the caller's platform, annotated with
+  // which are already clients, so the console can offer bulk onboarding of the not-yet-used domains.
+  router.get(`${BASE}/platform/domains/registrar`, auth, platformAdmin, async (ctx: Ctx) => {
     if (!deps.platformOnboard) throw new ApiError("NOT_CONFIGURED", "onboarding is not configured on this deployment", 503);
-    return domain(() => deps.platformOnboard!.listRegistrarDomains());
+    return domain(() => deps.platformOnboard!.listRegistrarDomains(adminScopePlatform(ctx)));
   });
 
   // Real per-domain health (Cloudflare Pages custom-domain status), so the Clients table shows the TRUE
   // state (Live / Pending / Not provisioned) instead of a fake "✓ Domain" just because a string is set.
-  router.get(`${BASE}/platform/domains/health`, auth, platform, async () => {
+  router.get(`${BASE}/platform/domains/health`, auth, platformAdmin, async () => {
     if (!deps.platformOnboard) return { configured: false, statuses: {} };
     return domain(() => deps.platformOnboard!.domainHealth());
+  });
+
+  // ── Per-platform registrar (Namecheap) configuration (Issue 1 #3) ──────────────────────────────
+  // A platform admin manages ITS OWN registrar credentials (scoped in the RPC); the system owner may
+  // target a specific platform via ?platform=<id> (defaults to the default platform). The GET also
+  // returns the egress IP to whitelist in Namecheap and whether server-side encryption is configured.
+  const registrarPlatformId = (ctx: Ctx): string =>
+    adminScopePlatform(ctx) ?? ((ctx.query.get("platform")?.trim()) || DEFAULT_PLATFORM_ID);
+  const draftFrom = (b: Record<string, unknown>): { apiUser?: string; userName?: string; clientIp?: string; apiKey?: string } => {
+    const d: { apiUser?: string; userName?: string; clientIp?: string; apiKey?: string } = {};
+    if (typeof b.apiUser === "string") d.apiUser = b.apiUser;
+    if (typeof b.userName === "string") d.userName = b.userName;
+    if (typeof b.clientIp === "string") d.clientIp = b.clientIp;
+    if (typeof b.apiKey === "string") d.apiKey = b.apiKey;
+    return d;
+  };
+
+  router.get(`${BASE}/platform/registrar/config`, auth, platformAdmin, async (ctx: Ctx) => {
+    if (!deps.registrarConfig) throw new ApiError("NOT_CONFIGURED", "registrar configuration is not available on this deployment", 503);
+    return domain(() => deps.registrarConfig!.get(ctx.claims!.userId, ctx.claims!.role ?? "player", registrarPlatformId(ctx)));
+  });
+
+  router.put(`${BASE}/platform/registrar/config`, auth, platformAdmin, async (ctx: Ctx) => {
+    if (!deps.registrarConfig) throw new ApiError("NOT_CONFIGURED", "registrar configuration is not available on this deployment", 503);
+    return domain(() => deps.registrarConfig!.set(ctx.claims!.userId, ctx.claims!.role ?? "player", registrarPlatformId(ctx), draftFrom(asObject(ctx.body))));
+  });
+
+  router.post(`${BASE}/platform/registrar/config/test`, auth, platformAdmin, async (ctx: Ctx) => {
+    if (!deps.registrarConfig) throw new ApiError("NOT_CONFIGURED", "registrar configuration is not available on this deployment", 503);
+    return domain(() => deps.registrarConfig!.test(ctx.claims!.userId, ctx.claims!.role ?? "player", registrarPlatformId(ctx), draftFrom(asObject(ctx.body))));
   });
 
   // ── Platform tier governance (Issue 1) — SYSTEM owner only (platform_superadmin). ──────────────
