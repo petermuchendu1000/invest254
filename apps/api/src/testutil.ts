@@ -14,7 +14,7 @@ import { createLogger } from "@invest254/shared/logger";
 import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
 import type { ReferralRepo, CommissionPayoutRow, AdminCommissionPayoutRow } from "./app.referral.js";
 import type { SupportDeps, SupportStore, SupportConversation, SupportMessageRow } from "./app.support.js";
-import type { PlatformOnboardDeps, OnboardInput, OnboardResult } from "./app.platform.js";
+import type { PlatformOnboardDeps, OnboardInput, OnboardResult, RegistrarConfigDeps } from "./app.platform.js";
 import type { EmbedFn, KbHit, LlmFn, LlmMessage, SupportBrandInfo } from "@invest254/shared";
 import { createHash } from "node:crypto";
 
@@ -511,7 +511,8 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const onboardDeps: PlatformOnboardDeps = {
     domainConfigured: true,
     registrarConfigured: true,
-    async onboard(input: OnboardInput): Promise<OnboardResult> {
+    async capabilities(_platformId: string | null) { return { domainConfigured: true, registrarConfigured: true }; },
+    async onboard(input: OnboardInput, _platformId: string | null): Promise<OnboardResult> {
       onboardCalls.push(input);
       const host = input.primaryDomain ? input.primaryDomain.trim().toLowerCase() : null;
       const brand = {
@@ -526,7 +527,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     async domainStatus(d: string) {
       return { domain: d, zoneStatus: "pending", pages: [{ name: d, status: "initializing" }], active: false };
     },
-    async listRegistrarDomains() {
+    async listRegistrarDomains(_platformId: string | null) {
       return {
         registrarConfigured: true,
         domains: [
@@ -538,6 +539,35 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     async domainHealth() {
       // tamutraders live; shikafx pending (zone not yet active) — mirrors real, truthful states.
       return { configured: true, statuses: { "tamutraders.com": "active", "www.tamutraders.com": "active", "shikafx.com": "pending" } };
+    },
+  };
+
+  // In-memory registrar-config harness (Issue 1 #3): records per-platform config so the API endpoints
+  // can be exercised without a DB. Real scoping/encryption is proven by e2e_registrar_config.py.
+  const registrarStore = new Map<string, { settings: Record<string, string>; hasSecret: boolean }>();
+  const registrarConfig: RegistrarConfigDeps = {
+    async get(_a, _r, platformId) {
+      const cur = registrarStore.get(platformId);
+      return {
+        platformId, providerCode: "namecheap", settings: cur?.settings ?? {},
+        secretMeta: cur?.hasSecret ? { api_key: { set: true, last4: "cb60" } } : {},
+        hasSecret: Boolean(cur?.hasSecret), encVersion: 1,
+        updatedAt: cur ? new Date().toISOString() : null, exists: Boolean(cur),
+        egressIp: "203.0.113.9", encryptionConfigured: true,
+      };
+    },
+    async set(_a, _r, platformId, values) {
+      const cur = registrarStore.get(platformId) ?? { settings: {}, hasSecret: false };
+      if (typeof values.apiUser === "string") cur.settings.api_user = values.apiUser.trim();
+      if (typeof values.userName === "string") cur.settings.username = values.userName.trim();
+      if (typeof values.clientIp === "string") cur.settings.client_ip = values.clientIp.trim();
+      if (values.apiKey !== undefined) cur.hasSecret = String(values.apiKey).trim() !== "";
+      registrarStore.set(platformId, cur);
+      return { platformId, hasSecret: cur.hasSecret, settings: cur.settings, exists: true };
+    },
+    async test(_a, _r, _platformId, draft) {
+      const ok = Boolean((draft.apiKey ?? "").trim() && (draft.apiUser ?? "").trim());
+      return { ok, detail: ok ? "Connected — Namecheap API responded successfully." : "Enter the Namecheap API user and API key first.", egressIp: "203.0.113.9" };
     },
   };
 
@@ -646,6 +676,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     transactions: (userId, q, siteId) => payRepo.listTransactions(userId, q, siteId),
     support: support.deps,
     platformOnboard: onboardDeps,
+    registrarConfig,
     ...opts.depsOverrides,
   };
 

@@ -18,7 +18,8 @@ import { BrandOriginAllowlist } from "./cors.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgReferralRepo } from "./referral.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
-import { makeDomainProvisioner } from "./domains.js";
+import { makeDomainProvisioner, type DomainProvisioner } from "./domains.js";
+import { RegistrarConfigService } from "./registrarconfig.js";
 import { makeWebPushTransport } from "./webpush.js";
 import { makeResendSender, buildPayoutEmail } from "./email.js";
 import { makeTelegramClient, type PayoutAlert, type PayoutDecisionRecord } from "./telegram.js";
@@ -555,12 +556,25 @@ async function buildDeps(): Promise<ApiDeps> {
 
   // Instant client onboarding: upsert the brand + economy (service_role SQL, works without the
   // platform-console RPCs) and optionally provision its domain across Cloudflare + Namecheap.
-  const provisioner = makeDomainProvisioner();
-  if (provisioner) console.log(`[api] domain provisioning enabled (Cloudflare Pages project '${provisioner.pagesProject}')`);
+  const registrarConfig = new RegistrarConfigService(q);
+  const envProvisioner = makeDomainProvisioner();
+  if (envProvisioner) console.log(`[api] domain provisioning enabled (Cloudflare Pages project '${envProvisioner.pagesProject}')`);
+  // Resolve the registrar PER PLATFORM (Issue 1 #3): a platform admin uses its OWN Namecheap; the
+  // system owner / default platform falls back to the global env registrar. Cloudflare stays shared.
+  const provisionerFor = async (platformId: string | null): Promise<DomainProvisioner | null> => {
+    if (!envProvisioner) return null;                 // no Cloudflare -> no provisioning at all
+    if (!platformId) return envProvisioner;           // system owner / default platform -> env
+    const reg = await registrarConfig.buildRegistrar(platformId);
+    return reg ? makeDomainProvisioner(reg) : envProvisioner;   // platform's own Namecheap, else env
+  };
   const platformOnboard: PlatformOnboardDeps = {
-    domainConfigured: Boolean(provisioner),
-    registrarConfigured: provisioner?.registrarConfigured ?? false,
-    async onboard(input: OnboardInput): Promise<OnboardResult> {
+    domainConfigured: Boolean(envProvisioner),
+    registrarConfigured: envProvisioner?.registrarConfigured ?? false,
+    async capabilities(platformId: string | null) {
+      const p = await provisionerFor(platformId);
+      return { domainConfigured: Boolean(p), registrarConfigured: p?.registrarConfigured ?? false };
+    },
+    async onboard(input: OnboardInput, platformId: string | null): Promise<OnboardResult> {
       const f = {
         name: input.name,
         primary_domain: input.primaryDomain ? input.primaryDomain.trim().toLowerCase() : null,
@@ -582,9 +596,12 @@ async function buildDeps(): Promise<ApiDeps> {
         const sets = Object.keys(f).map((k, i) => `${k} = $${i + 2}`).join(", ");
         await q.query(`update sites set ${sets}, updated_at = now() where id = $1`, [siteId, ...Object.values(f)]);
       } else {
-        const cols = ["slug", ...Object.keys(f)];
+        // A platform admin's NEW brand is stamped into ITS platform; the system owner (null) uses the
+        // column default. platform_id is never changed on re-onboard (the update path above).
+        const fi: Record<string, unknown> = { ...f, ...(platformId ? { platform_id: platformId } : {}) };
+        const cols = ["slug", ...Object.keys(fi)];
         const ph = cols.map((_, i) => `$${i + 1}`).join(", ");
-        const r = await q.query(`insert into sites (${cols.join(", ")}) values (${ph}) returning id`, [input.slug, ...Object.values(f)]);
+        const r = await q.query(`insert into sites (${cols.join(", ")}) values (${ph}) returning id`, [input.slug, ...Object.values(fi)]);
         siteId = String(r.rows[0].id);
       }
       const g = input.game ?? {};
@@ -605,16 +622,20 @@ async function buildDeps(): Promise<ApiDeps> {
         : false;
       const brand = { siteId, slug: input.slug, name: f.name, primaryDomain: host, currency: f.currency, status: f.status, resolvesByHost: resolves };
       let domainResult = null as OnboardResult["domain"];
-      if (input.provisionDomain && provisioner && host) domainResult = await provisioner.provision(host);
+      if (input.provisionDomain && host) {
+        const p = await provisionerFor(platformId);
+        if (p) domainResult = await p.provision(host);
+      }
       return { siteId, brand, domain: domainResult };
     },
     async domainStatus(d: string) {
-      if (!provisioner) throw new Error("NOT_CONFIGURED: domain provisioning is not configured");
-      return provisioner.status(d);
+      if (!envProvisioner) throw new Error("NOT_CONFIGURED: domain provisioning is not configured");
+      return envProvisioner.status(d);
     },
-    async listRegistrarDomains() {
-      if (!provisioner || !provisioner.registrarConfigured) return { registrarConfigured: false, domains: [] };
-      const regDomains = await provisioner.listRegistrarDomains();
+    async listRegistrarDomains(platformId: string | null) {
+      const p = await provisionerFor(platformId);
+      if (!p || !p.registrarConfigured) return { registrarConfigured: false, domains: [] };
+      const regDomains = await p.listRegistrarDomains();
       const rows = await q.query("select lower(primary_domain) as d, slug from sites where primary_domain is not null", []);
       const claimed = new Set(rows.rows.map((r: { d: string }) => String(r.d)));
       const domains = regDomains.map((rd) => {
@@ -632,9 +653,9 @@ async function buildDeps(): Promise<ApiDeps> {
       return { registrarConfigured: true, domains };
     },
     async domainHealth() {
-      if (!provisioner) return { configured: false, statuses: {} };
+      if (!envProvisioner) return { configured: false, statuses: {} };
       try {
-        const pages = await provisioner.pagesDomains();
+        const pages = await envProvisioner.pagesDomains();
         const statuses: Record<string, string> = {};
         for (const p of pages) statuses[p.name.trim().toLowerCase()] = p.status;
         return { configured: true, statuses };
@@ -850,6 +871,7 @@ async function buildDeps(): Promise<ApiDeps> {
     // are configured; otherwise the /support routes stay unregistered (unchanged behaviour).
     ...(support ? { support } : {}),
     platformOnboard,
+    registrarConfig,
   };
 }
 

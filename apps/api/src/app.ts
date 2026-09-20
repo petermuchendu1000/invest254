@@ -28,7 +28,7 @@ import { registerReferralRoutes, type ReferralRepo } from "./app.referral.js";
 import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
 import { registerSubscriptionRoutes } from "./app.subscriptions.js";
 import { registerTicketRoutes } from "./app.tickets.js";
-import type { PlatformOnboardDeps } from "./app.platform.js";
+import type { PlatformOnboardDeps, RegistrarConfigDeps } from "./app.platform.js";
 import type { Server } from "node:http";
 
 /**
@@ -264,6 +264,8 @@ export interface ApiDeps {
    * domain across Cloudflare + Namecheap. Optional; when absent the /platform/onboard route 503s.
    */
   platformOnboard?: PlatformOnboardDeps;
+  /** Per-platform domain-registrar (Namecheap) configuration service (Issue 1 #3). */
+  registrarConfig?: RegistrarConfigDeps;
 }
 
 const BASE = "/api/v1";
