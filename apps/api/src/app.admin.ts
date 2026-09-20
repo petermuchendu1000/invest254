@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, rateLimit, assertTargetSiteInScope, adminScopeSite, DEFAULT_SITE_ID, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, rateLimit, assertTargetSiteInScope, adminScopeSite, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, AdminTransactionListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery, UserOverridePatch } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 
@@ -245,8 +245,8 @@ function intParam(ctx: Ctx, name: string): number {
 
 export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   const auth = requireAuth(deps.verifier);
-  const admin = requireRole("admin");
-  const superadmin = requireRole("superadmin");
+  const admin = requireSiteAdmin("admin");
+  const superadmin = requireSiteAdmin("superadmin");
 
   router.get(`${BASE}/admin/overview`, auth, admin, async (ctx: Ctx) => deps.admin.overview(adminScopeSite(ctx) ?? undefined));
 
