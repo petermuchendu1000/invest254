@@ -561,11 +561,18 @@ async function buildDeps(): Promise<ApiDeps> {
   if (envProvisioner) console.log(`[api] domain provisioning enabled (Cloudflare Pages project '${envProvisioner.pagesProject}')`);
   // Resolve the registrar PER PLATFORM (Issue 1 #3): a platform admin uses its OWN Namecheap; the
   // system owner / default platform falls back to the global env registrar. Cloudflare stays shared.
+  const DEFAULT_PLATFORM_ID = "10000000-0000-0000-0000-000000000001";
   const provisionerFor = async (platformId: string | null): Promise<DomainProvisioner | null> => {
     if (!envProvisioner) return null;                 // no Cloudflare -> no provisioning at all
-    if (!platformId) return envProvisioner;           // system owner / default platform -> env
+    // The env NAMECHEAP creds belong to the SYSTEM OWNER (the default platform). They are used ONLY for
+    // the system owner acting globally (null) or the owner's OWN default platform. Every OTHER platform
+    // must use its OWN configured registrar and NEVER borrow the owner's — doing so both charged domains
+    // to the owner's Namecheap AND exposed the owner's domain list to a platform admin (bug). Until a
+    // platform configures its registrar, provisioning is Cloudflare-only (manual nameservers); or the
+    // owner registers the domain in their Namecheap and assigns the resulting site to that platform.
+    if (!platformId || platformId === DEFAULT_PLATFORM_ID) return envProvisioner;
     const reg = await registrarConfig.buildRegistrar(platformId);
-    return reg ? makeDomainProvisioner(reg) : envProvisioner;   // platform's own Namecheap, else env
+    return makeDomainProvisioner(reg ?? null);        // own registrar, else NO registrar (never the owner's)
   };
   const platformOnboard: PlatformOnboardDeps = {
     domainConfigured: Boolean(envProvisioner),
