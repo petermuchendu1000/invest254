@@ -121,3 +121,26 @@ test("E2E isolation: a brand-A admin's aggregate payloads never contain brand-B'
     assert.equal(ovA.finance.depositsCents, 40_000);
   } finally { await api.close(); }
 });
+
+// ───────────────────────────── deposit reconciliation isolation (Issue 1 leak fix) ─────────────
+// The bug: GET /admin/deposits/reconcile aggregated deposits across EVERY brand (no site filter),
+// so a brand-scoped admin saw other brands' deposit summary + stale list. Now site-scoped.
+
+test("E2E isolation: /admin/deposits/reconcile is brand-scoped; platform sees the rollup", async () => {
+  const api = await startTestApi({ startingBalanceCents: 1_000_000 });
+  try {
+    await deposit(api, PLAYER_A, "invest254", 40_000, "RA-DEP");
+    await deposit(api, PLAYER_B, "brandb",     25_000, "RB-DEP");
+
+    const sumAmt = (r: any) => (r.summary as any[]).reduce((s, b) => s + b.amountCents, 0);
+    const recA = await json(await get(api, "/api/v1/admin/deposits/reconcile", ADMIN_A));
+    const recB = await json(await get(api, "/api/v1/admin/deposits/reconcile", ADMIN_B));
+    const recP = await json(await get(api, "/api/v1/admin/deposits/reconcile", ADMIN_PLATFORM));
+
+    assert.equal(sumAmt(recA), 40_000, "reconcile summary: brand A only");
+    assert.equal(sumAmt(recB), 25_000, "reconcile summary: brand B only");
+    assert.equal(sumAmt(recP), 65_000, "reconcile summary: platform rollup");
+    // Brand-B's unique amount must never appear anywhere in brand-A's reconcile payload.
+    assert.ok(!JSON.stringify(recA).includes("25000"), "no brand-B deposit leaks into brand-A reconcile");
+  } finally { await api.close(); }
+});

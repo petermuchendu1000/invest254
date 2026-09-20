@@ -539,7 +539,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/admin/deposits/reconcile`, auth, admin, async (ctx: Ctx) => {
     const raw = ctx.query.get("staleMinutes");
     const n = raw === null ? 15 : Number(raw);
-    return deps.admin.depositsReconcile(Number.isFinite(n) && n >= 0 ? n : 15);
+    return deps.admin.depositsReconcile(Number.isFinite(n) && n >= 0 ? n : 15, adminScopeSite(ctx) ?? undefined);
   });
 
   router.get(`${BASE}/admin/deposits`, auth, admin, async (ctx: Ctx) => {
