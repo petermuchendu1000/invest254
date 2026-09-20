@@ -103,8 +103,9 @@ export default function PlatformPoolPage() {
       </Section>
 
       {/* ── Demand-based suggestion ────────────────────────────────────────────────────────── */}
-      <Section title="Smart suggestion (demand-based)">
+      <Section title="Dynamic pool distribution (demand-based)">
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4">
+          <p className="text-sm text-muted">Forecasts each brand&rsquo;s recent player turnover over the lookback window and allocates the pool where demand is highest (water-fill). Preview first, then apply &mdash; it sets each brand&rsquo;s daily pool for you.</p>
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-40"><Input label="Lookback (days)" inputMode="numeric" value={lookback} onChange={(e) => setLookback(e.target.value)} /></div>
             <div className="w-56"><Input label="Total to allocate (KES)" inputMode="decimal" value={demandKes} onChange={(e) => setDemandKes(e.target.value)} placeholder="blank = keep current total" optional /></div>
@@ -115,20 +116,21 @@ export default function PlatformPoolPage() {
             <>
               <TableWrap>
                 <table className="w-full text-sm">
-                  <thead><tr><Th>Brand</Th><Th>Current</Th><Th>Suggested</Th><Th>Coverage</Th></tr></thead>
+                  <thead><tr><Th>Brand</Th><Th>Forecast turnover</Th><Th>Required</Th><Th>Current</Th><Th>Suggested</Th><Th>Coverage</Th></tr></thead>
                   <tbody>
                     {preview.rows.map((r) => (
                       <tr key={r.siteId}>
-                        <Td>{r.slug}</Td><Td>{money(r.currentPoolCents)}</Td><Td>{money(r.suggestedCents)}</Td>
+                        <Td>{r.slug}</Td><Td>{money(r.forecastTurnoverCents)}</Td><Td>{money(r.requiredCents)}</Td>
+                        <Td>{money(r.currentPoolCents)}</Td><Td>{money(r.suggestedCents)}</Td>
                         <Td>{Math.round((r.coverage ?? 0) * 100)}%</Td>
                       </tr>
                     ))}
-                    {preview.rows.length === 0 ? <tr><Td>No pool-mode brands with recent activity.</Td><Td> </Td><Td> </Td><Td> </Td></tr> : null}
+                    {preview.rows.length === 0 ? <tr><Td>No pool-mode brands with recent activity.</Td><Td> </Td><Td> </Td><Td> </Td><Td> </Td><Td> </Td></tr> : null}
                   </tbody>
                 </table>
               </TableWrap>
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm text-muted">Suggested total: <b className="text-fg">{money(preview.suggestedTotalCents)}</b></span>
+                <span className="text-sm text-muted">Suggested total: <b className="text-fg">{money(preview.suggestedTotalCents)}</b> &middot; Reserve (unallocated): <b className="text-fg">{money(preview.reserveCents)}</b></span>
                 <Button
                   type="button" disabled={dynMut.isPending || preview.rows.length === 0}
                   onClick={() => { setMsg(null); dynMut.mutate({ lookbackDays: Number(lookback) || 14, ...(demandKes ? { totalCents: toCents(demandKes) } : {}) }, { onSuccess: () => setMsg('Applied the demand-based allocation to your brands.') }); }}
