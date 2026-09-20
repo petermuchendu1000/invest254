@@ -512,7 +512,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
 
   // Distribute a global withdrawal-pool total across every active brand's daily cap.
   //   { totalCents, mode: 'equal' } | { mode: 'per_site', overrides: { <siteId>: cents } }
-  router.post(`${BASE}/platform/pool/distribute`, auth, platform, async (ctx: Ctx) => {
+  router.post(`${BASE}/platform/pool/distribute`, auth, platformAdmin, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const mode = body.mode === "per_site" ? "per_site" : "equal";
     let totalCents: number | null = null;
@@ -531,22 +531,22 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
       }
       if (Object.keys(overrides).length === 0) throw new ApiError("VALIDATION", "per_site mode requires a non-empty overrides map", 400);
     }
-    return { result: await domain(() => deps.platform.distributePool(ctx.claims!.userId, ctx.claims!.role ?? "player", totalCents, mode, overrides)) };
+    return { result: await domain(() => deps.platform.distributePool(ctx.claims!.userId, ctx.claims!.role ?? "player", totalCents, mode, overrides, adminScopePlatform(ctx))) };
   });
 
-  router.get(`${BASE}/platform/pool/distributions`, auth, platform, async (ctx: Ctx) => {
+  router.get(`${BASE}/platform/pool/distributions`, auth, platformAdmin, async (ctx: Ctx) => {
     const limit = Math.min(Math.max(Number(ctx.query.get("limit")) || 20, 1), 100);
-    return { distributions: await domain(() => deps.platform.listPoolDistributions(limit)) };
+    return { distributions: await domain(() => deps.platform.listPoolDistributions(limit, adminScopePlatform(ctx))) };
   });
 
   // ── Dynamic (demand-based) pool distribution (docs/25 §15) ──
   // Preview: forecasts each active pool-mode brand's demand and returns the suggested allocation. No apply.
-  router.get(`${BASE}/platform/pool/demand`, auth, platform, async (ctx: Ctx) => {
+  router.get(`${BASE}/platform/pool/demand`, auth, platformAdmin, async (ctx: Ctx) => {
     const opts = parsePoolDemandQuery(ctx);
-    return { preview: await domain(() => deps.platform.poolDemand(opts)) };
+    return { preview: await domain(() => deps.platform.poolDemand(opts, adminScopePlatform(ctx))) };
   });
   // Apply: computes the demand-based allocation and applies it via the audited per-site distributor.
-  router.post(`${BASE}/platform/pool/distribute-dynamic`, auth, platform, async (ctx: Ctx) => {
+  router.post(`${BASE}/platform/pool/distribute-dynamic`, auth, platformAdmin, async (ctx: Ctx) => {
     const body = asObject(ctx.body);
     const opts = {
       lookbackDays: body.lookbackDays != null ? Number(body.lookbackDays) : undefined,
@@ -557,7 +557,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     };
     if (opts.totalCents != null && (!Number.isFinite(opts.totalCents) || opts.totalCents < 0))
       throw new ApiError("VALIDATION", "totalCents must be a non-negative number", 400);
-    return { result: await domain(() => deps.platform.distributePoolDynamic(ctx.claims!.userId, ctx.claims!.role ?? "player", opts)) };
+    return { result: await domain(() => deps.platform.distributePoolDynamic(ctx.claims!.userId, ctx.claims!.role ?? "player", opts, adminScopePlatform(ctx))) };
   });
 
   // ── Task R: cross-brand marketer rollup (reporting only; money stays per site) ──
