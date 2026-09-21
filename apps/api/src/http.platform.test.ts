@@ -46,8 +46,14 @@ test("assertTargetPlatformInScope: a platform_admin may act only inside its own 
   assert.ok(caught instanceof ApiError, "threw an ApiError");
   assert.equal(caught!.code, "PLATFORM_SCOPE_FORBIDDEN");
   assert.equal(caught!.status, 403);
-  // unknown target platform (null) defers to the DB RPC guard -> tolerant, no throw
-  assert.doesNotThrow(() => assertTargetPlatformInScope(pa, null));
+  // CHANGED (audit finding 03): an unresolved target used to defer to the DB RPC ("tolerant").
+  // That tolerance WAS the hole -- a platform_admin whose token lacked the `platform` claim got
+  // scope === null (UNRESTRICTED) and every guard was skipped. Now refused.
+  let unresolved: ApiError | undefined;
+  try { assertTargetPlatformInScope(pa, null); } catch (e) { unresolved = e as ApiError; }
+  assert.ok(unresolved instanceof ApiError, "bounded caller + unresolved target must fail closed");
+  assert.equal(unresolved!.code, "PLATFORM_SCOPE_FORBIDDEN");
+  assert.equal(unresolved!.status, 403);
 });
 
 test("assertTargetPlatformInScope: the system owner is never platform-restricted", () => {

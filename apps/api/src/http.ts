@@ -460,6 +460,14 @@ export function adminScopeSite(ctx: Ctx): string | null {
   // per-brand bound is a PLATFORM check (adminScopePlatform / assertTargetPlatformInScope), so it
   // must not be treated as a single-site admin here.
   if (role === "platform_admin") return null;
+  // FAIL CLOSED (audit finding 03): the scope key of a site-scoped admin IS its `site` claim. A
+  // missing key must never widen scope to "every brand" -- consumers read `null` as UNRESTRICTED
+  // (`adminScopeSite(ctx) ?? undefined`), so a token minted without a site claim would otherwise
+  // expose all brands in the back office. Re-authenticate with a valid brand instead.
+  const siteScoped = role === "admin" || role === "superadmin";
+  if (siteScoped && !ctx.claims.site) {
+    throw new ApiError("SITE_SCOPE_REQUIRED", "SITE_SCOPE_REQUIRED: this admin has no brand scope", 403);
+  }
   return ctx.claims.site ?? null;
 }
 
@@ -475,7 +483,18 @@ export function adminScopePlatform(ctx: Ctx): string | null {
   const role = ctx.claims.role ?? "player";
   const systemRank = ROLE_RANK.platform_superadmin ?? Number.POSITIVE_INFINITY;
   if ((ROLE_RANK[role] ?? 0) >= systemRank) return null;
-  if (role === "platform_admin") return ctx.claims.platform ?? null;
+  // FAIL CLOSED (audit finding 03). This line is what let @thegenius -- a platform_admin of platform
+  // `nduati` -- impersonate a brand admin on invest254/tamutraders, both inside @zrinok's platform:
+  // `?? null` turned a MISSING claim into `null`, and `null` is the sentinel this module reserves
+  // for the system owner (UNRESTRICTED). `scopeSiteParam` then returned early,
+  // `assertTargetPlatformInScope` skipped its check, and `listSites(null)` resolved to every brand.
+  // A platform_admin without a platform is unscopable, so it is refused -- never widened.
+  if (role === "platform_admin") {
+    if (!ctx.claims.platform) {
+      throw new ApiError("PLATFORM_SCOPE_REQUIRED", "PLATFORM_SCOPE_REQUIRED: this platform admin has no platform scope", 403);
+    }
+    return ctx.claims.platform;
+  }
   return null;
 }
 
@@ -488,7 +507,12 @@ export function adminScopePlatform(ctx: Ctx): string | null {
 export function assertTargetPlatformInScope(ctx: Ctx, targetPlatform: string | null | undefined): void {
   const scope = adminScopePlatform(ctx);
   if (scope === null) return;                 // system owner -> unrestricted
-  if (targetPlatform == null) return;         // unknown target -> defer to the RPC's own guard
+  // FAIL CLOSED (audit finding 03): an UNRESOLVED target used to pass ("defer to the RPC"), which is
+  // the same widening as above -- a target the caller cannot resolve is precisely the case that must
+  // not be waved through. A bounded caller passes only when the target is KNOWN to be in scope.
+  if (targetPlatform == null) {
+    throw new ApiError("PLATFORM_SCOPE_FORBIDDEN", "PLATFORM_SCOPE_FORBIDDEN: target platform could not be resolved", 403);
+  }
   if (targetPlatform !== scope) {
     throw new ApiError("PLATFORM_SCOPE_FORBIDDEN", "PLATFORM_SCOPE_FORBIDDEN: target belongs to another platform", 403);
   }
@@ -503,7 +527,11 @@ export function assertTargetPlatformInScope(ctx: Ctx, targetPlatform: string | n
 export function assertTargetSiteInScope(ctx: Ctx, targetSite: string | null | undefined): void {
   const scope = adminScopeSite(ctx);
   if (scope === null) return;            // platform admin / platform_superadmin -> unrestricted
-  if (targetSite == null) return;        // unknown target -> defer to the RPC's own site guard
+  // FAIL CLOSED (audit finding 03): identical widening to the platform guard above. A site-scoped
+  // admin acting on a target whose brand cannot be resolved is refused, not waved through.
+  if (targetSite == null) {
+    throw new ApiError("SITE_SCOPE_FORBIDDEN", "SITE_SCOPE_FORBIDDEN: target brand could not be resolved", 403);
+  }
   if (targetSite !== scope) {
     throw new ApiError("SITE_SCOPE_FORBIDDEN", "SITE_SCOPE_FORBIDDEN: target belongs to another brand", 403);
   }
