@@ -20,6 +20,10 @@ export interface CredentialRecord { userId: string; role: string; status: string
 /** Profile state for the `/me` view. */
 export interface ProfileRow {
   userId: string; username: string; phone: string; role: string; status: string;
+  // Multi-tenant binding, read live from the profile. Carried so token RE-ISSUE (/auth/refresh) can
+  // re-stamp the `site` + `platform` claims instead of dropping them — a platform_admin that loses its
+  // `platform` claim is otherwise treated as an unrestricted system owner (cross-platform leak, Issue 1).
+  siteId: string | null; platformId: string | null;
 }
 
 /** An affiliate (marketer) enrollment: the stable referral code + commission terms + current role. */
@@ -413,13 +417,15 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
   }
   async getProfile(userId: string): Promise<ProfileRow | null> {
     const r = await this.q.query(
-      "select id, username, phone, role, status from profiles where id = $1", [userId]);
+      "select id, username, phone, role, status, site_id, platform_id from profiles where id = $1", [userId]);
     if (!r.rows.length) return null;
     return this.rowToProfile(r.rows[0]);
   }
   private rowToProfile(x: Record<string, unknown>): ProfileRow {
     return {
       userId: String(x.id), username: String(x.username), phone: String(x.phone), role: String(x.role), status: String(x.status),
+      siteId: x.site_id == null ? null : String(x.site_id),
+      platformId: x.platform_id == null ? null : String(x.platform_id),
     };
   }
   async setSecurityAnswers(userId: string, answers: SecurityAnswerHash[]): Promise<void> {
@@ -738,6 +744,9 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
   private toProfile(u: MemUser): ProfileRow {
     return {
       userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status,
+      // The in-memory mirror captures the brand on register but not the platform tier (tests drive the
+      // `platform` claim explicitly via dev tokens), so platformId is null here.
+      siteId: u.siteId ?? null, platformId: null,
     };
   }
   /** Test seam: flip an account's status (active | suspended | banned). */

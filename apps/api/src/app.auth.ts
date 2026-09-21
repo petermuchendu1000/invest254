@@ -319,7 +319,12 @@ export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
     if (profile.status !== "active") {
       throw new ApiError(`ACCOUNT_${profile.status.toUpperCase()}`, `account is ${profile.status}`, 403);
     }
-    const token = await deps.auth.issueToken(userId, profile.role);
+    // Re-stamp the multi-tenant binding from the LIVE profile. Dropping these on refresh silently
+    // un-scoped a platform_admin: with no `platform` claim, adminScopePlatform() treats it as an
+    // unrestricted system owner, letting it act on / impersonate ANY brand across ALL platforms
+    // (cross-tenant data leak, Issue 1). Mirrors exactly what the login path mints.
+    const token = await deps.auth.issueToken(
+      userId, profile.role, profile.siteId ?? undefined, profile.platformId ?? undefined);
     return { token, userId, role: profile.role };
   });
 }

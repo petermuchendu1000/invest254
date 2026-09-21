@@ -475,7 +475,17 @@ export function adminScopePlatform(ctx: Ctx): string | null {
   const role = ctx.claims.role ?? "player";
   const systemRank = ROLE_RANK.platform_superadmin ?? Number.POSITIVE_INFINITY;
   if ((ROLE_RANK[role] ?? 0) >= systemRank) return null;
-  if (role === "platform_admin") return ctx.claims.platform ?? null;
+  if (role === "platform_admin") {
+    // FAIL CLOSED (Issue 1): `null` means "unrestricted system owner" everywhere this value flows
+    // (scopeSiteParam short-circuits, assertTargetPlatformInScope passes). A platform_admin MUST carry
+    // its `platform` binding; a missing one is a defective/stale token, NOT a licence to reach every
+    // platform. Refuse rather than silently widen scope. (Login + /auth/refresh both stamp the claim.)
+    const platform = ctx.claims.platform;
+    if (!platform) {
+      throw new ApiError("PLATFORM_SCOPE_FORBIDDEN", "PLATFORM_SCOPE_FORBIDDEN: platform_admin token is missing its platform binding; sign in again", 403);
+    }
+    return platform;
+  }
   return null;
 }
 

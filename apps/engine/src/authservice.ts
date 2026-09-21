@@ -89,6 +89,8 @@ export interface AuthSession { token: string; userId: string; role: string; site
 /** Profile view returned by `/me`. */
 export interface Profile {
   userId: string; username: string; phone: string; role: string; status: string;
+  // Live multi-tenant binding, so token re-issue can re-stamp the `site`/`platform` claims (Issue 1).
+  siteId: string | null; platformId: string | null;
 }
 
 export interface AuthServiceOptions {
