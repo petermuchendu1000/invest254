@@ -3,6 +3,7 @@ import { COHORT_KEYS, PAYMENT_KEYS } from "@invest254/shared";
 import type { MarketerRollupRow } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 import type { ProvisionResult, DomainStatus } from "./domains.js";
+import { parseOverridePatch } from "./app.admin.js";
 
 // ── Instant client onboarding (docs/21) — brand + economy + optional domain provisioning ──
 export interface OnboardColors { primary?: string; bg?: string; accent?: string }
@@ -684,6 +685,19 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.admin.getUserDetail(ctx.params.uid!));
   });
 
+  // docs/42 UI-10: ONE audit trail across a platform's brands, attributed to brand + actor name. A platform
+  // admin sees its own platform only; the owner every brand, or one platform with ?platform=. ?site=
+  // narrows to one brand (which must be in scope).
+  router.get(`${BASE}/platform/audit-log`, auth, platformAdmin, async (ctx: Ctx) => {
+    const platformId = actingPlatform(ctx);
+    const site = ctx.query.get("site")?.trim() || null;
+    if (site) {
+      if (!UUID_RE.test(site)) throw new ApiError("VALIDATION", "site must be a brand id", 400);
+      assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite(site));
+    }
+    return deps.admin.listPlatformAudit({ ...pageQ(ctx), platformId, siteId: site });
+  });
+
   // Per-brand audit trail (admin_actions filtered by site).
   router.get(`${BASE}/platform/sites/:id/audit`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) =>
     deps.admin.listAudit(pageQ(ctx), ctx.params.id));
@@ -718,8 +732,18 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return domain(() => deps.admin.adjustBalance(a, r, ctx.params.uid!, Math.round(amount), reason));
   });
 
+  // docs/42 UI-10: read a player's overrides in the console (the write existed with no UI and no read).
+  router.get(`${BASE}/platform/sites/:id/users/:uid/overrides`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite((await deps.admin.siteOfUser(ctx.params.uid!)) ?? ""));
+    return (await deps.admin.getUserOverrides(ctx.params.uid!)) ?? {
+      userId: ctx.params.uid!, winRate: null, houseEdge: null, tradeDurationS: null, maxWinMultiplier: null,
+      minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null,
+    };
+  });
+
   router.patch(`${BASE}/platform/sites/:id/users/:uid/overrides`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
-    const patch = asObject(ctx.body);
+    // UI-10: same validation as the back office (was the raw body — a typo surfaced as a DB 500).
+    const patch = parseOverridePatch(ctx);
     assertTargetPlatformInScope(ctx, await deps.platform.platformOfSite((await deps.admin.siteOfUser(ctx.params.uid!)) ?? ""));
     const [a, r] = actorOf(ctx);
     return domain(() => deps.admin.setUserOverrides(a, r, ctx.params.uid!, patch));

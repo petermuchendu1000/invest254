@@ -176,7 +176,7 @@ function parseGameConfigPatch(ctx: Ctx): GameConfigPatch {
 
 /** Parse a per-user overrides patch (J8). Numeric fields accept a value or null (clear to global). */
 const OVERRIDE_NUM_FIELDS = ["winRate", "houseEdge", "tradeDurationS", "maxWinMultiplier", "minStakeCents", "maxStakeCents"] as const;
-function parseOverridePatch(ctx: Ctx): UserOverridePatch {
+export function parseOverridePatch(ctx: Ctx): UserOverridePatch {
   const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
   const patch: Record<string, unknown> = {};
   for (const key of OVERRIDE_NUM_FIELDS) {

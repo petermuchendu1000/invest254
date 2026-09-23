@@ -1,5 +1,6 @@
 import { apiFetch } from '@/lib/api/client';
 import type { CohortEconomy, PaymentsEconomy } from '@invest254/shared/globaleconomy';
+import type { AdminUserDetail, UserOverrideRow, UserOverridePatch } from '@/lib/admin/types';
 
 /** A brand's economy (mirrors site_game_config; cents for money fields). */
 export interface SiteConfig {
@@ -89,6 +90,8 @@ export interface SiteUserRow {
 export interface AuditRow {
   id: string; actorId: string; actorRole: string; action: string; targetType: string; targetId: string | null; detail: unknown; createdAtMs: number;
 }
+/** docs/42 UI-10: an audit row in the platform-wide view (brand + actor name). */
+export interface PlatformAuditRowDto extends AuditRow { siteId: string | null; siteName: string | null; actorUsername: string | null }
 
 /** Platform-wide master config (migrations 0092 + 0099) — the global console. */
 export interface GlobalConfigDto {
@@ -179,6 +182,13 @@ export const platformApi = {
     apiFetch(`/platform/sites/${id}/users/${uid}/role`, { method: 'POST', token: t, body }),
   siteUserBalance: (t: string, id: string, uid: string, body: { amountCents: number; reason?: string | undefined; kind?: string | undefined }) =>
     apiFetch(`/platform/sites/${id}/users/${uid}/balance`, { method: 'POST', token: t, body }),
+  // docs/42 UI-10 — player detail, overrides (read + validated write) and the platform-wide audit trail
+  siteUserDetail: (t: string, id: string, uid: string) => apiFetch<AdminUserDetail>(`/platform/sites/${id}/users/${uid}`, { token: t }),
+  siteUserOverrides: (t: string, id: string, uid: string) => apiFetch<UserOverrideRow>(`/platform/sites/${id}/users/${uid}/overrides`, { token: t }),
+  setSiteUserOverrides: (t: string, id: string, uid: string, patch: UserOverridePatch) =>
+    apiFetch<UserOverrideRow>(`/platform/sites/${id}/users/${uid}/overrides`, { method: 'PATCH', token: t, body: patch }),
+  platformAudit: (t: string, q: { platformId?: string | undefined; siteId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }) =>
+    apiFetch<Page<PlatformAuditRowDto>>('/platform/audit-log', { token: t, query: { platform: q.platformId, site: q.siteId, cursor: q.cursor, limit: q.limit } }),
   // ── Global config console (migration 0092) ──
   globalConfig: (t: string) => apiFetch<{ config: GlobalConfigDto }>('/platform/global-config', { token: t }),
   // ── Payment-gateway provider switches (migration 0116) ──

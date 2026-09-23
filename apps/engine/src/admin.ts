@@ -88,6 +88,15 @@ export interface AdminAuditRow {
   id: string; actorId: string; actorRole: string; action: string;
   targetType: string; targetId: string | null; detail: unknown; createdAtMs: number;
 }
+/** docs/42 UI-10: an audit row in the platform-wide view — which brand, and who (by name). */
+export interface PlatformAuditRow extends AdminAuditRow {
+  siteId: string | null; siteName: string | null; actorUsername: string | null;
+}
+export interface PlatformAuditQuery extends PageQuery {
+  /** null = every brand (System owner only; the API pins a platform admin to its own platform). */
+  platformId: string | null;
+  siteId?: string | null;
+}
 /** One persisted system-log line (docs/36) surfaced to the owner-only System logs UI. */
 export interface AdminSystemLogRow {
   id: string; tMs: number; app: string | null; level: string; msg: string;
@@ -330,6 +339,8 @@ export interface AdminRepository {
   /** Unified deposits + withdrawals feed for the Finance transactions explorer (newest-first, keyset). */
   listTransactions(q: AdminTransactionListQuery): Promise<Page<AdminTransactionRow>>;
   listAudit(q: PageQuery, siteId?: string): Promise<Page<AdminAuditRow>>;
+  /** docs/42 UI-10: audit across a platform's brands (brand-attributed rows only), newest first. */
+  listPlatformAudit(q: PlatformAuditQuery): Promise<Page<PlatformAuditRow>>;
   /** Owner-only: the persisted system logs (docs/36), newest-first, filterable + cursor-paginated. */
   listSystemLogs(q: AdminSystemLogQuery): Promise<Page<AdminSystemLogRow>>;
   adjustBalance(actorId: string, actorRole: string, targetId: string, amountCents: Cents, reason: string): Promise<AdjustBalanceResult>;
@@ -907,6 +918,32 @@ export class PgAdminRepository implements AdminRepository {
     const rows: AdminAuditRow[] = r.rows.map((x) => ({
       id: String(x.id), actorId: String(x.actor_id), actorRole: String(x.actor_role), action: String(x.action),
       targetType: String(x.target_type), targetId: x.target_id == null ? null : String(x.target_id), detail: x.detail, createdAtMs: ms(x.created_at),
+    }));
+    return pageFrom(rows, limit, (a) => `${a.createdAtMs}:${a.id}`);
+  }
+
+  async listPlatformAudit(q: PlatformAuditQuery): Promise<Page<PlatformAuditRow>> {
+    const limit = clampLimit(q.limit);
+    const cur = decodeKeyset(q.cursor);
+    const r = await this.q.query(
+      `select a.id, a.actor_id, a.actor_role, pa.username as actor_username, a.action, a.target_type, a.target_id,
+              a.detail, a.created_at, a.site_id, s.name as site_name
+         from admin_actions a
+         join sites s on s.id = a.site_id
+         left join profiles pa on pa.id = a.actor_id
+        -- keyset on the MILLISECOND-truncated time (the cursor carries ms): comparing the raw
+        -- microsecond timestamp skipped every row sharing the cursor's millisecond (see PAGE-1).
+        where ($1::timestamptz is null or (date_trunc('milliseconds', a.created_at), a.id) < ($1::timestamptz, $2::bigint))
+          and ($4::uuid is null or s.platform_id = $4::uuid)
+          and ($5::uuid is null or a.site_id = $5::uuid)
+        order by date_trunc('milliseconds', a.created_at) desc, a.id desc
+        limit $3`,
+      [cur ? new Date(cur.tsMs).toISOString() : null, cur ? Number(cur.id) : null, limit + 1, q.platformId ?? null, q.siteId ?? null]);
+    const rows: PlatformAuditRow[] = r.rows.map((x) => ({
+      id: String(x.id), actorId: String(x.actor_id), actorRole: String(x.actor_role), action: String(x.action),
+      targetType: String(x.target_type), targetId: x.target_id == null ? null : String(x.target_id), detail: x.detail, createdAtMs: ms(x.created_at),
+      siteId: x.site_id == null ? null : String(x.site_id), siteName: x.site_name == null ? null : String(x.site_name),
+      actorUsername: x.actor_username == null ? null : String(x.actor_username),
     }));
     return pageFrom(rows, limit, (a) => `${a.createdAtMs}:${a.id}`);
   }
@@ -1763,6 +1800,10 @@ export class InMemoryAdminRepository implements AdminRepository {
       _ts: a.createdAtMs, _id: String(a.id).padStart(12, "0"),
     }));
     return memKeyset(rows, q);
+  }
+  /** In-memory audit rows carry no brand, so the platform-wide view is empty here (see the pg test). */
+  async listPlatformAudit(_q: PlatformAuditQuery): Promise<Page<PlatformAuditRow>> {
+    return { items: [], nextCursor: null };
   }
   // System logs are only persisted by the DB-backed sink (docs/36); the in-memory harness has none.
   async listSystemLogs(_q: AdminSystemLogQuery): Promise<Page<AdminSystemLogRow>> {

@@ -419,6 +419,8 @@ export interface TestApi {
   referral: InMemoryReferralRepo;
   /** The in-memory platform repo, so tests can seed brands + marketer rollup rows (Task R). */
   platformRepo: InMemoryPlatformRepository;
+  /** The in-memory admin repo (docs/42 UI-10: tests spy on the platform audit query). */
+  adminRepo: InMemoryAdminRepository;
   ticketRepo: InMemoryTicketRepository;
   /** Support-chat fakes (seed KB, swap LLM, inspect recorded conversations/messages). */
   support: SupportHarness;
@@ -737,6 +739,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     marketers: deps.marketers,
     referral: referralRepo,
     platformRepo,
+    adminRepo,
     ticketRepo,
     support,
     onboard: { calls: onboardCalls, deps: onboardDeps },
