@@ -5,6 +5,33 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #70 — Billing was a stub: no invoices, no way to pay, add-on prices never billed, dunning on dates alone (BILL-1) — FIXED (branch `feat/bill1-billing`, migration 0165)
+- **What (owner request, 2026-09-23: "a really serious /billing page … what we have is a total basic and a joke"):**
+  - There were no invoices. A "payment" was the owner pressing *Mark paid*, which extended the period with no record of what was paid for.
+  - Platforms had no way to pay. Add-on prices were shown ("It is billed at KES X") but never charged.
+  - The cron moved platforms to past_due / grace / suspended purely on dates, even when nothing had been invoiced.
+  - The owner saw each platform's active/archived state, not its subscription standing. There were no revenue figures and no settings.
+- **Fix:** see docs/47.
+  - Migration 0165 adds consolidated per-platform invoices (plan + each brand's monthly add-ons + pending one-off/setup charges), numbered `PREFIX-YYYY-00001` and billed in advance.
+  - Dunning now follows the oldest unpaid invoice (past_due → final notice → suspended), with a reminder at each stage. A paid-up platform returns to active and its brands come back online.
+  - Payments: manual (bank / cash / M-Pesa / other, including part payments) and M-Pesa **Pay now**, an STK push from the System account. Every result is verified with STKPushQuery, success *and* failure, so a forged callback can neither pay nor cancel. A 2-minute sweep settles payments whose callback was lost.
+  - Settlement is idempotent. Overpayments (rounding up to whole KES, or a double settle) and credits larger than an invoice carry forward as credits instead of being lost.
+  - Add-ons get a pricing model (free / one-off / monthly + setup fee). One-off and setup fees are charged on grant, never twice. The System's own platform is exempt, and existing (grandfathered) entitlements are not charged.
+  - Owner console: Overview (MRR/ARR, outstanding, overdue, aging, needs-attention, renewals, payments), Invoices, Subscriptions (manage: plan, charge/credit, status, exempt, history), Plans, Settings (seller, prefix, terms, tax, Pay now, overdue timeline).
+  - Platform admin page: a due banner that states the consequence and date, plan, next-invoice estimate, usage, invoices with Pay, plan comparison.
+  - Printable invoice page.
+- **Found while testing on the real stack:** Pay now pre-filled the phone as `00700000003` when the profile stored `07…` (it only handled `254…`), so the Send button stayed disabled. It is now normalised from any stored form (`localPhone`, unit-tested).
+- **Behaviour change (production):** the daily lifecycle job now issues invoices. NDUATI (Business, KES 40,000) gets its first invoice on its renewal date (2026-10-19), due 7 days later. MUCHENDU (the System's platform) is exempt.
+- **Tests:**
+  - `e2e_billing.py`: BEFORE reproduces 3; AFTER 112 checks.
+  - `e2e_subscriptions_tickets.py` updated to the invoice-driven lifecycle (33/33).
+  - Engine: 5 unit tests. API: 3 route tests and a real-schema pg test. The F-44 cross-tenant matrix now covers the billing routes against a seeded invoice. Web: 4 label tests. Unit total 1167/1167.
+  - All 38 DB e2e suites pass.
+  - Role e2e: 23 new checks; 163/163 pass.
+  - Real stack: Pay now → the stub Daraja client → the reconcile sweep settled the invoice, and the platform went from grace_period to active.
+
+---
+
 ## #69 — No per-brand pool view; dynamic distribution had no setting and was off unless a GitHub variable was set; history hid who got what (POOL-1) — FIXED (branch `feat/pool1-overview-auto`, migration 0164)
 - **What (owner request, 2026-09-23):**
   - Nothing showed each brand's pool for today: budget, paid, reserved and available.

@@ -168,8 +168,7 @@ export function registerBillingRoutes(router: Router, deps: ApiDeps): void {
   });
   router.post(`${B}/invoices/:id/pay`, auth, padmin, async (ctx: Ctx) => {
     const b = obj(ctx.body); const [a, r] = who(ctx); const id = uuid(ctx.params.id, "id");
-    if (typeof b.phone !== "string") throw new ApiError("INVALID_PHONE", MESSAGES.INVALID_PHONE!, 400);
-    return domain(() => need().payNow(a, r, id, b.phone as string));
+    return domain(() => need().payNow(a, r, id, typeof b.phone === "string" ? b.phone : ""));
   });
   router.get(`${B}/charges`, auth, padmin, async (ctx: Ctx) => {
     const [a, r] = who(ctx);

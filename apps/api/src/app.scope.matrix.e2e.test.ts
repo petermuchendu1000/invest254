@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { startTestApi, TEST_USER, SITE_A, SITE_B, type TestApi } from "./testutil.js";
 import { createRouter } from "./app.js";
+import { BillingService, InMemoryBillingRepository, StubDarajaClient } from "@invest254/engine";
 
 /**
  * ISSUE 1 / F-44 — cross-tenant ATTACK MATRIX over EVERY id-addressed operator route.
@@ -26,6 +27,7 @@ function req(api: TestApi, method: string, path: string, token?: string, body?: 
   return fetch(`${api.baseUrl}${path}`, init);
 }
 const DEFAULT_PLATFORM = "10000000-0000-0000-0000-000000000001";
+const BILL_INV_A = "30000000-0000-0000-0000-00000000000a";
 const OWNER = "owner:platform_superadmin";
 const ADMIN_A = `adm-a:admin:${SITE_A}`;
 const ATTACKER_SITE = `atk:admin:${SITE_B}`;
@@ -76,6 +78,8 @@ function instantiate(path: string, s: Seed): { url: string; body: unknown; seede
     if (/\/admin\/withdrawals\/:id/.test(path)) return s.withdrawalA;
     if (/\/admin\/affiliate\/advances\/:id/.test(path)) return s.advanceA;
     if (/\/platform\/payment-scopes\//.test(path)) return SITE_A;   // PAY-1: brand A's payment scope
+    if (/\/platform\/billing\/invoices\/:id/.test(path)) return BILL_INV_A;   // BILL-1: platform A's invoice
+    if (/\/platform\/billing\/accounts\/:id/.test(path)) return DEFAULT_PLATFORM;
     if (/\/platform\/sites\/:id/.test(path)) return SITE_A;
     if (/\/platform\/(platforms|subscriptions)\/:id/.test(path)) return DEFAULT_PLATFORM;
     if (/\/support\/conversations\/:id/.test(path)) return s.convA;
@@ -92,6 +96,7 @@ function instantiate(path: string, s: Seed): { url: string; body: unknown; seede
     "reset-balance": { reason: "x" }, overrides: { winRate: 0.1 }, notifications: { title: "pwned" },
     resolve: {}, credit: { amountCents: 100 }, withdraw: { amountCents: 100 }, fuliza: { amountCents: 100 },
     airtime: { amountCents: 100 }, pin: { pin: "9999" }, status: { status: "disabled", reason: "x" },
+    pay: { phone: "0712345678" },   // BILL-1: a valid phone, so only scope can refuse
     approve: { password: PASSWORD }, reject: { reason: "x" }, "mark-paid": { password: PASSWORD }, paid: { ref: "x" },
     messages: { message: "hi" }, escalate: { email: "a@b.co", note: "x" }, comments: { body: "x" },
     balance: { amountCents: 100, direction: "credit", reason: "x" }, assign: { platformId: s.betaPlatform },
@@ -106,9 +111,16 @@ function instantiate(path: string, s: Seed): { url: string; body: unknown; seede
 }
 
 test("F-44 matrix: every id-addressed operator route refuses a cross-tenant attacker; brand A is untouched", async () => {
-  const api = await startTestApi({ startingBalanceCents: 1_000_000, depsOverrides: { verifyApprovalPassword: async (pw) => pw === PASSWORD } });
+  const billRepo = new InMemoryBillingRepository();
+  billRepo.invoicesById.set(BILL_INV_A, { id: BILL_INV_A, number: "TRIO-2026-00001", platformId: DEFAULT_PLATFORM, platformName: "Default", kind: "renewal",
+    status: "open", issuedAt: "", dueAt: "", periodStart: null, periodEnd: null, totalCents: 100000, amountPaidCents: 0, amountDueCents: 100000,
+    overdue: false, paidAt: null, currency: "KES", planKey: null, subtotalCents: 100000, taxRateBp: 0, taxCents: 0, voidedAt: null, statusReason: null,
+    notes: null, lines: [], payments: [], seller: {} as never });
+  const billing = new BillingService(billRepo, { daraja: () => new StubDarajaClient() });
+  const api = await startTestApi({ startingBalanceCents: 1_000_000, depsOverrides: { verifyApprovalPassword: async (pw) => pw === PASSWORD, billing } });
   try {
     const s = await seed(api);
+    billRepo.actorPlatform.set("pa-beta", s.betaPlatform);   // the attacker is a real platform admin — of ANOTHER platform
     const routes = createRouter(api.deps).listRoutes()
       .filter((r) => r.path.includes(":") && /^\/api\/v1\/(admin|platform|tickets|addons|support)\//.test(r.path));
     assert.ok(routes.length >= 70, `expected the full operator surface, got ${routes.length}`);

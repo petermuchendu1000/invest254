@@ -165,8 +165,6 @@ export function mpesaAccountRef(invoiceNumber: string): string {
   return `${prefix.slice(0, Math.max(1, 12 - tail.length))}${tail}`.slice(0, 12);
 }
 
-const PHONE_RE = /^(\+?254|0)?[17]\d{8}$/;
-
 export class BillingService {
   constructor(
     private readonly repo: BillingRepository,
@@ -225,8 +223,8 @@ export class BillingService {
    * that fails is closed immediately so the payer can try again.
    */
   async payNow(a: string, r: string, invoiceId: string, phone: string): Promise<{ paymentId: string; amountCents: number; invoiceNumber: string; checkoutRequestId: string }> {
+    // Scope first (the RPC authorizes before it looks at the phone), so a cross-tenant call is refused, not validated.
     const p = phone.replace(/\s+/g, "");
-    if (!PHONE_RE.test(p)) throw new Error("INVALID_PHONE");
     const start = await this.repo.startMpesa(a, r, invoiceId, p);
     try {
       const res = await this.opts.daraja().stkPush({ amountCents: start.amountCents, msisdn: p, accountRef: mpesaAccountRef(start.invoiceNumber), desc: "Invoice" });
@@ -283,4 +281,59 @@ export class BillingService {
     }
     return { scanned: rows.length, settled, stillPending, errors };
   }
+}
+
+/**
+ * Minimal in-memory billing store for API tests (the money logic is proven against Postgres). It mirrors the
+ * RPCs' AUTHORIZATION exactly — owner: anything; platform admin: only invoices of its own platform
+ * (`actorPlatform`), never money actions — so the cross-tenant route matrix exercises real refusals.
+ */
+export class InMemoryBillingRepository implements BillingRepository {
+  readonly actorPlatform = new Map<string, string>();
+  readonly invoicesById = new Map<string, Invoice>();
+  private owner(r: string) { if (r !== "platform_superadmin") throw new Error("NOT_AUTHORIZED"); }
+  private scope(a: string, r: string, platformId: string) {
+    if (r === "platform_superadmin") return;
+    if (r !== "platform_admin") throw new Error("NOT_AUTHORIZED");
+    if (this.actorPlatform.get(a) !== platformId) throw new Error("PLATFORM_SCOPE_FORBIDDEN");
+  }
+  private get(id: string): Invoice { const i = this.invoicesById.get(id); if (!i) throw new Error("INVOICE_NOT_FOUND"); return i; }
+  async overview(_a: string, r: string): Promise<BillingOverview> {
+    this.owner(r);
+    return { mrrCents: 0, arrCents: 0, outstandingCents: 0, overdueCents: 0, collectedThisMonthCents: 0, collectedLastMonthCents: 0,
+      aging: { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90p: 0 }, statusCounts: {}, upcoming: [], recentPayments: [] };
+  }
+  async accounts(a: string, r: string) { if (r === "platform_admin" && !this.actorPlatform.has(a)) throw new Error("PLATFORM_SCOPE_FORBIDDEN"); if (r !== "platform_admin") this.owner(r); return []; }
+  async invoices(a: string, r: string, f: { platformId: string | null }) {
+    const pid = r === "platform_admin" ? this.actorPlatform.get(a) : (this.owner(r), f.platformId);
+    if (r === "platform_admin" && !pid) throw new Error("PLATFORM_SCOPE_FORBIDDEN");
+    return [...this.invoicesById.values()].filter((i) => !pid || i.platformId === pid);
+  }
+  async invoice(a: string, r: string, id: string) { const i = this.get(id); this.scope(a, r, i.platformId); return i; }
+  async pendingCharges(a: string, r: string, p: string) { this.scope(a, r, p); return []; }
+  async settings(_a: string, r: string): Promise<BillingSettings> {
+    if (r !== "platform_admin") this.owner(r);
+    return { businessName: "TrioCodes", businessAddress: "", taxPin: "", billingEmail: "", billingPhone: "", invoicePrefix: "TRIO", nextNumber: 1,
+      daysUntilDue: 7, taxRateBp: 0, taxLabel: "VAT", paymentInstructions: "", mpesaPayEnabled: true, footerNote: "", trialDays: 3, pastDueDays: 3, graceDays: 5, updatedAt: null };
+  }
+  async saveSettings(_a: string, r: string) { this.owner(r); }
+  async plans() { return []; }
+  async upsertPlan(_a: string, r: string) { this.owner(r); }
+  async createInvoice(_a: string, r: string): Promise<string> { this.owner(r); throw new Error("NOTHING_TO_INVOICE"); }
+  async addCharge(_a: string, r: string): Promise<string> { this.owner(r); return "charge"; }
+  async voidCharge(_a: string, r: string) { this.owner(r); throw new Error("CHARGE_NOT_PENDING"); }
+  async recordPayment(_a: string, r: string, id: string) { this.owner(r); this.get(id); }
+  async setInvoiceStatus(_a: string, r: string, id: string) { this.owner(r); this.get(id); }
+  async setExempt(_a: string, r: string) { this.owner(r); }
+  async runNow(_a: string, r: string) { this.owner(r); return { issued: 0, transitions: 0, reminders: 0 }; }
+  async startMpesa(a: string, r: string, id: string, phone: string) {
+    const i = this.get(id); this.scope(a, r, i.platformId);
+    if (!/^(\+?254|0)?[17]\d{8}$/.test(phone)) throw new Error("INVALID_PHONE");
+    return { paymentId: "pay-mem", amountCents: i.amountDueCents, invoiceNumber: i.number };
+  }
+  async attachCheckout() {}
+  async failStart() {}
+  async isBillingCheckout() { return false; }
+  async settleMpesa(): Promise<BillingSettleResult> { return { known: false }; }
+  async pendingMpesa() { return []; }
 }

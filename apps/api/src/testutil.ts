@@ -6,7 +6,7 @@ import {
   SubscriptionService, InMemorySubscriptionRepository, TicketService, InMemoryTicketRepository,
   NotificationService, InMemoryNotificationRepository,
   PushService, InMemoryPushSubscriptionRepository,
-  PaymentScopeService, InMemoryPaymentScopeRepository,
+  PaymentScopeService, InMemoryPaymentScopeRepository, BillingService, InMemoryBillingRepository,
   type PushSubscriptionRow, type PushSendResult, type WithdrawalRequestedEvent,
   type FairnessRecord, type AuthClaims, type Verifier,
 } from "@invest254/engine";
@@ -729,6 +729,8 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     paymentScopes: new PaymentScopeService(new InMemoryPaymentScopeRepository(), {
       callbacks: async () => ({ stkCallbackUrl: "", b2cResultUrl: "", b2cTimeoutUrl: "" }),
     }),
+    // BILL-1: scope-enforcing in-memory billing (money logic is proven against Postgres).
+    billing: new BillingService(new InMemoryBillingRepository(), { daraja: () => new StubDarajaClient() }),
     ...opts.depsOverrides,
   };
 

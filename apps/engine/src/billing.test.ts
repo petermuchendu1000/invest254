@@ -42,7 +42,6 @@ test("BILL-1: Pay now pushes the whole balance from the System account and attac
   assert.equal(d.pushes[0]!.amountCents, 100100);
   assert.equal(d.pushes[0]!.accountRef, "TRIO2600012");
   assert.deepEqual(calls[1], ["attach", "pay1", "ws_CO_9"]);
-  await assert.rejects(() => svc.payNow("pa", "platform_admin", "inv1", "12345"), /INVALID_PHONE/);
 });
 
 test("BILL-1: a push that fails closes the reserved payment so the payer can retry", async () => {

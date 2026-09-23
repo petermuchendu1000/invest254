@@ -71,3 +71,31 @@ Owner decisions (same day):
   - Plan comparison.
   - How to pay by hand.
 - **Invoice page, `/platform/billing/invoices/[id]`:** a printable invoice (seller, bill-to, number, dates, lines by brand, totals, payments) with the actions allowed to the viewer.
+
+## 6. Implementation (as built)
+
+| Layer | Where |
+|---|---|
+| Schema, RPCs and lifecycle | `packages/db/migrations/0165_billing.sql`. Every function is SECURITY DEFINER and executable by service_role only. |
+| Engine | `apps/engine/src/billing.ts`: `PgBillingRepository`, `BillingService` (pay now, callback verification, reconcile) and `InMemoryBillingRepository` (for API tests; it enforces the same scope rules). |
+| API | `apps/api/src/app.billing.ts` (17 routes under `/platform/billing/*`). The STK callback in `app.payments.ts` asks billing first. Wiring and the 2-minute sweep are in `server.ts`. |
+| Web | `/platform/billing` has owner tabs and the platform-admin view. `/platform/billing/invoices/[id]` is the printable invoice. Components are in `components/billing/*`, and the client and labels in `lib/billing/*`. |
+
+Operational notes:
+- **The daily job is unchanged.** The *Subscription Lifecycle* workflow still calls `fn_subscription_auto_advance()`, which now runs `fn_billing_run(now())`. The owner can also press **Run billing now**.
+- **Callback verification.** Pay-now results are verified with STKPushQuery in both directions (paid and failed). `BILLING_VERIFY_STK=false` turns verification off (for local development only).
+- **The reconcile sweep.** It runs every `BILLING_RECONCILE_INTERVAL_MS`, default 120000 (0 disables it). It settles M-Pesa payments that are still pending after 90 s. It closes reservations that never reached Safaricom after 10 minutes.
+- **The account reference.** Daraja allows 12 characters, so `TRIO-2026-00012` is sent as `TRIO2600012` (`mpesaAccountRef`). The invoice shows the same value.
+- **Money that doesn't fit an invoice is never lost.**
+  - Credits larger than an invoice are carried forward.
+  - Overpayments become a credit. They come from rounding up to whole KES, or from an invoice settled another way while a prompt was open.
+- **Add-ons already granted before 0165** (grandfathered gateways) are never charged. One-off and setup charges are created only when an entitlement is inserted, and only once per brand and add-on.
+- **No KES 0 invoices.** A custom-priced plan with no price, no paid add-ons and no pending charges rolls its period forward without one.
+
+## 7. Tests
+
+- `packages/db/_testkit/e2e_billing.py`: BEFORE reproduces 3; AFTER 112 checks. They cover renewals and catch-up, trial conversion, dunning at every stage, manual and part payments, reactivation, M-Pesa idempotency and failure, rounding credit, void and write-off, charges and credits with carry-forward, exemption, plans, settings, reads, scope and grants.
+- `e2e_subscriptions_tickets.py` is updated to the invoice-driven lifecycle.
+- Engine `billing.test.ts` (5). API `app.billing.bill1.test.ts` (3) and `billing.pg.test.ts` (real schema). The F-44 cross-tenant matrix now includes the billing routes, with a seeded target invoice.
+- Web `lib/billing/labels.test.ts` (4). The role e2e has 23 billing checks, covering both tiers, the phone layout, Pay now, and the owner's settings, invoice, payment and credit flows.
+- Real stack: the invoice was paid through Pay now with the stub Daraja client, and the reconcile sweep settled it. The platform went from grace_period to active.

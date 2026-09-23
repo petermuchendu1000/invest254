@@ -43,7 +43,9 @@ function mem() {
     async setInvoiceStatus(_a: string, r: string, ...rest: unknown[]) { owner(r); calls.push(["status", ...rest]); },
     async setExempt(_a: string, r: string) { owner(r); },
     async runNow(_a: string, r: string) { owner(r); return { issued: 1, transitions: 0, reminders: 0 }; },
-    async startMpesa(a: string, r: string, inv: string, phone: string) { calls.push(["start", a, r, inv, phone]); return { paymentId: "p1", amountCents: 100000, invoiceNumber: "TRIO-2026-00001" }; },
+    async startMpesa(a: string, r: string, inv: string, phone: string) {
+      if (!/^(\+?254|0)?[17]\d{8}$/.test(phone)) throw new Error("INVALID_PHONE");   // as the RPC does, after scope
+      calls.push(["start", a, r, inv, phone]); return { paymentId: "p1", amountCents: 100000, invoiceNumber: "TRIO-2026-00001" }; },
     async attachCheckout(p: string, c: string) { calls.push(["attach", p, c]); },
     async failStart() {},
     async isBillingCheckout(c: string) { return c === "ws_CO_BILL"; },
