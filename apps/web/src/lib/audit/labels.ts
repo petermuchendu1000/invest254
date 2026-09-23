@@ -27,6 +27,8 @@ const LABELS: Record<string, string> = {
   'addon.update': 'Edited the add-on catalog', 'addon.set_price': 'Changed an add-on price',
   'billing.run': 'Ran billing', 'billing.settings': 'Changed billing settings', 'billing.exempt': 'Changed billing exemption', 'billing.plan.upsert': 'Edited a plan',
   'billing.invoice.create': 'Created an invoice', 'billing.invoice.void': 'Voided an invoice', 'billing.invoice.uncollectible': 'Wrote off an invoice',
+  'site.update': 'Edited a brand', 'site.theme': 'Changed a brand theme', 'withdrawal.approve': 'Approved a withdrawal',
+  'withdrawal.reject': 'Declined a withdrawal', 'withdrawal.retry': 'Retried a withdrawal', 'deposit.reconcile': 'Checked a deposit with M-Pesa',
   'billing.payment.record': 'Recorded a payment', 'billing.charge.add': 'Added a charge or credit', 'billing.charge.void': 'Removed a charge',
 };
 
@@ -36,6 +38,7 @@ export function actionLabel(code: string): string {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : code;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MONEY_KEYS = /(^|_)(amount|cents|before|after|price|total)(_|$)|Cents$/;
 /** A short "key: value · key: value" summary of the detail blob (money keys in KES), max ~4 entries. */
 export function detailSummary(detail: unknown): string {
@@ -44,8 +47,10 @@ export function detailSummary(detail: unknown): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(detail as Record<string, unknown>)) {
     if (v == null || typeof v === 'object') continue;
-    const key = k.replace(/_/g, ' ');
-    const val = typeof v === 'number' && MONEY_KEYS.test(k) ? `KES ${(v / 100).toLocaleString('en-KE')}` : String(v);
+    // Internal ids (uuids) mean nothing to a reader; the full record keeps them.
+    if (typeof v === 'string' && UUID.test(v)) continue;
+    const key = k.replace(/_?cents$/i, '').replace(/Cents$/, '').replace(/_/g, ' ').trim();
+    const val = typeof v === 'number' && MONEY_KEYS.test(k) ? `KES ${(v / 100).toLocaleString('en-KE')}` : String(v).replace(/_/g, ' ');
     parts.push(`${key}: ${val}`);
     if (parts.length === 4) break;
   }

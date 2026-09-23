@@ -19,6 +19,7 @@ const ROLE_OPTS = [
   { value: 'marketer', label: 'Marketers' },
   { value: 'admin', label: 'Admins' },
 ];
+const ROLE_LABEL: Record<string, string> = { marketer: 'Marketer', admin: 'Brand admin', platform_admin: 'Platform admin', platform_superadmin: 'System owner' };
 const STATUS_OPTS = [
   { value: '', label: 'All statuses' },
   { value: 'active', label: 'Active' },
@@ -138,7 +139,6 @@ export default function UsersPage() {
       <Toolbar>
         <SearchInput value={search} onChange={setSearch} placeholder="Search username or phone…" className="sm:w-72" />
         <FilterSelect value={role} onChange={setRole} options={ROLE_OPTS} />
-        <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTS} />
         <Button variant="outline" size="sm" onClick={() => setShowAdv((v) => !v)}>
           {showAdv ? 'Hide filters' : 'More filters'}
           {advCount > 0 ? (
@@ -370,7 +370,7 @@ function UserRow({ r, selected, onToggle }: { r: AdminUserRow; selected: boolean
         <span className="inline-flex flex-col leading-tight">
           <span className="flex items-center gap-1.5">
             <Link href={href} className="font-medium text-accent hover:underline">@{r.username}</Link>
-            {r.role !== 'player' ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium capitalize text-muted">{r.role}</span> : null}
+            {r.role !== 'player' ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">{ROLE_LABEL[r.role] ?? r.role}</span> : null}
           </span>
           {r.phone ? (
             <a href={`tel:${r.phone}`} className="text-[11px] tabular-nums text-muted hover:text-accent hover:underline">{r.phone}</a>
@@ -383,8 +383,8 @@ function UserRow({ r, selected, onToggle }: { r: AdminUserRow; selected: boolean
       <Td className="text-right font-medium tabular-nums"><Money cents={r.realBalanceCents} /></Td>
       <Td className="text-right tabular-nums">
         <span className="flex flex-col leading-tight">
-          <span className="text-up"><Money cents={r.depositsCents} /></span>
-          <span className="text-[11px] text-down"><Money cents={r.withdrawalsCents} /></span>
+          <span className={r.depositsCents > 0 ? 'text-up' : 'text-muted'}><Money cents={r.depositsCents} /></span>
+          {r.withdrawalsCents > 0 ? <span className="text-[11px] text-down">−<Money cents={r.withdrawalsCents} /></span> : <span className="text-[11px] text-muted">no withdrawals</span>}
         </span>
       </Td>
       <Td className="text-right tabular-nums">

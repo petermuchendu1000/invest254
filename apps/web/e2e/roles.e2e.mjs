@@ -207,7 +207,7 @@ Object.assign(FIXTURES, {
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${name}${!ok && detail ? `  -- ${detail}` : ''}`); };
 
-async function session(browser, { token, me, stash = null, viewport = null }) {
+async function session(browser, { token, me, stash = null, viewport = null, fixtures = {} }) {
   const ctx = await browser.newContext(viewport ? { viewport } : {});
   const calls = [];
   const full = [];   // method + path + query (UI-9: which platform a request acts for)
@@ -223,6 +223,7 @@ async function session(browser, { token, me, stash = null, viewport = null }) {
     if (req.method() !== 'GET') { let b = null; try { b = req.postDataJSON(); } catch { /* none */ } bodies.push([`${req.method()} ${path}`, b]); }
     const body = path === '/auth/me' ? me
       : path === '/me/referral' ? REFERRAL
+      : fixtures[path] ? fixtures[path]
       : FIXTURES[path] ? FIXTURES[path]
       : /^\/admin\/users\/[^/]+$/.test(path) ? USER
       : { items: [], sites: [], platforms: [], statuses: {}, configured: false, key: null, enabled: true };
@@ -272,7 +273,7 @@ try {
   // 2) Owner, own session
   { const { ctx, page, calls } = await session(browser, { token: T.owner, me: ME.owner });
     await open(page, '/admin/tickets');
-    check('owner (own session): /admin shows the brand picker, not an unscoped back office (UI-2)', await page.getByText('Choose a brand to open').isVisible());
+    check('owner (own session): /admin shows the brand picker, not an unscoped back office (UI-2)', await page.getByRole('heading', { name: 'Brand back office' }).isVisible());
     check('owner: no back-office data request was made without a brand', !calls.some((c) => /^GET \/(admin|tickets)/.test(c)), calls.join());
     await open(page, '/platform'); const pnav = await navTexts(page);
     check('owner console: system nav incl. moved governance (Audit log, System logs, Deployment)', ['Platforms', 'Gateways', 'Controls & economy', 'Audit log', 'System logs', 'Deployment'].every((x) => pnav.some((n) => n.includes(x))), pnav.join('|'));
@@ -486,7 +487,7 @@ try {
     await open(page, `/platform/clients/${SITE}`);
     check('UI-A owner: a brand page keeps "Overview" current', (await page.locator('aside [aria-current="page"]').getAttribute('href').catch(() => null)) === '/platform');
     await open(page, '/admin');
-    check('UI-A owner: the brand picker opens inside the console, with "Brand back office" current', await page.getByText('Choose a brand to open').isVisible() && (await page.locator('aside [aria-current="page"]').getAttribute('href').catch(() => null)) === '/admin');
+    check('UI-A owner: the brand picker opens inside the console, with "Brand back office" current', await page.getByRole('heading', { name: 'Brand back office' }).isVisible() && (await page.locator('aside [aria-current="page"]').getAttribute('href').catch(() => null)) === '/admin');
     await ctx.close(); }
   { const { ctx, page } = await session(browser, { token: T.admin, me: ME.admin });
     await open(page, '/admin/withdrawals');
@@ -716,6 +717,36 @@ try {
     await open(page, '/platform/addons');
     const w = await page.evaluate(() => document.documentElement.scrollWidth);
     check('ADDON-1: the add-ons page fits a phone', w <= 392, String(w));
+    await ctx.close(); }
+
+  // UI-F #32: the owner's brand back office picks a platform first, then its brands.
+  { const PICK_SITES = { sites: [
+      { ...SITE_ROW, platformId: PLATFORM },
+      { ...SITE_ROW, siteId: 'site-kilo', slug: 'kilo', name: 'Kilo Bets', primaryDomain: 'kilo.test', platformId: OTHER_PLATFORM },
+      { ...SITE_ROW, siteId: 'site-old', slug: 'old', name: 'Old Brand', primaryDomain: null, status: 'archived', platformId: PLATFORM },
+    ] };
+    const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner, fixtures: { '/platform/sites': PICK_SITES } });
+    await open(page, `/admin?platform=${OTHER_PLATFORM}`);
+    const plats = await page.getByRole('navigation', { name: 'Platforms' }).innerText().catch(() => '');
+    check('UI-F picker: platforms are listed with their brand counts', /Alpha Platform\s*1/.test(plats) && /Beta Platform\s*1/.test(plats), plats);
+    const brands = () => page.getByRole('list', { name: 'Brands' }).innerText().catch(() => '');
+    check('UI-F picker: ?platform= opens that platform and lists only its brands', /Kilo Bets/.test(await brands()) && !/Tamu Traders/.test(await brands()));
+    await page.getByLabel('Search brands').fill('tamu'); await page.waitForTimeout(200);
+    check('UI-F picker: a search with no match here says which platform has it', await page.getByRole('button', { name: 'Alpha Platform (1)' }).isVisible().catch(() => false));
+    await page.getByRole('button', { name: 'Alpha Platform (1)' }).click(); await page.waitForTimeout(200);
+    check('UI-F picker: jumping to that platform shows the brand', /Tamu Traders/.test(await brands()) && page.url().includes(`platform=${PLATFORM}`), page.url());
+    await page.getByLabel('Search brands').fill(''); await page.waitForTimeout(150);
+    check('UI-F picker: archived brands are hidden by default', !/Old Brand/.test(await brands()));
+    await page.getByLabel(/Show archived/).check(); await page.waitForTimeout(150);
+    check('UI-F picker: …and shown on request', /Old Brand/.test(await brands()));
+    check('UI-F picker: every brand opens with one clear action', (await page.getByRole('list', { name: 'Brands' }).getByRole('button', { name: 'Open back office' }).count()) === 2);
+    await open(page, '/admin');
+    check('UI-F picker: the last platform is remembered on this device', /Tamu Traders/.test(await brands()) && !/Kilo Bets/.test(await brands()));
+    await ctx.close(); }
+  { const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner, viewport: { width: 390, height: 844 } });
+    await open(page, '/admin');
+    const w = await page.evaluate(() => document.documentElement.scrollWidth);
+    check('UI-F picker: on a phone the platform is a select and the page fits', await page.getByLabel('Platform', { exact: true }).isVisible().catch(() => false) && w <= 392, String(w));
     await ctx.close(); }
 
   // UI-D: Gateways as one list incl. M-Pesa, with an in-place "offered to players" switch and plain language.
