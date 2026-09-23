@@ -65,7 +65,7 @@ export function ConsoleShell(props: ConsoleShellProps) {
     <div className="flex min-h-dvh bg-bg">
       <aside
         className={cn(
-          'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-200 md:flex',
+          'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-200 md:flex print:!hidden',
           collapsed ? 'w-[68px]' : 'w-64',
         )}
       >
@@ -74,7 +74,7 @@ export function ConsoleShell(props: ConsoleShellProps) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Phone top bar: names the current page, opens the drawer. */}
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-surface/95 px-2 backdrop-blur md:hidden">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-surface/95 px-2 backdrop-blur md:hidden print:hidden">
           <button
             type="button"
             onClick={() => setDrawer(true)}
@@ -96,7 +96,7 @@ export function ConsoleShell(props: ConsoleShellProps) {
           ) : null}
         </header>
 
-        <main className="min-w-0 flex-1 px-4 py-5 md:px-8 md:py-7">
+        <main className="min-w-0 flex-1 px-4 py-5 md:px-8 md:py-7 print:p-0">
           <div className={cn('mx-auto flex w-full flex-col gap-6', contentWidth)}>{children}</div>
         </main>
       </div>

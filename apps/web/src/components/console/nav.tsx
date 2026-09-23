@@ -82,7 +82,7 @@ export function consoleNav(isSystem: boolean): NavGroup[] {
   const registrar: NavItem = { href: '/platform/registrar', label: 'Domain registrar', icon: Icons.registrar, hint: 'Namecheap connection' };
   const accounts: NavItem = { href: '/platform/payment-accounts', label: 'Payment accounts', icon: Icons.accounts, hint: 'Your own M-Pesa and gateway accounts' };
   const pool: NavItem = { href: '/platform/pool', label: 'Withdrawal pool', icon: Icons.pool, hint: 'Daily payout budget per brand' };
-  const billing: NavItem = { href: '/platform/billing', label: 'Billing', icon: Icons.billing, hint: 'Plans and subscriptions' };
+  const billing: NavItem = { href: '/platform/billing', label: 'Billing', icon: Icons.billing, hint: 'Invoices, plans and payments' };
   if (!isSystem) {
     return [
       { id: 'home', items: [overview, tickets] },

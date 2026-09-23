@@ -146,6 +146,49 @@ const FIXTURES = {
     updatedAt: null, exists: false, egressIp: '203.0.113.7', encryptionConfigured: true },
 };
 
+
+// BILL-1 fixtures
+const DAY = 86400e3;
+const INV_SUM = { id: 'inv-1', number: 'TRIO-2026-00007', platformId: PLATFORM, platformName: 'Alpha Platform', kind: 'renewal', status: 'open',
+  issuedAt: new Date(Date.now() - 12 * DAY).toISOString(), dueAt: new Date(Date.now() - 5 * DAY).toISOString(),
+  periodStart: new Date(Date.now() - 12 * DAY).toISOString(), periodEnd: new Date(Date.now() + 18 * DAY).toISOString(),
+  totalCents: 4500000, amountPaidCents: 0, amountDueCents: 4500000, overdue: true, paidAt: null };
+const INV_PAID = { ...INV_SUM, id: 'inv-0', number: 'TRIO-2026-00003', status: 'paid', dueAt: new Date(Date.now() - 35 * DAY).toISOString(),
+  issuedAt: new Date(Date.now() - 42 * DAY).toISOString(), amountPaidCents: 4000000, totalCents: 4000000, amountDueCents: 0, overdue: false, paidAt: new Date(Date.now() - 36 * DAY).toISOString() };
+const SELLER = { name: 'TrioCodes Ltd', address: 'Nairobi', taxPin: 'P051234567X', email: 'billing@triocodes.com', phone: '', taxLabel: 'VAT',
+  paymentInstructions: 'Bank: KCB 1234567890', footerNote: 'Thank you.', mpesaPayEnabled: true };
+const INVOICE = { ...INV_SUM, currency: 'KES', planKey: 'business', subtotalCents: 4500000, taxRateBp: 0, taxCents: 0, voidedAt: null, statusReason: null, notes: null,
+  lines: [{ id: 'l1', kind: 'plan', description: 'Business plan', siteId: null, siteName: null, quantity: 1, unitCents: 4000000, amountCents: 4000000, periodStart: INV_SUM.periodStart, periodEnd: INV_SUM.periodEnd },
+    { id: 'l2', kind: 'addon_monthly', description: 'Area graph — Tamu Traders', siteId: SITE, siteName: 'Tamu Traders', quantity: 1, unitCents: 500000, amountCents: 500000, periodStart: INV_SUM.periodStart, periodEnd: INV_SUM.periodEnd }],
+  payments: [], seller: SELLER };
+const ACCOUNT = { platformId: PLATFORM, platformName: 'Alpha Platform', platformSlug: 'alpha', planKey: 'business', planName: 'Business', priceCents: 4000000,
+  customPrice: false, billingPeriod: 'month', status: 'grace_period', billingExempt: false, trialEndsAt: null,
+  currentPeriodStart: INV_SUM.periodStart, currentPeriodEnd: INV_SUM.periodEnd, graceEndsAt: new Date(Date.now() + 2 * DAY).toISOString(),
+  lastPaymentAt: INV_PAID.paidAt, nextInvoiceAt: INV_SUM.periodEnd, monthlyAddonsCents: 500000, pendingChargesCents: 0,
+  balanceDueCents: 4500000, overdueCents: 4500000, openInvoices: 1, maxSites: 5, maxUsers: 1000, sites: 2, users: 812 };
+const BILL_PLANS = [
+  { key: 'starter', name: 'Starter', priceCents: 100000, maxSites: 1, maxUsers: 100, billingPeriod: 'month', isCustom: false, active: true, sort: 1, platforms: 0 },
+  { key: 'business', name: 'Business', priceCents: 4000000, maxSites: 5, maxUsers: 1000, billingPeriod: 'month', isCustom: false, active: true, sort: 2, platforms: 1 },
+  { key: 'enterprise', name: 'Enterprise', priceCents: null, maxSites: null, maxUsers: null, billingPeriod: 'month', isCustom: true, active: true, sort: 3, platforms: 1 },
+];
+Object.assign(FIXTURES, {
+  '/platform/billing/accounts': { accounts: [ACCOUNT] },
+  '/platform/billing/invoices': { invoices: [INV_SUM, INV_PAID] },
+  '/platform/billing/invoices/inv-1': INVOICE,
+  '/platform/billing/invoices/inv-1/pay': { paymentId: 'pay-1', amountCents: 4500000, invoiceNumber: 'TRIO-2026-00007', checkoutRequestId: 'ws_CO_1' },
+  '/platform/billing/invoices/inv-1/payments': INVOICE,
+  '/platform/billing/charges': { charges: [] },
+  '/platform/billing/plans': { plans: BILL_PLANS },
+  '/platform/billing/settings': { businessName: 'TrioCodes Ltd', businessAddress: 'Nairobi', taxPin: '', billingEmail: '', billingPhone: '', invoicePrefix: 'TRIO',
+    nextNumber: 8, daysUntilDue: 7, taxRateBp: 0, taxLabel: 'VAT', paymentInstructions: 'Bank: KCB 1234567890', mpesaPayEnabled: true, footerNote: '',
+    trialDays: 3, pastDueDays: 3, graceDays: 5, updatedAt: null },
+  '/platform/billing/overview': { mrrCents: 4500000, arrCents: 54000000, outstandingCents: 4500000, overdueCents: 4500000, collectedThisMonthCents: 0,
+    collectedLastMonthCents: 4000000, aging: { current: 0, d1_30: 4500000, d31_60: 0, d61_90: 0, d90p: 0 }, statusCounts: { grace_period: 1 },
+    upcoming: [], recentPayments: [{ id: 'p0', invoiceId: 'inv-0', number: 'TRIO-2026-00003', platformName: 'Alpha Platform', method: 'mpesa', amountCents: 4000000, reference: 'QK12AB', settledAt: INV_PAID.paidAt }] },
+  '/platform/billing/run': { issued: 1, transitions: 0, reminders: 2 },
+  [`/platform/subscriptions/${PLATFORM}/events`]: { events: [] },
+});
+
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${name}${!ok && detail ? `  -- ${detail}` : ''}`); };
 
@@ -521,6 +564,76 @@ try {
     check('POOL-1: Controls & economy no longer duplicates the pool; it links to it', !(await page.getByText('Global withdrawal pool').count()) && await page.getByText('Open Withdrawal pool →').isVisible().catch(() => false));
     await open(page, '/platform/pool');
     check('POOL-1: the owner can view every platform at once', await page.getByRole('option', { name: 'All platforms' }).count() === 1);
+    await ctx.close(); }
+
+
+  // BILL-1: platform admin — what is owed, one clear Pay action (M-Pesa STK), invoices; no owner money controls.
+  { const { ctx, page, bodies } = await session(browser, { token: T.pa, me: ME.pa });
+    await open(page, '/platform/billing');
+    const banner = await page.getByRole('alert').first().innerText().catch(() => '');
+    check('BILL-1: a platform in its grace period sees when its brands go offline, and what it owes', /keep your brands online/.test(banner) && /KES 45,000/.test(banner), banner.slice(0, 200));
+    check('BILL-1: the plan, next-invoice estimate and usage are shown', await page.getByText('Your plan', { exact: true }).isVisible().catch(() => false) && await page.getByText('Estimated total').isVisible().catch(() => false) && /812/.test(await page.getByRole('meter', { name: 'Players' }).locator('..').innerText().catch(() => '')));
+    check('BILL-1: invoices show a plain overdue state', await page.getByText('Overdue 5 days').first().isVisible().catch(() => false));
+    check('BILL-1: platform admins get no owner money controls', !(await page.getByRole('button', { name: 'Run billing now' }).count()) && !(await page.getByRole('tab', { name: 'Settings' }).count()));
+    await page.getByRole('alert').getByRole('button', { name: /Pay KES 45,000/ }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(300);
+    const phone = await page.getByLabel('M-Pesa phone number').inputValue().catch(() => '');
+    check('BILL-1: Pay now pre-fills the admin’s own phone', phone === '0700000003', phone);
+    await page.getByRole('button', { name: /Send prompt for KES 45,000/ }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(400);
+    const sent = bodies.find(([k]) => k === 'POST /platform/billing/invoices/inv-1/pay');
+    check('BILL-1: Pay now sends the STK request for that invoice with the phone', !!sent && sent[1]?.phone === '0700000003', JSON.stringify(bodies.map(([k]) => k)));
+    check('BILL-1: then it says to check the phone', await page.getByText('Check your phone').isVisible().catch(() => false));
+    await open(page, '/platform/billing/invoices/inv-1');
+    const doc = await page.getByRole('article').innerText().catch(() => '');
+    check('BILL-1: the invoice page is a proper invoice (seller, bill-to, lines by brand, amount due, reference)',
+      /TrioCodes Ltd/.test(doc) && /Bill to[\s\S]*Alpha Platform/i.test(doc) && /Area graph — Tamu Traders/.test(doc) && /Amount due[\s\S]*KES 45,000/i.test(doc) && /TRIO2600007/.test(doc), doc.slice(0, 300));
+    check('BILL-1: a platform admin cannot record, void or write off', !(await page.getByRole('button', { name: 'Record payment' }).count()) && !(await page.getByRole('button', { name: 'Void' }).count()) && await page.getByRole('button', { name: /Pay KES 45,000/ }).isVisible());
+    await ctx.close(); }
+  { const { ctx, page } = await session(browser, { token: T.pa, me: ME.pa, viewport: { width: 390, height: 844 } });
+    await open(page, '/platform/billing');
+    const w = await page.evaluate(() => document.documentElement.scrollWidth);
+    check('BILL-1: the billing page fits a phone (no sideways scroll)', w <= 392, String(w));
+    check('BILL-1: on a phone invoices are cards with a Pay button', await page.getByRole('list', { name: 'Invoices' }).getByRole('button', { name: /Pay KES 45,000/ }).isVisible().catch(() => false));
+    await ctx.close(); }
+
+  // BILL-1: owner — revenue overview, invoice filters, settings, manual invoice, record payment, credit.
+  { const { ctx, page, full, bodies } = await session(browser, { token: T.owner, me: ME.owner });
+    await open(page, '/platform/billing');
+    check('BILL-1: the owner sees recurring revenue, what is owed and how late', await page.getByText('Monthly recurring').isVisible().catch(() => false) && await page.getByText('Money owed, by how late it is').isVisible().catch(() => false));
+    const att = await page.locator('section').filter({ hasText: 'Needs attention' }).first().innerText().catch(() => '');
+    check('BILL-1: "Needs attention" lists the platform in its final notice with the amount', /Alpha Platform/.test(att) && /Final notice/.test(att) && /KES 45,000/.test(att), att.slice(0, 200));
+    await page.getByRole('tab', { name: 'Invoices' }).click(); await page.waitForTimeout(200);
+    await page.getByRole('tab', { name: 'Overdue' }).click(); await page.waitForTimeout(400);
+    check('BILL-1: the Overdue filter asks the API for overdue invoices', full.some((c) => c.startsWith('GET /platform/billing/invoices?') && c.includes('status=overdue')), full.filter((c) => c.includes('/billing/invoices')).join('|'));
+    check('BILL-1: the tab is kept in the URL', page.url().includes('tab=invoices'));
+    await page.getByRole('tab', { name: 'Settings' }).click(); await page.waitForTimeout(300);
+    await page.getByLabel('Tax rate (%)').fill('16'); await page.waitForTimeout(100);
+    check('BILL-1: settings show the unsaved-change bar and the overdue timeline', await page.getByText('1 unsaved change').isVisible().catch(() => false) && await page.getByRole('list', { name: 'Overdue timeline' }).isVisible());
+    await page.getByRole('button', { name: 'Save changes' }).click(); await page.waitForTimeout(400);
+    const st = bodies.find(([k]) => k === 'PATCH /platform/billing/settings');
+    check('BILL-1: saving sends only what changed (16% = 1600 basis points)', !!st && JSON.stringify(st[1]) === '{"taxRateBp":1600}', JSON.stringify(st?.[1]));
+    await page.getByRole('button', { name: 'New invoice' }).click(); await page.waitForTimeout(200);
+    await page.getByLabel('Platform').last().selectOption(PLATFORM).catch(() => {});
+    await page.getByLabel('Line 1 description').fill('Custom domain setup');
+    await page.getByLabel('Line 1 quantity').fill('2');
+    await page.getByLabel('Line 1 unit price').fill('2,500');
+    await page.getByRole('button', { name: /Send invoice/ }).click(); await page.waitForTimeout(400);
+    const ni = bodies.find(([k]) => k === 'POST /platform/billing/invoices');
+    check('BILL-1: a manual invoice sends its lines in cents with the quantity', !!ni && ni[1]?.platformId === PLATFORM && JSON.stringify(ni[1]?.lines) === '[{"description":"Custom domain setup","unitCents":250000,"quantity":2}]', JSON.stringify(ni?.[1]));
+    await open(page, '/platform/billing/invoices/inv-1');
+    await page.getByRole('button', { name: 'Record payment' }).click(); await page.waitForTimeout(200);
+    check('BILL-1: recording a payment defaults to the full balance', (await page.getByLabel('Amount (KES)').inputValue()) === '45000');
+    await page.getByLabel('Reference').fill('KCB-778');
+    await page.getByRole('dialog').getByRole('button', { name: 'Record payment' }).click(); await page.waitForTimeout(400);
+    const rp = bodies.find(([k]) => k === 'POST /platform/billing/invoices/inv-1/payments');
+    check('BILL-1: the payment is recorded as a bank transfer for the full balance with its reference', !!rp && rp[1]?.method === 'bank' && rp[1]?.amountCents === 4500000 && rp[1]?.reference === 'KCB-778', JSON.stringify(rp?.[1]));
+    await open(page, '/platform/billing?tab=subscriptions');
+    await page.getByRole('button', { name: 'Manage' }).first().click(); await page.waitForTimeout(300);
+    await page.getByRole('button', { name: 'Add charge or credit' }).click(); await page.waitForTimeout(150);
+    await page.getByRole('radio', { name: /Credit/ }).click();
+    await page.getByLabel('Description').fill('Downtime credit'); await page.getByLabel('Amount (KES)').fill('1000');
+    await page.getByRole('button', { name: 'Add credit' }).click(); await page.waitForTimeout(400);
+    const cr = bodies.find(([k]) => k === 'POST /platform/billing/charges');
+    check('BILL-1: a credit is sent as a negative amount for the next invoice', !!cr && cr[1]?.amountCents === -100000 && cr[1]?.platformId === PLATFORM, JSON.stringify(cr?.[1]));
     await ctx.close(); }
 
   // UI-D: Gateways as one list incl. M-Pesa, with an in-place "offered to players" switch and plain language.

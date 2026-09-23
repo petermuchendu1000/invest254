@@ -296,6 +296,13 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
 
   const stkCallback = async (ctx: Ctx) => {
     const cb = parseStkCallback(ctx.body);
+    // BILL-1: an invoice Pay-now shares the System STK callback URL; billing claims its own checkouts first
+    // (verified with STKPushQuery inside), everything else is a player deposit as before.
+    if (deps.billing) {
+      const billing = deps.billing;
+      const r = await domain(() => billing.handleStkCallback(cb.checkoutRequestId, cb.resultCode, cb.resultDesc, cb.receipt, ctx.body));
+      if (r.handled) return DARAJA_ACK;
+    }
     await domain(() => deps.payments.handleStkCallback(cb.checkoutRequestId, cb.resultCode, cb.resultDesc, cb.receipt, ctx.body));
     return DARAJA_ACK;
   };
