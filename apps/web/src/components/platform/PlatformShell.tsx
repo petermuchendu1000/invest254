@@ -115,7 +115,10 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
             </span>
             <span className="flex flex-col leading-tight">
               <span className="text-sm font-semibold tracking-tight">TrioCodes</span>
-              <span className="text-[10px] font-medium uppercase tracking-wide text-accent">Operator console</span>
+              {/* docs/42 UI-8 (P3): a platform admin always sees WHICH platform it is operating. */}
+              <span className="truncate text-[10px] font-medium uppercase tracking-wide text-accent">
+                {isSystem ? 'System console · all platforms' : `Platform · ${user?.scope?.platform?.name ?? 'your platform'}`}
+              </span>
             </span>
           </span>
           <button
@@ -177,7 +180,7 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
             <>
               <div className="flex flex-col gap-1">
                 <span className="truncate text-sm font-medium">@{user?.username}</span>
-                <span className="inline-flex w-fit items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">{isSystem ? '◆ System owner' : '◆ Platform admin'}</span>
+                <span className="inline-flex w-fit items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">{isSystem ? '◆ System owner' : `◆ Platform admin · ${user?.scope?.platform?.name ?? ''}`}</span>
               </div>
               {isSystem && <Link href="/admin" className="text-xs text-muted hover:text-fg">← Admin back office</Link>}
               <Button variant="secondary" size="sm" onClick={logout}>Log out</Button>

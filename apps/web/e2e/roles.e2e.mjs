@@ -24,9 +24,9 @@ const T = {
   paImp: jwt({ sub: 'u-pa', role: 'admin', site: SITE, act: { sub: 'u-pa', role: 'platform_admin', brand: 'Tamu Traders' } }),
 };
 const ME = {
-  admin: { userId: 'u-admin', role: 'admin', username: 'siteadmin', phone: '254700000001' },
+  admin: { userId: 'u-admin', role: 'admin', username: 'siteadmin', phone: '254700000001', scope: { site: { id: SITE, name: 'Tamu Traders' }, platform: null } },
   owner: { userId: 'u-owner', role: 'platform_superadmin', username: 'owner', phone: '254700000002' },
-  pa: { userId: 'u-pa', role: 'platform_admin', username: 'platadmin', phone: '254700000003' },
+  pa: { userId: 'u-pa', role: 'platform_admin', username: 'platadmin', phone: '254700000003', scope: { site: { id: SITE, name: 'Tamu Traders' }, platform: { id: PLATFORM, name: 'Alpha Platform' } } },
 };
 const USER = {
   userId: 'u-target', username: 'target', phone: '254711111111', role: 'player', status: 'active', createdAtMs: 1,
@@ -74,6 +74,7 @@ try {
   { const { ctx, page, calls } = await session(browser, { token: T.admin, me: ME.admin });
     await open(page, '/admin/tickets'); const nav = await navTexts(page);
     check('site admin: operations nav present', nav.includes('Withdrawals') && nav.includes('Users'), nav.join('|'));
+    check('site admin: the shell names the brand (UI-8)', await page.getByText('Tamu Traders Admin').first().isVisible());
     check('site admin: NO Audit log / Governance / Platform nav', !nav.some((n) => /Audit log|Game config|M-Pesa|Fly\.io|All brands|System logs/.test(n)), nav.join('|'));
     await open(page, '/admin/audit');
     check('site admin: /admin/audit shows the owner-only gate', await page.getByText('Audit log is owner-only').isVisible());
@@ -110,6 +111,7 @@ try {
   // 4) Platform admin, own session
   { const { ctx, page, calls } = await session(browser, { token: T.pa, me: ME.pa });
     await open(page, '/platform'); const pnav = await navTexts(page);
+    check('platform admin console: the shell names its platform (UI-8)', await page.getByText('Platform · Alpha Platform').first().isVisible());
     check('platform admin console: NO system nav', !pnav.some((n) => /Platforms|Payments|Global config|Add-ons/.test(n)), pnav.join('|'));
     await open(page, '/platform/onboard');
     check('platform admin: onboarding never calls the owner-only platforms list', !calls.includes('GET /platform/platforms'), calls.filter((c) => c.includes('platforms')).join());

@@ -242,6 +242,9 @@ export interface ApiDeps {
     | "initiatePayHeroDeposit" | "handlePayHeroCallback" | "reconcilePayHeroDeposits" | "listDepositProviders">;
   /** Resolve a player's display handle (falls back to a guest handle). */
   resolveHandle(userId: string): Promise<string>;
+  /** docs/42 UI-8: display names of the brand/platform a session is scoped to (for the shells' scope chip).
+   *  Optional; /auth/me omits `scope` names when absent or failing. */
+  scopeNames?: ((siteId: string | null, platformId: string | null) => Promise<{ siteName: string | null; platformName: string | null }>) | undefined;
   /** Wallet balances (real + bonus) for the authenticated player, scoped to their brand. */
   walletBalance(userId: string, siteId?: string): Promise<WalletBalance>;
 

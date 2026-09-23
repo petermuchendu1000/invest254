@@ -706,6 +706,11 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     brandByHost: async (host) => resolveTestBrand(host),
     payments,
     resolveHandle,
+    scopeNames: async (siteId: string | null, platformId: string | null) => {
+      const site = siteId ? (await platformRepo.listSites(null)).find((x) => x.siteId === siteId) : undefined;
+      const plat = platformId ? (await platformRepo.listPlatforms()).find((x) => x.platformId === platformId) : undefined;
+      return { siteName: site?.name ?? null, platformName: plat?.name ?? null };
+    },
     walletBalance: async (userId, siteId): Promise<WalletBalance> =>
       ({ real: await payRepo.getBalance(userId, siteId), bonus: bonus.get(userId) ?? 0, currency: "KES" }),
     ledger: (userId, q, siteId) => gameRepo.listLedger(userId, q, siteId),
