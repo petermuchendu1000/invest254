@@ -331,8 +331,10 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     ({ sites: await domain(() => deps.platform.overview(ctx.claims!.userId, ctx.claims!.role ?? "player")) }));
 
   // Per-brand performance within a [from, to) window (docs/24 performance filters). `from`/`to` are
-  // epoch-ms (or ISO); defaults to the last 24h when omitted. Read-only; platform_superadmin-gated.
-  router.get(`${BASE}/platform/performance`, auth, platform, async (ctx: Ctx) => {
+  // epoch-ms (or ISO); defaults to the last 24h when omitted. Read-only. docs/42 UI-5: platform admins
+  // too, scoped to THEIR platform's brands (adminScopePlatform: owner -> null = all; claimless -> 403).
+  router.get(`${BASE}/platform/performance`, auth, platformAdmin, async (ctx: Ctx) => {
+    const scope = adminScopePlatform(ctx);
     const parse = (raw: string | null): number | null => {
       if (!raw || !raw.trim()) return null;
       const n = Number(raw);
@@ -343,7 +345,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     const toMs = parse(ctx.query.get("to")) ?? now;
     const fromMs = parse(ctx.query.get("from")) ?? toMs - 24 * 60 * 60 * 1000;
     if (toMs <= fromMs) throw new ApiError("VALIDATION", "`to` must be after `from`", 400);
-    return { fromMs, toMs, sites: await domain(() => deps.platform.performance(fromMs, toMs)) };
+    return { fromMs, toMs, sites: await domain(() => deps.platform.performance(fromMs, toMs, scope)) };
   });
 
   // Brands + economy — platform-scoped: a platform_admin sees only ITS platform's brands.

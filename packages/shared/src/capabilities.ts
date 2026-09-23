@@ -39,8 +39,8 @@ export const CAPABILITIES = {
   "console.brands": PLATFORM_TIER,                       // brands, onboarding, identity/theme/economy, players, pool, registrar, open brand
   "console.system": OWNER,                               // platforms, payment providers, global config, add-on catalog, platform admins
   "console.site.owner_settings": OWNER,                  // chart style / trade UI, site owner & default marketer
-  "console.performance": OWNER,
-  "console.live": OWNER,
+  "console.performance": PLATFORM_TIER,                  // scoped to its own platform for a platform admin (UI-5)
+  "console.live": PLATFORM_TIER,                         // engine feed scoped per platform (UI-5)
 } as const satisfies Record<string, readonly Tier[]>;
 
 export type Capability = keyof typeof CAPABILITIES;
