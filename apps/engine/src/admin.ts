@@ -692,7 +692,7 @@ export class PgAdminRepository implements AdminRepository {
           and (p.status <> 'deleted' or $2 = 'deleted')
           and ($13::uuid is null or p.site_id = $13)
           and ($3::text is null or p.username ilike '%'||$3||'%' or p.phone ilike '%'||$3||'%')
-          and ($4::timestamptz is null or (p.created_at, p.id) < ($4::timestamptz, $5::uuid))
+          and ($4::timestamptz is null or (p.created_at, p.id) < (coalesce((select k.created_at from profiles k where k.id = $5::uuid), $4::timestamptz), $5::uuid))
           and ($7::bigint  is null or coalesce(w.real_balance,0) >= $7)
           and ($8::bigint  is null or coalesce(w.real_balance,0) <= $8)
           and ($9::bigint  is null or coalesce(td.deposits,0)    >= $9)
@@ -782,7 +782,12 @@ export class PgAdminRepository implements AdminRepository {
             from ledger_entries l
            where l.user_id = $1 and l.type = 'adjustment' and ($2::text is null or $2 = 'adjustment')
        ) a
-       where ($3::timestamptz is null or (a.created_at, a.id) < ($3::timestamptz, $4::text))
+       where ($3::timestamptz is null or (a.created_at, a.id) < (coalesce(
+               -- the cursor row's EXACT time (the ms cursor alone skipped rows sharing its millisecond — PAGE-1)
+               (select k.created_at from transactions k where k.user_id = $1 and k.id = (case when $4 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then $4::uuid end)),
+               (select k.opened_at from positions k where k.user_id = $1 and k.id = (case when $4 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then $4::uuid end)),
+               (select k.created_at from ledger_entries k where k.user_id = $1 and k.id = (case when $4 ~ '^[0-9]{1,18}$' then $4::bigint end)),
+               $3::timestamptz), $4::text))
        order by a.created_at desc, a.id desc
        limit $5`,
       [userId, kind, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1]);
@@ -865,7 +870,7 @@ export class PgAdminRepository implements AdminRepository {
           -- (migration 0108): the moderation queue must show their pending requests too.
           and ($1::text is null or t.status = $1)
           and ($5::uuid is null or t.site_id = $5)
-          and ($2::timestamptz is null or (t.created_at, t.id) < ($2::timestamptz, $3::uuid))
+          and ($2::timestamptz is null or (t.created_at, t.id) < (coalesce((select k.created_at from transactions k where k.id = $3::uuid), $2::timestamptz), $3::uuid))
         order by t.created_at desc, t.id desc
         limit $4`,
       [q.status ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1, q.siteId ?? null]);
@@ -897,7 +902,7 @@ export class PgAdminRepository implements AdminRepository {
           and t.user_id not in (select user_id from marketer_account_ids)
           and ($7::uuid is null or t.site_id = $7)
           and ($3::text is null or p.username ilike '%'||$3||'%' or t.phone ilike '%'||$3||'%' or t.mpesa_receipt ilike '%'||$3||'%')
-          and ($4::timestamptz is null or (t.created_at, t.id) < ($4::timestamptz, $5::uuid))
+          and ($4::timestamptz is null or (t.created_at, t.id) < (coalesce((select k.created_at from transactions k where k.id = $5::uuid), $4::timestamptz), $5::uuid))
         order by t.created_at desc, t.id desc
         limit $6`,
       [q.kind ?? null, q.status ?? null, q.q ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1, q.siteId ?? null]);
@@ -910,7 +915,7 @@ export class PgAdminRepository implements AdminRepository {
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
       `select id, actor_id, actor_role, action, target_type, target_id, detail, created_at from admin_actions
-        where ($1::timestamptz is null or (created_at, id) < ($1::timestamptz, $2::bigint))
+        where ($1::timestamptz is null or (created_at, id) < (coalesce((select k.created_at from admin_actions k where k.id = $2::bigint), $1::timestamptz), $2::bigint))
           and ($4::uuid is null or site_id = $4)
         order by created_at desc, id desc
         limit $3`,
@@ -931,12 +936,11 @@ export class PgAdminRepository implements AdminRepository {
          from admin_actions a
          join sites s on s.id = a.site_id
          left join profiles pa on pa.id = a.actor_id
-        -- keyset on the MILLISECOND-truncated time (the cursor carries ms): comparing the raw
-        -- microsecond timestamp skipped every row sharing the cursor's millisecond (see PAGE-1).
-        where ($1::timestamptz is null or (date_trunc('milliseconds', a.created_at), a.id) < ($1::timestamptz, $2::bigint))
+        -- PAGE-1: compare with the cursor row's EXACT time (the cursor carries only milliseconds).
+        where ($1::timestamptz is null or (a.created_at, a.id) < (coalesce((select k.created_at from admin_actions k where k.id = $2::bigint), $1::timestamptz), $2::bigint))
           and ($4::uuid is null or s.platform_id = $4::uuid)
           and ($5::uuid is null or a.site_id = $5::uuid)
-        order by date_trunc('milliseconds', a.created_at) desc, a.id desc
+        order by a.created_at desc, a.id desc
         limit $3`,
       [cur ? new Date(cur.tsMs).toISOString() : null, cur ? Number(cur.id) : null, limit + 1, q.platformId ?? null, q.siteId ?? null]);
     const rows: PlatformAuditRow[] = r.rows.map((x) => ({
@@ -954,7 +958,7 @@ export class PgAdminRepository implements AdminRepository {
     const r = await this.q.query(
       `select id, t, level, msg, request_id, method, path, status, duration_ms, ip, user_id, role, site_id, fields, app
          from system_logs
-        where ($1::timestamptz is null or (t, id) < ($1::timestamptz, $2::bigint))
+        where ($1::timestamptz is null or (t, id) < (coalesce((select k.t from system_logs k where k.id = $2::bigint), $1::timestamptz), $2::bigint))
           and ($4::text is null or level = $4)
           and ($5::int  is null or status = $5)
           and ($6::text is null or request_id = $6)
@@ -1036,7 +1040,7 @@ export class PgAdminRepository implements AdminRepository {
         where t.kind = 'deposit'
           and ($1::text is null or t.status = $1)
           and ($5::uuid is null or t.site_id = $5)
-          and ($2::timestamptz is null or (t.created_at, t.id) < ($2::timestamptz, $3::uuid))
+          and ($2::timestamptz is null or (t.created_at, t.id) < (coalesce((select k.created_at from transactions k where k.id = $3::uuid), $2::timestamptz), $3::uuid))
         order by t.created_at desc, t.id desc
         limit $4`,
       [q.status ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1, q.siteId ?? null]);
@@ -1377,7 +1381,7 @@ export class PgAdminRepository implements AdminRepository {
          from affiliate_payouts ap join profiles pr on pr.id = ap.affiliate_id
         where ($1::text is null or ap.status = $1)
           and ($5::uuid is null or ap.site_id = $5)
-          and ($2::timestamptz is null or (ap.created_at, ap.id) < ($2::timestamptz, $3::uuid))
+          and ($2::timestamptz is null or (ap.created_at, ap.id) < (coalesce((select k.created_at from affiliate_payouts k where k.id = $3::uuid), $2::timestamptz), $3::uuid))
         order by ap.created_at desc, ap.id desc limit $4`,
       [q.status ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1, q.siteId ?? null]);
     const rows: AdminPayoutRow[] = r.rows.map((x) => ({

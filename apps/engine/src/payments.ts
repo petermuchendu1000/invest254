@@ -457,7 +457,7 @@ export class PgPaymentRepository implements PaymentRepository {
           and ($7::uuid is null or site_id = $7)
           and ($2::text is null or kind = $2)
           and ($3::text is null or status = $3)
-          and ($4::timestamptz is null or (created_at, id) < ($4::timestamptz, $5::uuid))
+          and ($4::timestamptz is null or (created_at, id) < (coalesce((select k.created_at from transactions k where k.id = $5::uuid and k.user_id = $1), $4::timestamptz), $5::uuid))
         order by created_at desc, id desc
         limit $6`,
       [userId, q.kind ?? null, q.status ?? null, cur ? new Date(cur.tsMs).toISOString() : null, cur ? cur.id : null, limit + 1, siteId ?? null]);

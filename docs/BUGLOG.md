@@ -5,6 +5,14 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #61 — Paged lists silently skipped rows that shared a millisecond with the page boundary (PAGE-1) — FIXED (branch `fix/page1-keyset-precision`)
+- **What:** every keyset-paginated list (audit log, system logs, admin transactions/withdrawals/deposits, user list, user activity, affiliate payouts, referrals, commissions, a player's ledger/positions/digits/transactions) built its cursor from the last row's time in **milliseconds** and asked the database for `(created_at, id) < (cursor_ms, id)`. Postgres timestamps carry **microseconds**, so every remaining row in the cursor row's millisecond compared as *newer* and was never shown on any page. Rows written in one transaction share `now()` exactly — e.g. a bulk action's audit rows, a settlement's ledger lines.
+- **Evidence:** production `admin_actions` has 1,223 rows in 406 same-millisecond groups (the owner's Audit log could hide them at page boundaries). A real-schema test paging 7 same-transaction ledger rows 2 at a time returned **2 of 7** on the old code.
+- **Fix:** each keyset now compares against the cursor row's EXACT timestamp, looked up by its id (`coalesce((select k.created_at from <table> k where k.id = $cursorId [and k.user_id = $owner]), $cursor_ms)`) — an index-friendly InitPlan; the ORDER BY and indexes are unchanged (EXPLAIN on production `system_logs`: PK lookup + the existing `(t, id)` index scan). User-scoped lists resolve the cursor only within the caller's own rows. The activity union resolves across its three sources with guarded casts.
+- **Tests:** `keyset.page1.pg.test.ts` (real schema, one transaction = identical timestamps): ledger, positions, player transactions, user activity (21-row union, 3/page), audit, system logs and admin transactions each return every row exactly once; fails on the old code.
+
+---
+
 ## #60 — Platform admins could not see or manage a player properly: no detail, bonus adjustments impossible, overrides API with no UI (and no validation), no audit across their brands (docs/42 UI-10) — FIXED (branch `fix/ui10-platform-admin-gaps`)
 - **What:**
   - A platform admin's player panel showed only the list row.
