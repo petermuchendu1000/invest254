@@ -31,6 +31,7 @@ import { registerAddonRoutes, type AddonDeps } from "./app.addons.js";
 import { registerTicketRoutes } from "./app.tickets.js";
 import { registerPaymentScopeRoutes } from "./app.paymentscopes.js";
 import { registerC2bRoutes } from "./app.c2b.js";
+import { registerBillingRoutes } from "./app.billing.js";
 import type { PlatformOnboardDeps, RegistrarConfigDeps } from "./app.platform.js";
 import type { Server } from "node:http";
 
@@ -276,6 +277,8 @@ export interface ApiDeps {
   c2b?: import("@invest254/engine").C2bConfigService | undefined;
   /** POOL-1 (docs/46): per-brand pool overview + automatic distribution. */
   poolOps?: import("@invest254/engine").PoolOpsService | undefined;
+  /** BILL-1 (docs/47): invoices, payments (M-Pesa Pay now + manual), charges, plans, billing settings. */
+  billing?: import("@invest254/engine").BillingService | undefined;
   /** Per-platform domain-registrar (Namecheap) configuration service (Issue 1 #3). */
   registrarConfig?: RegistrarConfigDeps;
   /** Add-on catalog / entitlements / requests service (Issue 2). */
@@ -401,6 +404,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerAddonRoutes(router, deps);
   registerPaymentScopeRoutes(router, deps);
   registerC2bRoutes(router, deps);
+  registerBillingRoutes(router, deps);
   registerTicketRoutes(router, deps);
   return router;
 }

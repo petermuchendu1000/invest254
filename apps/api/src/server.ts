@@ -9,7 +9,7 @@ import {
   ConfiguredMegaPayClient,
   ConfiguredPayHeroClient,
   PaymentScopeService, PgPaymentScopeRepository, loadDarajaConfigFromDb, type GlobalCallbacks,
-  C2bConfigService, PgC2bConfigRepository, systemDarajaCredentials, PoolOpsService, PgPoolOpsRepository,
+  C2bConfigService, PgC2bConfigRepository, systemDarajaCredentials, PoolOpsService, PgPoolOpsRepository, BillingService, PgBillingRepository,
   verifyPassword,
   type GameRepository, type EngagementRepository, type PaymentRepository,
   type Querier, type FairnessRecord, type ListenClient,
@@ -955,6 +955,13 @@ async function buildDeps(): Promise<ApiDeps> {
     // PAY-2 (docs/45): Pay Bill settings + Safaricom C2B URL registration with the System Daraja app.
     c2b: new C2bConfigService(new PgC2bConfigRepository(q), { darajaConfig: systemDarajaCredentials(q) }),
     poolOps: new PoolOpsService(new PgPoolOpsRepository(q), platform),
+    // BILL-1 (docs/47): invoices + Pay now. Money always goes to the SYSTEM Daraja account (the live-reloaded
+    // store), and every result is verified with STKPushQuery before an invoice is marked paid.
+    billing: new BillingService(new PgBillingRepository(q), {
+      daraja: () => daraja,
+      verify: process.env.BILLING_VERIFY_STK !== "false",
+      log: (m: string) => log.warn(m),
+    }),
     addons,
   };
 }
@@ -1001,4 +1008,18 @@ if (Number.isFinite(RECONCILE_MS) && RECONCILE_MS > 0) {
       .catch((err: unknown) => recLog.error("payhero reconcile sweep failed", err as Error));
   }, RECONCILE_MS);
   payheroTimer.unref();
+}
+
+// BILL-1: settle invoice Pay-now payments whose STK callback never arrived (Safaricom's STKPushQuery decides),
+// and close reservations that never reached Safaricom. Every 2 minutes; 0 disables.
+const BILLING_RECONCILE_MS = Number(process.env.BILLING_RECONCILE_INTERVAL_MS ?? 120_000);
+if (deps.billing && Number.isFinite(BILLING_RECONCILE_MS) && BILLING_RECONCILE_MS > 0) {
+  const billing = deps.billing;
+  const billLog = (deps.logger ?? log).child({ module: "billing.reconcile" });
+  const billTimer = setInterval(() => {
+    void billing.reconcile()
+      .then((r) => { if (r.settled || r.errors) billLog.info("billing reconcile sweep", r); })
+      .catch((err: unknown) => billLog.error("billing reconcile sweep failed", err as Error));
+  }, BILLING_RECONCILE_MS);
+  billTimer.unref();
 }
