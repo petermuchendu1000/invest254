@@ -101,9 +101,10 @@ def scenario(upto, fixed):
           [(r[0], r[1]) for r in rows] == [("addon_one_off", 1500000), ("addon_setup", 200000)] and "A1SITE" in rows[0][2], str(rows))
     q1(cur, "select fn_addon_revoke(%s,%s,%s,'payment_gateway','stripe')", [OWNER, SYS, a1])
     q1(cur, "select fn_addon_grant(%s,%s,%s,'payment_gateway','stripe')", [OWNER, SYS, a1])
-    check("revoking and re-granting does not charge twice", q1(cur, "select count(*) from billing_charges where platform_id=%s", [alpha])[0] == 2)
+    check("revoking and re-granting does not charge twice (0166: the removed grant's charges are voided)",
+          q1(cur, "select count(*) filter (where voided_at is null), count(*) filter (where voided_at is not null) from billing_charges where platform_id=%s", [alpha]) == (2, 2))
     q1(cur, "select fn_addon_grant(%s,%s,%s,'chart','area')", [OWNER, SYS, a2])
-    check("a monthly add-on is not a one-off charge", q1(cur, "select count(*) from billing_charges where platform_id=%s", [alpha])[0] == 2)
+    check("a monthly add-on is not a one-off charge", q1(cur, "select count(*) from billing_charges where platform_id=%s and voided_at is null", [alpha])[0] == 2)
     q1(cur, "select fn_addon_grant(%s,%s,%s,'payment_gateway','stripe')", [OWNER, SYS, DEFAULT_SITE])
     check("the exempt default platform is never charged", q1(cur, "select count(*) from billing_charges where platform_id=%s", [DEFAULT_PLATFORM])[0] == 0)
 

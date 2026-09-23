@@ -5,6 +5,25 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #71 — Add-ons: paid charts never reached players; catalog, requests and billing gaps (ADDON-1) — FIXED (branch `feat/addon1-marketplace`, migration 0166)
+- **What (owner request, 2026-09-23: "a complete overhaul of the /addons page … a total joke"):**
+  - **Players never saw paid charts (critical, found in the audit).** `/site/brand` coerced every `chart_style` except `candlestick` to `line`. A brand sold *Area graph* (KES 50,000 in production), *OHLC bars* (60,000) or *Baseline* got the free line chart.
+  - The catalog had no descriptions, the pricing model could not be edited, add-ons could not be hidden, and there were no adoption numbers.
+  - Approving or declining a request overwrote the brand's reason, and a request could not be withdrawn. A decline returned `"rejectd"`.
+  - A price change before approval changed what the brand paid. Removing an add-on before it was invoiced still billed it.
+  - Brands could not switch between systems they owned. Platform admins had no add-ons page.
+- **Fix:** see docs/48.
+  - Every chart system is served and rendered: TradingView opens on the brand's series type.
+  - Migration 0166 adds the catalog editor RPC with rules, quoted-price billing, void-on-remove, cancel and activate, the brand matrix, and product-named notices.
+  - New routes; a rebuilt `/platform/addons` (owner: Requests / Catalog / Brands; platform admin: marketplace + history); a marketplace component used on every tier.
+- **Tests:**
+  - `e2e_addon_marketplace.py`: BEFORE 4; AFTER 46. All 39 DB suites pass.
+  - Unit tests: 1169/1169.
+  - Role e2e: 181/181, including 21 new checks.
+  - Real stack: the player page on an Area brand renders the area chart.
+
+---
+
 ## #70 — Billing was a stub: no invoices, no way to pay, add-on prices never billed, dunning on dates alone (BILL-1) — FIXED (branch `feat/bill1-billing`, migration 0165)
 - **What (owner request, 2026-09-23: "a really serious /billing page … what we have is a total basic and a joke"):**
   - There were no invoices. A "payment" was the owner pressing *Mark paid*, which extended the period with no record of what was paid for.

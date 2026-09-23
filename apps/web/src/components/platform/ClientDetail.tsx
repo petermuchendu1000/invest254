@@ -106,8 +106,11 @@ function IdentitySection({ site }: { site: SiteWithConfig }) {
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="font-medium text-fg">Price chart</span>
             <select className="h-11 rounded-brand border border-border bg-surface-2 px-3 text-fg" value={form.chart_style} onChange={set('chart_style')}>
-              <option value="line">Line / area curve</option>
+              <option value="line">Line (free default)</option>
+              <option value="area">Area (TradingView)</option>
               <option value="candlestick">Candlesticks (TradingView)</option>
+              <option value="bars">OHLC bars (TradingView)</option>
+              <option value="baseline">Baseline (TradingView)</option>
             </select>
             <span className="text-xs text-muted">How this brand renders the live price. Currency + chart are display-only; the money of record stays KES.</span>
           </label>
@@ -122,7 +125,7 @@ function IdentitySection({ site }: { site: SiteWithConfig }) {
           </>
         ) : (
           <p className="text-sm text-muted sm:col-span-2">
-            Price chart: <span className="text-fg">{form.chart_style === 'candlestick' ? 'Candlesticks' : 'Line / area'}</span> · Trade interface:{' '}
+            Price chart: <span className="text-fg">{CHART_NAMES[form.chart_style] ?? 'Line'}</span> · Trade interface:{' '}
             <span className="text-fg">{form.trade_ui === 'digits' ? 'Digits broker' : 'Classic'}</span> — set by the system owner (add-on).
           </p>
         )}
@@ -583,6 +586,8 @@ const DETAIL_TABS = [
 type DetailTab = (typeof DETAIL_TABS)[number]['id'];
 
 const DETAIL_TAB_IDS = DETAIL_TABS.map((t) => t.id) as DetailTab[];
+
+const CHART_NAMES: Record<string, string> = { line: 'Line', area: 'Area', candlestick: 'Candlesticks', bars: 'OHLC bars', baseline: 'Baseline' };
 
 export function ClientDetail({ site, addons }: { site: SiteWithConfig; addons?: React.ReactNode }) {
   // UI-C: the open tab lives in the URL (?tab=…), so it can be linked and survives a reload.
