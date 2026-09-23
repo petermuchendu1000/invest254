@@ -5,6 +5,21 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #62 — M-Pesa Till number, B2C shortcode and B2C CommandID could never take effect (PAY-0, found while designing PAY-1) — FIXED (branch `fix/pay0-mpesa-till-b2c-fields`)
+- **What:** two independent drops.
+  - (A) `resolveDarajaConfig` rebuilt the live Daraja config from `mpesa_config` **without** `transactionType`, `tillNumber`, `b2cShortcode` or `b2cCommandId`. A Till (Buy Goods) configuration would have gone out as a Paybill STK to the paybill shortcode, and B2C always paid from the STK shortcode with `BusinessPayment`.
+  - (B) `PATCH /admin/mpesa-config` accepted only the older plain fields and silently discarded the four the M-Pesa page sends, so they could not even be saved. Migration 0150 and `HttpDarajaClient` supported all four; the tests built `HttpDarajaClient` directly, so neither gap was visible.
+- **Impact (production, read-only):** none so far. `transaction_type = 'paybill'` and `b2c_shortcode`/`till_number` are empty, which matches the defaults. It would have broken the first Till brand or separate B2C shortcode.
+- **Fix:**
+  - Carried through: DB value first, then env (`MPESA_TRANSACTION_TYPE`, `MPESA_TILL_NUMBER`, `MPESA_B2C_SHORTCODE`, `MPESA_B2C_COMMAND_ID`), then the client defaults.
+  - The PATCH accepts and validates them: rail `paybill|till`, CommandID enum, numbers 4–10 digits or empty.
+  - The in-memory repository mirrors this.
+- **Tests:**
+  - `daraja.configfields.test.ts` drives the real factory and reads the Safaricom bodies: Till + PartyB, B2C PartyA + CommandID, env fallback and DB precedence, defaults unchanged. The first two fail on the old code.
+  - `app.admin.mpesafields.pay0.test.ts`: saved and read back; 5 invalid values give 400.
+
+---
+
 ## #61 — Paged lists silently skipped rows that shared a millisecond with the page boundary (PAGE-1) — FIXED (branch `fix/page1-keyset-precision`)
 - **What:** every keyset-paginated list (audit log, system logs, admin transactions/withdrawals/deposits, user list, user activity, affiliate payouts, referrals, commissions, a player's ledger/positions/digits/transactions) built its cursor from the last row's time in **milliseconds** and asked the database for `(created_at, id) < (cursor_ms, id)`. Postgres timestamps carry **microseconds**, so every remaining row in the cursor row's millisecond compared as *newer* and was never shown on any page. Rows written in one transaction share `now()` exactly — e.g. a bulk action's audit rows, a settlement's ledger lines.
 - **Evidence:** production `admin_actions` has 1,223 rows in 406 same-millisecond groups (the owner's Audit log could hide them at page boundaries). A real-schema test paging 7 same-transaction ledger rows 2 at a time returned **2 of 7** on the old code.

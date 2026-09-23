@@ -217,6 +217,24 @@ function parseMpesaConfigPatch(ctx: Ctx): MpesaConfigPatch {
     if (typeof raw !== "string") throw new ApiError("VALIDATION", `${key} must be a string`, 400);
     patch[key] = raw.trim();
   }
+  // PAY-0 (BUGLOG #62): the M-Pesa page sends these but they were silently dropped here, so a Till
+  // number / separate B2C shortcode / CommandID could never be saved.
+  if (body.transactionType !== undefined && body.transactionType !== null) {
+    if (body.transactionType !== "paybill" && body.transactionType !== "till") throw new ApiError("VALIDATION", "transactionType must be 'paybill' or 'till'", 400);
+    patch.transactionType = body.transactionType;
+  }
+  if (body.b2cCommandId !== undefined && body.b2cCommandId !== null) {
+    if (!["BusinessPayment", "SalaryPayment", "PromotionPayment"].includes(String(body.b2cCommandId))) {
+      throw new ApiError("VALIDATION", "b2cCommandId must be BusinessPayment, SalaryPayment or PromotionPayment", 400);
+    }
+    patch.b2cCommandId = String(body.b2cCommandId);
+  }
+  for (const key of ["tillNumber", "b2cShortcode"] as const) {
+    const raw = body[key];
+    if (raw === undefined || raw === null) continue;
+    if (typeof raw !== "string" || (raw.trim() !== "" && !/^\d{4,10}$/.test(raw.trim()))) throw new ApiError("VALIDATION", `${key} must be 4-10 digits (or empty)`, 400);
+    patch[key] = raw.trim();
+  }
   for (const key of MPESA_SECRET_FIELDS) {
     const raw = body[key];
     if (raw === undefined || raw === null) continue;

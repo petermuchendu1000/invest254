@@ -161,7 +161,25 @@ function resolveDarajaConfig(over: Partial<DarajaConfig>, env: NodeJS.ProcessEnv
     b2cSecurityCredential: pick("b2cSecurityCredential", "MPESA_B2C_SECURITY_CREDENTIAL"),
     b2cResultUrl: pick("b2cResultUrl", "MPESA_B2C_RESULT_URL"),
     b2cTimeoutUrl: pick("b2cTimeoutUrl", "MPESA_B2C_TIMEOUT_URL"),
+    // PAY-0 (BUGLOG #62): the Paybill/Till rail, till number, separate B2C shortcode and B2C CommandID
+    // were loaded from mpesa_config but DROPPED here, so a Till brand's STK went out as a Paybill
+    // request and B2C always paid from the STK shortcode. Carried through now (DB, else env, else the
+    // client's defaults).
+    ...optionalDaraja(over, env),
   };
+}
+
+function optionalDaraja(over: Partial<DarajaConfig>, env: NodeJS.ProcessEnv): Partial<DarajaConfig> {
+  const out: Partial<DarajaConfig> = {};
+  const tt = over.transactionType ?? env.MPESA_TRANSACTION_TYPE;
+  if (tt === "paybill" || tt === "till") out.transactionType = tt;
+  const till = over.tillNumber ?? env.MPESA_TILL_NUMBER;
+  if (till) out.tillNumber = till;
+  const b2cSc = over.b2cShortcode ?? env.MPESA_B2C_SHORTCODE;
+  if (b2cSc) out.b2cShortcode = b2cSc;
+  const cmd = over.b2cCommandId ?? env.MPESA_B2C_COMMAND_ID;
+  if (cmd === "BusinessPayment" || cmd === "SalaryPayment" || cmd === "PromotionPayment") out.b2cCommandId = cmd;
+  return out;
 }
 
 /**
