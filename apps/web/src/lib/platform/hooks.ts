@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { platformApi, type CreateSiteBody, type OnboardBody, type RegistrarConfigBody } from '@/lib/platform/endpoints';
 import { useSession } from '@/lib/auth/session';
 import type { SiteTheme } from '@/lib/brand/siteThemes';
@@ -357,10 +357,46 @@ export function usePlatformSiteAudit(id: string) {
 }
 
 /** Phase 2 — player actions (status / role / balance) for a brand; refreshes the players list. */
+/** docs/42 UI-10: one player's detail in the console (platform-scoped server-side). */
+export function usePlatformUserDetail(siteId: string, uid: string | null) {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'site-user', siteId, uid], queryFn: () => platformApi.siteUserDetail(t, siteId, uid as string), enabled: !!t && !!uid });
+}
+export function usePlatformUserOverrides(siteId: string, uid: string | null) {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'site-user-overrides', siteId, uid], queryFn: () => platformApi.siteUserOverrides(t, siteId, uid as string), enabled: !!t && !!uid });
+}
+export function useSetPlatformUserOverrides(siteId: string, uid: string) {
+  const t = useTok(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: import('@/lib/admin/types').UserOverridePatch) => platformApi.setSiteUserOverrides(t, siteId, uid, patch),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['platform', 'site-user-overrides', siteId, uid] });
+      void qc.invalidateQueries({ queryKey: ['platform', 'site-audit', siteId] });
+      void qc.invalidateQueries({ queryKey: ['platform', 'audit-log'] });
+    },
+  });
+}
+/** docs/42 UI-10: the audit trail across the caller's platform (owner: every brand, or one platform). */
+export function usePlatformAudit(q: { platformId?: string | undefined; siteId?: string | undefined }) {
+  const t = useTok();
+  return useInfiniteQuery({
+    queryKey: ['platform', 'audit-log', q.platformId ?? 'all', q.siteId ?? 'all'],
+    enabled: !!t,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => platformApi.platformAudit(t, { ...q, cursor: pageParam, limit: 50 }),
+    getNextPageParam: (l) => l.nextCursor ?? undefined,
+  });
+}
 export function usePlatformUserAction(id: string) {
   const t = useTok();
   const qc = useQueryClient();
-  const refresh = () => { void qc.invalidateQueries({ queryKey: ['platform', 'site-users', id] }); void qc.invalidateQueries({ queryKey: ['platform', 'site-audit', id] }); };
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['platform', 'site-users', id] });
+    void qc.invalidateQueries({ queryKey: ['platform', 'site-user', id] });
+    void qc.invalidateQueries({ queryKey: ['platform', 'site-audit', id] });
+    void qc.invalidateQueries({ queryKey: ['platform', 'audit-log'] });
+  };
   return useMutation({
     mutationFn: async (v:
       | { kind: 'status'; uid: string; status: string; reason?: string }

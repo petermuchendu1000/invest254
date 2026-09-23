@@ -1,5 +1,6 @@
 'use client';
 
+import { PlayerSummary, BalanceAdjust, PlayerOverridesForm } from '@/components/platform/PlayerConsolePanels';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -298,13 +299,9 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
   const [sel, setSel] = useState<SiteUserRow | null>(null);
   const rows = users.data?.items ?? [];
 
-  const [amt, setAmt] = useState('');
-  const [dir, setDir] = useState<'credit' | 'debit'>('credit');
-  const [reason, setReason] = useState('');
-
   function run(v: Parameters<typeof action.mutate>[0], ok: string) {
     action.mutate(v, {
-      onSuccess: () => { toast.push({ tone: 'success', title: ok }); setAmt(''); setReason(''); },
+      onSuccess: () => { toast.push({ tone: 'success', title: ok }); },
       onError: (e) => toast.push({ tone: 'error', title: 'Action failed', description: (e as Error).message }),
     });
   }
@@ -385,6 +382,7 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
             <span className="text-sm font-semibold text-fg">Manage @{sel.username} <span className="font-normal text-muted">{sel.phone}</span></span>
             <button className="text-xs text-muted hover:text-fg" onClick={() => setSel(null)}>close ✕</button>
           </div>
+          <PlayerSummary key={sel.userId} siteId={site.siteId} uid={sel.userId} />
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted">Status:</span>
             <Button size="sm" variant="outline" disabled={action.isPending} onClick={() => run({ kind: 'status', uid: sel.userId, status: 'active', reason: 'platform console' }, 'Activated')}>Activate</Button>
@@ -418,18 +416,17 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
           </div>
             </>
           ) : null}
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-muted">Amount (KES)
-              <input value={amt} onChange={(e) => setAmt(e.target.value)} type="number" className="h-9 w-28 rounded-lg border border-border bg-surface px-2 text-sm text-fg" /></label>
-            <select value={dir} onChange={(e) => setDir(e.target.value as 'credit' | 'debit')} className="h-9 rounded-lg border border-border bg-surface px-2 text-sm text-fg"><option value="credit">credit +</option><option value="debit">debit −</option></select>
-            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="reason (required)" className="h-9 w-48 rounded-lg border border-border bg-surface px-2 text-sm text-fg" />
-            <Button size="sm" disabled={action.isPending || !amt || !reason.trim()} onClick={() => {
-              const cents = Math.round(Number(amt) * 100) * (dir === 'debit' ? -1 : 1);
-              if (Number.isFinite(cents) && cents !== 0) run({ kind: 'balance', uid: sel.userId, amountCents: cents, reason: reason.trim() }, 'Balance adjusted');
-            }}>Adjust balance</Button>
+          {/* docs/42 UI-10: a named wallet, a before → after confirmation, and the player's overrides. */}
+          <div className="flex flex-col gap-2 border-t border-border pt-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted">Adjust balance</h4>
+            <BalanceAdjust key={sel.userId} siteId={site.siteId} uid={sel.userId} username={sel.username} />
           </div>
+          <details className="border-t border-border pt-3">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">Game overrides for this player</summary>
+            <div className="pt-2"><PlayerOverridesForm key={sel.userId} site={site} uid={sel.userId} /></div>
+          </details>
         </div>
-      ) : <p className="text-xs text-muted">Select a player to manage status, role and balance.</p>}
+      ) : <p className="text-xs text-muted">Select a player to see their details and manage status, role, balance and overrides.</p>}
     </div>
   );
 }

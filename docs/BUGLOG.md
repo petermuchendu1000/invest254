@@ -5,6 +5,29 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #60 — Platform admins could not see or manage a player properly: no detail, bonus adjustments impossible, overrides API with no UI (and no validation), no audit across their brands (docs/42 UI-10) — FIXED (branch `fix/ui10-platform-admin-gaps`)
+- **What:**
+  - A platform admin's player panel showed only the list row.
+  - "Adjust balance" never sent a wallet, so every credit or debit hit **real cash**. The API supported `kind: real|bonus`; bonus could not be adjusted, and a goodwill bonus became withdrawable money.
+  - `PATCH /platform/sites/:id/users/:uid/overrides` existed with no read route and no UI. It forwarded the raw body, so a typo reached the database and came back as a 500.
+  - No page showed the audit trail across a platform's brands; each brand's Audit tab had to be opened one at a time.
+- **Fix (API):**
+  - `GET /platform/sites/:id/users/:uid/overrides` (platform-scoped).
+  - The PATCH now uses the back office's `parseOverridePatch` (400 `VALIDATION`). The database's fairness fence (0135) still refuses any override better for the player than the brand.
+  - `GET /platform/audit-log[?platform=][&site=]`: a platform admin is pinned to its own platform; `?site=` must be in scope (403 otherwise). Rows carry the brand name and actor username.
+- **Fix (web):**
+  - The Players panel shows a summary: real/bonus balance, deposits and withdrawals, net, turnover and bets, GGR, last active, joined/referred.
+  - `BalanceAdjust` has an explicit Wallet (real cash vs bonus) and a review step that states "credit KES X to @user's bonus (non-withdrawable) balance — before → after", blocking any overdraw.
+  - `PlayerOverridesForm` shows the brand's limits up front and blocks invalid or player-favouring values before saving.
+  - New **Brand audit** page (`/platform/activity`), in the nav for platform admins only (the owner keeps the global Audit log), with a brand filter and Load more.
+- **Found alongside, fixed separately:** PAGE-1. Keyset pagination compares a millisecond cursor with microsecond timestamps, so rows sharing the cursor's millisecond are skipped. Production `admin_actions` has 1,223 rows in 406 same-millisecond groups. The new audit query already uses the millisecond-consistent form.
+- **Tests:**
+  - `app.platform.players.ui10.test.ts`: override read and scope, 6 invalid patches return 400, valid saved, audit pinning and site scope, refused requests never query.
+  - `platformaudit.pg.test.ts` (real schema): own brands only, brand and actor names, site filter, paging across a shared timestamp.
+  - Browser role e2e 78/78 (+10 UI-10 checks: detail, bonus wallet sent, before→after confirm, override fence, audit page, nav).
+
+---
+
 ## #59 — The System console hid who runs each platform, and several owner tools silently acted on the wrong platform (docs/42 UI-9) — FIXED (branch `fix/ui9-owner-console-gaps`)
 - **What (six gaps):**
   - **Platform admins by raw uuid.** The owner saw only a COUNT of platform admins and appointed/revoked by pasting a user id. Refusals from the governance RPCs (`NO_SELF_ACTION`, `PLATFORM_NOT_FOUND`, `USER_NOT_FOUND`, `SUPERADMIN_PROTECTED`, `DEFAULT_MARKETER_LOCKED`, `INVALID_ROLE`, `NOT_A_PLATFORM_ADMIN`) were unmapped, so they surfaced as HTTP 500.

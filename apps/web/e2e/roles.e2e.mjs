@@ -73,6 +73,12 @@ const FIXTURES = {
   '/tickets': { tickets: [TICKET] },
   '/tickets/t-1': { ticket: TICKET, comments: [], escalations: [] },
   '/addons/brand': { items: ADDONS },
+  [`/platform/sites/${SITE}/users`]: { items: [USER] },
+  [`/platform/sites/${SITE}/users/u-target`]: { ...USER, realBalanceCents: 50000, bonusBalanceCents: 2000, depositsCents: 100000, turnoverCents: 300000, betCount: 12, createdAtMs: 1 },
+  [`/platform/sites/${SITE}/users/u-target/overrides`]: { userId: 'u-target', winRate: null, houseEdge: null, tradeDurationS: null, maxWinMultiplier: null,
+    minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null },
+  '/platform/audit-log': { items: [{ id: '9', actorId: 'u-admin', actorRole: 'admin', actorUsername: 'siteadmin', action: 'user.set_status',
+    targetType: 'user', targetId: 'u-target', detail: { status: 'suspended' }, createdAtMs: Date.now() - 60000, siteId: SITE, siteName: 'Tamu Traders' }], nextCursor: null },
   '/platform/registrar/config': { platformId: PLATFORM, providerCode: 'namecheap', settings: {}, secretMeta: {}, hasSecret: false, encVersion: 1,
     updatedAt: null, exists: false, egressIp: '203.0.113.7', encryptionConfigured: true },
 };
@@ -84,6 +90,7 @@ async function session(browser, { token, me, stash = null }) {
   const ctx = await browser.newContext();
   const calls = [];
   const full = [];   // method + path + query (UI-9: which platform a request acts for)
+  const bodies = []; // [method path, parsed JSON body] of writes (UI-10: what a confirm actually sent)
   await ctx.route(`${API}/**`, async (route) => {
     const req = route.request();
     const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
@@ -92,6 +99,7 @@ async function session(browser, { token, me, stash = null }) {
     const path = u.pathname.replace('/api/v1', '');
     calls.push(`${req.method()} ${path}`);
     full.push(`${req.method()} ${path}${u.search}`);
+    if (req.method() !== 'GET') { let b = null; try { b = req.postDataJSON(); } catch { /* none */ } bodies.push([`${req.method()} ${path}`, b]); }
     const body = path === '/auth/me' ? me
       : path === '/me/referral' ? REFERRAL
       : FIXTURES[path] ? FIXTURES[path]
@@ -104,7 +112,7 @@ async function session(browser, { token, me, stash = null }) {
     if (st) sessionStorage.setItem('pp-impersonating-brand', st);
   }, [token, stash]);
   const page = await ctx.newPage();
-  return { ctx, page, calls, full };
+  return { ctx, page, calls, full, bodies };
 }
 async function navTexts(page) {
   await page.waitForTimeout(300);
@@ -263,6 +271,39 @@ try {
     await page.keyboard.press('Escape');
     await page.getByText('Payouts stuck').first().click(); await page.waitForTimeout(400);
     check('site admin: can still escalate to System', await page.getByRole('button', { name: 'Escalate to System' }).isVisible());
+    await ctx.close(); }
+
+  // 9) docs/42 UI-10: platform-admin player management + one audit trail
+  { const { ctx, page, calls, bodies } = await session(browser, { token: T.pa, me: ME.pa });
+    await open(page, `/platform/clients/${SITE}`);
+    await page.getByRole('button', { name: 'Players' }).click(); await page.waitForTimeout(300);
+    await page.getByText('@target').first().click(); await page.waitForTimeout(500);
+    check('platform admin: selecting a player shows their money + activity (detail)', await page.getByText('Bonus balance').isVisible() && await page.getByText('KES 20').first().isVisible());
+    await page.getByLabel('Wallet').selectOption('bonus');
+    await page.getByLabel('Amount (KES)').fill('100');
+    await page.getByLabel('Reason').fill('goodwill');
+    await page.getByRole('button', { name: 'Review adjustment' }).click();
+    check('platform admin: the confirm names the wallet and shows before -> after', await page.getByText(/bonus \(non-withdrawable\) balance/).isVisible() && await page.getByText('KES 120').isVisible());
+    await page.getByRole('button', { name: 'Confirm adjustment' }).click(); await page.waitForTimeout(400);
+    const adj = bodies.find(([k]) => k === 'POST /platform/sites/' + SITE + '/users/u-target/balance');
+    check('platform admin: the adjustment is sent for the BONUS wallet (was: never sent, always real cash)', adj && adj[1]?.kind === 'bonus' && adj[1]?.amountCents === 10000, JSON.stringify(adj));
+    await page.getByText('Game overrides for this player').click(); await page.waitForTimeout(400);
+    check('platform admin: player overrides are editable in the console (was: no UI)', await page.getByLabel('Win rate (0–1)').isVisible());
+    await page.getByLabel('Win rate (0–1)').fill('0.9');
+    check("platform admin: an override better than the brand is stopped before saving", await page.getByText(/at most the brand's 0.4/).isVisible() && await page.getByRole('button', { name: 'Save overrides' }).isDisabled());
+    await page.getByLabel('Win rate (0–1)').fill('0.3');
+    await page.getByRole('button', { name: 'Save overrides' }).click(); await page.waitForTimeout(400);
+    const ov = bodies.find(([k]) => k === 'PATCH /platform/sites/' + SITE + '/users/u-target/overrides');
+    check('platform admin: a valid override is saved', ov && ov[1]?.winRate === 0.3, JSON.stringify(ov));
+    await open(page, '/platform'); const nav = await navTexts(page);
+    check('platform admin: nav has ONE audit trail across its brands (Brand audit)', nav.some((n) => n.includes('Brand audit')), nav.join('|'));
+    await open(page, '/platform/activity');
+    check('platform admin: the audit trail names the brand and the person', await page.getByText('@siteadmin').isVisible() && await page.getByRole('cell', { name: 'Tamu Traders' }).first().isVisible());
+    check('platform admin: the audit trail uses the platform-scoped route', calls.includes('GET /platform/audit-log'), calls.filter((c) => c.includes('audit')).join());
+    await ctx.close(); }
+  { const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner });
+    await open(page, '/platform'); const nav = await navTexts(page);
+    check('owner: nav keeps the global Audit log and no duplicate Brand audit', nav.some((n) => n.includes('Audit log')) && !nav.some((n) => n.includes('Brand audit')), nav.join('|'));
     await ctx.close(); }
 } finally {
   await browser.close();
