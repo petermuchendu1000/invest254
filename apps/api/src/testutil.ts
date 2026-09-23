@@ -612,6 +612,16 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     async decideRequest(_a, _r, id, decision) { return { id, status: `${decision}d` }; },
     async grant(_a, _r, site, category, key) { return { site_id: site, category, key, entitled: true }; },
     async revoke(_a, _r, site, category, key) { return { site_id: site, category, key, entitled: false }; },
+    // ADDON-1 (scope/rules proven by e2e_addon_marketplace.py): no request is seeded here, so a cancel of
+    // an unknown id is refused like the RPC does.
+    async update(_a, role, category, key, patch) { if (role !== "platform_superadmin") throw new Error("NOT_AUTHORIZED"); return { category, key, ...patch }; },
+    async cancelRequest() { throw new Error("REQUEST_NOT_FOUND"); },
+    async activate(_a, _r, site, category, key) {
+      if (category !== "chart" && category !== "trade_ui") throw new Error("NOT_SWITCHABLE");
+      if (key !== "line" && key !== "classic") throw new Error("NOT_ENTITLED");
+      return { site_id: site, category, key, active: true };
+    },
+    async brands() { return []; },
   };
 
   const referralRepo = makeInMemoryReferralRepo();
