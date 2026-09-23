@@ -139,8 +139,16 @@ test("POST /admin/affiliate/accrue: optional `site` scopes the accrual and is va
       { token: admin, body: { date: "2026-06-10", site: "00000000-0000-0000-0000-000000000001" } });
     assert.equal(scoped.status, 200);
     assert.equal((await json(scoped)).site, "00000000-0000-0000-0000-000000000001");
-    // Omitting site => all-brands accrual (site echoed as null).
-    const all = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: admin, body: { date: "2026-06-10" } });
+    // F-44: a SITE admin that omits `site` accrues ITS OWN brand (was: every brand) ...
+    const own = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: admin, body: { date: "2026-06-10" } });
+    assert.equal((await json(own)).site, "00000000-0000-0000-0000-000000000001");
+    // ... and naming ANOTHER brand is refused.
+    const other = await req(api, "POST", "/api/v1/admin/affiliate/accrue",
+      { token: admin, body: { date: "2026-06-10", site: "22222222-2222-2222-2222-222222222222" } });
+    assert.equal(other.status, 403);
+    assert.equal((await json(other)).error.code, "SITE_SCOPE_FORBIDDEN");
+    // Only the SYSTEM owner runs the all-brands accrual (site echoed as null).
+    const all = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: "owner:platform_superadmin", body: { date: "2026-06-10" } });
     assert.equal((await json(all)).site, null);
     // A non-string site is rejected.
     const bad = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: admin, body: { date: "2026-06-10", site: 123 } });

@@ -161,7 +161,7 @@ export interface ApiDeps {
   /** Internal escalation ticketing (Issue 2). Absent -> /tickets routes off. */
   tickets?: TicketService | undefined;
   /** Per-user sticky notifications: admin/system raise; player reads active + dismisses (J7). */
-  notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory" | "listTemplates" | "audienceCount" | "broadcast" | "resolveCategory">;
+  notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory" | "listTemplates" | "audienceCount" | "broadcast" | "resolveCategory" | "ownerOf">;
   /** Admin Web Push subscriptions (Issue 1): opt-in real-time withdrawal-request alerts. Absent when
    *  push is not configured (no VAPID keys) — the /admin/push/* routes then stay unregistered. */
   push?: Pick<PushService, "publicKey" | "upsert" | "removeByEndpoint"> | undefined;

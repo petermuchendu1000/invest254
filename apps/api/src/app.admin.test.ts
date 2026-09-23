@@ -61,7 +61,8 @@ test("admin suspend is applied + audited; login still works (deposits) but the a
     const stillIn = await req(api, "POST", "/api/v1/auth/login", { body: { phone: "0712000004", password: "Password1" } });
     assert.equal(stillIn.status, 200);
 
-    const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "admin-9:admin:00000000-0000-0000-0000-000000000001" }));
+    assert.equal((await req(api, "GET", "/api/v1/admin/audit", { token: "admin-9:admin:00000000-0000-0000-0000-000000000001" })).status, 403, "F-44: audit is System-owner-only");
+    const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "owner:platform_superadmin" }));
     assert.ok(audit.items.some((a: any) => a.action === "user.status" && a.targetId === uid));
   } finally { await api.close(); }
 });
@@ -110,7 +111,8 @@ test("admin manual balance adjustment credits the wallet, requires a reason, and
     const noReason = await req(api, "POST", `/api/v1/admin/wallets/${uid}/adjust`, { token: "fin-1:admin:00000000-0000-0000-0000-000000000001", body: { amountCents: 1_000 } });
     assert.equal(noReason.status, 400);
 
-    const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "fin-1:admin:00000000-0000-0000-0000-000000000001" }));
+    assert.equal((await req(api, "GET", "/api/v1/admin/audit", { token: "fin-1:admin:00000000-0000-0000-0000-000000000001" })).status, 403, "F-44: audit is System-owner-only");
+    const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "owner:platform_superadmin" }));
     assert.ok(audit.items.some((a: any) => a.action === "balance.adjust" && a.targetId === uid));
   } finally { await api.close(); }
 });
@@ -386,11 +388,13 @@ test("J5 game config: admin reads; only superadmin edits; validates; audited", a
   } finally { await api.close(); }
 });
 
-test("M-Pesa config: admin reads masked; only superadmin edits; secrets write-only; audited", async () => {
+test("M-Pesa config: only the system owner reads (masked) and edits; secrets write-only; audited", async () => {
   const api = await startTestApi();
   try {
     // admin can read; defaults are empty and secrets are masked to has_* flags (never returned raw)
-    const cfg = await json(await req(api, "GET", "/api/v1/admin/mpesa-config", { token: "admin-1:admin:00000000-0000-0000-0000-000000000001" }));
+    // F-44: the global M-Pesa config is System-owner-only — a site admin is refused even the masked read.
+    assert.equal((await req(api, "GET", "/api/v1/admin/mpesa-config", { token: "admin-1:admin:00000000-0000-0000-0000-000000000001" })).status, 403);
+    const cfg = await json(await req(api, "GET", "/api/v1/admin/mpesa-config", { token: "root:platform_superadmin" }));
     assert.equal(cfg.environment, "sandbox");
     assert.equal(cfg.shortcode, "");
     assert.equal(cfg.hasConsumerKey, false);
@@ -529,7 +533,8 @@ test("J6 affiliate payout queue: admin lists requests and approves (audited)", a
     assert.equal(appr.status, 200);
     assert.equal((await json(appr)).approved, true);
 
-    const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "admin-9:admin:00000000-0000-0000-0000-000000000001" }));
+    assert.equal((await req(api, "GET", "/api/v1/admin/audit", { token: "admin-9:admin:00000000-0000-0000-0000-000000000001" })).status, 403, "F-44: audit is System-owner-only");
+    const audit = await json(await req(api, "GET", "/api/v1/admin/audit", { token: "owner:platform_superadmin" }));
     assert.ok(audit.items.some((a: any) => a.action === "affiliate.payout.approve" && a.targetId === payout.payoutId));
 
     // a player cannot view the queue

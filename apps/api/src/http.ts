@@ -46,7 +46,7 @@ export interface HandlerResult { status?: number; body: unknown; }
 export type Handler = (ctx: Ctx) => Promise<HandlerResult | unknown> | HandlerResult | unknown;
 export type Middleware = (ctx: Ctx) => Promise<void> | void;
 
-interface Route { method: string; regex: RegExp; keys: string[]; chain: Array<Middleware | Handler>; }
+interface Route { method: string; path: string; regex: RegExp; keys: string[]; chain: Array<Middleware | Handler>; }
 
 /**
  * Role hierarchy — higher rank satisfies any lower minimum (see docs/05 §7, docs/38). Five tiers:
@@ -226,8 +226,14 @@ export class Router {
 
   private add(method: string, path: string, chain: Array<Middleware | Handler>): this {
     const { regex, keys } = compile(path);
-    this.routes.push({ method, regex, keys, chain });
+    this.routes.push({ method, path, regex, keys, chain });
     return this;
+  }
+
+  /** Read-only listing of every registered route (method + path pattern). Used by the scope
+   *  registry guard (Issue 1 / F-44) so a new id-addressed operator route cannot ship unclassified. */
+  listRoutes(): ReadonlyArray<{ method: string; path: string }> {
+    return this.routes.map((r) => ({ method: r.method, path: r.path }));
   }
   // Last argument is the handler; any preceding arguments are middleware.
   get(path: string, ...chain: Array<Middleware | Handler>): this { return this.add("GET", path, chain); }

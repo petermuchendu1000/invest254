@@ -38,15 +38,18 @@ test("POST /admin/withdrawals/bulk: multi-approve, partial success, idempotent, 
     assert.equal((await req(api, "POST", "/api/v1/admin/withdrawals/bulk", { token: ADMIN, body: { action: "approve", txIds: [] } })).status, 400);
     assert.equal((await req(api, "POST", "/api/v1/admin/withdrawals/bulk", { token: ADMIN, body: { action: "nope", txIds: [id1] } })).status, 400);
 
-    // bulk approve both + a bogus id. Approve is TOLERANT: an unknown/non-pending tx is a safe
-    // no-op (row ok:true, approved:false), not a hard error — so all rows succeed at the row level.
+    // bulk approve both + a bogus id. A REAL non-pending tx is still a safe no-op (idempotency, below),
+    // but an UNKNOWN id now fails its row: target scope is fail-closed (Issue 1 / F-44) — an unresolvable
+    // target is never passed through to the money RPC. The real rows still succeed (partial success).
     const res = await req(api, "POST", "/api/v1/admin/withdrawals/bulk", { token: ADMIN, body: { action: "approve", txIds: [id1, id2, "bogus-id", id1] } });
     assert.equal(res.status, 200);
     const body = await json(res);
     assert.equal(body.total, 3, "dedup drops the repeat id");
-    assert.equal(body.okCount, 3);
+    assert.equal(body.okCount, 2);
+    assert.equal(body.failCount, 1);
     assert.equal(body.results.find((r: any) => r.id === id1).result.approved, true, "a real pending row is approved");
-    assert.equal(body.results.find((r: any) => r.id === "bogus-id").result.approved, false, "unknown id is a safe no-op");
+    const bogus = body.results.find((r: any) => r.id === "bogus-id");
+    assert.equal(bogus.ok, false, "an unknown id fails its row (fail-closed scope)");
 
     // idempotent: re-approving an already-approved withdrawal succeeds at the row level with approved:false
     const again = await json(await req(api, "POST", "/api/v1/admin/withdrawals/bulk", { token: ADMIN, body: { action: "approve", txIds: [id1] } }));
