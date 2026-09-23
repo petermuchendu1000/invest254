@@ -132,7 +132,7 @@ export const adminApi = {
   rejectWithdrawal: (t: string, id: string) =>
     apiFetch<unknown>(`/admin/withdrawals/${id}/reject`, { method: 'POST', token: t }),
   // Manually finalize a stuck (pending/processing) withdrawal as PAID when the provider result callback
-  // never arrived (Mega Pay / Daraja). Same superadmin-password gate as approve; the client then shows paid.
+  // never arrived (Mega Pay / Daraja). Same system-owner password gate as approve; the client then shows paid.
   markWithdrawalPaid: (t: string, id: string, password: string) =>
     apiFetch<unknown>(`/admin/withdrawals/${id}/mark-paid`, { method: 'POST', token: t, body: { password } }),
   // Bulk withdrawal moderation (partial success per row; approve dispatches M-Pesa B2C each).
@@ -215,13 +215,13 @@ export const adminApi = {
   rotateSeed: (t: string, tradeDate: string) =>
     apiFetch<SeedRotateResult>('/admin/seeds/rotate', { method: 'POST', token: t, body: { tradeDate } }),
 
-  // docs/25: daily withdrawal-pool budget (per brand, EAT day). Read = admin; set = superadmin.
+  // docs/25: daily withdrawal-pool budget (per brand, EAT day). Read = admin; set = system owner.
   withdrawalPool: (t: string, day?: string) =>
     apiFetch<WithdrawalPoolRow>('/admin/withdrawal-pool', day ? { token: t, query: { day } } : { token: t }),
   setWithdrawalPool: (t: string, body: { amountCents?: number; defaultAmountCents?: number; day?: string }) =>
     apiFetch<WithdrawalPoolRow>('/admin/withdrawal-pool', { method: 'PUT', token: t, body }),
 
-  // Fly.io machine restart (superadmin only)
+  // Fly.io machine restart (system owner only)
   flyStatus: (t: string) => apiFetch<{ configured: boolean; apps: string[]; app: string }>('/admin/fly/status', { token: t }),
   flyRestart: (t: string) =>
     apiFetch<{ ok: boolean; apps: Array<{ app: string; machinesRestarted: number; machineIds: string[]; skippedStopped: number; error?: string }>; machinesRestarted: number; by: string; at: string }>(

@@ -17,7 +17,7 @@ import {
 /**
  * Platform-owner impersonation (docs/24 §370) — browser glue over the pure state machine in
  * ./impersonate.core.ts. The platform_superadmin "logs into" a client's admin console AS that
- * brand's superadmin using a token minted by POST /platform/sites/:id/impersonate. We swap the
+ * brand's admin using a token minted by POST /platform/sites/:id/impersonate. We swap the
  * active session token to it and hard-navigate to /admin so every provider re-inits with the new
  * token; the platform token is stashed so "Exit to platform" restores it.
  *

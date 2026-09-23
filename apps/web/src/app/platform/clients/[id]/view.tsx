@@ -13,7 +13,7 @@ import type { SiteWithConfig } from '@/lib/platform/endpoints';
 /**
  * Open this brand's back office. For BOTH the system owner and a platform admin the server mints a
  * brand-scoped `admin` session (Issue 1 / F1, Option B) marked with an `act` claim (docs/42 UI-3), so
- * the label says exactly that (docs/42 UI-13 — it used to promise a "platform admin"/"superadmin" session).
+ * the label says exactly that (docs/42 UI-13 — it used to promise a "platform admin" / owner-tier session).
  */
 function ImpersonateButton({ siteId, brandName }: { siteId: string; brandName: string }) {
   const impersonate = useImpersonate();
