@@ -98,6 +98,13 @@ const FIXTURES = {
   },
   '/platform/global-config': { config: { depositsEnabled: true, withdrawalsEnabled: true, playEnabled: true, marketersEnabled: true, registrationsEnabled: true,
     maintenanceMessage: null, globalDailyPoolCents: 100000000, playerEconomy: {}, marketerEconomy: {}, payments: {}, version: 3, updatedAt: null } },
+  // UI-D fixtures
+  '/platform/payment-providers/config': { providers: [
+    { code: 'megapay', schema: { code: 'megapay', displayName: 'Mega Pay', docsUrl: 'https://megapay.test', blurb: 'M-Pesa STK deposit rail via Mega Pay. Both the API key and the account email travel in every request.', playerAvailable: true, fields: [] },
+      config: { providerCode: 'megapay', settings: {}, secretMeta: {}, hasSecret: false, exists: false, updatedAt: null } },
+    { code: 'paystack', schema: { code: 'paystack', displayName: 'Paystack', docsUrl: 'https://paystack.test', blurb: 'Signs webhooks (HMAC-SHA512).', playerAvailable: false, fields: [] },
+      config: { providerCode: 'paystack', settings: {}, secretMeta: {}, hasSecret: false, exists: false, updatedAt: null } }] },
+  '/platform/payment-providers': { providers: [{ code: 'megapay', displayName: 'Mega Pay', enabledGlobal: false, sortOrder: 1 }], overrides: [] },
   // POOL-1 fixtures
   '/platform/pool/overview': { platformId: PLATFORM, brands: [
     { siteId: SITE, name: 'Tamu Traders', slug: 'tamu', platformId: PLATFORM, platformName: 'Alpha Platform', poolMode: true, withdrawalsEnabled: true,
@@ -374,7 +381,7 @@ try {
     await open(page, '/platform/payment-accounts');
     check('platform admin: the page lists the whole platform and each brand, with who they pay into', await page.getByText('Whole platform · Alpha Platform').isVisible() && await page.getByText('Players pay into the System accounts').isVisible());
     check('platform admin: configs are drafts until go-live (plain statement)', await page.getByText(/drafts until you go live/).isVisible());
-    check('platform admin: readiness is shown as facts (deposits ready / payouts not set up)', await page.getByText('Deposits ready: mpesa').isVisible() && await page.getByText('Payouts (M-Pesa B2C): not set up').isVisible());
+    check('platform admin: readiness is shown as a checklist (deposits ready / withdrawals still needed)', await page.getByText('Ready: M-Pesa').isVisible() && await page.getByText(/Add M-Pesa payout details/).isVisible());
     check('platform admin: a saved secret is write-only (masked, "leave blank to keep")', await page.getByText(/saved •••• 1234 — leave blank to keep/).isVisible());
     await page.getByLabel('Business shortcode').fill('600222');
     await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.waitForTimeout(400);
@@ -514,6 +521,15 @@ try {
     check('POOL-1: Controls & economy no longer duplicates the pool; it links to it', !(await page.getByText('Global withdrawal pool').count()) && await page.getByText('Open Withdrawal pool →').isVisible().catch(() => false));
     await open(page, '/platform/pool');
     check('POOL-1: the owner can view every platform at once', await page.getByRole('option', { name: 'All platforms' }).count() === 1);
+    await ctx.close(); }
+
+  // UI-D: Gateways as one list incl. M-Pesa, with an in-place "offered to players" switch and plain language.
+  { const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner });
+    await open(page, '/platform/payments');
+    const list = await page.getByRole('list', { name: 'Gateways' }).innerText().catch(() => '');
+    check('UI-D: Gateways lists M-Pesa first, with the other gateways', list.indexOf('M-Pesa (Daraja)') >= 0 && list.indexOf('M-Pesa (Daraja)') < list.indexOf('Mega Pay'), list.slice(0, 120));
+    check('UI-D: no developer jargon in the gateway list (HMAC, Basic Auth)', !/HMAC|Basic Auth/.test(list));
+    check('UI-D: a gateway that is not set up cannot be switched on for players', await page.getByRole('switch', { name: /Offer .* to players/ }).first().isDisabled().catch(() => false));
     await ctx.close(); }
 } finally {
   await browser.close();

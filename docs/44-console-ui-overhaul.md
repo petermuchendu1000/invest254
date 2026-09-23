@@ -66,3 +66,23 @@ with current page + Log out + Escape, no sideways scroll) — 15 failed before, 
 - **Overview trends.** A metric with no activity in the earlier half shows "New", never a fake "▲100%". Each metric is coloured by what counts as good news for it.
 - **User page.** Read-only overrides are shown as values.
 - **Tabs.** `PageTabs` (underline tabs, arrow-key navigation, scrolls on phones) replaces the old tab controls. `useTabParam` keeps the open tab in the URL. The brand page gains an Add-ons tab.
+
+## UI-D — Payment accounts and Gateways (owner request, 2026-09-23)
+
+- **Gateways** (`/platform/payments`) is now one list, following the Stripe "payment methods" pattern:
+  - M-Pesa is listed first. It used to be missing from this page.
+  - Each row shows a plain-language description and what the gateway offers (Deposits / Payouts).
+  - Status is one word or phrase: Live, Ready · not offered, Not set up, or Coming soon. This replaces "Hidden" and "Config only".
+  - Each row has an in-place **Offered to players** switch. It is disabled until the gateway is set up, and turning it off asks for confirmation.
+  - A summary line counts the live gateways.
+- **Gateway detail:**
+  - A status pill sits next to the name, with a plain description.
+  - A **Setup** checklist shows Credentials saved, Connection tested and Offered to players.
+  - Per-brand availability is a list of every brand with Default / On / Off. Before, you had to pick a brand first.
+  - Jargon is gone: "AES-256-GCM", "clients", and so on.
+- **Payment accounts:**
+  - Go-live readiness is a two-step checklist (Deposits, Withdrawals) that says what is still needed. The disabled Go-live button says why it is disabled.
+  - Gateway cards show chevrons and plain descriptions, and missing fields are listed in words.
+  - A single-option environment is shown as read-only text.
+  - The M-Pesa labels are plain: Deposit type, Payout shortcode, Initiator name, Payout type. The shared engine schema changed only its labels; the keys are unchanged.
+- **Tests:** role e2e +3, plus the payment-accounts readiness check updated (142/142 pass).
