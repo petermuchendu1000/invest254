@@ -1,5 +1,6 @@
 'use client';
 
+import { PageTabs, useTabParam } from '@/components/admin/Tabs';
 import { useState } from 'react';
 import { formatKes, kesToCents } from '@invest254/shared/money';
 import { PageHeader, Section, TableWrap, Th, Td, Toolbar, FilterSelect, Empty, PasswordConfirmButton } from '@/components/admin/ui';
@@ -32,13 +33,15 @@ import { formatDateTime } from '@/lib/format';
 
 type Tab = 'referral' | 'wallets' | 'expenses' | 'advances' | 'affiliate';
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'referral', label: 'Referral payouts' },
-  { id: 'wallets', label: 'Marketer wallets' },
-  { id: 'expenses', label: 'Expenses' },
-  { id: 'advances', label: 'Advances' },
-  { id: 'affiliate', label: 'Affiliate payouts' },
+// UI-C: each tab says what it holds (the two "payouts" tabs were indistinguishable).
+const TABS: { id: Tab; label: string; hint: string }[] = [
+  { id: 'referral', label: 'Referral payouts', hint: 'Cash-outs of the commission marketers earn on their referrals’ deposits.' },
+  { id: 'wallets', label: 'Marketer wallets', hint: 'Each marketer’s demo wallet: credit, debit and reset.' },
+  { id: 'expenses', label: 'Expenses', hint: 'Costs you record against a marketer (promotion, airtime, etc.).' },
+  { id: 'advances', label: 'Advances', hint: 'Marketers asking to be paid ahead of their earnings.' },
+  { id: 'affiliate', label: 'Affiliate payouts', hint: 'Cash-outs of the revenue share marketers earn on their players’ play.' },
 ];
+const TAB_IDS = TABS.map((t) => t.id);
 
 const PAYOUT_STATUSES = [
   { value: 'requested', label: 'Requested' },
@@ -82,27 +85,17 @@ function KesInput({ value, onChange, placeholder }: { value: string; onChange: (
 }
 
 export default function MarketerFinancePage() {
-  const [tab, setTab] = useState<Tab>('referral');
+  const [tab, setTab] = useTabParam<Tab>(TAB_IDS, 'referral');
   return (
     <>
       <PageHeader
         title="Marketer payouts"
-        subtitle="Payout queues, marketer wallets, and the expense ledger — every marketer money flow in one place."
+        subtitle="Everything paid to or recorded against your marketers."
       />
 
-      <div className="flex gap-1 rounded-xl border border-border bg-surface p-1">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              tab === t.id ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-surface-2 hover:text-fg'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="flex flex-col gap-2">
+        <PageTabs tabs={TABS} value={tab} onChange={setTab} label="Marketer money" />
+        <p className="text-sm text-muted">{TABS.find((t) => t.id === tab)?.hint}</p>
       </div>
 
       {tab === 'referral' && <ReferralPayouts />}

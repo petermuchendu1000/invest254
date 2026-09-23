@@ -16,6 +16,7 @@ import { useCan } from '@/lib/auth/can';
 import { useGameConfig, useUpdateGameConfig, useWithdrawalPool, useSetWithdrawalPool, useWithdrawalsEnabled, useSetWithdrawalsEnabled } from '@/lib/admin/hooks';
 import { formatNumber } from '@/lib/format';
 import { formatKes } from '@invest254/shared/money';
+import { PageTabs, useTabParam } from '@/components/admin/Tabs';
 
 /** Expandable section (accordion) — remembers its own open state; the spine of Client Detail. */
 export function Expandable({
@@ -574,34 +575,23 @@ const DETAIL_TABS = [
   { id: 'economy', label: 'Economy' },
   { id: 'pool', label: 'Pool & payouts', ownerOnly: true },
   { id: 'payments', label: 'Payments' },
+  { id: 'addons', label: 'Add-ons' },
   { id: 'legal', label: 'Legal' },
   { id: 'players', label: 'Players' },
   { id: 'audit', label: 'Audit' },
 ] as const;
 type DetailTab = (typeof DETAIL_TABS)[number]['id'];
 
-export function ClientDetail({ site }: { site: SiteWithConfig }) {
-  const [tab, setTab] = useState<DetailTab>('identity');
+const DETAIL_TAB_IDS = DETAIL_TABS.map((t) => t.id) as DetailTab[];
+
+export function ClientDetail({ site, addons }: { site: SiteWithConfig; addons?: React.ReactNode }) {
+  // UI-C: the open tab lives in the URL (?tab=…), so it can be linked and survives a reload.
+  const [tab, setTab] = useTabParam<DetailTab>(DETAIL_TAB_IDS, 'identity');
   const ownerSettings = useCan('console.site.owner_settings');
   const tabs = DETAIL_TABS.filter((t) => !('ownerOnly' in t && t.ownerOnly) || ownerSettings);
   return (
     <div className="flex flex-col gap-4">
-      {/* Tab bar */}
-      <div className="table-wrapper overflow-x-auto">
-        <div className="flex min-w-max gap-1 border-b border-border">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              aria-current={tab === t.id ? 'page' : undefined}
-              className={`shrink-0 border-b-2 px-3.5 py-2 text-sm font-medium transition ${tab === t.id ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageTabs tabs={tabs} value={tab} onChange={setTab} label="Brand settings" />
 
       <div className="rounded-2xl border border-border bg-surface p-4">
         {tab === 'identity' ? <IdentitySection site={site} /> : null}
@@ -614,6 +604,7 @@ export function ClientDetail({ site }: { site: SiteWithConfig }) {
         ) : null}
         {tab === 'economy' ? <EconomySection site={site} /> : null}
         {tab === 'payments' ? <PaymentsSection site={site} /> : null}
+        {tab === 'addons' ? addons ?? null : null}
         {tab === 'legal' ? <LegalSection site={site} /> : null}
         {tab === 'players' ? <PlayersSection site={site} /> : null}
         {tab === 'audit' ? <AuditSection site={site} /> : null}
