@@ -20,7 +20,7 @@ const fmtPct = (x: number): string => (Number.isFinite(x) ? (x * 100).toFixed(2)
 const fmtMult = (x: number): string => (Number.isFinite(x) ? x.toFixed(2) : '—');
 import { PageHeader, Section, TableWrap, Th, Td, Empty, ConfirmButton } from '@/components/admin/ui';
 import { useGameConfig, useUpdateGameConfig, useWithdrawalPool, useSetWithdrawalPool } from '@/lib/admin/hooks';
-import { SuperadminOnly } from '@/components/admin/SuperadminOnly';
+import { RequireCapability } from '@/components/auth/RequireCapability';
 import type { GameConfigPatch, GameConfigRow } from '@/lib/admin/types';
 
 // Editable engine knobs. `kes` fields are cents edited in KES; `pct` fields are fractions
@@ -151,7 +151,7 @@ function GameBody() {
                 </span>
               </span>
             </div>
-            <SuperadminOnly>
+            <RequireCapability cap="backoffice.governance" title="Owner-only area" hint="System governance is managed by the system owner from their own console session.">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 p-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-fg">Pool mode (players)</p>
@@ -198,7 +198,7 @@ function GameBody() {
                   />
                 </button>
               </div>
-            </SuperadminOnly>
+            </RequireCapability>
             {cfg.poolMode ? (
               <div className="rounded-xl border border-accent/40 bg-accent/5 p-3 text-xs text-muted">
                 <span className="font-semibold text-fg">Pool mode is ON.</span> Payouts are governed by the{' '}
@@ -366,8 +366,8 @@ function WithdrawalPoolSection() {
 
 export default function GamePage() {
   return (
-    <SuperadminOnly>
+    <RequireCapability cap="backoffice.governance" title="Owner-only area" hint="System governance is managed by the system owner from their own console session.">
       <GameBody />
-    </SuperadminOnly>
+    </RequireCapability>
   );
 }

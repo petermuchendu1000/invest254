@@ -16,9 +16,9 @@ export function usePlatformOverview() {
 }
 
 // ── Platform tier governance (Issue 1) ──
-export function usePlatforms() {
+export function usePlatforms(enabled = true) {
   const t = useTok();
-  return useQuery({ queryKey: ['platform', 'platforms'], queryFn: () => platformApi.platforms(t), enabled: !!t });
+  return useQuery({ queryKey: ['platform', 'platforms'], queryFn: () => platformApi.platforms(t), enabled: !!t && enabled });
 }
 export function usePlatformsOverview() {
   const t = useTok();

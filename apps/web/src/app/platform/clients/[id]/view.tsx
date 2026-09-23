@@ -8,24 +8,17 @@ import { usePlatformSites, useImpersonate } from '@/lib/platform/hooks';
 import { startImpersonation } from '@/lib/platform/impersonate';
 import { ClientDetail } from '@/components/platform/ClientDetail';
 import { BrandAddons } from '@/components/addons/BrandAddons';
-import { useSession } from '@/lib/auth/session';
 import type { SiteWithConfig } from '@/lib/platform/endpoints';
 
 /**
- * Enter this brand's admin console, fenced to the brand. The label + minted session match the
- * OPERATOR'S tier (server-enforced in /platform/sites/:id/impersonate):
- *   - System owner (platform_superadmin) -> a brand-scoped SUPERADMIN session (full governance).
- *   - Platform admin                     -> a brand-scoped ADMIN session (Operations, scoped to their
- *                                            platform). A platform admin is NEVER offered or granted a
- *                                            superadmin session (was a leak/escalation).
+ * Open this brand's back office. For BOTH the system owner and a platform admin the server mints a
+ * brand-scoped `admin` session (Issue 1 / F1, Option B) marked with an `act` claim (docs/42 UI-3), so
+ * the label says exactly that (docs/42 UI-13 — it used to promise a "platform admin"/"superadmin" session).
  */
 function ImpersonateButton({ siteId, brandName }: { siteId: string; brandName: string }) {
   const impersonate = useImpersonate();
-  const isSystemOwner = useSession((s) => s.user?.role) === 'platform_superadmin';
-  const label = isSystemOwner ? 'Log in as brand admin ↗' : 'Log in as platform admin ↗';
-  const title = isSystemOwner
-    ? `Open ${brandName}'s admin console as a brand admin`
-    : `Open ${brandName}'s admin console as platform admin (scoped to your platform)`;
+  const label = 'Open brand as admin ↗';
+  const title = `Open ${brandName}'s back office as its admin (you can leave at any time from the banner)`;
   return (
     <Button
       size="sm"

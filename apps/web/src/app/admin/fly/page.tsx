@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { PageHeader, Section } from '@/components/admin/ui';
-import { SuperadminOnly } from '@/components/admin/SuperadminOnly';
+import { RequireCapability } from '@/components/auth/RequireCapability';
 import { useFlyStatus, useFlyRestart } from '@/lib/admin/hooks';
 
 function FlyBody() {
@@ -40,7 +40,7 @@ function FlyBody() {
     <div className="space-y-6">
       <Section title="Fly.io engine restart">
         <p className="text-sm text-muted">
-          Restart the Fly machines running the API/engine so freshly deployed code picks up. Superadmin only.
+          Restart the Fly machines running the API/engine so freshly deployed code picks up. System owner only.
         </p>
         <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-5">
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -98,9 +98,9 @@ export default function FlyAdminPage() {
   return (
     <>
       <PageHeader title="Fly.io" subtitle="Deployment controls — restart the engine after shipping updates." />
-      <SuperadminOnly>
+      <RequireCapability cap="backoffice.governance" title="Owner-only area" hint="System governance is managed by the system owner from their own console session.">
         <FlyBody />
-      </SuperadminOnly>
+      </RequireCapability>
     </>
   );
 }

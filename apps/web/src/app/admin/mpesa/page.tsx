@@ -7,10 +7,10 @@ import { Input } from '@/components/ui/Input';
 import { formatRelativeTime } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
-import { useSession } from '@/lib/auth/session';
 import { PageHeader, Section, Empty, FilterSelect } from '@/components/admin/ui';
 import { useMpesaConfig, useUpdateMpesaConfig } from '@/lib/admin/hooks';
-import { SuperadminOnly } from '@/components/admin/SuperadminOnly';
+import { RequireCapability } from '@/components/auth/RequireCapability';
+import { useCan } from '@/lib/auth/can';
 import type { MpesaConfigPatch, MpesaConfigRow } from '@/lib/admin/types';
 import { env as appEnv } from '@/lib/env';
 import { defaultMpesaEndpoints, DEFAULT_MPESA_ENV } from '@/lib/admin/mpesaDefaults';
@@ -45,10 +45,9 @@ function MpesaBody() {
   const cfgQ = useMpesaConfig();
   const update = useUpdateMpesaConfig();
   const toast = useToast();
-  const role = useSession((s) => s.user?.role);
+  const canEdit = useCan('backoffice.governance');   // docs/42: token role via the shared capability list
   // Owner-tier edit is SYSTEM-only (Issue 1 / F1): only the platform owner (platform_superadmin)
   // may edit M-Pesa config; it moved out of the site back-office into the system console.
-  const canEdit = role === 'platform_superadmin';
 
   const cfg = cfgQ.data;
   const [env, setEnv] = useState(DEFAULT_MPESA_ENV);
@@ -228,8 +227,8 @@ function MpesaBody() {
 
 export default function MpesaConfigPage() {
   return (
-    <SuperadminOnly>
+    <RequireCapability cap="backoffice.governance" title="Owner-only area" hint="System governance is managed by the system owner from their own console session.">
       <MpesaBody />
-    </SuperadminOnly>
+    </RequireCapability>
   );
 }

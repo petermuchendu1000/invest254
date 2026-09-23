@@ -1,4 +1,5 @@
 'use client';
+import { RequireCapability } from '@/components/auth/RequireCapability';
 
 import { useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -32,7 +33,7 @@ function fieldsText(fields: unknown): string {
   try { const s = JSON.stringify(fields); return s === '{}' ? '' : s; } catch { return String(fields); }
 }
 
-export default function SystemLogsPage() {
+function SystemLogsPageInner() {
   const [app, setApp] = useState('');
   const [level, setLevel] = useState('');
   const [qInput, setQInput] = useState('');
@@ -136,4 +137,9 @@ function Row({ r }: { r: AdminSystemLogRow }) {
       </Td>
     </tr>
   );
+}
+
+/** docs/42 UI-7: gate BEFORE the page mounts, so no request is made that the session will be refused. */
+export default function SystemLogsPage() {
+  return <RequireCapability cap="backoffice.logs" title="System logs are owner-only"><SystemLogsPageInner /></RequireCapability>;
 }
