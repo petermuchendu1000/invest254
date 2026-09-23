@@ -42,6 +42,7 @@ const DOMAIN_STATUS: Readonly<Record<string, number>> = {
   MEGAPAY_VERIFY_PENDING: 409,   // callback arrived but status not yet final -> caller/retry + reconcile settles it
   MPESA_B2C_NOT_CONFIGURED: 503, // withdrawal payout attempted but Daraja B2C initiator/credential unset
   // PAY-1 (docs/43): a brand on its own payment accounts
+  PAYOUT_PHONE_MISMATCH: 400,    // F-49 (0161): withdrawals are paid only to the registered number
   GATEWAY_NOT_CONFIGURED: 503,   // the brand's payment owner has no complete account for this rail (never re-routed)
   PAYBILL_NOT_AVAILABLE: 403,    // the manual Pay Bill is the System owner's; not offered on own accounts
   INVALID_SCOPE: 500,

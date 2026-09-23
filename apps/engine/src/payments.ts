@@ -200,6 +200,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   async createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents, siteId?: string): Promise<CreateWithdrawalResult> {
     if (amountCents <= 0) throw new Error("INVALID_AMOUNT");
     if (amountCents < minCents) throw new Error("BELOW_MIN");
+    // F-49 (0161): pay out only to the registered number (when the double knows it).
+    const registered = this.phones.get(userId);
+    const sig9 = (x: string) => x.replace(/\D/g, "").slice(-9);
+    if (registered !== undefined && (sig9(phone).length < 9 || sig9(phone) !== sig9(registered))) throw new Error("PAYOUT_PHONE_MISMATCH");
     const bal = this.balances.get(userId);
     if (bal === undefined) throw new Error("WALLET_NOT_FOUND");
     if (bal < amountCents) throw new Error("INSUFFICIENT_FUNDS");
