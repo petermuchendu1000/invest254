@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSite, adminScopeSite, adminListSite, rateLimit, DEFAULT_SITE_ID, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSite, requireEarningRole, adminScopeSite, adminListSite, rateLimit, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import { assertUserTarget, assertSiteTarget } from "./scope.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
@@ -24,6 +24,7 @@ const AFFILIATE_STATUS: Readonly<Record<string, number>> = {
   USER_NOT_FOUND: 404,
   NOT_FOUND: 404,
   NOT_AFFILIATE: 404,
+  OPERATOR_NOT_ELIGIBLE: 403,   // docs/42 UI-12 (DB: fn_affiliate_enroll refuses operator profiles)
   INVALID_PERIOD: 400,
   PAYOUT_NOT_FOUND: 404,
   NO_AVAILABLE_COMMISSION: 409,
@@ -64,7 +65,11 @@ async function domain<T>(fn: () => Promise<T>): Promise<T> {
 export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
   const auth = requireAuth(deps.verifier);
   const admin = requireSiteAdmin("admin");
-  const marketer = requireRole("marketer");
+  // Marketer earning routes: EXACTLY a marketer. requireRole is a minimum rank (an admin would pass),
+  // so requireEarningRole also refuses every operator tier (docs/42 UI-12: operators are never affiliates).
+  const earner = requireEarningRole();
+  const marketerRank = requireRole("marketer");
+  const marketer = async (ctx: Ctx) => { await earner(ctx); await marketerRank(ctx); };
   // Marketer-facing routes run under requireSite: a marketer's identity is brand-bound, so this
   // both makes ctx.siteId available and rejects a token that names a different brand (?site=).
   const site = requireSite();
@@ -88,7 +93,7 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     return { recorded };
   });
 
-  router.post(`${BASE}/affiliate/enroll`, auth, site, async (ctx: Ctx) => {
+  router.post(`${BASE}/affiliate/enroll`, auth, earner, site, async (ctx: Ctx) => {
     const e = await domain(() => deps.affiliate.enroll(ctx.claims!.userId));
     // Enrollment promotes player -> marketer in the DB, but the caller's JWT still carries the
     // old role. Reissue a token that reflects the new role so the marketer-gated dashboard routes

@@ -18,11 +18,26 @@ test("docs/42 UI-3: an impersonated brand session ('admin') never holds an owner
   }
 });
 
+const isEarning = (cap: string) => cap.startsWith("earn.");
+const OPERATORS = ["admin", "platform_admin", "platform_superadmin"] as const;
+
 test("docs/42: players and marketers hold no operator capability; every capability has at least one tier", () => {
   for (const cap of ALL_CAPABILITIES) {
-    assert.equal(can("player", cap), false, cap);
-    assert.equal(can("marketer", cap), false, cap);
+    if (!isEarning(cap)) {
+      assert.equal(can("player", cap), false, cap);
+      assert.equal(can("marketer", cap), false, cap);
+    }
     assert.ok(CAPABILITIES[cap].length > 0, cap);
   }
   assert.equal(can("platform_admin", "backoffice.enter"), false, "a raw platform admin works a brand only by opening it");
+});
+
+test("docs/42 UI-12: operators never hold an earning capability; players and marketers do", () => {
+  const earning = ALL_CAPABILITIES.filter(isEarning);
+  assert.ok(earning.length >= 2, "earning capabilities exist");
+  for (const cap of earning) for (const op of OPERATORS) assert.equal(can(op, cap), false, `${op} ${cap}`);
+  assert.equal(can("player", "earn.referrals"), true);
+  assert.equal(can("marketer", "earn.referrals"), true);
+  assert.equal(can("marketer", "earn.marketer_dashboard"), true);
+  assert.equal(can("player", "earn.marketer_dashboard"), false);
 });
