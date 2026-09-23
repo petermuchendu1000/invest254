@@ -29,6 +29,7 @@ import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
 import { registerSubscriptionRoutes } from "./app.subscriptions.js";
 import { registerAddonRoutes, type AddonDeps } from "./app.addons.js";
 import { registerTicketRoutes } from "./app.tickets.js";
+import { registerPaymentScopeRoutes } from "./app.paymentscopes.js";
 import type { PlatformOnboardDeps, RegistrarConfigDeps } from "./app.platform.js";
 import type { Server } from "node:http";
 
@@ -268,6 +269,8 @@ export interface ApiDeps {
    * domain across Cloudflare + Namecheap. Optional; when absent the /platform/onboard route 503s.
    */
   platformOnboard?: PlatformOnboardDeps;
+  /** PAY-1 (docs/43): per-platform / per-brand payment accounts. Absent -> the routes answer 503. */
+  paymentScopes?: import("@invest254/engine").PaymentScopeService | undefined;
   /** Per-platform domain-registrar (Namecheap) configuration service (Issue 1 #3). */
   registrarConfig?: RegistrarConfigDeps;
   /** Add-on catalog / entitlements / requests service (Issue 2). */
@@ -391,6 +394,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerSupportRoutes(router, deps);
   registerSubscriptionRoutes(router, deps);
   registerAddonRoutes(router, deps);
+  registerPaymentScopeRoutes(router, deps);
   registerTicketRoutes(router, deps);
   return router;
 }

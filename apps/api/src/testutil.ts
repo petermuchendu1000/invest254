@@ -6,6 +6,7 @@ import {
   SubscriptionService, InMemorySubscriptionRepository, TicketService, InMemoryTicketRepository,
   NotificationService, InMemoryNotificationRepository,
   PushService, InMemoryPushSubscriptionRepository,
+  PaymentScopeService, InMemoryPaymentScopeRepository,
   type PushSubscriptionRow, type PushSendResult, type WithdrawalRequestedEvent,
   type FairnessRecord, type AuthClaims, type Verifier,
 } from "@invest254/engine";
@@ -724,6 +725,10 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     platformOnboard: onboardDeps,
     registrarConfig,
     addons,
+    // PAY-1: an empty in-memory scope store (no scope configured -> every brand on the System accounts).
+    paymentScopes: new PaymentScopeService(new InMemoryPaymentScopeRepository(), {
+      callbacks: async () => ({ stkCallbackUrl: "", b2cResultUrl: "", b2cTimeoutUrl: "" }),
+    }),
     ...opts.depsOverrides,
   };
 

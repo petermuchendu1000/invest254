@@ -5,6 +5,36 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #63 — PAY-1: platform admins can run their platform / brands on their OWN payment accounts, honoured by live payments (owner decision 2026-09-23) — DONE (branch `feat/pay1-payment-scopes`, migration 0160, docs/43)
+- **Before:**
+  - Every deposit, verification and payout used ONE System-wide account set: the `mpesa_config` singleton and the global Mega Pay / PayHero rows.
+  - The per-brand M-Pesa fields on the brand page were editable by platform admins but **never read by payments**. The page itself said live routing used the platform-wide config, and was misleading.
+  - Per-site `payment_provider_config` rows could exist, but nothing wrote or read them.
+- **Design:** docs/43.
+  - **Payment owner.** A brand's payment owner is its own scope if active, else its platform's scope if active, else the System.
+  - **Drafts until go-live.** Non-global configs stay drafts until an explicit go-live. Go-live is audited and the System owner is notified.
+  - **Money-safety invariants, enforced and tested:**
+    - (1) No mixing across owners: scoped clients never use env, a stub or a parent scope's account, and an unset rail is refused rather than re-routed.
+    - (2) Payouts follow the owner and are refused before approval when the owner cannot pay, so no withdrawal is stranded in processing.
+    - (3) Verification and reconcile use the scope recorded on the transaction, so deposits in flight survive a switch.
+    - (4) Platform admins cannot set sandbox mode, base URLs, callback URLs or CIDRs. Enforced in the database and the API; otherwise they could point verification at a fake provider.
+    - (5) Go-live needs a ready deposit rail, plus a payout account or an explicit "deposits only".
+    - (6) The System's manual Pay Bill is hidden and refused for brands on their own accounts.
+- **Also:**
+  - Platform admins may switch entitled gateways on or off for their own brands.
+  - Affiliate B2C payouts follow the owner too.
+  - Owner and client caches are invalidated by NOTIFY, with a TTL backstop.
+- **Production at deploy:** behaviour-neutral. No scope is active, so every brand stays on the System accounts, and the legacy global RPCs ignore platform rows.
+- **Tests:**
+  - DB e2e 63/63.
+  - Engine money-invariant suite 11/11.
+  - Real-schema money path (pg).
+  - API 5/5.
+  - F-44 cross-tenant matrix and capability contract extended.
+  - Browser role e2e 89/89.
+
+---
+
 ## #62 — M-Pesa Till number, B2C shortcode and B2C CommandID could never take effect (PAY-0, found while designing PAY-1) — FIXED (branch `fix/pay0-mpesa-till-b2c-fields`)
 - **What:** two independent drops.
   - (A) `resolveDarajaConfig` rebuilt the live Daraja config from `mpesa_config` **without** `transactionType`, `tillNumber`, `b2cShortcode` or `b2cCommandId`. A Till (Buy Goods) configuration would have gone out as a Paybill STK to the paybill shortcode, and B2C always paid from the STK shortcode with `BusinessPayment`.

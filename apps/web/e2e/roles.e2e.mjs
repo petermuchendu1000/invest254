@@ -79,6 +79,23 @@ const FIXTURES = {
     minStakeCents: null, maxStakeCents: null, notes: null, updatedBy: null, updatedAtMs: null },
   '/platform/audit-log': { items: [{ id: '9', actorId: 'u-admin', actorRole: 'admin', actorUsername: 'siteadmin', action: 'user.set_status',
     targetType: 'user', targetId: 'u-target', detail: { status: 'suspended' }, createdAtMs: Date.now() - 60000, siteId: SITE, siteName: 'Tamu Traders' }], nextCursor: null },
+  '/platform/payment-scopes': { platformId: PLATFORM, scopes: [
+    { scopeType: 'platform', scopeId: PLATFORM, name: 'Alpha Platform', active: false, payoutsEnabled: true, activatedAtMs: null },
+    { scopeType: 'site', scopeId: SITE, name: 'Tamu Traders', active: false, payoutsEnabled: true, activatedAtMs: null }] },
+  [`/platform/payment-scopes/platform/${PLATFORM}`]: {
+    scope: { type: 'platform', id: PLATFORM },
+    state: { scopeType: 'platform', scopeId: PLATFORM, name: 'Alpha Platform', active: false, payoutsEnabled: true, activatedAtMs: null },
+    schemas: {
+      mpesa: { code: 'mpesa', displayName: 'M-Pesa (Daraja)', docsUrl: '', blurb: 'Your own Daraja app', playerAvailable: true, fields: [
+        { key: 'environment', label: 'Environment', kind: 'select', secret: false, required: true, options: [{ value: 'production', label: 'Production (live money)' }] },
+        { key: 'shortcode', label: 'Business shortcode', kind: 'text', secret: false, required: true, group: 'Deposits (STK)' },
+        { key: 'consumer_key', label: 'Consumer key', kind: 'secret', secret: true, required: true, group: 'App credentials' },
+        { key: 'passkey', label: 'Lipa na M-Pesa passkey', kind: 'secret', secret: true, required: false, group: 'Deposits (STK)' }] },
+    },
+    configs: { mpesa: { providerCode: 'mpesa', scopeType: 'platform', scopeId: PLATFORM, settings: { environment: 'production', shortcode: '600111' },
+      secretMeta: { consumer_key: { set: true, last4: '1234' } }, hasSecret: true, updatedAt: null, exists: true } },
+    status: { mpesa: { configured: true, depositsReady: true, payoutsReady: false, missing: ['b2cInitiator', 'b2cSecurityCredential'] } },
+  },
   '/platform/registrar/config': { platformId: PLATFORM, providerCode: 'namecheap', settings: {}, secretMeta: {}, hasSecret: false, encVersion: 1,
     updatedAt: null, exists: false, egressIp: '203.0.113.7', encryptionConfigured: true },
 };
@@ -304,6 +321,34 @@ try {
   { const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner });
     await open(page, '/platform'); const nav = await navTexts(page);
     check('owner: nav keeps the global Audit log and no duplicate Brand audit', nav.some((n) => n.includes('Audit log')) && !nav.some((n) => n.includes('Brand audit')), nav.join('|'));
+    await ctx.close(); }
+
+  // 10) PAY-1 (docs/43): payment accounts — platform admins bring their own gateway accounts
+  { const { ctx, page, bodies } = await session(browser, { token: T.pa, me: ME.pa });
+    await open(page, '/platform'); const nav = await navTexts(page);
+    check('platform admin: nav has "Payment accounts"', nav.some((n) => n.includes('Payment accounts')), nav.join('|'));
+    await open(page, '/platform/payment-accounts');
+    check('platform admin: the page lists the whole platform and each brand, with who they pay into', await page.getByText('Whole platform · Alpha Platform').isVisible() && await page.getByText('Players pay into the System accounts').isVisible());
+    check('platform admin: configs are drafts until go-live (plain statement)', await page.getByText(/drafts until you go live/).isVisible());
+    check('platform admin: readiness is shown as facts (deposits ready / payouts not set up)', await page.getByText('Deposits ready: mpesa').isVisible() && await page.getByText('Payouts (M-Pesa B2C): not set up').isVisible());
+    check('platform admin: a saved secret is write-only (masked, "leave blank to keep")', await page.getByText(/saved •••• 1234 — leave blank to keep/).isVisible());
+    await page.getByLabel('Business shortcode').fill('600222');
+    await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.waitForTimeout(400);
+    const put = bodies.find(([k]) => k === `PUT /platform/payment-scopes/platform/${PLATFORM}/gateways/mpesa`);
+    check('platform admin: saving sends the account for ITS platform (secret left blank = keep)', put && put[1]?.shortcode === '600222' && put[1]?.consumer_key === '', JSON.stringify(put));
+    await page.getByRole('button', { name: 'Go live on these accounts…' }).click(); await page.waitForTimeout(300);
+    check('platform admin: go-live states the blast radius (deposits to YOUR accounts, owner notified)', await page.getByText(/Deposits go to/).isVisible() && await page.getByText(/The System owner is notified/).isVisible());
+    const goLive = page.getByRole('button', { name: 'Go live', exact: true });
+    check('platform admin: without a payout account, go-live needs an explicit "withdrawals disabled" acknowledgement', await goLive.isDisabled());
+    await page.getByRole('checkbox').check();
+    check('...and is allowed once acknowledged', !(await goLive.isDisabled()));
+    await goLive.click(); await page.waitForTimeout(400);
+    const act = bodies.find(([k]) => k === `POST /platform/payment-scopes/platform/${PLATFORM}/activate`);
+    check('platform admin: go-live sends payoutsEnabled=false (deposits only)', act && act[1]?.payoutsEnabled === false, JSON.stringify(act));
+    await ctx.close(); }
+  { const { ctx, page } = await session(browser, { token: T.admin, me: ME.admin });
+    await open(page, '/platform/payment-accounts');
+    check('site admin: /platform/payment-accounts is a 404', await page.getByText('This page could not be found.').isVisible());
     await ctx.close(); }
 } finally {
   await browser.close();

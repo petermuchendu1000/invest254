@@ -34,6 +34,8 @@ const NAV = [
   { href: '/platform/onboard', label: 'Onboard client', icon: <Icon d="M12 5v14M5 12h14" /> },
   { href: '/platform/registrar', label: 'Domain registrar', icon: <Icon d="M3 12a9 9 0 1018 0 9 9 0 00-18 0zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18" /> },
   { href: '/platform/pool', label: 'Withdrawal pool', icon: <Icon d="M3 7h18M3 12h18M3 17h18M6 3v18" /> },
+  // PAY-1 (docs/43): a platform's own gateway accounts (whole platform or per brand) — platform admins + owner.
+  { href: '/platform/payment-accounts', label: 'Payment accounts', icon: <Icon d="M2 7h20v10H2zM2 11h20M6 15h4" /> },
   // docs/42 UI-10: a platform admin's ONE audit trail across its brands (the owner has the global Audit log).
   { href: '/platform/activity', label: 'Brand audit', platformOnly: true, icon: <Icon d="M9 12l2 2 4-4M12 3l7 4v5c0 4.5-3 8.5-7 9-4-.5-7-4.5-7-9V7z" /> },
   { href: '/platform/payments', label: 'Payments', system: true, icon: <Icon d="M3 10h18M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z" /> },
