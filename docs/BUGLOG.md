@@ -5,12 +5,13 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
-## #48 — Merges migrated production but never shipped the code: the Fly deploy jobs failed silently (deploy pipeline) — HARDENED (branch `ci/deploy-preflight-and-verify`); ⚠️ `FLY_API_TOKEN` secret must be replaced (owner action)
+## #48 — Merges migrated production but never shipped the code: the Fly deploy jobs failed silently (deploy pipeline) — HARDENED (branch `ci/deploy-preflight-and-verify`); root cause: overdue Fly invoice (paid)
 - **What:** every backend merge since 2026-09-23 06:25Z (F-43 → F-47, six runs) ran `verify` and `migrate` — migrations 0153–0156 are in production — but produced **no Fly release**: `invest254-api` stayed on v156 and `invest254-engine-pm` on v119 (2026-09-22 20:50Z). The API/engine code fixes for F-43, F-44, F-46 and F-47 were therefore not live.
 - **Evidence:** until then each backend merge produced a release ~3 min later (19f0870 → v154, 415d3fd → v155, 49069df → v156). Nothing the image build uses changed after v156 (Dockerfile, fly configs, lockfile, tsconfigs identical), and the latest flyctl (0.4.106) predates the last two good deploys — so the failure is in the deploy job itself. The most likely cause is `FLY_API_TOKEN` being revoked/expired overnight (the secret held a Fly org token, and Fly credentials were reissued for this session). Actions logs are not reachable from the agent sandbox, so this is inferred, not read.
 - **Why it was silent / harmful:** the deploy jobs ran AFTER `migrate`, so a bad token left production migrated but un-deployed, with no signal outside the Actions tab; flyctl was unpinned (`@master` → latest); nothing verified that the release that went live was the merged commit.
 - **Fix (`.github/workflows/deploy.yml`):** new `fly-auth` preflight job (token must reach BOTH apps) runs BEFORE `migrate`, with an explicit error annotation and remediation; flyctl pinned (`FLYCTL_VERSION`); deploys are a `fail-fast: false` matrix; images labelled `git-<sha>`; after each deploy the workflow verifies the latest release carries this commit's label and the API health endpoint returns 200; production-repo-only guard (mirror skips). `HOSTING.md §2.6.1` documents the token (a dedicated long-lived org deploy token) and the rotate-then-re-run procedure. actionlint clean.
-- **Owner action:** create a deploy token (`fly tokens create org -o personal -n github-deploy -x 8760h`) and update the `FLY_API_TOKEN` Actions secret, then re-run Deploy (Fly). Include this secret in every future Fly credential rotation.
+- **Root cause (owner-confirmed 2026-09-23):** an overdue Fly.io invoice blocked deploys; the org tokens are non-expiring and valid. Paid 2026-09-23 ~12:00Z. The deploy step now emits an explicit billing/builder hint on failure.
+- **Owner action (still recommended at rotation time):** create a deploy token (`fly tokens create org -o personal -n github-deploy -x 8760h`) and update the `FLY_API_TOKEN` Actions secret, then re-run Deploy (Fly). Include this secret in every future Fly credential rotation.
 
 ---
 

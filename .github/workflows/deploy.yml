@@ -137,6 +137,10 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config ${{ matrix.config }} --remote-only --image-label "git-${GITHUB_SHA}" --wait-timeout 5m
+      - name: Explain a failed deploy
+        if: failure()
+        run: |
+          echo "::error title=${{ matrix.app }} deploy failed::The token passed preflight, so check (1) Fly billing — an overdue invoice blocks builds/releases (BUGLOG #48, 2026-09-23), (2) the remote builder, (3) the release health checks. Then re-run: Actions → Deploy (Fly) → Run workflow."
       - name: Verify the live release is this commit
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
