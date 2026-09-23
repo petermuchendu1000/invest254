@@ -253,13 +253,18 @@ try {
     check('site admin: the shell names the brand (UI-8)', await page.locator('aside').getByText('Tamu Traders', { exact: true }).isVisible() && await page.locator('aside').getByText('Brand admin', { exact: true }).first().isVisible());
     check('site admin: NO Audit log / Governance / Platform nav', !nav.some((n) => /Audit log|Game config|M-Pesa|Fly\.io|All brands|System logs/.test(n)), nav.join('|'));
     await open(page, '/admin/audit');
-    check('site admin: old /admin/audit forwards to the console, which reveals nothing (404)', page.url().endsWith('/platform/audit') && await page.getByText('This page could not be found.').isVisible(), page.url());
+    check('UI-F site admin: old /admin/audit goes back to the back-office home (was: a console 404)', page.url().endsWith('/admin'), page.url());
     check('site admin: no audit request was ever made', !calls.includes('GET /admin/audit'), calls.filter((c) => c.includes('audit')).join());
     await open(page, '/admin/game');
-    check('site admin: old /admin/game forwards to the console (404 for a site admin)', await page.getByText('This page could not be found.').isVisible(), page.url());
+    check('UI-F site admin: old /admin/game goes back to the back-office home (was: a console 404)', page.url().endsWith('/admin'), page.url());
     await open(page, '/admin/users/u-target');
     check('site admin: "Edit details" and "Role" sections visible', await page.getByText('Edit details', { exact: true }).isVisible().catch(() => false) && await page.getByText('Role', { exact: true }).first().isVisible().catch(() => false));
     check('site admin: overrides are read-only (no Save overrides)', !(await page.getByText('Save overrides').isVisible().catch(() => false)));
+    check('UI-F user page: marketer money is not repeated here (lives in Marketer payouts)', (await page.getByText('Marketer expenses & advances').count()) === 0);
+    check('UI-F user page: brand admins are not appointed from here (console → People)', (await page.locator('option[value="admin"]').count()) === 0);
+    await open(page, '/admin/users?status=suspended');
+    check('UI-F users: a ?status= deep link pre-selects the quick filter', await page.getByRole('button', { name: /^Suspended/ }).getAttribute('aria-pressed').then((v) => v === 'true').catch(() => false));
+    check('UI-F users: one way to open a person (the name), no separate Manage column', (await page.getByRole('columnheader', { name: 'Manage' }).count()) === 0);
     await open(page, '/platform');
     check('site admin: /platform is a 404', await page.getByText('This page could not be found.').isVisible());
     await ctx.close(); }
@@ -270,7 +275,8 @@ try {
     check('owner (own session): /admin shows the brand picker, not an unscoped back office (UI-2)', await page.getByText('Choose a brand to open').isVisible());
     check('owner: no back-office data request was made without a brand', !calls.some((c) => /^GET \/(admin|tickets)/.test(c)), calls.join());
     await open(page, '/platform'); const pnav = await navTexts(page);
-    check('owner console: system nav incl. moved governance (Audit log, System logs, M-Pesa, Deployment)', ['Platforms', 'Gateways', 'Controls & economy', 'Audit log', 'System logs', 'M-Pesa defaults', 'Deployment'].every((x) => pnav.some((n) => n.includes(x))), pnav.join('|'));
+    check('owner console: system nav incl. moved governance (Audit log, System logs, Deployment)', ['Platforms', 'Gateways', 'Controls & economy', 'Audit log', 'System logs', 'Deployment'].every((x) => pnav.some((n) => n.includes(x))), pnav.join('|'));
+    check('UI-F owner console: M-Pesa defaults is reached from Gateways, not a second nav item', !pnav.some((n) => n.includes('M-Pesa defaults')), pnav.join('|'));
     await open(page, '/admin/mpesa');
     check('owner: old /admin/mpesa forwards to /platform/mpesa', page.url().endsWith('/platform/mpesa'), page.url());
     await ctx.close(); }
@@ -294,9 +300,9 @@ try {
     check('platform admin console: NO system nav', !pnav.some((n) => /Platforms|Gateways|Controls|System logs|M-Pesa|Deployment|Brand back office/.test(n)), pnav.join('|'));
     check('ADDON-1: platform admins get Add-ons for their brands', pnav.includes('Add-ons'), pnav.join('|'));
     const paHrefs = await page.locator('aside nav a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
-    check('platform admin console: its only audit trail is the platform-scoped one', paHrefs.includes('/platform/activity') && !paHrefs.includes('/platform/audit'), paHrefs.join('|'));
+    check('UI-F platform admin console: one audit log, the same page as the owner (scoped server-side)', paHrefs.includes('/platform/audit') && !paHrefs.includes('/platform/activity'), paHrefs.join('|'));
     await open(page, '/platform/audit');
-    check('platform admin: /platform/audit is a 404', await page.getByText('This page could not be found.').isVisible());
+    check('UI-F platform admin: /platform/audit opens the audit log', await page.getByRole('heading', { name: 'Audit log' }).isVisible().catch(() => false) && calls.includes('GET /platform/audit-log'), calls.filter((c) => c.includes('audit')).join());
     await open(page, '/platform/onboard');
     check('platform admin: onboarding never calls the owner-only platforms list', !calls.includes('GET /platform/platforms'), calls.filter((c) => c.includes('platforms')).join());
     await open(page, '/admin');
@@ -403,17 +409,11 @@ try {
   // 9) docs/42 UI-10: platform-admin player management + one audit trail
   { const { ctx, page, calls, bodies } = await session(browser, { token: T.pa, me: ME.pa });
     await open(page, `/platform/clients/${SITE}`);
-    await page.getByRole('tab', { name: 'Players' }).click({ timeout: 3000 }).catch(() => page.getByRole('button', { name: 'Players' }).click()); await page.waitForTimeout(300);
-    await page.getByText('@target').first().click(); await page.waitForTimeout(500);
+    await page.getByRole('tab', { name: 'People' }).click(); await page.waitForTimeout(300);
+    await page.locator('section[aria-label="Players"]').getByText('@target').first().click(); await page.waitForTimeout(500);
     check('platform admin: selecting a player shows their money + activity (detail)', await page.getByText('Bonus balance').isVisible() && await page.getByText('KES 20').first().isVisible());
-    await page.getByLabel('Wallet').selectOption('bonus');
-    await page.getByLabel('Amount (KES)').fill('100');
-    await page.getByLabel('Reason').fill('goodwill');
-    await page.getByRole('button', { name: 'Review adjustment' }).click();
-    check('platform admin: the confirm names the wallet and shows before -> after', await page.getByText(/bonus \(non-withdrawable\) balance/).isVisible() && await page.getByText('KES 120').isVisible());
-    await page.getByRole('button', { name: 'Confirm adjustment' }).click(); await page.waitForTimeout(400);
-    const adj = bodies.find(([k]) => k === 'POST /platform/sites/' + SITE + '/users/u-target/balance');
-    check('platform admin: the adjustment is sent for the BONUS wallet (was: never sent, always real cash)', adj && adj[1]?.kind === 'bonus' && adj[1]?.amountCents === 10000, JSON.stringify(adj));
+    check('UI-F platform admin: balance changes live in the back office only (no second form here)', (await page.getByRole('button', { name: 'Review adjustment' }).count()) === 0 && await page.getByRole('button', { name: 'Manage in back office' }).isVisible());
+    check('UI-F platform admin: brand admins are managed on the same People tab', await page.getByRole('region', { name: 'Brand admins' }).isVisible().catch(() => false) || await page.getByText('Brand admins', { exact: true }).isVisible());
     await page.getByText('Game overrides for this player').click(); await page.waitForTimeout(400);
     check('platform admin: player overrides are editable in the console (was: no UI)', await page.getByLabel('Win rate (0–1)').isVisible());
     await page.getByLabel('Win rate (0–1)').fill('0.9');
@@ -425,6 +425,7 @@ try {
     await open(page, '/platform'); const nav = await navTexts(page);
     check('platform admin: nav has ONE audit trail across its brands (Audit log)', nav.filter((n) => n.includes('Audit log')).length === 1, nav.join('|'));
     await open(page, '/platform/activity');
+    check('UI-F platform admin: the old /platform/activity forwards to the one audit log', page.url().includes('/platform/audit'), page.url());
     check('platform admin: the audit trail names the brand and the person', await page.getByText('@siteadmin').isVisible() && await page.getByRole('cell', { name: 'Tamu Traders' }).first().isVisible());
     check('platform admin: the audit trail uses the platform-scoped route', calls.includes('GET /platform/audit-log'), calls.filter((c) => c.includes('audit')).join());
     await ctx.close(); }
@@ -464,7 +465,7 @@ try {
   // UI-A (console shell): grouped + labelled navigation, a header that stays inside the sidebar, one current
   // item that follows the route, distinct icons, and — on a phone — a drawer that holds the nav AND the account.
   const OWNER_ROUTES = ['/platform', '/platform/tickets', '/platform/platforms', '/platform/onboard', '/platform/registrar', '/admin',
-    '/platform/payment-accounts', '/platform/payments', '/platform/mpesa', '/platform/pool', '/platform/billing', '/platform/addons',
+    '/platform/payment-accounts', '/platform/payments', '/platform/pool', '/platform/billing', '/platform/addons',
     '/platform/config', '/platform/audit', '/platform/logs', '/platform/engine'];
   { const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner });
     await open(page, '/platform/engine');
@@ -477,6 +478,9 @@ try {
     check('UI-A owner: exactly one current item, and it is the open route', (await cur.count()) === 1 && (await cur.getAttribute('href')) === '/platform/engine');
     const hrefs = await page.locator('aside nav a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
     check('UI-A owner: every console route stays reachable from the nav', OWNER_ROUTES.every((h) => hrefs.includes(h)), hrefs.join('|'));
+    await open(page, '/platform/mpesa');
+    check('UI-F owner: M-Pesa defaults keeps "Gateways" current', (await page.locator('aside [aria-current="page"]').getAttribute('href').catch(() => null)) === '/platform/payments');
+    await open(page, '/platform/engine');
     const glyphs = await page.locator('aside nav a svg').evaluateAll((ss) => ss.map((s) => s.innerHTML));
     check('UI-A owner: every nav item has its own icon', glyphs.length === new Set(glyphs).size, `${glyphs.length} icons, ${new Set(glyphs).size} distinct`);
     await open(page, `/platform/clients/${SITE}`);
@@ -689,6 +693,9 @@ try {
   // ADDON-1: platform admin — marketplace for its brand: request with a reason, switch to an owned system.
   { const { ctx, page, bodies } = await session(browser, { token: T.pa, me: ME.pa });
     await open(page, '/platform/addons');
+    check('UI-F platform admin: /platform/addons is an overview that links to each brand\'s Add-ons tab (one marketplace, on the brand)',
+      await page.getByRole('list', { name: "Your brands' add-ons" }).getByRole('link', { name: /Manage add-ons/ }).first().getAttribute('href').then((h) => h === `/platform/clients/${SITE}?tab=addons`).catch(() => false));
+    await open(page, `/platform/clients/${SITE}?tab=addons`);
     check('ADDON-1: the marketplace shows each add-on with its price and state', await page.locator('[data-addon="chart:area"]').getByText('Requested', { exact: true }).isVisible().catch(() => false)
       && await page.locator('[data-addon="trade_ui:deriv"]').getByText('Owned', { exact: true }).isVisible().catch(() => false));
     await page.locator('[data-addon="trade_ui:deriv"]').getByRole('button', { name: 'Use this' }).click(); await page.waitForTimeout(400);
@@ -717,7 +724,8 @@ try {
     const list = await page.getByRole('list', { name: 'Gateways' }).innerText().catch(() => '');
     check('UI-D: Gateways lists M-Pesa first, with the other gateways', list.indexOf('M-Pesa (Daraja)') >= 0 && list.indexOf('M-Pesa (Daraja)') < list.indexOf('Mega Pay'), list.slice(0, 120));
     check('UI-D: no developer jargon in the gateway list (HMAC, Basic Auth)', !/HMAC|Basic Auth/.test(list));
-    check('UI-D: a gateway that is not set up cannot be switched on for players', await page.getByRole('switch', { name: /Offer .* to players/ }).first().isDisabled().catch(() => false));
+    check('UI-F: the gateway list shows state only — switching happens on the gateway page (one place)', (await page.getByRole('list', { name: 'Gateways' }).getByRole('switch').count()) === 0
+      && (await page.getByRole('list', { name: 'Gateways' }).locator('a[href="/platform/payments/megapay"]').count()) > 0);
     await ctx.close(); }
 } finally {
   await browser.close();

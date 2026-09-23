@@ -25,6 +25,8 @@ export interface SiteRow {
   hasMpesaConsumerKey: boolean; hasMpesaConsumerSecret: boolean; hasMpesaPasskey: boolean; hasMpesaB2cCredential: boolean;
   legalCopy: Record<string, unknown> | null;
   ownerUserId: string | null;
+  /** UI-F: the platform this brand belongs to (null only for legacy rows). */
+  platformId?: string | null;
 }
 export interface SiteConfigRow {
   houseEdge: number; maxMultiplier: number; minStakeCents: number; maxStakeCents: number; minWithdrawalCents: number;
@@ -254,6 +256,7 @@ function mapSiteRow(x: Record<string, unknown>): SiteRow {
     hasMpesaPasskey: Boolean(x.mpesa_passkey_ref), hasMpesaB2cCredential: Boolean(x.mpesa_b2c_credential_ref),
     legalCopy: (x.legal_copy as Record<string, unknown>) ?? null,
     ownerUserId: (x.owner_user_id as string) ?? null,
+    platformId: x.platform_id == null ? null : String(x.platform_id),
   };
 }
 function mapConfigRow(x: Record<string, unknown>): SiteConfigRow {

@@ -90,7 +90,7 @@ export function consoleNav(isSystem: boolean): NavGroup[] {
         { href: '/platform/addons', label: 'Add-ons', icon: Icons.addons, hint: 'Charts, trade screens and gateways for your brands' }] },
       { id: 'money', label: 'Money', items: [accounts, pool] },
       { id: 'oversight', label: 'Oversight', items: [
-        { href: '/platform/activity', label: 'Audit log', icon: Icons.audit, hint: 'Who did what, on which brand' },
+        { href: '/platform/audit', label: 'Audit log', icon: Icons.audit, hint: 'Who did what, on which brand' },
       ] },
       { id: 'account', label: 'Account', items: [billing] },
     ];
@@ -105,8 +105,7 @@ export function consoleNav(isSystem: boolean): NavGroup[] {
     ] },
     { id: 'money', label: 'Money', items: [
       accounts,
-      { href: '/platform/payments', label: 'Gateways', icon: Icons.gateways, hint: 'Gateway catalogue and credentials' },
-      { href: '/platform/mpesa', label: 'M-Pesa defaults', icon: Icons.mpesa, hint: 'The System M-Pesa account' },
+      { href: '/platform/payments', label: 'Gateways', icon: Icons.gateways, hint: 'M-Pesa and every gateway: set-up and who is offered it', also: (p: string) => p.startsWith('/platform/mpesa') },
       pool,
     ] },
     { id: 'commercial', label: 'Commercial', items: [
