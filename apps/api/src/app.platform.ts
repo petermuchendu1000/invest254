@@ -356,7 +356,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   //
   // The minted ROLE matches the operator's TIER — this fixes the leak where a platform_admin was
   // offered (and, if the gate were widened, granted) a 'superadmin' session:
-  //   - platform_superadmin (system owner) -> 'superadmin' (full site governance; they own everything);
+  //   - platform_superadmin (system owner) -> 'admin' as well since F1/Option B (governance lives in the console);
   //   - platform_admin                     -> 'admin'      (site Operations only, fenced to the brand —
   //                                                         NEVER superadmin governance, so a platform
   //                                                         admin can never escalate on a client).
@@ -372,7 +372,9 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     // site-fenced `superadmin` token entirely. The site claim scopes the impersonated session to the
     // one brand; the action is audited with the caller's REAL role below.
     const impersonatedRole = "admin";
-    const token = await deps.auth.issueToken(ctx.claims!.userId, impersonatedRole, siteId);
+    // docs/42 UI-3: the token itself records the impersonation (RFC 8693-style `act` claim).
+    const token = await deps.auth.issueToken(ctx.claims!.userId, impersonatedRole, siteId, undefined,
+      { sub: ctx.claims!.userId, role: ctx.claims!.role ?? "player", brand: brand.name });
     await deps.admin.recordAction(
       ctx.claims!.userId, ctx.claims!.role ?? "player",
       "platform.impersonate", "site", siteId, { slug: brand.slug, name: brand.name, as: impersonatedRole },

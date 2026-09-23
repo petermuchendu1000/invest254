@@ -11,6 +11,7 @@ import { deriveMinimalPalette } from '@/lib/brand/derivePalette';
 import { groupedPresets, presetForSeed } from '@/lib/brand/presets';
 import { BRAND_FONTS, googleFontsHref } from '@/lib/brand/fonts';
 import { ThemeGallery } from '@/components/platform/ThemeGallery';
+import { useCan } from '@/lib/auth/can';
 
 /** Expandable section (accordion) — remembers its own open state; the spine of Client Detail. */
 export function Expandable({
@@ -56,6 +57,7 @@ const STATUSES = ['active', 'paused', 'archived'] as const;
 
 /** Identity, status, domain, locale & legal — all persisted via PATCH /platform/sites/:id. */
 function IdentitySection({ site }: { site: SiteWithConfig }) {
+  const ownerSettings = useCan('console.site.owner_settings');   // docs/42 UI-6: chart style / trade UI are owner-only at the API
   const update = useUpdateSite();
   const toast = useToast();
   const init = useMemo(() => ({
@@ -94,22 +96,31 @@ function IdentitySection({ site }: { site: SiteWithConfig }) {
           <Input label="Currency" name={`cur-${site.siteId}`} value={form.currency} onChange={set('currency')} hint="display currency, e.g. KES or USD" />
           <Input label="Locale" name={`loc-${site.siteId}`} value={form.locale} onChange={set('locale')} />
         </div>
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium text-fg">Price chart</span>
-          <select className="h-11 rounded-brand border border-border bg-surface-2 px-3 text-fg" value={form.chart_style} onChange={set('chart_style')}>
-            <option value="line">Line / area curve</option>
-            <option value="candlestick">Candlesticks (TradingView)</option>
-          </select>
-          <span className="text-xs text-muted">How this brand renders the live price. Currency + chart are display-only; the money of record stays KES.</span>
-        </label>
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium text-fg">Trade interface</span>
-          <select className="h-11 rounded-brand border border-border bg-surface-2 px-3 text-fg" value={form.trade_ui} onChange={set('trade_ui')}>
-            <option value="classic">Classic (rise/fall curve)</option>
-            <option value="digits">Digits broker (Deriv-style)</option>
-          </select>
-          <span className="text-xs text-muted">Which trade screen this brand shows. Layout only; the money of record stays KES.</span>
-        </label>
+        {ownerSettings ? (
+          <>
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-fg">Price chart</span>
+            <select className="h-11 rounded-brand border border-border bg-surface-2 px-3 text-fg" value={form.chart_style} onChange={set('chart_style')}>
+              <option value="line">Line / area curve</option>
+              <option value="candlestick">Candlesticks (TradingView)</option>
+            </select>
+            <span className="text-xs text-muted">How this brand renders the live price. Currency + chart are display-only; the money of record stays KES.</span>
+          </label>
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-fg">Trade interface</span>
+            <select className="h-11 rounded-brand border border-border bg-surface-2 px-3 text-fg" value={form.trade_ui} onChange={set('trade_ui')}>
+              <option value="classic">Classic (rise/fall curve)</option>
+              <option value="digits">Digits broker (Deriv-style)</option>
+            </select>
+            <span className="text-xs text-muted">Which trade screen this brand shows. Layout only; the money of record stays KES.</span>
+          </label>
+          </>
+        ) : (
+          <p className="text-sm text-muted sm:col-span-2">
+            Price chart: <span className="text-fg">{form.chart_style === 'candlestick' ? 'Candlesticks' : 'Line / area'}</span> · Trade interface:{' '}
+            <span className="text-fg">{form.trade_ui === 'digits' ? 'Digits broker' : 'Classic'}</span> — set by the system owner (add-on).
+          </p>
+        )}
         <Input label="Licence line" name={`lic-${site.siteId}`} value={form.licence_line} onChange={set('licence_line')} hint="footer compliance text" />
       </div>
       <SaveBar dirty={dirty} saving={update.isPending} onSave={save} onReset={() => setForm(init)} />
@@ -275,6 +286,7 @@ const kes = (c: number) => `KES ${(c / 100).toLocaleString()}`;
 
 /** Players in a brand — searchable table + an actions panel for the selected player. */
 function PlayersSection({ site }: { site: SiteWithConfig }) {
+  const ownerSettings = useCan('console.site.owner_settings');   // docs/42 UI-6: site owner / default marketer is owner-only at the API
   const [q, setQ] = useState('');
   const [statusF, setStatusF] = useState('');
   const params = useMemo(() => ({ q: q.trim() || undefined, status: statusF || undefined, limit: '50' }), [q, statusF]);
@@ -312,6 +324,8 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
 
   return (
     <div className="flex flex-col gap-3">
+      {ownerSettings ? (
+        <>
       {/* Brand marketer (commission owner) — every deposit on this brand credits this marketer by default. */}
       <div className="flex flex-wrap items-center gap-2 rounded-brand border border-accent/30 bg-accent/5 p-3">
         <span className="text-xs font-semibold text-fg">Brand marketer (commission owner):</span>
@@ -331,6 +345,10 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
         </select>
         <span className="text-[11px] text-muted">All deposits on this brand credit this marketer (25%) unless a player used a specific referral code.</span>
       </div>
+        </>
+      ) : (
+        <p className="text-xs text-muted">Brand marketer (commission owner): {site.ownerUserId ? (rows.find((u) => u.userId === site.ownerUserId)?.username ? `@${rows.find((u) => u.userId === site.ownerUserId)!.username}` : 'assigned') : 'unassigned'} — managed by the system owner.</p>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search phone / username…" className="h-9 w-56 max-w-full rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent" />
@@ -376,6 +394,8 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
               <option value="player">player</option><option value="marketer">marketer</option><option value="admin">admin</option>
             </select>
           </div>
+          {ownerSettings ? (
+            <>
           {/* Brand default marketer — make this marketer earn 25% of every deposit on this client. */}
           <div className="flex flex-wrap items-center gap-2 rounded-brand border border-accent/30 bg-accent/5 p-2">
             <span className="text-xs font-semibold text-fg">Brand default marketer:</span>
@@ -395,6 +415,8 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
               </>
             )}
           </div>
+            </>
+          ) : null}
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1 text-xs text-muted">Amount (KES)
               <input value={amt} onChange={(e) => setAmt(e.target.value)} type="number" className="h-9 w-28 rounded-lg border border-border bg-surface px-2 text-sm text-fg" /></label>

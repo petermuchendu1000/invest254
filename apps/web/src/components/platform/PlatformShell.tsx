@@ -12,6 +12,9 @@ import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { useSidebarCollapsed } from '@/lib/useSidebarCollapsed';
 import { CommandPalette } from '@/components/platform/CommandPalette';
+import { roleFromToken, actorFromToken } from '@/lib/auth/token';
+import { can } from '@invest254/shared/capabilities';
+import { endImpersonation } from '@/lib/platform/impersonate';
 
 function Icon({ d }: { d: string }) {
   return (
@@ -38,7 +41,8 @@ const NAV = [
 
 /**
  * Operator-console shell for the platform-superadmin: a persistent left sidebar (desktop) / top
- * scroll-nav (mobile), a global ⌘K command palette, and strict platform_superadmin gating.
+ * scroll-nav (mobile), a global ⌘K command palette, and capability gating (docs/42: console.enter =
+ * platform admin + system owner; console.system = owner only).
  * Brand-token styling, consistent with the admin back office.
  */
 export function PlatformShell({ children }: { children: React.ReactNode }) {
@@ -68,12 +72,25 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
     // sign in here regardless of which host serves the console.
     return <AdminSignIn />;
   }
-  if (user && user.role !== 'platform_superadmin' && user.role !== 'platform_admin') {
-    // Wrong role: reveal nothing — no hint that an operator console exists here.
+  // docs/42 UI-3: decisions use the TOKEN role (what the API authorises). A brand session opened from
+  // the console (impersonation, `act` claim) is not a console session: offer the way back, don't 404.
+  const actor = actorFromToken(token);
+  if (actor) {
+    return (
+      <Gate
+        title={`You're in ${actor.brand ?? 'a brand'} as admin`}
+        body="Leave the brand to return to your console."
+        action={<Button onClick={() => { void endImpersonation(); }}>Exit brand</Button>}
+      />
+    );
+  }
+  const tokenRole = roleFromToken(token);
+  if (!can(tokenRole, 'console.enter')) {
+    // Wrong tier: reveal nothing — no hint that an operator console exists here.
     return <Gate title="404" body="This page could not be found." action={null} />;
   }
   // Platform admins see a SCOPED console (their platform's sites only); system-only tools are hidden.
-  const isSystem = user?.role === 'platform_superadmin';
+  const isSystem = can(tokenRole, 'console.system');
 
   // Defense-in-depth: hide-from-nav is not enough. A platform admin typing a System-only URL must get
   // a plain 404 (reveal nothing), not a broken page that 403s every call. The API + RPCs already gate

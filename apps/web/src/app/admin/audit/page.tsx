@@ -1,4 +1,5 @@
 'use client';
+import { RequireCapability } from '@/components/auth/RequireCapability';
 
 import { useMemo } from 'react';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -19,7 +20,7 @@ function detailText(detail: unknown): string {
   }
 }
 
-export default function AuditPage() {
+function AuditPageInner() {
   const q = useAudit();
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
 
@@ -89,4 +90,9 @@ function Row({ r }: { r: AdminAuditRow }) {
       </Td>
     </tr>
   );
+}
+
+/** docs/42 UI-7: gate BEFORE the page mounts, so no request is made that the session will be refused. */
+export default function AuditPage() {
+  return <RequireCapability cap="backoffice.audit" title="Audit log is owner-only"><AuditPageInner /></RequireCapability>;
 }
