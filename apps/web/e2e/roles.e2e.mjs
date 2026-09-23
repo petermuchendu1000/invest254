@@ -96,6 +96,22 @@ const FIXTURES = {
       secretMeta: { consumer_key: { set: true, last4: '1234' } }, hasSecret: true, updatedAt: null, exists: true } },
     status: { mpesa: { configured: true, depositsReady: true, payoutsReady: false, missing: ['b2cInitiator', 'b2cSecurityCredential'] } },
   },
+  // UI-C fixtures (brand back office pages)
+  '/admin/withdrawals': { items: [{ txId: 'w-1', userId: 'u-target', username: 'wanjiku_long_username', phone: '0712345678', amountCents: 158000, status: 'pending',
+    provider: 'mpesa', mpesaReceipt: null, createdAtMs: Date.now() - 3600e3, updatedAtMs: null, balanceCents: 2207000, totalDepositsCents: 746000,
+    depositCount: 4, totalWithdrawalsCents: 0, withdrawalCount: 0, firstDepositAtMs: Date.now() - 20 * 86400e3 }], nextCursor: null },
+  '/admin/notification-templates': { items: [{ key: 'announcement', level: 'info', title: 'Announcement', body: 'We have an update to share with you.',
+    dismissible: true, category: 'announcement', resolvesCategory: null, defaultAudience: {}, description: 'Generic announcement. Edit the title and body before sending.' }] },
+  '/admin/notifications/audience-count': { count: 22 },
+  '/admin/overview': { users: { total: 24, active: 23, suspended: 1, banned: 0, players: 20, marketers: 2, admins: 2 },
+    finance: { depositsCents: 0, withdrawalsCents: 0, internalTransfersCents: 0, pendingWithdrawals: 1, walletLiabilityCents: 0 },
+    affiliate: { marketers: 2, commissionAccruedCents: 0, commissionPaidCents: 0, pendingPayouts: 0 },
+    game: { settledPositions: 0, turnoverCents: 0, ggrCents: 0 }, marketer: { accounts: 2, creditedCents: 0, turnoverCents: 0, ggrCents: 0, walletLiabilityCents: 0 } },
+  '/admin/rtp': { targetRtp: 0.95, toleranceAbs: 0.05, minSamples: 100, alert: false, windows: [] },
+  '/admin/real-cash-rtp': { rtpTarget: 0.95, windows: [] },
+  '/admin/config-review': [],
+  '/admin/reports/daily': { items: Array.from({ length: 30 }, (_, i) => ({ date: `2026-09-${String(i + 1).padStart(2, '0')}`,
+    depositsCents: 100000 + i * 1000, withdrawalsCents: i >= 25 ? 50000 : 0, turnoverCents: 0, ggrCents: 0 })) },
   '/platform/registrar/config': { platformId: PLATFORM, providerCode: 'namecheap', settings: {}, secretMeta: {}, hasSecret: false, encVersion: 1,
     updatedAt: null, exists: false, egressIp: '203.0.113.7', encryptionConfigured: true },
 };
@@ -266,7 +282,8 @@ try {
     check('owner: registrar page asks which platform', await page.getByLabel('Registrar for platform').isVisible());
     await open(page, '/platform/onboard');
     check('owner: onboarding asks which platform up-front', await page.getByLabel('Onboard into platform').isVisible());
-    await open(page, `/platform/clients/${SITE}`);
+    await open(page, `/platform/clients/${SITE}?tab=addons`);
+    check('UI-C: a brand tab is deep-linkable (?tab=addons opens Add-ons)', (await page.getByRole('tab', { name: 'Add-ons' }).getAttribute('aria-selected', { timeout: 3000 }).catch(() => null)) === 'true');
     check('owner: a brand page can ASSIGN a locked add-on (was: request only)', await page.getByRole('button', { name: 'Assign…' }).first().isVisible());
     check('owner: a brand page can REMOVE an owned non-default add-on', await page.getByRole('button', { name: 'Remove…' }).first().isVisible());
     await page.getByRole('button', { name: 'Assign…' }).first().click();
@@ -281,6 +298,8 @@ try {
     check('platform admin: new ticket says it goes straight to the System owner', await page.getByText('Goes straight to the System owner.').isVisible());
     await page.keyboard.press('Escape');
     await open(page, `/platform/clients/${SITE}`);
+    check('UI-C: add-ons are NOT shown under Identity (own tab)', (await page.getByRole('button', { name: /Request Pro chart/ }).count()) === 0);
+    await page.getByRole('tab', { name: 'Add-ons' }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(300);
     check('platform admin: a brand page offers Request, never Assign', (await page.getByRole('button', { name: 'Assign…' }).count()) === 0 && await page.getByRole('button', { name: /Request Pro chart/ }).isVisible());
     await ctx.close(); }
   { const { ctx, page } = await session(browser, { token: T.admin, me: ME.admin });
@@ -295,7 +314,7 @@ try {
   // 9) docs/42 UI-10: platform-admin player management + one audit trail
   { const { ctx, page, calls, bodies } = await session(browser, { token: T.pa, me: ME.pa });
     await open(page, `/platform/clients/${SITE}`);
-    await page.getByRole('button', { name: 'Players' }).click(); await page.waitForTimeout(300);
+    await page.getByRole('tab', { name: 'Players' }).click({ timeout: 3000 }).catch(() => page.getByRole('button', { name: 'Players' }).click()); await page.waitForTimeout(300);
     await page.getByText('@target').first().click(); await page.waitForTimeout(500);
     check('platform admin: selecting a player shows their money + activity (detail)', await page.getByText('Bonus balance').isVisible() && await page.getByText('KES 20').first().isVisible());
     await page.getByLabel('Wallet').selectOption('bonus');
@@ -396,6 +415,41 @@ try {
     check(`UI-A ${who} (phone): Escape closes the drawer`, !(await drawer.isVisible().catch(() => false)));
     const sw = await page.evaluate(() => document.documentElement.scrollWidth);
     check(`UI-A ${who} (phone): no sideways page scroll`, sw <= 390, `scrollWidth ${sw}`);
+    await ctx.close();
+  }
+
+  // UI-C (page P1s): withdrawal actions reachable, editable announcements, honest trends, read-only overrides,
+  // no sideways page scroll on phones.
+  { const { ctx, page } = await session(browser, { token: T.admin, me: ME.admin, viewport: { width: 1440, height: 900 } });
+    await open(page, '/admin/withdrawals');
+    const rej = await page.getByRole('button', { name: 'Reject', exact: true }).first().boundingBox().catch(() => null);
+    check('UI-C withdrawals (1440px): Reject is on screen, not clipped', !!rej && rej.x + rej.width <= 1440, JSON.stringify(rej));
+    await open(page, '/admin');
+    const trends = await page.locator('section').filter({ hasText: 'Trends' }).first().innerText().catch(() => '');
+    check('UI-C overview: a metric that started this period says "New", never a fake ▲100%', trends.includes('New') && !/100%/.test(trends), trends.slice(0, 200));
+    await open(page, '/admin/users/u-target');
+    check('UI-C user page: overrides are shown as read-only values, not inputs', await page.getByTestId('overrides-readonly').isVisible().catch(() => false) && (await page.getByLabel(/Win rate/).count()) === 0);
+    await ctx.close(); }
+  { const { ctx, page, bodies } = await session(browser, { token: T.admin, me: ME.admin });
+    await open(page, '/admin/announcements');
+    await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Weekend bonus', { timeout: 3000 }).catch(() => {});
+    await page.getByLabel(/^Message/).fill('Deposit this weekend and get 10% extra.', { timeout: 3000 }).catch(() => {});
+    check('UI-C announcements: the preview shows the edited text', await page.getByText('Deposit this weekend and get 10% extra.').last().isVisible().catch(() => false));
+    await page.getByRole('button', { name: /^Send to 22 people/ }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(200);
+    await page.getByRole('button', { name: 'Yes, send it' }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(400);
+    const sent = bodies.find(([k]) => k === 'POST /admin/notifications/broadcast');
+    check('UI-C announcements: the edited title and body are what gets sent', sent && sent[1]?.title === 'Weekend bonus' && sent[1]?.body === 'Deposit this weekend and get 10% extra.', JSON.stringify(sent));
+    check('UI-C announcements: clearing notices is scoped to the brand (no "platform-wide")', !(await page.getByText(/platform-wide/i).count()));
+    await ctx.close(); }
+  for (const path of ['/admin/withdrawals', '/admin/announcements', '/admin/marketer-finance']) {
+    const { ctx, page } = await session(browser, { token: T.admin, me: ME.admin, viewport: { width: 390, height: 844 } });
+    await open(page, path);
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    check(`UI-C phone ${path}: no sideways page scroll`, sw <= 390, `scrollWidth ${sw}`);
+    if (path === '/admin/withdrawals') {
+      const ap = await page.getByRole('button', { name: 'Approve', exact: true }).first().boundingBox().catch(() => null);
+      check('UI-C phone withdrawals: Approve is reachable without scrolling sideways', !!ap && ap.x >= 0 && ap.x + ap.width <= 390, JSON.stringify(ap));
+    }
     await ctx.close();
   }
 } finally {

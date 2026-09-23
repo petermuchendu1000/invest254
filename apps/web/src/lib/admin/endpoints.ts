@@ -298,8 +298,8 @@ export const adminApi = {
     apiFetch<{ items: NotificationTemplateRow[] }>('/admin/notification-templates', { token: t }),
   notificationAudienceCount: (t: string, audience: BroadcastAudienceInput) =>
     apiFetch<{ count: number }>('/admin/notifications/audience-count', { method: 'POST', token: t, body: { audience } }),
-  notificationBroadcast: (t: string, templateKey: string, audience: BroadcastAudienceInput) =>
-    apiFetch<{ recipients: number }>('/admin/notifications/broadcast', { method: 'POST', token: t, body: { templateKey, audience } }),
+  notificationBroadcast: (t: string, templateKey: string, audience: BroadcastAudienceInput, text?: { title: string; body: string }) =>
+    apiFetch<{ recipients: number }>('/admin/notifications/broadcast', { method: 'POST', token: t, body: { templateKey, audience, ...(text ?? {}) } }),
   notificationResolveCategory: (t: string, category: string) =>
     apiFetch<{ cleared: number }>('/admin/notifications/resolve-category', { method: 'POST', token: t, body: { category } }),
 };

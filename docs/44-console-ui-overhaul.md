@@ -58,3 +58,11 @@ with current page + Log out + Escape, no sideways scroll) — 15 failed before, 
 - `SearchInput`: one 36px toolbar search with an icon.
 - Disabled buttons use a neutral style whatever their variant, and can carry a tooltip that says why.
 - Overview: "Brands" (was "Clients") and "Onboard brand". The KPI grid now wraps as 4 + 3 instead of squeezing 7 tiles until values truncate.
+
+## UI-C — page-level P1 fixes
+
+- **Withdrawals.** The Action column is pinned to the right edge and the phone view uses cards. The columns are Player (with phone and receipt), Amount, Status, Balance, Lifetime (in/out/net) and Requested. Above the table sits one summary line ("2 awaiting review · KES 1,520 held"), and the kill switch is a compact row.
+- **Announcements.** Title and message can be edited and are sent through migration 0162. There is a live preview, a plain count of people, and a brand-scoped "Remove active notices".
+- **Overview trends.** A metric with no activity in the earlier half shows "New", never a fake "▲100%". Each metric is coloured by what counts as good news for it.
+- **User page.** Read-only overrides are shown as values.
+- **Tabs.** `PageTabs` (underline tabs, arrow-key navigation, scrolls on phones) replaces the old tab controls. `useTabParam` keeps the open tab in the URL. The brand page gains an Add-ons tab.

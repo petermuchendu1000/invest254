@@ -5,6 +5,27 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #67 — Page-level P1s from the UI audit: clipped withdrawal actions, an announcement that couldn't be edited, fake trends, editable-looking read-only overrides, sideways scroll on phones (UI-C) — FIXED (branch `ui/c-page-p1-fixes`, migration 0162)
+- **What:**
+  - **Withdrawals.** At 1440px the Reject and Mark paid buttons sat past the right edge of the table (Reject measured at x=1505). On a phone, Approve was at x=1146 on a 390px screen.
+  - **Announcements.** The "Announcement" template said "Edit the title and body before sending", but there was no text field, and `fn_broadcast_notification` could only send a template verbatim. A brand admin would have sent "We have an update to share with you…" to every player. The clear button's copy said "platform-wide" on a brand page.
+  - **Overview.** Trend chips showed "▲100%" whenever the first half of the 30 days was zero, and rising withdrawals were coloured green.
+  - **User page.** Player overrides rendered as eight editable inputs, and only a footnote said they were read-only. Nobody in the brand back office can write them.
+  - **Phones.** /admin/marketer-finance was 456px wide on a 390px screen. The segmented tab control overflowed.
+  - **Brand page.** Add-ons rendered under every tab, and the open tab was not in the URL.
+- **Fix:**
+  - **Withdrawals.** Actions are pinned to the right edge, and the phone view uses a card list. Four duplicate KPI tiles became one summary line. The kill switch is now a compact row.
+  - **Announcements.** Migration 0162 adds `p_title`/`p_body` to `fn_broadcast_notification`. They are trimmed and bounded, blank means the template's own text, and the audit trail records that the text was edited. It is one function, not an overload, and deploy-order safe. The API validates the text, and the page gets Title and Message fields with a live preview.
+  - **Overview.** A metric with nothing in the earlier half now shows "New", and each metric is coloured by what counts as good news for it.
+  - **User page.** Overrides are shown read-only as values, with "Managed in the console".
+  - **Tabs.** One underline `PageTabs` component, with the tab in the URL, replaces the segmented control and the old brand-page tabs. Add-ons now has its own tab.
+- **Tests:**
+  - `e2e_broadcast_custom_text.py` (BEFORE reproduces; AFTER 11 checks). `e2e_notification_scope`, `e2e_actor_scope_impersonation` and `e2e_function_grants` pass.
+  - API test for the edited text and its validation. `charts.test.ts` (trendDelta).
+  - Role e2e: 12 new checks. 9 failed before the fix; 126/126 pass after.
+
+---
+
 ## #66 — "now ago", browser-dependent dates and numbers, "KES 1,607.5" in the operator consoles (UI-B) — FIXED (branch `ui/b-shared-formatting`)
 - **What:**
   - `formatRelativeTime` returns "now" for anything under 5 s, and 13 call sites appended " ago", so tables read "now ago" (seen in System logs).

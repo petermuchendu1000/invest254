@@ -16,6 +16,7 @@ import { useCan } from '@/lib/auth/can';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
 import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useDeleteUser, useSetDefaultMarketer, useUpdateUserDetails, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig, useMarketerExpenses, useAddMarketerExpense } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel, UserOverridePatch } from '@/lib/admin/types';
+import { formatKes } from '@invest254/shared/money';
 
 const ROLES = ['player', 'marketer', 'admin'] as const;
 
@@ -911,6 +912,46 @@ function OverridesPanel({ id }: { id: string }) {
     const feasible = bounded && required > 1 && required <= mm;
     return { feasible, rtp, winRate: wr, maxMult: mm, required, pricing };
   })();
+
+  // UI-C: in the brand back office nobody can write overrides (owner-only at the API). Show the values as
+  // plain text with who manages them, instead of eight inputs that looked editable until you read the footnote.
+  if (!canWriteOverrides) {
+    const o = q.data;
+    const val = (v: number | null | undefined, fmt: (n: number) => string) => (v == null ? 'Brand default' : fmt(v));
+    const rows: Array<[string, string]> = [
+      ['Win rate', val(o?.winRate, (n) => `${(n * 100).toFixed(1)}%`)],
+      ['House edge', val(o?.houseEdge, (n) => `${(n * 100).toFixed(1)}%`)],
+      ['Max win multiplier', val(o?.maxWinMultiplier, (n) => `×${n}`)],
+      ['Auto-sell after', val(o?.tradeDurationS, (n) => `${n}s`)],
+      ['Min stake', val(o?.minStakeCents, (n) => formatKes(n))],
+      ['Max stake', val(o?.maxStakeCents, (n) => formatKes(n))],
+    ];
+    const custom = rows.some(([, v]) => v !== 'Brand default');
+    return (
+      <Section title="Player overrides">
+        <Card className="flex flex-col gap-3" data-testid="overrides-readonly">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted">
+              {custom ? 'This player has custom game settings.' : 'This player uses the brand’s game settings.'}
+            </p>
+            <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-muted">Managed in the console</span>
+          </div>
+          {q.isLoading ? <Skeleton className="h-20 w-full" /> : (
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+              {rows.map(([k, v]) => (
+                <div key={k} className="flex flex-col">
+                  <dt className="text-xs text-muted">{k}</dt>
+                  <dd className={v === 'Brand default' ? 'text-muted' : 'font-medium text-fg'}>{v}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {o?.notes ? <p className="text-xs text-muted">Note: {o.notes}</p> : null}
+          <p className="text-xs text-muted">Your platform admin or the System owner can change these from the console.</p>
+        </Card>
+      </Section>
+    );
+  }
 
   return (
     <Section title="Player overrides">
