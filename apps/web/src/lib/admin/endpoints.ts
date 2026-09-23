@@ -140,10 +140,11 @@ export const adminApi = {
   bulkWithdrawals: (t: string, body: { action: 'approve' | 'reject'; txIds: string[]; password?: string }) =>
     apiFetch<AdminBulkResult>('/admin/withdrawals/bulk', { method: 'POST', token: t, body }),
   // 0067 — per-brand withdrawal kill switch (owner/admin override).
-  withdrawalsEnabled: (t: string) =>
-    apiFetch<{ enabled: boolean }>('/admin/withdrawals-enabled', { token: t }),
-  setWithdrawalsEnabled: (t: string, enabled: boolean) =>
-    apiFetch<{ enabled: boolean }>('/admin/withdrawals-enabled', { method: 'PUT', token: t, body: { enabled } }),
+  // docs/42 UI-2: `site` names the brand (required by the API for the system owner; a site admin is pinned).
+  withdrawalsEnabled: (t: string, site?: string) =>
+    apiFetch<{ enabled: boolean }>('/admin/withdrawals-enabled', { token: t, ...(site ? { query: { site } } : {}) }),
+  setWithdrawalsEnabled: (t: string, enabled: boolean, site?: string) =>
+    apiFetch<{ enabled: boolean }>('/admin/withdrawals-enabled', { method: 'PUT', token: t, body: { enabled }, ...(site ? { query: { site } } : {}) }),
   deposits: (t: string, p: Page & { status?: string | undefined } = {}) =>
     apiFetch<Paginated<AdminDepositRow>>('/admin/deposits', {
       token: t,
@@ -205,9 +206,9 @@ export const adminApi = {
     apiFetch<AdminAdvanceDto>(`/admin/affiliate/advances/${id}/reject`, { method: 'POST', token: t, body: note ? { note } : {} }),
 
   // Game config / RTP / seeds
-  gameConfig: (t: string) => apiFetch<GameConfigRow>('/admin/game-config', { token: t }),
-  updateGameConfig: (t: string, patch: GameConfigPatch) =>
-    apiFetch<GameConfigRow>('/admin/game-config', { method: 'PATCH', token: t, body: patch }),
+  gameConfig: (t: string, site?: string) => apiFetch<GameConfigRow>('/admin/game-config', { token: t, ...(site ? { query: { site } } : {}) }),
+  updateGameConfig: (t: string, patch: GameConfigPatch, site?: string) =>
+    apiFetch<GameConfigRow>('/admin/game-config', { method: 'PATCH', token: t, body: patch, ...(site ? { query: { site } } : {}) }),
   mpesaConfig: (t: string) => apiFetch<MpesaConfigRow>('/admin/mpesa-config', { token: t }),
   updateMpesaConfig: (t: string, patch: MpesaConfigPatch) =>
     apiFetch<MpesaConfigRow>('/admin/mpesa-config', { method: 'PATCH', token: t, body: patch }),
@@ -216,10 +217,10 @@ export const adminApi = {
     apiFetch<SeedRotateResult>('/admin/seeds/rotate', { method: 'POST', token: t, body: { tradeDate } }),
 
   // docs/25: daily withdrawal-pool budget (per brand, EAT day). Read = admin; set = system owner.
-  withdrawalPool: (t: string, day?: string) =>
-    apiFetch<WithdrawalPoolRow>('/admin/withdrawal-pool', day ? { token: t, query: { day } } : { token: t }),
-  setWithdrawalPool: (t: string, body: { amountCents?: number; defaultAmountCents?: number; day?: string }) =>
-    apiFetch<WithdrawalPoolRow>('/admin/withdrawal-pool', { method: 'PUT', token: t, body }),
+  withdrawalPool: (t: string, day?: string, site?: string) =>
+    apiFetch<WithdrawalPoolRow>('/admin/withdrawal-pool', { token: t, query: { ...(day ? { day } : {}), ...(site ? { site } : {}) } }),
+  setWithdrawalPool: (t: string, body: { amountCents?: number; defaultAmountCents?: number; day?: string }, site?: string) =>
+    apiFetch<WithdrawalPoolRow>('/admin/withdrawal-pool', { method: 'PUT', token: t, body, ...(site ? { query: { site } } : {}) }),
 
   // Fly.io machine restart (system owner only)
   flyStatus: (t: string) => apiFetch<{ configured: boolean; apps: string[]; app: string }>('/admin/fly/status', { token: t }),

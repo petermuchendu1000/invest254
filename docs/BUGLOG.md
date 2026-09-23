@@ -5,6 +5,14 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #56 — The owner's unscoped back office wrote brand #1 while labelled "every brand" (docs/42 UI-2) — FIXED (branch `fix/ui2-owner-brand-picker`; owner decision 2026-09-23: brand picker)
+- **What:** the system owner's own session opened `/admin` with no brand: lists mixed every brand, while settings writes — the pool-mode switch labelled "Default for every brand", game config, daily withdrawal budget, withdrawal kill switch, config review — fell back to `DEFAULT_SITE_ID` and changed brand #1 only. No brand was named anywhere.
+- **Fix (API):** owner-tier brand-config routes (`/admin/game-config`, `/admin/withdrawal-pool`, `/admin/withdrawals-enabled`, `/admin/config-review`) require an explicit, well-formed `?site=` from the system owner (400 `SITE_REQUIRED`); site admins stay pinned to their token's brand. The silent fallback is gone at the source, for every client.
+- **Fix (web):** the owner's own session at `/admin` shows a **brand picker** (search + "Open brand as admin"); brand work happens inside an opened brand (UI-3 `act` session). Owner-only per-brand settings moved to the console brand page (**Pool & payouts** tab: pool mode, daily budget, kill switch — each call names the brand). Owner governance moved into the console: Audit log, System logs, M-Pesa (global), Engine (Fly.io); old `/admin/*` URLs forward there (owner) or reveal nothing (others). Console link now reads "Open a brand →". Shared `OpenBrandButton`.
+- **Tests:** `app.admin.ownersite.ui2.test.ts` (7 owner routes × bare/malformed/named; site admin pinned), J5 updated to name the brand + assert `SITE_REQUIRED`; browser role e2e 28/28 (owner picker, no brand-less back-office request, console governance nav, forwarding, platform admin 404s). npm test green; web build OK.
+
+---
+
 ## #55 — The removed `superadmin` tier lingered in code and copy (docs/42 UI-11) — FIXED (branch `fix/ui11-superadmin-remnants`)
 - **What:** role literal `'superadmin'` still sent to the API as an announcement audience role and present in the `MeDto` role union, the payments "privileged" list, the engine in-memory default-marketer gate and harness role lists; ~20 comments described a "superadmin" impersonation session or "platform_superadmin-only" gating that no longer exists (misleading for the next change).
 - **Fix:** literals removed (announcement "Admins only" = brand admins + system owner); comments rewritten to the current model (brand `admin` sessions with an `act` claim; capability gating per docs/42). The DB's inert `fn_*` allow-lists are left as documented in docs/41 (no behaviour).

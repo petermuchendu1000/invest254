@@ -12,6 +12,7 @@ import { groupedPresets, presetForSeed } from '@/lib/brand/presets';
 import { BRAND_FONTS, googleFontsHref } from '@/lib/brand/fonts';
 import { ThemeGallery } from '@/components/platform/ThemeGallery';
 import { useCan } from '@/lib/auth/can';
+import { useGameConfig, useUpdateGameConfig, useWithdrawalPool, useSetWithdrawalPool, useWithdrawalsEnabled, useSetWithdrawalsEnabled } from '@/lib/admin/hooks';
 
 /** Expandable section (accordion) — remembers its own open state; the spine of Client Detail. */
 export function Expandable({
@@ -532,11 +533,79 @@ function LegalSection({ site }: { site: SiteWithConfig }) {
   );
 }
 
+
+/**
+ * docs/42 UI-2 — owner-only brand settings that used to live in the unscoped back office (where they
+ * silently hit brand #1): this brand's pool mode, daily withdrawal budget and withdrawal kill switch.
+ * Every call names THIS brand (?site=), which the API now requires of the system owner.
+ */
+function PoolPayoutsSection({ site }: { site: SiteWithConfig }) {
+  const toast = useToast();
+  const cfg = useGameConfig(site.siteId);
+  const updateCfg = useUpdateGameConfig(site.siteId);
+  const pool = useWithdrawalPool(undefined, site.siteId);
+  const setPool = useSetWithdrawalPool(site.siteId);
+  const wd = useWithdrawalsEnabled(site.siteId);
+  const setWd = useSetWithdrawalsEnabled(site.siteId);
+  const [today, setToday] = useState('');
+  const [dflt, setDflt] = useState('');
+  const err = (title: string) => (e: unknown) => toast.push({ tone: 'error', title, description: (e as Error).message });
+  const kes = (c: number | undefined) => (typeof c === 'number' ? (c / 100).toLocaleString('en-KE') : '—');
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-xs text-muted">These settings apply to <span className="font-semibold text-fg">{site.name}</span> only.</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Pool mode</p>
+          <p className="text-xs text-muted">When on, outcomes follow this brand&apos;s withdrawal pool instead of the fixed win rate.</p>
+        </div>
+        <Button size="sm" variant="outline" disabled={!cfg.data || updateCfg.isPending}
+          onClick={() => updateCfg.mutate({ poolMode: !cfg.data!.poolMode }, {
+            onSuccess: (r) => toast.push({ tone: 'success', title: `Pool mode ${r.poolMode ? 'ON' : 'OFF'} for ${site.name}` }),
+            onError: err('Pool mode not changed'),
+          })}>
+          {cfg.data ? (cfg.data.poolMode ? 'On — turn off' : 'Off — turn on') : '…'}
+        </Button>
+      </div>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">Daily withdrawal budget</p>
+        <p className="text-xs text-muted">
+          Today: KES {kes(pool.data?.amountCents)} (paid {kes(pool.data?.paidCents)}, available {kes(pool.data?.availableCents)}) · default for new days: KES {kes(pool.data?.defaultDailyPoolCents)}
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <Input label="Set today (KES)" name={`pt-${site.siteId}`} value={today} onChange={(e) => setToday(e.target.value)} />
+          <Button size="sm" disabled={!today || setPool.isPending} onClick={() => setPool.mutate({ amountCents: Math.round(Number(today) * 100) }, {
+            onSuccess: () => { setToday(''); toast.push({ tone: 'success', title: `Today's budget set for ${site.name}` }); }, onError: err('Budget not set'),
+          })}>Set today</Button>
+          <Input label="Default for new days (KES)" name={`pd-${site.siteId}`} value={dflt} onChange={(e) => setDflt(e.target.value)} />
+          <Button size="sm" disabled={!dflt || setPool.isPending} onClick={() => setPool.mutate({ defaultAmountCents: Math.round(Number(dflt) * 100) }, {
+            onSuccess: () => { setDflt(''); toast.push({ tone: 'success', title: `Default budget set for ${site.name}` }); }, onError: err('Default not set'),
+          })}>Set default</Button>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Withdrawals</p>
+          <p className="text-xs text-muted">Kill switch for this brand only. Pending requests stay pending.</p>
+        </div>
+        <Button size="sm" variant={wd.data?.enabled === false ? 'primary' : 'outline'} disabled={!wd.data || setWd.isPending}
+          onClick={() => setWd.mutate(!wd.data!.enabled, {
+            onSuccess: (r) => toast.push({ tone: 'success', title: `Withdrawals ${r.enabled ? 'enabled' : 'paused'} for ${site.name}` }),
+            onError: err('Withdrawals switch not changed'),
+          })}>
+          {wd.data ? (wd.data.enabled ? 'Enabled — pause' : 'Paused — enable') : '…'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** The full per-client management surface — a tabbed, consolidated detail (operator console). */
 const DETAIL_TABS = [
   { id: 'identity', label: 'Identity' },
   { id: 'branding', label: 'Branding' },
   { id: 'economy', label: 'Economy' },
+  { id: 'pool', label: 'Pool & payouts', ownerOnly: true },
   { id: 'payments', label: 'Payments' },
   { id: 'legal', label: 'Legal' },
   { id: 'players', label: 'Players' },
@@ -546,12 +615,14 @@ type DetailTab = (typeof DETAIL_TABS)[number]['id'];
 
 export function ClientDetail({ site }: { site: SiteWithConfig }) {
   const [tab, setTab] = useState<DetailTab>('identity');
+  const ownerSettings = useCan('console.site.owner_settings');
+  const tabs = DETAIL_TABS.filter((t) => !('ownerOnly' in t && t.ownerOnly) || ownerSettings);
   return (
     <div className="flex flex-col gap-4">
       {/* Tab bar */}
       <div className="table-wrapper overflow-x-auto">
         <div className="flex min-w-max gap-1 border-b border-border">
-          {DETAIL_TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -567,6 +638,7 @@ export function ClientDetail({ site }: { site: SiteWithConfig }) {
 
       <div className="rounded-2xl border border-border bg-surface p-4">
         {tab === 'identity' ? <IdentitySection site={site} /> : null}
+        {tab === 'pool' && ownerSettings ? <PoolPayoutsSection site={site} /> : null}
         {tab === 'branding' ? (
           <div className="flex flex-col gap-4">
             <ThemeGallery site={site} />
