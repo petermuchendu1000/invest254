@@ -24,12 +24,18 @@ import {
   useActivateScope, useDeactivateScope, type ScopeStateDto, type ScopeType, type ScopedConfigDto, type GatewayStatusDto,
 } from '@/lib/payments/scopes';
 import type { GatewaySchemaDto, ConnResultDto } from '@/lib/platform/endpoints';
+import { gatewayCopy } from '@/lib/payments/gatewayCopy';
 
 const RAILS = ['mpesa', 'megapay', 'payhero'];
+// Readiness keys from the engine (paymentscopes.ts gatewayStatus) in plain words.
+const MISSING_LABEL: Record<string, string> = {
+  shortcode: 'business shortcode', consumerKey: 'consumer key', consumerSecret: 'consumer secret', passkey: 'passkey',
+  b2cInitiator: 'payout initiator name', b2cSecurityCredential: 'payout security credential',
+};
 
 function Chip({ tone, children }: { tone: 'up' | 'warn' | 'muted' | 'down'; children: React.ReactNode }) {
   const cls = { up: 'bg-up/15 text-up', warn: 'bg-warn/15 text-warn', muted: 'bg-surface-2 text-muted', down: 'bg-down/15 text-down' }[tone];
-  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{children}</span>;
+  return <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{children}</span>;
 }
 
 function stateChip(s: ScopeStateDto | null | undefined) {
@@ -134,12 +140,19 @@ function GoLive({ type, id, name, state, status, affected, configs }: {
         </div>
         {state?.active
           ? <Button variant="outline" onClick={() => setConfirm('off')}>Switch back to System accounts</Button>
-          : <Button onClick={() => setConfirm('on')} disabled={ready.length === 0}>Go live on these accounts…</Button>}
+          : <Button onClick={() => setConfirm('on')} disabled={ready.length === 0} title={ready.length === 0 ? 'Set up at least one deposit account below first' : undefined}>Go live on these accounts…</Button>}
       </div>
-      <div className="flex flex-wrap gap-2 text-xs">
-        <Chip tone={ready.length ? 'up' : 'muted'}>Deposits ready: {ready.length ? ready.join(', ') : 'none'}</Chip>
-        <Chip tone={payouts ? 'up' : 'warn'}>Payouts (M-Pesa B2C): {payouts ? 'ready' : 'not set up'}</Chip>
-      </div>
+      {/* UI-D: what going live needs, as a checklist (was two chips) */}
+      <ul className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2" aria-label="Ready to go live">
+        <li className="flex items-start gap-2 rounded-xl border border-border px-3 py-2">
+          <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${ready.length ? 'bg-up text-white' : 'border border-border text-muted'}`}>{ready.length ? '✓' : '1'}</span>
+          <span><span className="font-medium">Deposits</span><br /><span className="text-xs text-muted">{ready.length ? `Ready: ${ready.map((c) => (c === 'mpesa' ? 'M-Pesa' : c)).join(', ')}` : 'Set up M-Pesa (or another deposit gateway) below'}</span></span>
+        </li>
+        <li className="flex items-start gap-2 rounded-xl border border-border px-3 py-2">
+          <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${payouts ? 'bg-up text-white' : 'border border-warn text-warn'}`}>{payouts ? '✓' : '2'}</span>
+          <span><span className="font-medium">Withdrawals</span><br /><span className="text-xs text-muted">{payouts ? `Paid from shortcode ${b2c ?? '—'}` : 'Add M-Pesa payout details (initiator + security credential), or go live for deposits only'}</span></span>
+        </li>
+      </ul>
 
       <Modal open={confirm === 'on'} onClose={() => setConfirm(null)} title={`Go live: ${name}`} chrome
         footer={<>
@@ -201,15 +214,15 @@ function GatewayCard({ type, id, code, schema, config, status, open, onToggle }:
   return (
     <div className="rounded-2xl border border-border bg-surface">
       <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center justify-between gap-3 p-4 text-left">
-        <span className="flex flex-col"><span className="text-sm font-semibold text-fg">{schema.displayName}</span><span className="text-xs text-muted">{schema.blurb}</span></span>
-        {statusChip}
+        <span className="flex min-w-0 flex-col"><span className="text-sm font-semibold text-fg">{schema.displayName}</span><span className="text-xs text-muted">{gatewayCopy(code, schema.blurb, schema.playerAvailable).summary}</span></span>
+        <span className="flex shrink-0 items-center gap-2">{statusChip}<span aria-hidden className={`text-muted transition ${open ? 'rotate-90' : ''}`}>›</span></span>
       </button>
       {open ? (
         <form className="flex flex-col gap-4 border-t border-border p-4" onSubmit={(e) => {
           e.preventDefault(); setResult(null);
           save.mutate({ type, id, code, values }, { onSuccess: () => toast.push({ tone: 'success', title: `${schema.displayName} saved`, description: 'Saved as part of this scope. It is live only while the scope is live.' }), onError: fail });
         }}>
-          {status.configured && status.missing.length ? <p className="text-xs text-warn">Still missing: {status.missing.join(', ')}</p> : null}
+          {status.configured && status.missing.length ? <p className="rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">Still needed: {status.missing.map((k) => MISSING_LABEL[k] ?? k).join(', ')}</p> : null}
           {groups.map(([g, fields]) => (
             <fieldset key={g} className="flex flex-col gap-3">
               <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{g}</legend>
@@ -220,7 +233,9 @@ function GatewayCard({ type, id, code, schema, config, status, open, onToggle }:
                   return (
                     <label key={f.key} className="flex flex-col gap-1.5 text-sm">
                       <span className="font-medium text-fg">{label}{f.required ? '' : <span className="font-normal text-muted"> (optional)</span>}</span>
-                      {f.kind === 'select' && f.options ? (
+                      {f.kind === 'select' && f.options && f.options.length === 1 ? (
+                        <span className="flex h-11 items-center rounded-brand border border-border bg-surface px-3 text-sm text-muted">{f.options[0]!.label}</span>
+                      ) : f.kind === 'select' && f.options ? (
                         <select aria-label={f.label} value={values[f.key] ?? ''} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))} className="h-11 rounded-brand border border-border bg-surface-2 px-3 text-fg">
                           {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
