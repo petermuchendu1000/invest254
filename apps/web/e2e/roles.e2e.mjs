@@ -22,10 +22,12 @@ const T = {
   pa: jwt({ sub: 'u-pa', role: 'platform_admin', site: SITE, platform: PLATFORM }),
   ownerImp: jwt({ sub: 'u-owner', role: 'admin', site: SITE, act: { sub: 'u-owner', role: 'platform_superadmin', brand: 'Tamu Traders' } }),
   paImp: jwt({ sub: 'u-pa', role: 'admin', site: SITE, act: { sub: 'u-pa', role: 'platform_admin', brand: 'Tamu Traders' } }),
+  player: jwt({ sub: 'u-player', role: 'player', site: SITE }),
 };
 const ME = {
   admin: { userId: 'u-admin', role: 'admin', username: 'siteadmin', phone: '254700000001', scope: { site: { id: SITE, name: 'Tamu Traders' }, platform: null } },
   owner: { userId: 'u-owner', role: 'platform_superadmin', username: 'owner', phone: '254700000002' },
+  player: { userId: 'u-player', role: 'player', username: 'punter', phone: '254700000009' },
   pa: { userId: 'u-pa', role: 'platform_admin', username: 'platadmin', phone: '254700000003', scope: { site: { id: SITE, name: 'Tamu Traders' }, platform: { id: PLATFORM, name: 'Alpha Platform' } } },
 };
 const USER = {
@@ -34,6 +36,9 @@ const USER = {
   netDepositsCents: 0, lastFundedCents: null, turnoverCents: 0, ggrCents: 0, betCount: 0, lastTxAtMs: null, lastTxKind: null,
   lastTxAmountCents: null, lastTxStatus: null, lastActiveAtMs: null, referredBy: null, isBrandDefaultMarketer: false,
 };
+
+const REFERRAL = { referralCode: 'K7PQ2MX', referralPath: '/r/K7PQ2MX', isMarketer: false, totalReferrals: 0, earnedCents: 0,
+  heldCents: 0, paidCents: 0, availableCents: 0, minPayoutCents: 50000, marketerEarnedCents: 0 };
 
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${name}${!ok && detail ? `  -- ${detail}` : ''}`); };
@@ -48,6 +53,7 @@ async function session(browser, { token, me, stash = null }) {
     const path = new URL(req.url()).pathname.replace('/api/v1', '');
     calls.push(`${req.method()} ${path}`);
     const body = path === '/auth/me' ? me
+      : path === '/me/referral' ? REFERRAL
       : /^\/admin\/users\/[^/]+$/.test(path) ? USER
       : { items: [], sites: [], platforms: [], statuses: {}, configured: false, key: null, enabled: true };
     return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -139,6 +145,25 @@ try {
     await open(page, '/admin/tickets');
     check('legacy impersonation (no act, tab stash): banner + exit still shown', await page.getByText('Tamu Traders').first().isVisible());
     check('legacy impersonation: token not re-minted', !calls.includes('POST /auth/refresh'), calls.join());
+    await ctx.close(); }
+
+  // 7) docs/42 UI-12: operators are never affiliates — no enrolment, no referral code, no requests
+  for (const [who, token, me] of [['site admin', T.admin, ME.admin], ['owner', T.owner, ME.owner],
+    ['platform admin', T.pa, ME.pa], ['owner impersonating', T.ownerImp, ME.owner]]) {
+    const { ctx, page, calls } = await session(browser, { token, me });
+    await open(page, '/affiliate');
+    check(`${who}: /affiliate explains staff accounts can't join (UI-12)`, await page.getByText('Not available for staff accounts').isVisible());
+    check(`${who}: /affiliate offers no "Apply to the programme"`, !(await page.getByText('Apply to the programme').isVisible().catch(() => false)));
+    await open(page, '/account');
+    check(`${who}: /account shows no referral invite card`, !(await page.getByText(/Invite & earn/).isVisible().catch(() => false)));
+    check(`${who}: no affiliate/referral request was made`, !calls.some((c) => /\/(me\/referral|affiliate)/.test(c)), calls.join());
+    await ctx.close();
+  }
+  { const { ctx, page } = await session(browser, { token: T.player, me: ME.player });
+    await open(page, '/account');
+    check('player: /account keeps the referral invite card', await page.getByText(/Invite & earn/).isVisible());
+    await open(page, '/affiliate');
+    check('player: /affiliate offers "Apply to the programme"', await page.getByText('Apply to the programme').isVisible());
     await ctx.close(); }
 } finally {
   await browser.close();

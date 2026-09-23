@@ -13,12 +13,15 @@
  *   ownerTier/platform (requireRole("platform_superadmin")) -> platform_superadmin
  *   platformAdmin     -> platform_admin + platform_superadmin
  * and the DB role rules (a site admin moves users only player<->marketer and cannot delete an admin).
+ *   requireEarningRole (UI-12) -> player + marketer only; every operator tier is refused.
  */
 export type Tier = "player" | "marketer" | "admin" | "platform_admin" | "platform_superadmin";
 
 const OWNER = ["platform_superadmin"] as const;
 const SITE_TIER = ["admin", "platform_superadmin"] as const;
 const PLATFORM_TIER = ["platform_admin", "platform_superadmin"] as const;
+/** docs/42 UI-12: only players and marketers may EARN from referrals — operators never. */
+const EARNERS = ["player", "marketer"] as const;
 
 export const CAPABILITIES = {
   // ── brand back office (/admin) — evaluated on the TOKEN role ────────────────────────────────
@@ -41,6 +44,9 @@ export const CAPABILITIES = {
   "console.site.owner_settings": OWNER,                  // chart style / trade UI, site owner & default marketer
   "console.performance": PLATFORM_TIER,                  // scoped to its own platform for a platform admin (UI-5)
   "console.live": PLATFORM_TIER,                         // engine feed scoped per platform (UI-5)
+  // ── player-side earning (UI-12: operators are never affiliates — conflict of interest) ──────
+  "earn.referrals": EARNERS,                             // invite code/link, 5% perk, commission payouts, apply to the programme
+  "earn.marketer_dashboard": ["marketer"],               // marketer dashboard, payout & advance requests
 } as const satisfies Record<string, readonly Tier[]>;
 
 export type Capability = keyof typeof CAPABILITIES;
