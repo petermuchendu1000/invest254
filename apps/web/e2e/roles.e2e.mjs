@@ -96,6 +96,14 @@ const FIXTURES = {
       secretMeta: { consumer_key: { set: true, last4: '1234' } }, hasSecret: true, updatedAt: null, exists: true } },
     status: { mpesa: { configured: true, depositsReady: true, payoutsReady: false, missing: ['b2cInitiator', 'b2cSecurityCredential'] } },
   },
+  // PAY-2 fixtures
+  '/admin/mpesa-config': { environment: 'production', shortcode: '600111', stkCallbackUrl: '', b2cInitiator: 'op', b2cResultUrl: '', b2cTimeoutUrl: '',
+    hasConsumerKey: true, hasConsumerSecret: true, hasPasskey: true, hasSecurityCredential: false, transactionType: 'paybill', tillNumber: '',
+    b2cShortcode: '', b2cCommandId: 'BusinessPayment', updatedBy: null, updatedAtMs: null },
+  '/admin/c2b-config': { enabled: true, shortcode: '600999', accountNumber: 'TRIO', businessName: 'Trio Ltd', instructions: '',
+    confirmationUrl: 'https://api.e2e.test/api/v1/deposits/c2b/confirmation', validationUrl: '', responseType: 'Completed',
+    registeredAtMs: null, registeredShortcode: null, registeredConfirmationUrl: null, lastRegisterAtMs: null, lastRegisterOk: null,
+    lastRegisterMessage: null, received7d: 3, unclaimed: 1, lastReceivedAtMs: Date.now() - 600000, updatedAtMs: null, registrationCurrent: false },
   // UI-C fixtures (brand back office pages)
   '/admin/withdrawals': { items: [{ txId: 'w-1', userId: 'u-target', username: 'wanjiku_long_username', phone: '0712345678', amountCents: 158000, status: 'pending',
     provider: 'mpesa', mpesaReceipt: null, createdAtMs: Date.now() - 3600e3, updatedAtMs: null, balanceCents: 2207000, totalDepositsCents: 746000,
@@ -452,6 +460,22 @@ try {
     }
     await ctx.close();
   }
+
+  // PAY-2: M-Pesa defaults grouped by purpose, with a C2B (Pay Bill) tab that can register with Safaricom.
+  { const { ctx, page, bodies } = await session(browser, { token: T.owner, me: ME.owner });
+    await open(page, '/platform/mpesa');
+    const bar = await page.locator('main').innerText().catch(() => '');
+    check('PAY-2: untouched auto-filled endpoints are "suggested", not "3 unsaved changes"', /Suggested endpoints are filled in/.test(bar) && !/Save 3 changes/.test(bar), bar.slice(-300));
+    const hasTab = await page.getByRole('tab', { name: 'Pay Bill (C2B)' }).isVisible().catch(() => false);
+    check('PAY-2: the M-Pesa page has a Pay Bill (C2B) section', hasTab);
+    await open(page, '/platform/mpesa?tab=c2b');
+    check('PAY-2: C2B status says it is not registered yet, with payment health', await page.getByText('Not registered', { exact: true }).isVisible().catch(() => false) && await page.getByText('Not yet claimed').isVisible().catch(() => false));
+    await page.getByRole('button', { name: 'Register with Safaricom' }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(200);
+    await page.getByRole('button', { name: 'Yes, register now' }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(400);
+    check('PAY-2: "Register with Safaricom" calls the registration endpoint', bodies.some(([k]) => k === 'POST /admin/c2b-config/register'), bodies.map(([k]) => k).join('|'));
+    await page.getByLabel('Confirmation URL').fill('https://api.e2e.test/mpesa/confirm', { timeout: 3000 }).catch(() => {});
+    check('PAY-2: a URL Safaricom would reject is flagged before saving', await page.getByText(/Safaricom rejects URLs containing/).isVisible().catch(() => false) && await page.getByRole('button', { name: 'Save', exact: true }).isDisabled().catch(() => false));
+    await ctx.close(); }
 } finally {
   await browser.close();
 }

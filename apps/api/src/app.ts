@@ -30,6 +30,7 @@ import { registerSubscriptionRoutes } from "./app.subscriptions.js";
 import { registerAddonRoutes, type AddonDeps } from "./app.addons.js";
 import { registerTicketRoutes } from "./app.tickets.js";
 import { registerPaymentScopeRoutes } from "./app.paymentscopes.js";
+import { registerC2bRoutes } from "./app.c2b.js";
 import type { PlatformOnboardDeps, RegistrarConfigDeps } from "./app.platform.js";
 import type { Server } from "node:http";
 
@@ -271,6 +272,8 @@ export interface ApiDeps {
   platformOnboard?: PlatformOnboardDeps;
   /** PAY-1 (docs/43): per-platform / per-brand payment accounts. Absent -> the routes answer 503. */
   paymentScopes?: import("@invest254/engine").PaymentScopeService | undefined;
+  /** PAY-2 (docs/45): C2B Pay Bill settings + Safaricom URL registration (owner tier). */
+  c2b?: import("@invest254/engine").C2bConfigService | undefined;
   /** Per-platform domain-registrar (Namecheap) configuration service (Issue 1 #3). */
   registrarConfig?: RegistrarConfigDeps;
   /** Add-on catalog / entitlements / requests service (Issue 2). */
@@ -395,6 +398,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerSubscriptionRoutes(router, deps);
   registerAddonRoutes(router, deps);
   registerPaymentScopeRoutes(router, deps);
+  registerC2bRoutes(router, deps);
   registerTicketRoutes(router, deps);
   return router;
 }
