@@ -480,12 +480,15 @@ interface MpesaInternal {
   shortcode: string; consumerKey: string; consumerSecret: string; passkey: string;
   stkCallbackUrl: string; b2cInitiator: string; b2cSecurityCredential: string;
   b2cResultUrl: string; b2cTimeoutUrl: string;
+  transactionType: "paybill" | "till"; tillNumber: string; b2cShortcode: string;
+  b2cCommandId: "BusinessPayment" | "SalaryPayment" | "PromotionPayment";
   updatedBy: string | null; updatedAtMs: number;
 }
 function defaultMpesaInternal(): MpesaInternal {
   return {
     environment: "sandbox", shortcode: "", consumerKey: "", consumerSecret: "", passkey: "",
     stkCallbackUrl: "", b2cInitiator: "", b2cSecurityCredential: "", b2cResultUrl: "", b2cTimeoutUrl: "",
+    transactionType: "paybill", tillNumber: "", b2cShortcode: "", b2cCommandId: "BusinessPayment",
     updatedBy: null, updatedAtMs: Date.now(),
   };
 }
@@ -495,7 +498,7 @@ function maskMpesaInternal(m: MpesaInternal): MpesaConfigRow {
     b2cInitiator: m.b2cInitiator, b2cResultUrl: m.b2cResultUrl, b2cTimeoutUrl: m.b2cTimeoutUrl,
     hasConsumerKey: m.consumerKey !== "", hasConsumerSecret: m.consumerSecret !== "",
     hasPasskey: m.passkey !== "", hasSecurityCredential: m.b2cSecurityCredential !== "",
-    transactionType: "paybill", tillNumber: "", b2cShortcode: "", b2cCommandId: "BusinessPayment",
+    transactionType: m.transactionType, tillNumber: m.tillNumber, b2cShortcode: m.b2cShortcode, b2cCommandId: m.b2cCommandId,
     updatedBy: m.updatedBy, updatedAtMs: m.updatedAtMs,
   };
 }
@@ -2120,6 +2123,10 @@ export class InMemoryAdminRepository implements AdminRepository {
     if (patch.b2cInitiator !== undefined) m.b2cInitiator = patch.b2cInitiator;
     if (patch.b2cResultUrl !== undefined) m.b2cResultUrl = patch.b2cResultUrl;
     if (patch.b2cTimeoutUrl !== undefined) m.b2cTimeoutUrl = patch.b2cTimeoutUrl;
+    if (patch.transactionType !== undefined) m.transactionType = patch.transactionType;
+    if (patch.tillNumber !== undefined) m.tillNumber = patch.tillNumber;
+    if (patch.b2cShortcode !== undefined) m.b2cShortcode = patch.b2cShortcode;
+    if (patch.b2cCommandId !== undefined) m.b2cCommandId = patch.b2cCommandId;
     if (patch.consumerKey) m.consumerKey = patch.consumerKey;
     if (patch.consumerSecret) m.consumerSecret = patch.consumerSecret;
     if (patch.passkey) m.passkey = patch.passkey;
