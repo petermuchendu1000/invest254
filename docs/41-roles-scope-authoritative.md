@@ -45,7 +45,7 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
 | 2 | API rank gate (`requireRole`, `requireSiteAdmin`) | token `role` | ✅ |
 | 3 | API scope gate (`adminScopeSite/Platform`, `assertTarget*InScope`) | token `site`/`platform` | ❌ missing on 25+ routes (F-44); fail-open for claimless `admin` (F-43) |
 | 4a | DB RPCs (SECURITY DEFINER, `p_actor_role`) | **actor's profile** (`fn_actor_target_sites`, 22 fns) | ⚠️ disagrees with layer 3 during impersonation (F-46) |
-| 4b | DB RLS for PostgREST (anon key) | JWT GUCs | ❌ 36 tables without RLS + 14 owner-run views (#42, fixed in 0153) |
+| 4b | DB RLS for PostgREST (anon key) | JWT GUCs | ✅ after 0153 (was: 36 tables without RLS + 14 owner-run views, #42) |
 
 ---
 
@@ -146,7 +146,7 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
 ### 2.6 Non-human principals (easy to forget, must be scoped too)
 | Principal | Scope today | Finding |
 |---|---|---|
-| Public anon key (PostgREST) | RLS only | ❌ #42 → fixed by 0153 (pending merge approval) |
+| Public anon key (PostgREST) | RLS only | ✅ #42 → closed by 0153 |
 | Anyone on the internet (public repo) | the repo | ❌ #41 → `.e2e.env` removed + CI secret-scan; **rotation pending (owner)** |
 | Impersonation session | token `site` at API; actor **profile** at DB | ⚠️ F-46 |
 | Payment callbacks (`/deposits/*/callback`) | STKPushQuery verify + optional CIDR | ✅ (not re-audited in depth here) |
@@ -201,7 +201,7 @@ hidden in the UI, but reachable by calling the API directly.
 | ID | Severity | Finding | Evidence | Fix | Status |
 |---|---|---|---|---|---|
 | #41 | P0 | Prod `DATABASE_URL` public in repo | raw.githubusercontent → 200 | removed + CI secret-scan | ✅ merged `7135cf9`; **owner must rotate** |
-| #42 | P0 | PostgREST table/view surface open to anon key | e2e_postgrest_surface (37 fails pre-fix) | migration 0153 + CI guard | ✅ branch `security/postgrest-table-surface` — **awaiting approval to merge (prod DB migration)** |
+| #42 | P0 | PostgREST table/view surface open to anon key | e2e_postgrest_surface (37 fails pre-fix) | migration 0153 + CI guard | ✅ approved & merged 2026-09-23 — applied by the deploy's migrate step (fails safe if its ownership guard trips) |
 | F-43 | P0 | Tokens minted without `site`/`platform`; claimless `admin` = unrestricted | app.auth.ts:329, app.affiliate.ts:87, app.marketers.ts:349,404; http.ts:465 | `issueSessionToken` choke point; `adminScopeSite` fail-closed; `adminListSite` | ✅ BUGLOG #43, branch `fix/issue1-f43-token-scope-claims` |
 | F-44 | P0/P1 | 25+ admin routes lack target-scope checks; global audit/M-Pesa reads; cross-tenant accrual & expenses | §2.3 | uniform target guards + RPC brand checks | after F-43 |
 | F-45 | P1 | Audit rows mis-attributed to default brand | 26/50 fns + `recordAction` omit `site_id` | derive `site_id` (trigger) + backfill | after F-44 |
