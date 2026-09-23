@@ -102,8 +102,32 @@ export function useDistributePool(platformId?: string) {
       void qc.invalidateQueries({ queryKey: ['platform', 'pool-distributions'] });
       void qc.invalidateQueries({ queryKey: ['platform', 'global-config'] });
       void qc.invalidateQueries({ queryKey: ['platform', 'sites'] });
+      void qc.invalidateQueries({ queryKey: ['platform', 'pool-overview'] });
     },
   });
+}
+// POOL-1 (docs/46)
+const invalidatePool = (qc: ReturnType<typeof useQueryClient>) => {
+  for (const k of ['pool-overview', 'pool-auto', 'pool-distributions', 'pool-demand', 'sites']) void qc.invalidateQueries({ queryKey: ['platform', k] });
+};
+export function usePoolOverview(platformId?: string) {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'pool-overview', platformId ?? 'all'], queryFn: () => platformApi.poolOverview(t, platformId), enabled: !!t, refetchInterval: 60_000 });
+}
+export function usePoolAutoSettings(platformId?: string) {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'pool-auto', platformId ?? 'own'], queryFn: () => platformApi.poolAutoSettings(t, platformId), enabled: !!t });
+}
+export function useSavePoolAutoSettings(platformId?: string) {
+  const t = useTok(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { mode: 'dynamic' | 'equal' | 'off'; dailyTotalCents: number | null; lookbackDays: number }) => platformApi.savePoolAutoSettings(t, body, platformId),
+    onSuccess: () => invalidatePool(qc),
+  });
+}
+export function useRunPoolAuto(platformId?: string) {
+  const t = useTok(); const qc = useQueryClient();
+  return useMutation({ mutationFn: () => platformApi.runPoolAuto(t, platformId), onSuccess: () => invalidatePool(qc) });
 }
 export function usePoolDistributions(platformId?: string) {
   const t = useTok();

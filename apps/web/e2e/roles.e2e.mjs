@@ -96,6 +96,21 @@ const FIXTURES = {
       secretMeta: { consumer_key: { set: true, last4: '1234' } }, hasSecret: true, updatedAt: null, exists: true } },
     status: { mpesa: { configured: true, depositsReady: true, payoutsReady: false, missing: ['b2cInitiator', 'b2cSecurityCredential'] } },
   },
+  '/platform/global-config': { config: { depositsEnabled: true, withdrawalsEnabled: true, playEnabled: true, marketersEnabled: true, registrationsEnabled: true,
+    maintenanceMessage: null, globalDailyPoolCents: 100000000, playerEconomy: {}, marketerEconomy: {}, payments: {}, version: 3, updatedAt: null } },
+  // POOL-1 fixtures
+  '/platform/pool/overview': { platformId: PLATFORM, brands: [
+    { siteId: SITE, name: 'Tamu Traders', slug: 'tamu', platformId: PLATFORM, platformName: 'Alpha Platform', poolMode: true, withdrawalsEnabled: true,
+      defaultCents: 500000, todayCents: 500000, paidCents: 200000, reservedCents: 50000, availableCents: 250000, todaySet: true, pendingCount: 2,
+      pendingCents: 30000, paid7dCents: 900000, lastChangedAtMs: Date.now() - 3600e3 },
+    { siteId: 'site-2', name: 'Simba FX', slug: 'simba', platformId: PLATFORM, platformName: 'Alpha Platform', poolMode: true, withdrawalsEnabled: false,
+      defaultCents: 100000, todayCents: 100000, paidCents: 100000, reservedCents: 0, availableCents: 0, todaySet: true, pendingCount: 0,
+      pendingCents: 0, paid7dCents: 100000, lastChangedAtMs: null }] },
+  '/platform/pool/auto-settings': { settings: { platformId: PLATFORM, mode: 'dynamic', dailyTotalCents: null, lookbackDays: 14, isDefault: true,
+    lastRunAtMs: Date.now() - 7200e3, lastRunOk: true, lastRunMessage: 'Split KES 6,000 across 2 brand(s) by demand.', updatedAtMs: null } },
+  '/platform/pool/distributions': { distributions: [{ id: 7, totalCents: 600000, mode: 'per_site', siteCount: 2, perSite: { [SITE]: 500000, 'site-2': 100000 },
+    createdAt: new Date(Date.now() - 7200e3).toISOString(), source: 'auto' }] },
+  '/platform/pool/auto-run': { run: { platformId: PLATFORM, mode: 'dynamic', ok: true, message: 'Split KES 6,000 across 2 brand(s) by demand.', totalCents: 600000, brands: 2 } },
   // PAY-2 fixtures
   '/admin/mpesa-config': { environment: 'production', shortcode: '600111', stkCallbackUrl: '', b2cInitiator: 'op', b2cResultUrl: '', b2cTimeoutUrl: '',
     hasConsumerKey: true, hasConsumerSecret: true, hasPasskey: true, hasSecurityCredential: false, transactionType: 'paybill', tillNumber: '',
@@ -475,6 +490,30 @@ try {
     check('PAY-2: "Register with Safaricom" calls the registration endpoint', bodies.some(([k]) => k === 'POST /admin/c2b-config/register'), bodies.map(([k]) => k).join('|'));
     await page.getByLabel('Confirmation URL').fill('https://api.e2e.test/mpesa/confirm', { timeout: 3000 }).catch(() => {});
     check('PAY-2: a URL Safaricom would reject is flagged before saving', await page.getByText(/Safaricom rejects URLs containing/).isVisible().catch(() => false) && await page.getByRole('button', { name: 'Save', exact: true }).isDisabled().catch(() => false));
+    await ctx.close(); }
+
+  // POOL-1: each brand's pool today, automatic distribution (dynamic by default), history with each brand's share.
+  { const { ctx, page, bodies } = await session(browser, { token: T.pa, me: ME.pa });
+    await open(page, '/platform/pool');
+    const today = await page.locator('section').filter({ hasText: 'Budget today' }).first().innerText().catch(() => '');
+    check('POOL-1: the pool page lists each brand with budget, paid, reserved and available today', /Tamu Traders/.test(today) && /KES 2,500/.test(today) && /KES 500/.test(today) && /Total \(pool on\)/.test(today), today.slice(0, 300));
+    check('POOL-1: a brand with withdrawals off is flagged', await page.getByText('withdrawals off').isVisible().catch(() => false));
+    check('POOL-1: automatic distribution is on, by demand, and marked as the default', await page.getByText('On — by demand').isVisible().catch(() => false) && await page.getByText('default', { exact: true }).isVisible().catch(() => false));
+    await page.getByRole('radio', { name: /Even split/ }).first().click({ timeout: 3000 }).catch(() => {});
+    check('POOL-1: an even split cannot be saved without a daily total', await page.getByText('An even split needs a daily total.').isVisible().catch(() => false) && await page.getByRole('button', { name: 'Save', exact: true }).isDisabled().catch(() => false));
+    await page.getByRole('radio', { name: /By demand/ }).first().click({ timeout: 3000 }).catch(() => {});
+    await page.getByRole('button', { name: 'Run now' }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(200);
+    await page.getByRole('button', { name: 'Yes, run it now' }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(400);
+    check('POOL-1: "Run now" runs the automatic distribution', bodies.some(([k]) => k === 'POST /platform/pool/auto-run'), bodies.map(([k]) => k).join('|'));
+    await page.getByText('Automatic', { exact: true }).first().click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(200);
+    const hist = await page.locator('section').filter({ hasText: 'History' }).last().innerText().catch(() => '');
+    check('POOL-1: a history row opens to show each brand’s share by name', /Tamu Traders[\s\S]*KES 5,000/.test(hist) && /Simba FX/.test(hist), hist.slice(0, 300));
+    await ctx.close(); }
+  { const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner });
+    await open(page, '/platform/config');
+    check('POOL-1: Controls & economy no longer duplicates the pool; it links to it', !(await page.getByText('Global withdrawal pool').count()) && await page.getByText('Open Withdrawal pool →').isVisible().catch(() => false));
+    await open(page, '/platform/pool');
+    check('POOL-1: the owner can view every platform at once', await page.getByRole('option', { name: 'All platforms' }).count() === 1);
     await ctx.close(); }
 } finally {
   await browser.close();

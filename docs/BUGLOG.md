@@ -5,6 +5,23 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #69 — No per-brand pool view; dynamic distribution had no setting and was off unless a GitHub variable was set; history hid who got what (POOL-1) — FIXED (branch `feat/pool1-overview-auto`, migration 0164)
+- **What (owner request, 2026-09-23):**
+  - Nothing showed each brand's pool for today: budget, paid, reserved and available.
+  - Automatic (dynamic) distribution only ran if the `POOL_DAILY_TOTAL_CENTS` repo variable was set, and then as one envelope across every platform.
+  - Dynamic runs were stored as `per_site`, the same as hand edits, and the history never showed each brand's share.
+  - Pool controls were duplicated on Controls & economy.
+- **Fix:** see docs/46.
+  - Migration 0164 adds the overview RPC, per-platform `pool_auto_settings` (dynamic when nothing is saved), and a `source` on each distribution.
+  - `PoolOpsService`, the rewritten daily job, four API routes, and a rebuilt `/platform/pool`.
+  - Controls & economy now links to the pool page.
+- **Tests:**
+  - `e2e_pool_overview.py` (BEFORE reproduces; AFTER 22 checks).
+  - Engine 3, a real-schema pg test, and unit tests: 1155 pass.
+  - Role e2e: 8 new checks, all failed before the fix; 139/139 pass after.
+
+---
+
 ## #68 — No C2B configuration: Pay Bill details not editable, C2B URLs never registered with Safaricom (PAY-2) — FIXED (branch `feat/pay2-c2b-config`, migration 0163)
 - **What (owner question, 2026-09-23):**
   - `/platform/mpesa` had only STK and B2C settings.

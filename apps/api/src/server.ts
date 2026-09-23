@@ -9,7 +9,7 @@ import {
   ConfiguredMegaPayClient,
   ConfiguredPayHeroClient,
   PaymentScopeService, PgPaymentScopeRepository, loadDarajaConfigFromDb, type GlobalCallbacks,
-  C2bConfigService, PgC2bConfigRepository, systemDarajaCredentials,
+  C2bConfigService, PgC2bConfigRepository, systemDarajaCredentials, PoolOpsService, PgPoolOpsRepository,
   verifyPassword,
   type GameRepository, type EngagementRepository, type PaymentRepository,
   type Querier, type FairnessRecord, type ListenClient,
@@ -954,6 +954,7 @@ async function buildDeps(): Promise<ApiDeps> {
     paymentScopes,
     // PAY-2 (docs/45): Pay Bill settings + Safaricom C2B URL registration with the System Daraja app.
     c2b: new C2bConfigService(new PgC2bConfigRepository(q), { darajaConfig: systemDarajaCredentials(q) }),
+    poolOps: new PoolOpsService(new PgPoolOpsRepository(q), platform),
     addons,
   };
 }
