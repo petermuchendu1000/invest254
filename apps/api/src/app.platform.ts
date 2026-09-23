@@ -124,6 +124,10 @@ const PLATFORM_STATUS: Readonly<Record<string, number>> = {
   NO_ACTIVE_SITES: 409,  // pool distribution: the chosen platform has no active brand
   INVALID_MODE: 400,
   INVALID_AMOUNT: 400,
+  // POOL-1 (0164)
+  PLATFORM_REQUIRED: 400,
+  TOTAL_REQUIRED: 400,
+  INVALID_LOOKBACK: 400,
 };
 
 async function domain<T>(fn: () => Promise<T>): Promise<T> {
@@ -601,7 +605,10 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
       }
       if (Object.keys(overrides).length === 0) throw new ApiError("VALIDATION", "per_site mode requires a non-empty overrides map", 400);
     }
-    return { result: await domain(() => deps.platform.distributePool(ctx.claims!.userId, ctx.claims!.role ?? "player", totalCents, mode, overrides, actingPlatform(ctx))) };
+    const platformId = actingPlatform(ctx);
+    const result = await domain(() => deps.platform.distributePool(ctx.claims!.userId, ctx.claims!.role ?? "player", totalCents, mode, overrides, platformId));
+    await deps.poolOps?.markLatest(ctx.claims!.userId, platformId, "manual").catch(() => {});
+    return { result };
   });
 
   router.get(`${BASE}/platform/pool/distributions`, auth, platformAdmin, async (ctx: Ctx) => {
@@ -627,7 +634,44 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     };
     if (opts.totalCents != null && (!Number.isFinite(opts.totalCents) || opts.totalCents < 0))
       throw new ApiError("VALIDATION", "totalCents must be a non-negative number", 400);
-    return { result: await domain(() => deps.platform.distributePoolDynamic(ctx.claims!.userId, ctx.claims!.role ?? "player", opts, actingPlatform(ctx))) };
+    const platformId = actingPlatform(ctx);
+    const result = await domain(() => deps.platform.distributePoolDynamic(ctx.claims!.userId, ctx.claims!.role ?? "player", opts, platformId));
+    await deps.poolOps?.markLatest(ctx.claims!.userId, platformId, "dynamic").catch(() => {});
+    return { result };
+  });
+
+  // ── POOL-1 (docs/46): per-brand overview + automatic daily distribution (dynamic by default) ──
+  const poolOps = () => {
+    if (!deps.poolOps) throw new ApiError("NOT_CONFIGURED", "pool overview is not available on this deployment", 503);
+    return deps.poolOps;
+  };
+  // Today, per brand: budget, paid, reserved, available, default, pending withdrawals. A platform admin is pinned
+  // to its own platform; the owner may pass ?platform= or omit it for every platform.
+  router.get(`${BASE}/platform/pool/overview`, auth, platformAdmin, async (ctx: Ctx) => {
+    const platformId = actingPlatform(ctx);
+    return { platformId, brands: await domain(() => poolOps().overview(ctx.claims!.userId, ctx.claims!.role ?? "player", platformId)) };
+  });
+  // The automatic distribution for ONE platform (the owner without ?platform= means the default platform).
+  router.get(`${BASE}/platform/pool/auto-settings`, auth, platformAdmin, async (ctx: Ctx) => {
+    const platformId = actingPlatform(ctx) ?? DEFAULT_PLATFORM_ID;
+    return { settings: await domain(() => poolOps().settings(ctx.claims!.userId, ctx.claims!.role ?? "player", platformId)) };
+  });
+  router.put(`${BASE}/platform/pool/auto-settings`, auth, platformAdmin, async (ctx: Ctx) => {
+    const platformId = actingPlatform(ctx) ?? DEFAULT_PLATFORM_ID;
+    const b = asObject(ctx.body);
+    const mode = b.mode;
+    if (mode !== "dynamic" && mode !== "equal" && mode !== "off") throw new ApiError("VALIDATION", "mode must be dynamic, equal or off", 400);
+    const total = b.dailyTotalCents === null || b.dailyTotalCents === undefined || b.dailyTotalCents === "" ? null : Number(b.dailyTotalCents);
+    if (total !== null && (!Number.isInteger(total) || total < 0)) throw new ApiError("VALIDATION", "dailyTotalCents must be a whole number of cents, or empty", 400);
+    if (mode === "equal" && total === null) throw new ApiError("VALIDATION", "An even split needs a daily total", 400);
+    const lookback = b.lookbackDays == null ? 14 : Number(b.lookbackDays);
+    if (!Number.isInteger(lookback) || lookback < 3 || lookback > 90) throw new ApiError("VALIDATION", "lookbackDays must be 3–90", 400);
+    return { settings: await domain(() => poolOps().saveSettings(ctx.claims!.userId, ctx.claims!.role ?? "player", platformId, { mode, dailyTotalCents: total, lookbackDays: lookback })) };
+  });
+  // Run the automatic distribution now (same as tonight's scheduled run).
+  router.post(`${BASE}/platform/pool/auto-run`, auth, platformAdmin, async (ctx: Ctx) => {
+    const platformId = actingPlatform(ctx) ?? DEFAULT_PLATFORM_ID;
+    return { run: await domain(() => poolOps().runAuto(ctx.claims!.userId, ctx.claims!.role ?? "player", platformId, "dynamic")) };
   });
 
   // ── Task R: cross-brand marketer rollup (reporting only; money stays per site) ──

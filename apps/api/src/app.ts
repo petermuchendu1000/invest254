@@ -274,6 +274,8 @@ export interface ApiDeps {
   paymentScopes?: import("@invest254/engine").PaymentScopeService | undefined;
   /** PAY-2 (docs/45): C2B Pay Bill settings + Safaricom URL registration (owner tier). */
   c2b?: import("@invest254/engine").C2bConfigService | undefined;
+  /** POOL-1 (docs/46): per-brand pool overview + automatic distribution. */
+  poolOps?: import("@invest254/engine").PoolOpsService | undefined;
   /** Per-platform domain-registrar (Namecheap) configuration service (Issue 1 #3). */
   registrarConfig?: RegistrarConfigDeps;
   /** Add-on catalog / entitlements / requests service (Issue 2). */

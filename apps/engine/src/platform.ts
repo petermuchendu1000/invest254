@@ -81,6 +81,8 @@ export interface DistributeResult { totalCents: number; mode: string; perSite: R
 export interface PoolDistribution {
   id: number; totalCents: number; mode: string; siteCount: number;
   perSite: Record<string, number>; createdAt: string;
+  /** POOL-1 (0164): how it was made — manual (set by hand), dynamic (demand-based, run by a person), auto (daily job). */
+  source?: string;
 }
 
 // ── Dynamic (demand-based) pool distribution (docs/25 §15) ──
@@ -572,10 +574,10 @@ export class PgPlatformRepository implements PlatformRepository {
   }
   async listPoolDistributions(limit = 20, platformId?: string | null): Promise<PoolDistribution[]> {
     const r = await this.q.query(
-      "select id, total_cents, mode, site_count, per_site, created_at from public.platform_pool_distributions where ($2::uuid is null or platform_id = $2) order by created_at desc limit $1", [limit, platformId ?? null]);
+      "select id, total_cents, mode, site_count, per_site, created_at, source from public.platform_pool_distributions where ($2::uuid is null or platform_id = $2) order by created_at desc limit $1", [limit, platformId ?? null]);
     return r.rows.map((x: Record<string, unknown>) => ({
       id: num(x.id), totalCents: num(x.total_cents), mode: String(x.mode), siteCount: num(x.site_count),
-      perSite: (x.per_site as Record<string, number>) ?? {}, createdAt: String(x.created_at),
+      perSite: (x.per_site as Record<string, number>) ?? {}, createdAt: String(x.created_at), source: String(x.source ?? 'manual'),
     }));
   }
 

@@ -103,7 +103,20 @@ export interface GlobalConfigDto {
   version: number; updatedAt: string | null;
 }
 export interface DistributeResultDto { totalCents: number; mode: string; perSite: Record<string, number> }
-export interface PoolDistributionDto { id: number; totalCents: number; mode: string; siteCount: number; perSite: Record<string, number>; createdAt: string }
+export interface PoolDistributionDto { id: number; totalCents: number; mode: string; siteCount: number; perSite: Record<string, number>; createdAt: string; source?: string }
+/** POOL-1 (docs/46): one brand's pool today. */
+export interface PoolOverviewRowDto {
+  siteId: string; name: string; slug: string; platformId: string | null; platformName: string | null;
+  poolMode: boolean; withdrawalsEnabled: boolean; defaultCents: number; todayCents: number; paidCents: number;
+  reservedCents: number; availableCents: number; todaySet: boolean; pendingCount: number; pendingCents: number;
+  paid7dCents: number; lastChangedAtMs: number | null;
+}
+export type PoolAutoMode = 'dynamic' | 'equal' | 'off';
+export interface PoolAutoSettingsDto {
+  platformId: string; mode: PoolAutoMode; dailyTotalCents: number | null; lookbackDays: number; isDefault: boolean;
+  lastRunAtMs: number | null; lastRunOk: boolean | null; lastRunMessage: string | null; updatedAtMs: number | null;
+}
+export interface PoolAutoRunDto { platformId: string; mode: PoolAutoMode; ok: boolean; message: string; totalCents: number; brands: number }
 
 /** Superadmin payment-gateway registry view (migration 0116). */
 export interface PaymentProviderDto { code: string; displayName: string; enabledGlobal: boolean; sortOrder: number }
@@ -211,6 +224,15 @@ export const platformApi = {
     apiFetch<{ result: DistributeResultDto }>('/platform/pool/distribute', { method: 'POST', token: t, body, query: { platform: platformId } }),
   poolDistributions: (t: string, platformId?: string) =>
     apiFetch<{ distributions: PoolDistributionDto[] }>('/platform/pool/distributions', { token: t, query: { platform: platformId } }),
+  // POOL-1 (docs/46): per-brand overview + automatic daily distribution.
+  poolOverview: (t: string, platformId?: string) =>
+    apiFetch<{ platformId: string | null; brands: PoolOverviewRowDto[] }>('/platform/pool/overview', { token: t, query: { platform: platformId } }),
+  poolAutoSettings: (t: string, platformId?: string) =>
+    apiFetch<{ settings: PoolAutoSettingsDto }>('/platform/pool/auto-settings', { token: t, query: { platform: platformId } }),
+  savePoolAutoSettings: (t: string, body: { mode: PoolAutoMode; dailyTotalCents: number | null; lookbackDays: number }, platformId?: string) =>
+    apiFetch<{ settings: PoolAutoSettingsDto }>('/platform/pool/auto-settings', { method: 'PUT', token: t, body, query: { platform: platformId } }),
+  runPoolAuto: (t: string, platformId?: string) =>
+    apiFetch<{ run: PoolAutoRunDto }>('/platform/pool/auto-run', { method: 'POST', token: t, query: { platform: platformId } }),
   // Dynamic (demand-based) distribution — preview (read-only) + apply.
   poolDemand: (t: string, params?: { lookbackDays?: number | undefined; totalCents?: number | undefined }, platformId?: string) => {
     const query: Record<string, number | string> = {};
