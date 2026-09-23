@@ -5,6 +5,13 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #54 — Operators were never shown WHICH brand or platform they were acting on (docs/42 UI-8) — FIXED (branch `fix/ui8-scope-chips`)
+- **What:** the back office header read "TrioCodes Admin" for every brand, and a platform admin's console never named its platform — a mode error waiting to happen for operators who switch brands (NN/g: modes need clear, redundant indicators). In a second impersonation tab the badge read "Accessing " (empty slug).
+- **Fix:** `/auth/me` returns `scope` — the brand/platform the SESSION's token is scoped to, with names (one targeted lookup, never a brand list; impersonated sessions report the opened brand). The back office header now reads "<Brand> Admin" with the session kind (Brand admin / Opened from the console · as admin / Owner · all brands) and the footer badge names the brand; the console shows "Platform · <name>" (or "System console · all platforms").
+- **Tests:** `app.auth.scope.ui8.test.ts` (brand session names its brand, platform admin its platform, owner neither); browser role e2e +2 checks (25/25). npm test green; web build OK.
+
+---
+
 ## #53 — A platform admin's Overview showed zeros and a fake "Live" badge (docs/42 UI-5) — FIXED (branch `fix/ui5-platform-dashboard-scoped`)
 - **What:** the console Overview (default period "today") called `GET /platform/performance`, which was owner-only → every KPI tile and per-brand column rendered 0 for a platform admin. The live card/feed opened the engine's `?platform=1` socket, which refused every role but the owner; the client marked itself "connected" on socket open and ignored the refusal, so a pulsing **Live** badge showed 0 online forever.
 - **Fix:** `/platform/performance` is open to platform admins, **scoped to their platform** (`adminScopePlatform`; owner → every brand; claimless platform admin → 403), via a `platform_id` filter in the performance query. The engine's console feed grants the owner every brand and a platform admin only its own platform's brands (online counts + deposits filtered per socket; scope re-resolved at most once a minute so newly onboarded brands appear; no platform claim → refused). The web marks the feed connected only when **granted**, and on refusal sets `denied`, stops reconnecting and hides the live widgets (docs/42 P6). `console.performance` / `console.live` opened to the platform tier in the shared capability list (contract test agrees).

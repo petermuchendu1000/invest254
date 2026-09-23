@@ -859,6 +859,14 @@ async function buildDeps(): Promise<ApiDeps> {
     payments,
     platformGate,
     resolveHandle,
+    // docs/42 UI-8: one targeted lookup for the scope chip (never a full brand list).
+    scopeNames: async (siteId: string | null, platformId: string | null) => {
+      const r = await q.query(
+        "select (select name from public.sites where id = $1::uuid) as site_name, (select name from public.platforms where id = $2::uuid) as platform_name",
+        [siteId, platformId]);
+      const x = (r.rows[0] ?? {}) as Record<string, unknown>;
+      return { siteName: x.site_name == null ? null : String(x.site_name), platformName: x.platform_name == null ? null : String(x.platform_name) };
+    },
     walletBalance: async (userId: string, siteId?: string): Promise<WalletBalance> => {
       // Spendable balance must match the game engine's source of truth (PgGameRepository
       // .getWalletSnapshot, migration 0084): marketer/demo accounts spend the DEMO bucket, players

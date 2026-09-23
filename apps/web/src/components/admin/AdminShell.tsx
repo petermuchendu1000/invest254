@@ -111,6 +111,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   const isSuper = can(effectiveRole, 'backoffice.governance');  // owner-tier accent (system owner's own session)
   const impRoleLabel = 'admin';
+  const brandName = impersonating?.name ?? user?.scope?.site?.name ?? null;
   const sections = SECTIONS
     .filter((s) => (!s.cap || can(effectiveRole, s.cap)) && !(s.hideWhileImpersonating && impersonating))
     .map((s) => ({ ...s, items: s.items.filter((n) => !n.cap || can(effectiveRole, n.cap)) }));
@@ -133,11 +134,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               <img src="/triocodes-mark.png" alt="TrioCodes" className="h-6 w-6 object-contain" />
             </span>
             <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold tracking-tight">
-                {impersonating ? impersonating.name : 'TrioCodes'} {isSuper ? 'Console' : 'Admin'}
+              {/* docs/42 UI-8 (P3): always name the brand this session acts on. */}
+              <span className="truncate text-sm font-semibold tracking-tight" title={brandName ?? undefined}>
+                {brandName ?? 'TrioCodes'} {brandName ? 'Admin' : 'Console'}
               </span>
-              <span className={cn('text-[10px] font-medium uppercase tracking-wide', isSuper ? 'text-warn' : 'text-muted')}>
-                {impersonating ? `Logged in as ${impRoleLabel}` : isSuper ? 'Owner · full authority' : 'Operations'}
+              <span className={cn('text-[10px] font-medium uppercase tracking-wide', isSuper || impersonating ? 'text-warn' : 'text-muted')}>
+                {impersonating ? `Opened from the console · as ${impRoleLabel}` : isSuper ? 'Owner · all brands' : 'Brand admin'}
               </span>
             </span>
           </Link>
@@ -213,7 +215,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                   )}
                   title={impersonating ? `Logged in as ${impRoleLabel}, accessing ${impersonating.name}` : undefined}
                 >
-                  {impersonating ? `Accessing ${impersonating.slug}` : isSuper ? '★ System owner' : 'Operator'}
+                  {impersonating ? `Accessing ${impersonating.name}` : isSuper ? '★ System owner' : `Admin · ${brandName ?? 'brand'}`}
                 </span>
               </div>
               <Button variant="secondary" size="sm" onClick={logout}>
