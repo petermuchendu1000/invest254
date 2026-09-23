@@ -28,6 +28,23 @@ function invalidatePlatformTier(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ['platform', 'platforms'] });
   void qc.invalidateQueries({ queryKey: ['platform', 'platforms-overview'] });
   void qc.invalidateQueries({ queryKey: ['platform', 'sites'] });
+  void qc.invalidateQueries({ queryKey: ['platform', 'platform-admins'] });
+  void qc.invalidateQueries({ queryKey: ['platform', 'user-search'] });
+}
+/** docs/42 UI-9: the current platform admins (System admin only). */
+export function usePlatformAdmins(enabled = true) {
+  const t = useTok();
+  return useQuery({ queryKey: ['platform', 'platform-admins'], queryFn: () => platformApi.platformAdmins(t), enabled: !!t && enabled });
+}
+/** docs/42 UI-9: cross-brand directory search; pass an already-debounced query (>= 2 chars to run). */
+export function useUserSearch(q: string) {
+  const t = useTok(); const needle = q.trim();
+  return useQuery({
+    queryKey: ['platform', 'user-search', needle],
+    queryFn: () => platformApi.searchUsers(t, needle),
+    enabled: !!t && needle.length >= 2,
+    staleTime: 15_000,
+  });
 }
 export function useCreatePlatform() {
   const t = useTok(); const qc = useQueryClient();
@@ -77,10 +94,10 @@ export function useSetGlobalConfig() {
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'global-config'] }); },
   });
 }
-export function useDistributePool() {
+export function useDistributePool(platformId?: string) {
   const t = useTok(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { totalCents?: number; mode: string; overrides?: Record<string, number> }) => platformApi.distributePool(t, body),
+    mutationFn: (body: { totalCents?: number; mode: string; overrides?: Record<string, number> }) => platformApi.distributePool(t, body, platformId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['platform', 'pool-distributions'] });
       void qc.invalidateQueries({ queryKey: ['platform', 'global-config'] });
@@ -88,9 +105,9 @@ export function useDistributePool() {
     },
   });
 }
-export function usePoolDistributions() {
+export function usePoolDistributions(platformId?: string) {
   const t = useTok();
-  return useQuery({ queryKey: ['platform', 'pool-distributions'], queryFn: () => platformApi.poolDistributions(t), enabled: !!t });
+  return useQuery({ queryKey: ['platform', 'pool-distributions', platformId ?? 'all'], queryFn: () => platformApi.poolDistributions(t, platformId), enabled: !!t });
 }
 
 // ── Payment-gateway provider switches (migration 0116) ──
@@ -133,18 +150,18 @@ export function useTestGatewayConfig() {
 }
 
 // Dynamic (demand-based) distribution (docs/25 §15)
-export function usePoolDemand(params: { lookbackDays?: number | undefined; totalCents?: number | undefined }, enabled = true) {
+export function usePoolDemand(params: { lookbackDays?: number | undefined; totalCents?: number | undefined }, enabled = true, platformId?: string) {
   const t = useTok();
   return useQuery({
-    queryKey: ['platform', 'pool-demand', params.lookbackDays ?? null, params.totalCents ?? null],
-    queryFn: () => platformApi.poolDemand(t, params),
+    queryKey: ['platform', 'pool-demand', params.lookbackDays ?? null, params.totalCents ?? null, platformId ?? 'all'],
+    queryFn: () => platformApi.poolDemand(t, params, platformId),
     enabled: !!t && enabled,
   });
 }
-export function useDistributePoolDynamic() {
+export function useDistributePoolDynamic(platformId?: string) {
   const t = useTok(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { totalCents?: number | undefined; lookbackDays?: number | undefined }) => platformApi.distributePoolDynamic(t, body),
+    mutationFn: (body: { totalCents?: number | undefined; lookbackDays?: number | undefined }) => platformApi.distributePoolDynamic(t, body, platformId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['platform', 'pool-distributions'] });
       void qc.invalidateQueries({ queryKey: ['platform', 'pool-demand'] });
@@ -154,9 +171,9 @@ export function useDistributePoolDynamic() {
   });
 }
 
-export function usePlatformSites() {
+export function usePlatformSites(platformId?: string) {
   const t = useTok();
-  return useQuery({ queryKey: ['platform', 'sites'], queryFn: () => platformApi.sites(t), enabled: !!t });
+  return useQuery({ queryKey: ['platform', 'sites', platformId ?? 'all'], queryFn: () => platformApi.sites(t, platformId), enabled: !!t });
 }
 
 /** Per-brand performance over a [fromMs, toMs) window (docs/24 performance filters). Disabled until
@@ -198,15 +215,15 @@ export function useCreateSite() {
 }
 
 /** Onboarding capabilities: is Cloudflare provisioning on, and are nameservers auto-set (else manual)? */
-export function useOnboardCapabilities() {
+export function useOnboardCapabilities(platformId?: string) {
   const t = useTok();
-  return useQuery({ queryKey: ['platform', 'onboard-caps'], queryFn: () => platformApi.onboardCapabilities(t), enabled: !!t, staleTime: 300_000 });
+  return useQuery({ queryKey: ['platform', 'onboard-caps', platformId ?? ''], queryFn: () => platformApi.onboardCapabilities(t, platformId), enabled: !!t, staleTime: 300_000 });
 }
 
 /** List the registrar (Namecheap) account's domains, annotated with which are already clients. */
-export function useRegistrarDomains(enabled = true) {
+export function useRegistrarDomains(enabled = true, platformId?: string) {
   const t = useTok();
-  return useQuery({ queryKey: ['platform', 'registrar-domains'], queryFn: () => platformApi.registrarDomains(t), enabled: !!t && enabled, staleTime: 60_000 });
+  return useQuery({ queryKey: ['platform', 'registrar-domains', platformId ?? ''], queryFn: () => platformApi.registrarDomains(t, platformId), enabled: !!t && enabled, staleTime: 60_000 });
 }
 
 /** Real per-domain health (Cloudflare Pages custom-domain statuses) for a truthful Clients table. */
@@ -223,20 +240,25 @@ export function useOnboardClient() {
 }
 
 // ── Per-platform registrar (Namecheap) config (Issue 1 #3) ──────────────────────────────────────
-export function useRegistrarConfig() {
+/** docs/42 UI-9: `platformId` — the System admin's chosen platform (ignored server-side for a platform admin). */
+export function useRegistrarConfig(platformId?: string) {
   const t = useTok();
-  return useQuery({ queryKey: ['platform', 'registrar-config'], queryFn: () => platformApi.registrarConfig(t), enabled: !!t });
+  return useQuery({ queryKey: ['platform', 'registrar-config', platformId ?? ''], queryFn: () => platformApi.registrarConfig(t, platformId), enabled: !!t });
 }
-export function useSetRegistrarConfig() {
+export function useSetRegistrarConfig(platformId?: string) {
   const t = useTok(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: RegistrarConfigBody) => platformApi.setRegistrarConfig(t, body),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'registrar-config'] }); },
+    mutationFn: (body: RegistrarConfigBody) => platformApi.setRegistrarConfig(t, body, platformId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['platform', 'registrar-config'] });
+      void qc.invalidateQueries({ queryKey: ['platform', 'onboard-caps'] });
+      void qc.invalidateQueries({ queryKey: ['platform', 'registrar-domains'] });
+    },
   });
 }
-export function useTestRegistrarConfig() {
+export function useTestRegistrarConfig(platformId?: string) {
   const t = useTok();
-  return useMutation({ mutationFn: (body: RegistrarConfigBody) => platformApi.testRegistrarConfig(t, body) });
+  return useMutation({ mutationFn: (body: RegistrarConfigBody) => platformApi.testRegistrarConfig(t, body, platformId) });
 }
 
 /** Poll a domain's provisioning status (zone active + Pages custom domains validated). */

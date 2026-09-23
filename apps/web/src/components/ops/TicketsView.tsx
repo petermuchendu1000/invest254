@@ -17,6 +17,26 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { useTickets, useTicket, useCreateTicket, useCommentTicket, useSetTicketStatus, useEscalateTicket } from '@/lib/ops/hooks';
 import type { Ticket } from '@/lib/ops/endpoints';
 import { ApiError } from '@/lib/api/client';
+import { can, useEffectiveRole } from '@/lib/auth/can';
+import { usePlatforms } from '@/lib/platform/hooks';
+
+/**
+ * docs/42 UI-9: who a new ticket goes to depends on WHO raises it (fn_ticket_create):
+ *   site admin      -> its platform's admin (level 0), auto-escalating to the System admin on SLA breach;
+ *   platform admin  -> straight to the System admin (level 1);
+ *   System admin    -> the admin of a platform it CHOOSES (level 0; the API requires platformId).
+ * The System admin never sees "Escalate to System" — escalating would only reassign the ticket to itself.
+ */
+type Raiser = 'system' | 'platform' | 'site';
+function raiserOf(role: string | null): Raiser {
+  if (can(role, 'console.system')) return 'system';
+  return role === 'platform_admin' ? 'platform' : 'site';
+}
+const ROUTING: Record<Raiser, string> = {
+  system: "Assigned to the chosen platform's admin. If they miss the SLA it comes back to you (System admin).",
+  platform: 'Goes straight to the System admin.',
+  site: 'Assigned to your platform admin; auto-escalates to the System admin if the SLA lapses.',
+};
 
 const URGENCY: Record<string, string> = {
   critical: 'border-down/40 bg-down/10 text-down', high: 'border-warn/40 bg-warn/10 text-warn',
@@ -41,6 +61,12 @@ function sla(t: Ticket): { label: string; tone: string } {
 
 export function TicketsView({ title, subtitle }: { title: string; subtitle: string }) {
   const toast = useToast();
+  const raiser = raiserOf(useEffectiveRole());
+  const isSystem = raiser === 'system';
+  const platformsQ = usePlatforms(isSystem);
+  const platforms = useMemo(() => platformsQ.data?.platforms ?? [], [platformsQ.data]);
+  const platformName = useMemo(() => new Map(platforms.map((p) => [p.platformId, p.name])), [platforms]);
+  const [targetPlatform, setTargetPlatform] = useState('');
   const [status, setStatus] = useState(''); const [urgency, setUrgency] = useState('');
   const q = useTickets({ status: status || undefined, urgency: urgency || undefined, limit: 100 });
   const tickets = useMemo(() => q.data?.tickets ?? [], [q.data]);
@@ -58,7 +84,11 @@ export function TicketsView({ title, subtitle }: { title: string; subtitle: stri
 
   async function submit() {
     if (!subject.trim()) return err(new Error('Subject is required.'));
-    try { await create.mutateAsync({ subject: subject.trim(), body: body.trim(), urgency: urg }); toast.push({ tone: 'success', title: 'Ticket raised' }); setCreateOpen(false); setSubject(''); setBody(''); setUrg('medium'); }
+    if (isSystem && !targetPlatform) return err(new Error('Choose the platform whose admin should handle this.'));
+    try {
+      await create.mutateAsync({ subject: subject.trim(), body: body.trim(), urgency: urg, ...(isSystem ? { platformId: targetPlatform } : {}) });
+      toast.push({ tone: 'success', title: 'Ticket raised' }); setCreateOpen(false); setSubject(''); setBody(''); setUrg('medium'); setTargetPlatform('');
+    }
     catch (e) { err(e); }
   }
 
@@ -86,11 +116,12 @@ export function TicketsView({ title, subtitle }: { title: string; subtitle: stri
           : (
           <TableWrap>
             <table className="w-full text-sm">
-              <thead><tr><Th>Subject</Th><Th>Urgency</Th><Th>Status</Th><Th>Assignee</Th><Th>SLA</Th><Th className="text-right">Raised</Th></tr></thead>
+              <thead><tr><Th>Subject</Th>{isSystem ? <Th>Platform</Th> : null}<Th>Urgency</Th><Th>Status</Th><Th>Assignee</Th><Th>SLA</Th><Th className="text-right">Raised</Th></tr></thead>
               <tbody>
                 {tickets.map((t) => { const s = sla(t); return (
                   <tr key={t.id} className="cursor-pointer border-t border-border hover:bg-surface-2" onClick={() => setOpenId(t.id)}>
                     <Td><span className="font-medium">{t.subject}</span></Td>
+                    {isSystem ? <Td className="text-xs text-muted">{platformName.get(t.platformId) ?? '—'}</Td> : null}
                     <Td><Badge cls={URGENCY[t.urgency]!}>{t.urgency}</Badge></Td>
                     <Td><Badge cls={STATUS[t.status]!}>{t.status.replace('_', ' ')}</Badge></Td>
                     <Td className="text-xs text-muted">{t.escalationLevel >= 1 ? 'System admin' : 'Platform admin'}</Td>
@@ -106,7 +137,7 @@ export function TicketsView({ title, subtitle }: { title: string; subtitle: stri
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Raise a ticket"
-        description="Assigned to your platform admin; auto-escalates to the System admin if the SLA lapses."
+        description={ROUTING[raiser]}
         footer={
           <>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
@@ -115,6 +146,12 @@ export function TicketsView({ title, subtitle }: { title: string; subtitle: stri
         }
       >
         <div className="flex flex-col gap-4">
+          {isSystem ? (
+            <Select label="Platform" value={targetPlatform} onChange={(e) => setTargetPlatform(e.target.value)}>
+              <option value="">Choose a platform…</option>
+              {platforms.map((p) => <option key={p.platformId} value={p.platformId}>{p.name}</option>)}
+            </Select>
+          ) : null}
           <Input label="Subject" placeholder="Short summary of the issue" value={subject} onChange={(e) => setSubject(e.target.value)} />
           <Select label="Urgency" value={urg} onChange={(e) => setUrg(e.target.value)}>
             <option value="critical">Critical — 1h SLA</option>
@@ -134,12 +171,12 @@ export function TicketsView({ title, subtitle }: { title: string; subtitle: stri
         </div>
       </Modal>
 
-      {openId ? <TicketDetail id={openId} onClose={() => setOpenId(null)} /> : null}
+      {openId ? <TicketDetail id={openId} canEscalate={!isSystem} onClose={() => setOpenId(null)} /> : null}
     </div>
   );
 }
 
-function TicketDetail({ id, onClose }: { id: string; onClose: () => void }) {
+function TicketDetail({ id, canEscalate, onClose }: { id: string; canEscalate: boolean; onClose: () => void }) {
   const toast = useToast();
   const q = useTicket(id); const comment = useCommentTicket(id); const setStatus = useSetTicketStatus(id); const escalate = useEscalateTicket(id);
   const [note, setNote] = useState('');
@@ -180,7 +217,7 @@ function TicketDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
-            {t.escalationLevel < 1 && t.status !== 'resolved' && t.status !== 'closed'
+            {canEscalate && t.escalationLevel < 1 && t.status !== 'resolved' && t.status !== 'closed'
               ? <Button variant="down" onClick={() => act(() => escalate.mutateAsync(undefined), 'Escalated to System admin')} disabled={escalate.isPending}>Escalate to System</Button> : null}
             {t.status !== 'in_progress' && t.status !== 'resolved' && t.status !== 'closed'
               ? <Button variant="outline" onClick={() => act(() => setStatus.mutateAsync({ status: 'in_progress' }), 'Marked in progress')}>Mark in progress</Button> : null}
