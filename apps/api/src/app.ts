@@ -155,7 +155,7 @@ export interface ApiDeps {
     | "listPaymentProviders" | "setProviderGlobal" | "setProviderSite" | "clearProviderSite"
     | "gatewaySchemas" | "getProviderConfig" | "setProviderConfig" | "testProviderConnection"
     | "listPlatforms" | "platformsOverview" | "createPlatform" | "updatePlatform" | "assignSiteToPlatform"
-    | "appointPlatformAdmin" | "revokePlatformAdmin" | "platformOfSite">;
+    | "appointPlatformAdmin" | "revokePlatformAdmin" | "platformOfSite" | "listPlatformAdmins" | "searchUsers">;
   /** Subscription plans + per-platform billing/status (Issue 2). Absent -> /subscriptions routes off. */
   subscriptions?: SubscriptionService | undefined;
   /** Internal escalation ticketing (Issue 2). Absent -> /tickets routes off. */

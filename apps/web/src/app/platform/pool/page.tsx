@@ -7,20 +7,30 @@ import { Input } from '@/components/ui/Input';
 import {
   usePlatformSites, useDistributePool, usePoolDistributions, usePoolDemand, useDistributePoolDynamic,
 } from '@/lib/platform/hooks';
+import { useCan } from '@/lib/auth/can';
+import { OwnerPlatformPicker, DEFAULT_PLATFORM_ID } from '@/components/platform/OwnerPlatformPicker';
 
 /**
  * Withdrawal-pool console for PLATFORM ADMINS (Issue 1 #4). Every action is scoped server-side to the
  * caller's platform (the API derives the platform from the token; the RPC refuses cross-platform writes).
  * Set each brand's daily payout budget — wins are hard-capped at the pool per day.
+ *
+ * docs/42 UI-9: the System admin picks WHICH platform it is setting the pool for (every call carries
+ * ?platform=). Before, the owner's calls had no scope, so this page distributed across every brand of
+ * every platform while saying "your brands". The all-platforms distributor stays in Global config.
  */
 const money = (cents: number, cur = 'KES') => `${cur} ${(cents / 100).toLocaleString()}`;
 const toCents = (kes: string): number => Math.round(Number(kes) * 100);
 
 export default function PlatformPoolPage() {
-  const sitesQ = usePlatformSites();
-  const distMut = useDistributePool();
-  const dynMut = useDistributePoolDynamic();
-  const distsQ = usePoolDistributions();
+  const isSystem = useCan('console.system');
+  const [platformId, setPlatformId] = useState(DEFAULT_PLATFORM_ID);
+  const target = isSystem ? platformId : undefined;
+  const yourBrands = isSystem ? "this platform's brands" : 'your brands';
+  const sitesQ = usePlatformSites(target);
+  const distMut = useDistributePool(target);
+  const dynMut = useDistributePoolDynamic(target);
+  const distsQ = usePoolDistributions(target);
 
   const sites = useMemo(() => (sitesQ.data?.sites ?? []).filter((s) => s.status === 'active'), [sitesQ.data]);
 
@@ -36,6 +46,7 @@ export default function PlatformPoolPage() {
   const demandQ = usePoolDemand(
     { lookbackDays: Number(lookback) || 14, ...(demandKes ? { totalCents: toCents(demandKes) } : {}) },
     previewOn,
+    target,
   );
   const preview = demandQ.data?.preview;
 
@@ -44,7 +55,7 @@ export default function PlatformPoolPage() {
     if (mode === 'equal') {
       const c = toCents(totalKes);
       if (!Number.isInteger(c) || c < 0) { setMsg('Enter a valid total amount.'); return; }
-      distMut.mutate({ totalCents: c, mode: 'equal' }, { onSuccess: () => setMsg('Daily pool distributed across your active brands.') });
+      distMut.mutate({ totalCents: c, mode: 'equal' }, { onSuccess: () => setMsg(`Daily pool distributed across ${isSystem ? "this platform's" : 'your'} active brands.`) });
     } else {
       const overrides: Record<string, number> = {};
       for (const s of sites) { const v = perBrand[s.siteId]; if (v != null && v !== '') overrides[s.siteId] = toCents(v); }
@@ -57,12 +68,16 @@ export default function PlatformPoolPage() {
     <>
       <PageHeader
         title="Withdrawal pool"
-        subtitle="Set each of your brands' daily payout budget. Total daily winnings are hard-capped at the pool, protecting your cash flow."
+        subtitle={isSystem
+          ? "Set the daily payout budget of one platform's brands. To split one total across EVERY platform, use Global config."
+          : "Set each of your brands' daily payout budget. Total daily winnings are hard-capped at the pool, protecting your cash flow."}
       />
+
+      <OwnerPlatformPicker value={platformId} onChange={(v) => { setPlatformId(v); setPerBrand({}); setPreviewOn(false); setMsg(null); }} label="Pool for platform" />
 
       {sites.length === 0 ? (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-fg">
-          You have no active brands yet. Onboard a client first, then set its daily pool here.
+          {isSystem ? 'This platform has no active brands yet.' : 'You have no active brands yet. Onboard a client first, then set its daily pool here.'}
         </div>
       ) : null}
 
@@ -77,7 +92,7 @@ export default function PlatformPoolPage() {
           {mode === 'equal' ? (
             <div className="flex flex-wrap items-end gap-3">
               <div className="w-56"><Input label="Total daily pool (KES)" inputMode="decimal" value={totalKes} onChange={(e) => setTotalKes(e.target.value)} placeholder="e.g. 500000" /></div>
-              <span className="text-sm text-muted">Split equally across your {sites.length} active brand{sites.length === 1 ? '' : 's'}.</span>
+              <span className="text-sm text-muted">Split equally across {isSystem ? "this platform's" : 'your'} {sites.length} active brand{sites.length === 1 ? '' : 's'}.</span>
             </div>
           ) : (
             <div className="flex flex-col gap-2">
@@ -133,7 +148,7 @@ export default function PlatformPoolPage() {
                 <span className="text-sm text-muted">Suggested total: <b className="text-fg">{money(preview.suggestedTotalCents)}</b> &middot; Reserve (unallocated): <b className="text-fg">{money(preview.reserveCents)}</b></span>
                 <Button
                   type="button" disabled={dynMut.isPending || preview.rows.length === 0}
-                  onClick={() => { setMsg(null); dynMut.mutate({ lookbackDays: Number(lookback) || 14, ...(demandKes ? { totalCents: toCents(demandKes) } : {}) }, { onSuccess: () => setMsg('Applied the demand-based allocation to your brands.') }); }}
+                  onClick={() => { setMsg(null); dynMut.mutate({ lookbackDays: Number(lookback) || 14, ...(demandKes ? { totalCents: toCents(demandKes) } : {}) }, { onSuccess: () => setMsg(`Applied the demand-based allocation to ${yourBrands}.`) }); }}
                 >
                   {dynMut.isPending ? 'Applying…' : 'Apply suggestion'}
                 </Button>

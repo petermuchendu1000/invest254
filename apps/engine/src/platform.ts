@@ -43,6 +43,22 @@ export interface CreateSiteInput { slug: string; name: string; currency?: string
 export interface PlatformRow { platformId: string; slug: string; name: string; status: string; ownerUserId: string | null; notes: string | null; }
 export interface PlatformKpis { platformId: string; slug: string; name: string; status: string; sites: number; users: number; siteAdmins: number; platformAdmins: number; }
 export interface AppointResult { userId: string; role: string; platformId: string | null; }
+/** docs/42 UI-9: a current platform admin, as the System console lists them (never by raw id alone). */
+export interface PlatformAdminRow {
+  userId: string; username: string | null; phone: string | null; status: string;
+  platformId: string | null; platformName: string | null; homeSiteId: string | null; homeSiteName: string | null; createdAtMs: number;
+}
+/** docs/42 UI-9: a cross-brand user-directory hit (System console only — appoint by search, not by uuid). */
+export interface DirectoryUserRow {
+  userId: string; username: string | null; phone: string | null; role: string; status: string;
+  siteId: string | null; siteName: string | null; platformId: string | null; platformName: string | null;
+  /** The user is some brand's default marketer (fn_platform_appoint_platform_admin refuses them). */
+  isDefaultMarketer: boolean;
+}
+/** Escape LIKE wildcards so a search for "a_b" or "50%" matches literally. */
+export function likeContains(q: string): string {
+  return `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
 /** Per-brand performance over a [fromMs, toMs) window (docs/24 performance filters). Shared columns
  *  (deposits/withdrawals/ggr/bets) reconcile with `overview` when the window spans all time. */
 export interface SitePerformance {
@@ -162,6 +178,10 @@ export interface PlatformRepository {
   appointPlatformAdmin(actorId: string, actorRole: string, targetUserId: string, platformId: string): Promise<AppointResult>;
   /** Revoke a platform_admin back to a site-level role (clears platform_id). */
   revokePlatformAdmin(actorId: string, actorRole: string, targetUserId: string, newRole: string): Promise<{ userId: string; role: string }>;
+  /** docs/42 UI-9: current platform admins (all platforms, or one). The route gates on platform_superadmin. */
+  listPlatformAdmins(platformId: string | null): Promise<PlatformAdminRow[]>;
+  /** docs/42 UI-9: search users across EVERY brand by username/phone (substring, case-insensitive). System only. */
+  searchUsers(q: string, limit: number): Promise<DirectoryUserRow[]>;
   /** Per-brand performance within a time window (read-only; the API route gates on platform_superadmin). */
   /** Per-brand performance in [from, to). `platformScope` (docs/42 UI-5): a platform admin's own platform only; null = every brand. */
   performance(fromMs: number, toMs: number, platformScope?: string | null): Promise<SitePerformance[]>;
@@ -359,6 +379,44 @@ export class PgPlatformRepository implements PlatformRepository {
       [actorId, actorRole, targetUserId, newRole]);
     const x = r.rows[0] as Record<string, unknown>;
     return { userId: String(x.user_id), role: String(x.role) };
+  }
+
+  async listPlatformAdmins(platformId: string | null): Promise<PlatformAdminRow[]> {
+    const r = await this.q.query(
+      `select p.id, p.username, p.phone, p.status, p.platform_id, pl.name as platform_name,
+              p.site_id, s.name as site_name, p.created_at
+         from profiles p
+         left join platforms pl on pl.id = p.platform_id
+         left join sites s on s.id = p.site_id
+        where p.role = 'platform_admin' and ($1::uuid is null or p.platform_id = $1::uuid)
+        order by pl.name nulls last, p.username`, [platformId]);
+    return r.rows.map((x: Record<string, unknown>) => ({
+      userId: String(x.id), username: x.username == null ? null : String(x.username), phone: x.phone == null ? null : String(x.phone),
+      status: String(x.status), platformId: x.platform_id == null ? null : String(x.platform_id),
+      platformName: x.platform_name == null ? null : String(x.platform_name),
+      homeSiteId: x.site_id == null ? null : String(x.site_id), homeSiteName: x.site_name == null ? null : String(x.site_name),
+      createdAtMs: x.created_at ? new Date(String(x.created_at)).getTime() : 0,
+    }));
+  }
+
+  async searchUsers(q: string, limit: number): Promise<DirectoryUserRow[]> {
+    const r = await this.q.query(
+      `select p.id, p.username, p.phone, p.role, p.status, p.site_id, s.name as site_name,
+              coalesce(p.platform_id, s.platform_id) as platform_id, pl.name as platform_name,
+              exists (select 1 from sites o where o.owner_user_id = p.id) as is_default_marketer
+         from profiles p
+         left join sites s on s.id = p.site_id
+         left join platforms pl on pl.id = coalesce(p.platform_id, s.platform_id)
+        where p.username ilike $1 or p.phone ilike $1
+        order by (lower(p.username) = lower($2)) desc, (p.phone = $2) desc, p.username
+        limit $3`, [likeContains(q), q, limit]);
+    return r.rows.map((x: Record<string, unknown>) => ({
+      userId: String(x.id), username: x.username == null ? null : String(x.username), phone: x.phone == null ? null : String(x.phone),
+      role: String(x.role), status: String(x.status),
+      siteId: x.site_id == null ? null : String(x.site_id), siteName: x.site_name == null ? null : String(x.site_name),
+      platformId: x.platform_id == null ? null : String(x.platform_id), platformName: x.platform_name == null ? null : String(x.platform_name),
+      isDefaultMarketer: x.is_default_marketer === true,
+    }));
   }
 
   async performance(fromMs: number, toMs: number, platformScope?: string | null): Promise<SitePerformance[]> {
@@ -764,6 +822,33 @@ export class InMemoryPlatformRepository implements PlatformRepository {
     return { userId: targetUserId, role: newRole };
   }
 
+  /** In-memory user directory for UI-9 tests (the real one is `profiles`). */
+  readonly directory = new Map<string, { username: string; phone: string; role: string; siteId: string | null }>();
+
+  async listPlatformAdmins(platformId: string | null): Promise<PlatformAdminRow[]> {
+    return [...this.platformAdmins.entries()]
+      .filter(([, pid]) => platformId === null || pid === platformId)
+      .map(([userId, pid]) => {
+        const u = this.directory.get(userId);
+        const home = u?.siteId ? this.sites.get(u.siteId) : undefined;
+        return { userId, username: u?.username ?? null, phone: u?.phone ?? null, status: "active", platformId: pid,
+          platformName: this.platforms.get(pid)?.name ?? null, homeSiteId: u?.siteId ?? null, homeSiteName: home?.name ?? null, createdAtMs: 0 };
+      });
+  }
+
+  async searchUsers(q: string, limit: number): Promise<DirectoryUserRow[]> {
+    const needle = q.toLowerCase();
+    return [...this.directory.entries()]
+      .filter(([, u]) => u.username.toLowerCase().includes(needle) || u.phone.includes(q))
+      .slice(0, limit)
+      .map(([userId, u]) => {
+        const pid = this.platformAdmins.get(userId) ?? (u.siteId ? this.sitePlatform.get(u.siteId) ?? null : null);
+        return { userId, username: u.username, phone: u.phone, role: this.platformAdmins.has(userId) ? "platform_admin" : u.role,
+          status: "active", siteId: u.siteId, siteName: u.siteId ? this.sites.get(u.siteId)?.name ?? null : null,
+          platformId: pid, platformName: pid ? this.platforms.get(pid)?.name ?? null : null, isDefaultMarketer: false };
+      });
+  }
+
   async performance(_fromMs: number, _toMs: number, platformScope?: string | null): Promise<SitePerformance[]> {
     // No transaction/position store in the in-memory repo — return each brand with zeroed metrics.
     const inScope = await this.listSites(platformScope ?? null);
@@ -1039,6 +1124,16 @@ export class PlatformService {
   revokePlatformAdmin(actorId: string, actorRole: string, targetUserId: string, newRole: string): Promise<{ userId: string; role: string }> {
     if (typeof targetUserId !== "string" || !targetUserId) throw new Error("INVALID_ARGS");
     return this.repo.revokePlatformAdmin(actorId, actorRole, targetUserId, newRole);
+  }
+  listPlatformAdmins(platformId: string | null): Promise<PlatformAdminRow[]> {
+    if (platformId !== null && !/^[0-9a-f-]{36}$/i.test(platformId)) throw new Error("INVALID_PLATFORM");
+    return this.repo.listPlatformAdmins(platformId);
+  }
+  /** Directory search: at least 2 characters (no "list everyone" by empty query); at most 25 rows. */
+  searchUsers(q: string, limit = 20): Promise<DirectoryUserRow[]> {
+    const needle = typeof q === "string" ? q.trim() : "";
+    if (needle.length < 2 || needle.length > 64) throw new Error("INVALID_QUERY");
+    return this.repo.searchUsers(needle, Math.min(Math.max(1, Math.floor(limit) || 20), 25));
   }
 
   // ── Task R: cross-brand marketer rollup (reporting only) ──

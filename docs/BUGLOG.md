@@ -5,6 +5,35 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #59 — The System console hid who runs each platform, and several owner tools silently acted on the wrong platform (docs/42 UI-9) — FIXED (branch `fix/ui9-owner-console-gaps`)
+- **What (six gaps):**
+  - **Platform admins by raw uuid.** The owner saw only a COUNT of platform admins and appointed/revoked by pasting a user id. Refusals from the governance RPCs (`NO_SELF_ACTION`, `PLATFORM_NOT_FOUND`, `USER_NOT_FOUND`, `SUPERADMIN_PROTECTED`, `DEFAULT_MARKETER_LOCKED`, `INVALID_ROLE`, `NOT_A_PLATFORM_ADMIN`) were unmapped, so they surfaced as HTTP 500.
+  - **Tickets.** The owner's "New ticket" sent no platform, so the API refused it with 400 `INVALID_PLATFORM`, while the dialog said "Assigned to your platform admin". "Escalate to System" was offered to the System admin itself; it would only reassign the ticket to the owner.
+  - **Withdrawal pool.** For the owner, `/platform/pool` distributed across every brand of every platform while its copy said "your brands".
+  - **Registrar.** The registrar page always edited the default platform. A registrar the owner saved for the default platform was never used: provisioning for the default platform was hard-wired to the env Namecheap account.
+  - **Onboarding and domain import.** The onboarding capability banner and the registrar domain import took no platform. Bulk-imported brands were created without the owner's chosen platform.
+  - **Add-ons.** The add-on grant/revoke API existed but had no UI. A brand page only ever offered "Request", even to the System admin.
+- **Fix (API):**
+  - `GET /platform/platform-admins[?platform=]` (who, platform, home brand) and `GET /platform/users/search?q=` (cross-brand username/phone search, 2–64 characters, at most 25 rows, `LIKE` wildcards escaped, default-marketer flag). Both are System-owner only.
+  - Governance and pool codes are now mapped to 4xx.
+  - `actingPlatform()`: a platform admin is always pinned to its own platform; the owner may name one with `?platform=<uuid>` (a bad value returns 400). It is used by onboarding capabilities, the registrar domain import, `/platform/sites`, and the pool routes (distribute, dynamic, demand, history).
+  - Provisioner resolution is extracted to `provisionerfor.ts`. Each platform uses its own stored registrar. The default platform uses its stored registrar, falling back to env; any other platform with none gets no registrar and never borrows the owner's.
+  - Production has no stored registrar config, so this is behaviour-neutral live.
+- **Fix (web):**
+  - `PlatformAdminsPanel` lists current admins (revoke with an explicit "make them" role). Appoint works from search results; ineligible people are shown disabled with the reason, and every action is confirmed.
+  - `TicketsView` is role-aware: the owner picks the platform and gets matching routing copy, never sees "Escalate to System", and sees a Platform column. A platform admin is told its ticket goes straight to the System admin.
+  - `OwnerPlatformPicker` appears only for the owner, on the registrar, onboarding and pool pages. One choice at the top drives the capabilities banner, the domain import (listing and `platformId` on every onboard) and the manual form.
+  - `BrandAddons` gives the owner Assign/Remove with an inline effect statement (active for every player now, the price, and that gateway payments stop).
+- **Tests:**
+  - `app.platform.admins.ui9.test.ts` (list, filter, search, gating, 4xx mapping).
+  - `platformadmins.pg.test.ts` (real schema: literal `_`/`%`, default-marketer flag, platform resolution).
+  - `app.platform.registrar.ui9.test.ts` and `app.platform.pool.ui9.test.ts` (the owner's `?platform=` honoured and a platform admin pinned).
+  - `provisionerfor.test.ts` (4).
+  - `e2e_subscriptions_tickets.py`: an owner ticket without a platform is refused; with one it goes to that platform's admin at level 0.
+  - Browser role e2e 68/68 (+22 UI-9 checks).
+
+---
+
 ## #58 — Operators could join the affiliate/referral programme and earn on players they manage (docs/42 UI-12) — FIXED (branch `fix/ui12-operators-never-affiliates`, migration 0159; owner decision 2026-09-23: hide for all operators)
 - **What:** every operator tier could (API) enrol via `POST /affiliate/enroll`, read and share a referral code (`/me/referral`), request commission payouts, and — because the marketer routes used `requireRole("marketer")`, a MINIMUM rank — use every marketer earning route: a site admin could file a **cash-advance request** (`POST /affiliate/advances` → 200). In the DB, `fn_affiliate_enroll` enrolled admins / platform admins / the system admin, `fn_register_user` attributed sign-ups to an operator's code, the instant 5% perk paid any referrer whose role was `<> 'marketer'` (so every operator tier), and GGR accrual credited an affiliate row whatever its owner's role (e.g. a marketer later made admin). The web showed operators the "Apply" card on `/affiliate` (and treated `admin` as a marketer) and the "Invite & earn 5%" card on `/account`.
 - **Also fixed (found in DRIFT-1):** enrolment replaced the player's existing referral code with a new affiliate code, silently breaking every link the player had already shared. Enrolment now keeps it. `fn_gen_referral_code` also avoids other users' affiliate codes.

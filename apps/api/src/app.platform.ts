@@ -109,6 +109,20 @@ const PLATFORM_STATUS: Readonly<Record<string, number>> = {
   PROVIDER_NOT_PLAYER_READY: 422,
   ENC_KEY_NOT_CONFIGURED: 503,
   INVALID_ARGS: 400,
+  // Platform-admin governance (0133) — were unmapped, so a refused appoint/revoke surfaced as a 500.
+  NO_SELF_ACTION: 409,
+  PLATFORM_NOT_FOUND: 404,
+  USER_NOT_FOUND: 404,
+  SUPERADMIN_PROTECTED: 403,
+  DEFAULT_MARKETER_LOCKED: 409,
+  INVALID_ROLE: 400,
+  NOT_A_PLATFORM_ADMIN: 409,
+  INVALID_PLATFORM: 400,
+  INVALID_QUERY: 400,   // docs/42 UI-9 directory search: 2..64 characters
+  PLATFORM_SCOPE_FORBIDDEN: 403,
+  NO_ACTIVE_SITES: 409,  // pool distribution: the chosen platform has no active brand
+  INVALID_MODE: 400,
+  INVALID_AMOUNT: 400,
 };
 
 async function domain<T>(fn: () => Promise<T>): Promise<T> {
@@ -185,6 +199,20 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   };
 
   const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /**
+   * docs/42 UI-9: the platform a console request acts for. A platform admin is ALWAYS its own platform
+   * (any ?platform= is ignored); the system owner may name one with ?platform=<uuid> (else null = the
+   * default platform / global).
+   */
+  const actingPlatform = (ctx: Ctx): string | null => {
+    const scoped = adminScopePlatform(ctx);
+    if (scoped) return scoped;
+    const raw = ctx.query.get("platform")?.trim();
+    if (!raw) return null;
+    if (!UUID_RE.test(raw)) throw new ApiError("VALIDATION", "platform must be a platform id", 400);
+    return raw;
+  };
   const DEFAULT_PLATFORM_ID = "10000000-0000-0000-0000-000000000001";
 
   // Instant client onboarding: create/upsert the brand + economy and optionally provision its
@@ -233,14 +261,14 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
   // (a platform admin may have configured its OWN registrar even when the global env has none).
   router.get(`${BASE}/platform/onboard/capabilities`, auth, platformAdmin, async (ctx: Ctx) => {
     if (!deps.platformOnboard) return { domainConfigured: false, registrarConfigured: false };
-    return domain(() => deps.platformOnboard!.capabilities(adminScopePlatform(ctx)));
+    return domain(() => deps.platformOnboard!.capabilities(actingPlatform(ctx)));   // UI-9: owner may name ?platform=
   });
 
   // Import: list the registrar (Namecheap) account's domains for the caller's platform, annotated with
   // which are already clients, so the console can offer bulk onboarding of the not-yet-used domains.
   router.get(`${BASE}/platform/domains/registrar`, auth, platformAdmin, async (ctx: Ctx) => {
     if (!deps.platformOnboard) throw new ApiError("NOT_CONFIGURED", "onboarding is not configured on this deployment", 503);
-    return domain(() => deps.platformOnboard!.listRegistrarDomains(adminScopePlatform(ctx)));
+    return domain(() => deps.platformOnboard!.listRegistrarDomains(actingPlatform(ctx)));   // UI-9: owner may name ?platform=
   });
 
   // Real per-domain health (Cloudflare Pages custom-domain status), so the Clients table shows the TRUE
@@ -318,6 +346,21 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return { status: 201, body: await domain(() => deps.platform.appointPlatformAdmin(ctx.claims!.userId, ctx.claims!.role ?? "player", b.userId as string, b.platformId as string)) };
   });
 
+  // docs/42 UI-9: WHO the platform admins are (not just a count), optionally for one platform, so the
+  // owner revokes a named person instead of pasting a uuid.
+  router.get(`${BASE}/platform/platform-admins`, auth, platform, async (ctx: Ctx) => {
+    const pid = ctx.query.get("platform")?.trim() || null;
+    return { admins: await domain(() => deps.platform.listPlatformAdmins(pid)) };
+  });
+
+  // docs/42 UI-9: find a person across EVERY brand by username or phone (System owner only) — the
+  // appoint flow picks from these results. >= 2 characters; at most 25 rows.
+  router.get(`${BASE}/platform/users/search`, auth, platform, async (ctx: Ctx) => {
+    const q = ctx.query.get("q") ?? "";
+    const limit = Number(ctx.query.get("limit")) || 20;
+    return { users: await domain(() => deps.platform.searchUsers(q, limit)) };
+  });
+
   // Revoke a platform_admin back to a site-level role (default 'admin').
   router.post(`${BASE}/platform/platform-admins/:uid/revoke`, auth, platform, async (ctx: Ctx) => {
     const b = asObject(ctx.body);
@@ -350,7 +393,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
 
   // Brands + economy — platform-scoped: a platform_admin sees only ITS platform's brands.
   router.get(`${BASE}/platform/sites`, auth, platformAdmin, async (ctx: Ctx) =>
-    ({ sites: await deps.platform.listSites(adminScopePlatform(ctx)) }));
+    ({ sites: await deps.platform.listSites(actingPlatform(ctx)) }));   // UI-9: owner may name ?platform=
 
   // Impersonation (docs/24 §370): an operator "logs into" a client brand's admin console, fenced to
   // that ONE brand. The SUBJECT stays the operator (every admin_actions row audits the real actor);
@@ -557,19 +600,19 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
       }
       if (Object.keys(overrides).length === 0) throw new ApiError("VALIDATION", "per_site mode requires a non-empty overrides map", 400);
     }
-    return { result: await domain(() => deps.platform.distributePool(ctx.claims!.userId, ctx.claims!.role ?? "player", totalCents, mode, overrides, adminScopePlatform(ctx))) };
+    return { result: await domain(() => deps.platform.distributePool(ctx.claims!.userId, ctx.claims!.role ?? "player", totalCents, mode, overrides, actingPlatform(ctx))) };
   });
 
   router.get(`${BASE}/platform/pool/distributions`, auth, platformAdmin, async (ctx: Ctx) => {
     const limit = Math.min(Math.max(Number(ctx.query.get("limit")) || 20, 1), 100);
-    return { distributions: await domain(() => deps.platform.listPoolDistributions(limit, adminScopePlatform(ctx))) };
+    return { distributions: await domain(() => deps.platform.listPoolDistributions(limit, actingPlatform(ctx))) };
   });
 
   // ── Dynamic (demand-based) pool distribution (docs/25 §15) ──
   // Preview: forecasts each active pool-mode brand's demand and returns the suggested allocation. No apply.
   router.get(`${BASE}/platform/pool/demand`, auth, platformAdmin, async (ctx: Ctx) => {
     const opts = parsePoolDemandQuery(ctx);
-    return { preview: await domain(() => deps.platform.poolDemand(opts, adminScopePlatform(ctx))) };
+    return { preview: await domain(() => deps.platform.poolDemand(opts, actingPlatform(ctx))) };
   });
   // Apply: computes the demand-based allocation and applies it via the audited per-site distributor.
   router.post(`${BASE}/platform/pool/distribute-dynamic`, auth, platformAdmin, async (ctx: Ctx) => {
@@ -583,7 +626,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     };
     if (opts.totalCents != null && (!Number.isFinite(opts.totalCents) || opts.totalCents < 0))
       throw new ApiError("VALIDATION", "totalCents must be a non-negative number", 400);
-    return { result: await domain(() => deps.platform.distributePoolDynamic(ctx.claims!.userId, ctx.claims!.role ?? "player", opts, adminScopePlatform(ctx))) };
+    return { result: await domain(() => deps.platform.distributePoolDynamic(ctx.claims!.userId, ctx.claims!.role ?? "player", opts, actingPlatform(ctx))) };
   });
 
   // ── Task R: cross-brand marketer rollup (reporting only; money stays per site) ──
