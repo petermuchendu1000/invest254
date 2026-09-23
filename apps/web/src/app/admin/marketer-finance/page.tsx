@@ -20,6 +20,7 @@ import {
 } from '@/lib/admin/hooks';
 import type { AdminCommissionPayoutRow } from '@/lib/admin/types';
 import type { AdminAdvanceDto } from '@/lib/api/types';
+import { formatDateTime } from '@/lib/format';
 
 /*
  * Marketer & affiliate finance — the single, consolidated home for every marketer/affiliate money
@@ -49,7 +50,7 @@ const PAYOUT_STATUSES = [
 
 function fmtDate(ms: number | null | undefined): string {
   if (!ms) return '—';
-  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return formatDateTime(ms);
 }
 
 function StatusPill({ status }: { status: string }) {

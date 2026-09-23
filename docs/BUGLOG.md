@@ -5,6 +5,25 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #66 — "now ago", browser-dependent dates and numbers, "KES 1,607.5" in the operator consoles (UI-B) — FIXED (branch `ui/b-shared-formatting`)
+- **What:**
+  - `formatRelativeTime` returns "now" for anything under 5 s, and 13 call sites appended " ago", so tables read "now ago" (seen in System logs).
+  - Dates were printed with `toLocaleString()` / `toLocaleDateString()` without a locale, so the same timestamp showed as "23 Sept 2026, 21:03" on one page and "9/23/2026, 9:03:05 PM" on another, depending on the browser.
+  - Counts used the browser locale too.
+  - Four console pages formatted money with a local helper that dropped the second decimal ("KES 1,607.5").
+  - KPI values and money cells wrapped ("KES" on one line, the number on the next).
+  - Disabled buttons kept their colour at 50% opacity, so a disabled green "Save" looked live, and `pointer-events-none` stopped any tooltip explaining why.
+- **Fix:**
+  - `formatAgo` ("just now", "5m ago"; the date after a week).
+  - `formatDate` and `formatNumber` pinned to en-KE.
+  - `formatKes` everywhere.
+  - Money, badges and KPI values no longer wrap; table headers no longer wrap, and `Th`/`Td` gained a `numeric` prop that right-aligns numbers.
+  - A neutral disabled style that keeps tooltips working.
+  - One toolbar search control, 36px, the same height as the filters.
+- **Tests:** `format.test.ts` (no "now ago"; the date shown after a week; en-KE dates and numbers). Role e2e and a screenshot review on seeded data.
+
+---
+
 ## #65 — Console shell: collapse control drawn over page content; no Log out on phones; flat, unlabelled navigation (UI-A) — FIXED (branch `ui/a-console-shell`)
 - **What (found by the docs/44 UI audit on seeded data):**
   - System owner console: the sidebar header row had no `min-w-0`, so the long subtitle "SYSTEM CONSOLE · ALL PLATFORMS" pushed the collapse chevron out of the 240px sidebar (measured at x=250–282). It sat on top of the first letter of every page title.

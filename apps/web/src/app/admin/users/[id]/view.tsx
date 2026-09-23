@@ -11,7 +11,7 @@ import { StatusBadge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
-import { formatDateTime, formatRelativeTime } from '@/lib/format';
+import { formatDateTime, formatAgo, formatNumber } from '@/lib/format';
 import { useCan } from '@/lib/auth/can';
 import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td, Toolbar, FilterSelect } from '@/components/admin/ui';
 import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useDeleteUser, useSetDefaultMarketer, useUpdateUserDetails, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides, useSetOverrides, useGameConfig, useMarketerExpenses, useAddMarketerExpense } from '@/lib/admin/hooks';
@@ -67,7 +67,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <StatCard label="Deposits" money={q.data.depositsCents} tone="up" />
               <StatCard label="Withdrawals" money={q.data.withdrawalsCents} tone="down" />
               <StatCard label="Net deposits" money={q.data.netDepositsCents} tone={q.data.netDepositsCents >= 0 ? 'up' : 'down'} />
-              <StatCard label="Settled bets" value={q.data.betCount.toLocaleString()} />
+              <StatCard label="Settled bets" value={formatNumber(q.data.betCount)} />
             </div>
           </Section>
 
@@ -208,7 +208,7 @@ function ActivityRow({ r }: { r: AdminUserActivityRow }) {
         <StatusBadge status={r.status} />
       </Td>
       <Td className="whitespace-nowrap text-right text-xs text-muted">
-        <span title={formatDateTime(r.createdAtMs)}>{formatRelativeTime(r.createdAtMs)} ago</span>
+        <span title={formatDateTime(r.createdAtMs)}>{formatAgo(r.createdAtMs)}</span>
       </Td>
     </tr>
   );
@@ -963,7 +963,7 @@ function OverridesPanel({ id }: { id: string }) {
         )}
         {q.data?.updatedAtMs ? (
           <p className="text-xs text-muted">
-            Last updated {formatRelativeTime(q.data.updatedAtMs)} ago{q.data.updatedBy ? ` by ${q.data.updatedBy.slice(0, 8)}…` : ''}.
+            Last updated {formatAgo(q.data.updatedAtMs)}{q.data.updatedBy ? ` by ${q.data.updatedBy.slice(0, 8)}…` : ''}.
           </p>
         ) : null}
       </Card>
@@ -1039,7 +1039,7 @@ function MarketerExpenses({ id }: { id: string }) {
                 <Td className="capitalize">{e.category.replace(/_/g, ' ')}</Td>
                 <Td className="text-muted">{e.note ?? '—'}</Td>
                 <Td className="text-right font-medium tabular-nums text-down">−<Money cents={e.amountCents} /></Td>
-                <Td className="text-right text-xs text-muted">{formatRelativeTime(e.createdAtMs)} ago</Td>
+                <Td className="text-right text-xs text-muted">{formatAgo(e.createdAtMs)}</Td>
               </tr>
             ))}
           </tbody>

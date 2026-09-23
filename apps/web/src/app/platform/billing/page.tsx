@@ -18,6 +18,8 @@ import { usePlatforms } from '@/lib/platform/hooks';
 import { usePlans, useSubscription, useMySubscription, useSetPlan, useSetSubStatus, useRecordPayment } from '@/lib/ops/hooks';
 import type { PlatformSubscription, PlatformUsage } from '@/lib/ops/endpoints';
 import { ApiError } from '@/lib/api/client';
+import { formatDate } from '@/lib/format';
+import { formatKes } from '@invest254/shared/money';
 
 const SUB_STATUS: Record<string, string> = {
   trial: 'border-accent/40 bg-accent/10 text-accent', active: 'border-up/40 bg-up/10 text-up',
@@ -25,8 +27,8 @@ const SUB_STATUS: Record<string, string> = {
   suspended: 'border-down/40 bg-down/10 text-down', cancelled: 'border-border bg-surface-2 text-muted',
 };
 const badge = (s: string) => <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${SUB_STATUS[s] ?? 'border-border bg-surface-2 text-muted'}`}>{s.replace('_', ' ')}</span>;
-const kes = (cents: number | null | undefined) => (cents == null ? 'Custom' : `KES ${(cents / 100).toLocaleString()}`);
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—');
+const kes = (cents: number | null | undefined) => (cents == null ? 'Custom' : formatKes(cents));
+const when = (iso: string | null) => (iso ? formatDate(iso) : '—');
 
 function UsageMeter({ label, used, max }: { label: string; used: number; max: number | null }) {
   const pct = max == null ? 0 : Math.min(100, Math.round((used / Math.max(1, max)) * 100));

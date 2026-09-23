@@ -107,10 +107,10 @@ export default function AdminOverviewPage() {
               <thead>
                 <tr className="border-b border-border">
                   <Th>Window</Th>
-                  <Th>Trades</Th>
-                  <Th>Turnover</Th>
-                  <Th>Payout</Th>
-                  <Th>Realised RTP</Th>
+                  <Th numeric>Trades</Th>
+                  <Th numeric>Turnover</Th>
+                  <Th numeric>Payout</Th>
+                  <Th numeric>Realised RTP</Th>
                 </tr>
               </thead>
               <tbody>
@@ -120,14 +120,14 @@ export default function AdminOverviewPage() {
                   return (
                     <tr key={w.window} className="border-b border-border last:border-0">
                       <Td className="font-medium capitalize">{w.window}</Td>
-                      <Td className="tabular-nums">{w.settledPositions}</Td>
-                      <Td className="tabular-nums">
+                      <Td numeric>{w.settledPositions}</Td>
+                      <Td numeric>
                         <Money cents={w.turnoverCents} />
                       </Td>
-                      <Td className="tabular-nums">
+                      <Td numeric>
                         <Money cents={w.payoutCents} />
                       </Td>
-                      <Td className={'tabular-nums font-medium ' + (drift ? 'text-down' : 'text-fg')}>
+                      <Td numeric className={'font-medium ' + (drift ? 'text-down' : 'text-fg')}>
                         {w.realisedRtp === null ? '—' : pct(w.realisedRtp)}
                       </Td>
                     </tr>

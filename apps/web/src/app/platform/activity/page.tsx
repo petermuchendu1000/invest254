@@ -10,7 +10,7 @@ import { useMemo, useState } from 'react';
 import { RequireCapability } from '@/components/auth/RequireCapability';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
-import { formatRelativeTime } from '@/lib/format';
+import { formatAgo, formatExact } from '@/lib/format';
 import { PageHeader, Section, TableWrap, Th, Td, Empty } from '@/components/admin/ui';
 import { usePlatformAudit, usePlatformSites } from '@/lib/platform/hooks';
 import type { PlatformAuditRowDto } from '@/lib/platform/endpoints';
@@ -65,7 +65,7 @@ function ActivityInner() {
 function Row({ r }: { r: PlatformAuditRowDto }) {
   return (
     <tr className="border-b border-border align-top last:border-0">
-      <Td className="whitespace-nowrap text-xs text-muted"><span title={new Date(r.createdAtMs).toLocaleString()}>{formatRelativeTime(r.createdAtMs)} ago</span></Td>
+      <Td className="whitespace-nowrap text-xs text-muted"><span title={formatExact(r.createdAtMs)}>{formatAgo(r.createdAtMs)}</span></Td>
       <Td className="whitespace-nowrap text-sm">{r.siteName ?? '—'}</Td>
       <Td className="whitespace-nowrap text-sm">
         {r.actorUsername ? `@${r.actorUsername}` : <span className="font-mono text-xs">{r.actorId.slice(0, 8)}…</span>}

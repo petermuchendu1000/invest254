@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { formatRelativeTime } from '@/lib/format';
+import { formatAgo } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { PageHeader, Section, Empty, FilterSelect } from '@/components/admin/ui';
@@ -136,7 +136,7 @@ function MpesaBody() {
                 <span>
                   Last updated:{' '}
                   <span className="font-medium text-fg">
-                    {cfg.updatedAtMs ? `${formatRelativeTime(cfg.updatedAtMs)} ago` : 'never'}
+                    {cfg.updatedAtMs ? `${formatAgo(cfg.updatedAtMs)}` : 'never'}
                     {cfg.updatedBy ? ` by ${cfg.updatedBy.slice(0, 8)}…` : ''}
                   </span>
                 </span>
