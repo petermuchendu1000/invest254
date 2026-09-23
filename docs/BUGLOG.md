@@ -5,6 +5,30 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #64 — Phone-only password reset + "Change number" on withdrawals = wallet theft for players (F-49) — FIXED (branch `fix/f49-payout-to-registered-phone`, migration 0161)
+- **What:**
+  - The player password reset is phone-only (no OTP) while `ALLOW_UNVERIFIED_PASSWORD_RESET` is on. **Confirmed live on 2026-09-23:** a reset for an unregistered number returns `{"reset":true}` instead of `RESET_DISABLED`.
+  - Privileged accounts have been protected by security questions since #4. Players and marketers were not.
+  - The withdraw form had **"Change number"**, and `fn_create_withdrawal` accepted any payout phone.
+  - So anyone who knew a player's phone number could reset the password, sign in, and request a withdrawal to their own M-Pesa. Only a manual approval stood in the way, and approvers are not told the number differs.
+- **Impact (production, read-only):** no evidence of abuse.
+  - 74 real withdrawals ever. 2 were to a different number, 0 of those were paid, and none is pending now.
+  - Every profile phone has at least 9 digits.
+- **Fix (money-side, independent of how an attacker gets in):**
+  - `fn_create_withdrawal` (0161) pays out **only to the account's registered number**, compared on the significant 9 digits so every format matches. Anything else is refused with `PAYOUT_PHONE_MISMATCH` (400) and nothing is held.
+  - The in-memory double mirrors this.
+  - The web form shows the registered number with "Withdrawals are paid to your registered number only" and no Change button.
+  - Also tightened: the wallet debit in that function is now filtered by `site_id` as well as `user_id`.
+- **Still recommended (owner decision):**
+  - Replace the phone-only reset with OTP, or turn `ALLOW_UNVERIFIED_PASSWORD_RESET` off. A reset attacker can no longer take the money, but can still gamble a victim's balance away.
+  - Optionally let players opt into the security-question second factor.
+- **Tests:**
+  - `e2e_payout_phone.py`: BEFORE reproduces any-number acceptance; AFTER, 7 checks cover refusal, nothing held, 3 formats accepted, short number refused and grants.
+  - Engine test `F-49` (other number refused, formatted own number accepted).
+  - `e2e_account_demo_mode.py` fixture made realistic: numeric phone, withdrawing to the registered number.
+
+---
+
 ## #63 — PAY-1: platform admins can run their platform / brands on their OWN payment accounts, honoured by live payments (owner decision 2026-09-23) — DONE (branch `feat/pay1-payment-scopes`, migration 0160, docs/43)
 - **Before:**
   - Every deposit, verification and payout used ONE System-wide account set: the `mpesa_config` singleton and the global Mega Pay / PayHero rows.
