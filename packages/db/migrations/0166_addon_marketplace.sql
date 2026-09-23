@@ -261,7 +261,8 @@ begin
              true, 'addon_request', p_actor, r.site_id
       where r.requested_by is not null;
   end if;
-  return jsonb_build_object('id', r.id, 'status', p_decision || 'd');
+  -- (was p_decision || 'd', which answered "rejectd")
+  return jsonb_build_object('id', r.id, 'status', case when p_decision = 'approve' then 'approved' else 'rejected' end);
 end;
 $fn$;
 

@@ -116,7 +116,7 @@ def scenario(upto, fixed):
     check("...once", "REQUEST_NOT_OPEN" in err(cur, "select fn_addon_cancel_request(%s,%s,%s)", [pa, PA, r2]))
     r3 = q1(cur, "select (fn_addon_request(%s,%s,%s,'chart','baseline',null)->>'id')::bigint", [adm_b, ADM, b1])[0]
     check("another brand cannot withdraw it", "SITE_SCOPE_FORBIDDEN" in err(cur, "select fn_addon_cancel_request(%s,%s,%s)", [adm, ADM, r3]))
-    cur.execute("select fn_addon_decide_request(%s,%s,%s,'reject','Not on your plan')", [OWNER, SYS, r3])
+    check("a decline answers 'rejected' (was 'rejectd')", q1(cur, "select fn_addon_decide_request(%s,%s,%s,'reject','Not on your plan')->>'status'", [OWNER, SYS, r3])[0] == "rejected")
     n = q1(cur, "select body from user_notifications where user_id=%s and title='Baseline request declined'", [adm_b])
     check("a decline gives the reason by product name", n and "Reason: Not on your plan" in n[0], str(n))
     reqs = q1(cur, "select fn_addon_list_requests(%s,%s,null)", [OWNER, SYS])[0]

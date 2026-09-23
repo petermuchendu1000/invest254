@@ -15,7 +15,7 @@ import {
   type Querier, type FairnessRecord, type ListenClient,
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
-import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, type VersionedGameConfig, type Cents } from "@invest254/shared";
+import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, type VersionedGameConfig, type Cents } from "@invest254/shared";
 import { BrandOriginAllowlist } from "./cors.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgReferralRepo } from "./referral.pg.js";
@@ -888,7 +888,7 @@ async function buildDeps(): Promise<ApiDeps> {
         colorPrimary: String(x.color_primary), colorBg: String(x.color_bg), colorAccent: String(x.color_accent),
         theme: String(x.theme) as "dark" | "light" | "auto",
         currency, locale: String(x.locale),
-        chartStyle: (x.chart_style === "candlestick" ? "candlestick" : "line"),
+        chartStyle: chartStyleOf(x.chart_style),   // ADDON-1: area / bars / baseline reach players (were coerced to "line")
         tradeUi: (x.trade_ui === "digits" ? "digits" : "classic"),
         fxRateFromKes,
         licenceLine: (x.licence_line as string | null) ?? null,

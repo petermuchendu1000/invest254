@@ -67,8 +67,8 @@ export interface Brand {
   supportEmail?: string | null;
   /** Full per-brand design-token palette (docs/22): overrides the fixed --pp-* tokens end-to-end. */
   themeTokens?: Record<string, string> | null;
-  /** Per-brand price chart style (migration 0111): 'line' (default) or 'candlestick'. Presentation only. */
-  chartStyle?: "line" | "candlestick";
+  /** Per-brand price chart system (0111/0147, ADDON-1): line (free default), area, candlestick, bars, baseline. Presentation only. */
+  chartStyle?: import("@invest254/shared").ChartStyle;
   /** Per-brand trade UI layout (migration 0112): 'classic' (default) or 'digits'. Presentation only. */
   tradeUi?: "classic" | "digits";
   /**

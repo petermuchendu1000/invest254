@@ -15,12 +15,13 @@ test('UI-A: every tier has unique routes and labelled groups after the first', (
 });
 
 test('UI-A: a platform admin never gets a System-only destination; the owner gets them all', () => {
-  const systemOnly = ['/platform/platforms', '/platform/payments', '/platform/config', '/platform/addons', '/platform/audit', '/platform/logs', '/platform/mpesa', '/platform/engine', '/admin'];
+  const systemOnly = ['/platform/platforms', '/platform/payments', '/platform/config', '/platform/audit', '/platform/logs', '/platform/mpesa', '/platform/engine', '/admin'];
   const pa = hrefs(consoleNav(false));
   systemOnly.forEach((h) => assert.ok(!pa.includes(h), `PA must not see ${h}`));
   const owner = hrefs(consoleNav(true));
   systemOnly.forEach((h) => assert.ok(owner.includes(h), `owner sees ${h}`));
   assert.ok(pa.includes('/platform/activity') && !owner.includes('/platform/activity'), 'one audit trail per tier');
+  assert.ok(pa.includes('/platform/addons') && owner.includes('/platform/addons'), 'ADDON-1: both tiers manage add-ons');
 });
 
 test('UI-A: exactly one current item — the most specific match', () => {

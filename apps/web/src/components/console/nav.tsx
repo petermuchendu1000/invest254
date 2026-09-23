@@ -86,7 +86,8 @@ export function consoleNav(isSystem: boolean): NavGroup[] {
   if (!isSystem) {
     return [
       { id: 'home', items: [overview, tickets] },
-      { id: 'brands', label: 'Brands', items: [onboard, registrar] },
+      { id: 'brands', label: 'Brands', items: [onboard, registrar,
+        { href: '/platform/addons', label: 'Add-ons', icon: Icons.addons, hint: 'Charts, trade screens and gateways for your brands' }] },
       { id: 'money', label: 'Money', items: [accounts, pool] },
       { id: 'oversight', label: 'Oversight', items: [
         { href: '/platform/activity', label: 'Audit log', icon: Icons.audit, hint: 'Who did what, on which brand' },
@@ -110,7 +111,7 @@ export function consoleNav(isSystem: boolean): NavGroup[] {
     ] },
     { id: 'commercial', label: 'Commercial', items: [
       billing,
-      { href: '/platform/addons', label: 'Add-ons & requests', icon: Icons.addons, hint: 'Prices and brand requests' },
+      { href: '/platform/addons', label: 'Add-ons', icon: Icons.addons, hint: 'Catalog, prices and brand requests' },
     ] },
     { id: 'system', label: 'System', items: [
       { href: '/platform/config', label: 'Controls & economy', icon: Icons.controls, hint: 'Kill switches, economy, limits' },
