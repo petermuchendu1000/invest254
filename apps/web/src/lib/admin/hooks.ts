@@ -333,8 +333,8 @@ export function usePayoutAction() {
   const t = useTok();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: string; action: 'approve' | 'reject'; reason?: string }) =>
-      v.action === 'approve' ? adminApi.approvePayout(t, v.id) : adminApi.rejectPayout(t, v.id, v.reason),
+    mutationFn: (v: { id: string; action: 'approve' | 'reject'; reason?: string; password?: string }) =>
+      v.action === 'approve' ? adminApi.approvePayout(t, v.id, v.password ?? '') : adminApi.rejectPayout(t, v.id, v.reason),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'payouts'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
@@ -652,7 +652,7 @@ export function useBulkPayouts() {
   const t = useTok();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { action: 'approve' | 'reject'; payoutIds: string[] }) => adminApi.bulkPayouts(t, body),
+    mutationFn: (body: { action: 'approve' | 'reject'; payoutIds: string[]; password?: string }) => adminApi.bulkPayouts(t, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'payouts'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });

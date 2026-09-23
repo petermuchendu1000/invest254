@@ -166,12 +166,13 @@ export const adminApi = {
       token: t,
       query: { cursor: p.cursor ?? undefined, limit: p.limit, status: p.status },
     }),
-  approvePayout: (t: string, id: string) =>
-    apiFetch<unknown>(`/admin/affiliate/payouts/${id}/approve`, { method: 'POST', token: t }),
+  // docs/42 UI-1: approval dispatches real M-Pesa -> system owner password, like withdrawals.
+  approvePayout: (t: string, id: string, password: string) =>
+    apiFetch<unknown>(`/admin/affiliate/payouts/${id}/approve`, { method: 'POST', token: t, body: { password } }),
   rejectPayout: (t: string, id: string, reason?: string) =>
     apiFetch<unknown>(`/admin/affiliate/payouts/${id}/reject`, { method: 'POST', token: t, body: reason ? { reason } : {} }),
   // Bulk payout moderation (partial success per row; approve dispatches M-Pesa B2C each).
-  bulkPayouts: (t: string, body: { action: 'approve' | 'reject'; payoutIds: string[] }) =>
+  bulkPayouts: (t: string, body: { action: 'approve' | 'reject'; payoutIds: string[]; password?: string }) =>
     apiFetch<AdminBulkResult>('/admin/affiliate/payouts/bulk', { method: 'POST', token: t, body }),
   setCommissionRate: (t: string, id: string, rate: number) =>
     apiFetch<unknown>(`/admin/affiliates/${id}/rate`, { method: 'PATCH', token: t, body: { rate } }),

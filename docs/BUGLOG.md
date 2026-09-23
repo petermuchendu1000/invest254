@@ -5,6 +5,14 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #50 — Affiliate payout approval sent real M-Pesa money without the owner password (docs/42 UI-1) — FIXED (branch `fix/ui1-affiliate-payout-password`)
+- **What:** `POST /admin/affiliate/payouts/:id/approve` and bulk approve dispatch a real M-Pesa B2C (`affiliateservice.ts:82`) but, unlike withdrawals and commission payouts, never asked for the system owner approval password. A site-admin session alone (or a stolen one) could pay out affiliates; the UI offered a plain two-step confirm.
+- **Evidence:** api `app.affiliate.ts:140,163` had no `requireApprovalPassword`; prod `affiliate_payouts` has 0 rows — latent, never exercised.
+- **Fix:** both routes call `requireApprovalPassword` (bulk: once per batch, approve only; reject stays ungated because it only releases the reservation). The payouts panel uses the same `PasswordConfirmButton` as withdrawals; the field now reads "System owner password" (was "Superadmin password").
+- **Tests:** `app.affiliate.payoutgate.ui1.test.ts` 3/3 (2 fail before the fix: missing/empty/wrong password → 403 `PASSWORD_REQUIRED` and the payout stays `requested`; bulk approve gated, bulk/single reject not). npm test 1078/1078 (+2 DB-gated); web build OK.
+
+---
+
 ## #49 — Support conversations were not owner-bound; withdrawal alerts were scoped by a stale brand snapshot; unsubscribe was not owner-bound; `v_mfa_status` was stale (Issue 1 / F-48) — FIXED (branch `fix/issue1-f48-support-push-mfa`, migration 0157)
 - **What (support, S1):** knowing a conversation id was enough to write to it. A stranger could post into anyone's conversation, get earlier turns replayed back through the assistant ("what did I ask before?"), and **re-point the escalation contact** so staff follow up with the attacker. A logged-in player could do the same to another player of the same brand (only the brand was checked).
 - **What (support, S2 — shared device):** the widget kept the conversation id and full transcript in `localStorage` across logout/account switch, so the next person on the browser saw — and continued — the previous person's conversation.
