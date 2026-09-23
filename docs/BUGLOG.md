@@ -19,9 +19,10 @@ entry: what, evidence, root cause, impact, and resolution.
   - The in-memory double mirrors this.
   - The web form shows the registered number with "Withdrawals are paid to your registered number only" and no Change button.
   - Also tightened: the wallet debit in that function is now filtered by `site_id` as well as `user_id`.
-- **Still recommended (owner decision):**
-  - Replace the phone-only reset with OTP, or turn `ALLOW_UNVERIFIED_PASSWORD_RESET` off. A reset attacker can no longer take the money, but can still gamble a victim's balance away.
-  - Optionally let players opt into the security-question second factor.
+- **Owner decision (2026-09-23): phone-only player reset stays ON until an SMS provider is integrated.**
+  - The flag was briefly unset in production (probe returned `RESET_DISABLED`), then restored at the owner's request (probe returns `{"reset":true}` again). Admin-issued reset codes were considered and declined as extra support load.
+  - Accepted residual risk: someone who knows a player's number can still sign in and gamble the balance away, but can no longer withdraw it (0161).
+  - **Follow-up:** replace the phone-only reset with an SMS one-time code once a provider is chosen. Then unset `ALLOW_UNVERIFIED_PASSWORD_RESET` on `invest254-api`.
 - **Tests:**
   - `e2e_payout_phone.py`: BEFORE reproduces any-number acceptance; AFTER, 7 checks cover refusal, nothing held, 3 formats accepted, short number refused and grants.
   - Engine test `F-49` (other number refused, formatted own number accepted).
