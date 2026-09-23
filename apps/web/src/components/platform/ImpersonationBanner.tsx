@@ -10,7 +10,7 @@ import { roleFromToken } from '@/lib/auth/token';
  * Makes the impersonation obvious (so it is never mistaken for the operator's own account) and offers
  * a one-click return to the platform console. The role shown reflects the ACTIVE session's minted
  * role — always 'admin' (Issue 1 / F1: impersonation mints a day-to-day admin session) — so it never
- * mislabels a platform admin as a superadmin. Renders nothing when not impersonating.
+ * mislabels the session (it is always a brand `admin` session). Renders nothing when not impersonating.
  */
 export function ImpersonationBanner() {
   const [brand, setBrand] = useState<ImpersonatedBrand | null>(null);

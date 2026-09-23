@@ -233,7 +233,7 @@ export function useWithdrawalsEnabled() {
     queryFn: () => adminApi.withdrawalsEnabled(t),
   });
 }
-/** Toggle the per-brand withdrawal kill switch (admin/superadmin). */
+/** Toggle the per-brand withdrawal kill switch (brand admin; the owner via Open brand). */
 export function useSetWithdrawalsEnabled() {
   const t = useTok();
   const qc = useQueryClient();
@@ -621,7 +621,7 @@ export function useMarketerStatus(id: string) {
   });
 }
 
-// ── Fly.io machine restart (superadmin only) ──
+// ── Fly.io machine restart (system owner only) ──
 export function useFlyStatus() {
   const t = useTok();
   return useQuery({ queryKey: ['admin', 'fly-status'], queryFn: () => adminApi.flyStatus(t), enabled: !!t });

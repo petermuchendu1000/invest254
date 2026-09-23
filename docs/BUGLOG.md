@@ -5,6 +5,13 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #55 — The removed `superadmin` tier lingered in code and copy (docs/42 UI-11) — FIXED (branch `fix/ui11-superadmin-remnants`)
+- **What:** role literal `'superadmin'` still sent to the API as an announcement audience role and present in the `MeDto` role union, the payments "privileged" list, the engine in-memory default-marketer gate and harness role lists; ~20 comments described a "superadmin" impersonation session or "platform_superadmin-only" gating that no longer exists (misleading for the next change).
+- **Fix:** literals removed (announcement "Admins only" = brand admins + system owner); comments rewritten to the current model (brand `admin` sessions with an `act` claim; capability gating per docs/42). The DB's inert `fn_*` allow-lists are left as documented in docs/41 (no behaviour).
+- **Guard:** `legacyroles.guard.test.ts` fails CI if a `'superadmin'` role literal reappears in executable source of any app/package (mutation-checked). npm test 1097/1097 (+2 DB-gated); web build OK.
+
+---
+
 ## #54 — Operators were never shown WHICH brand or platform they were acting on (docs/42 UI-8) — FIXED (branch `fix/ui8-scope-chips`)
 - **What:** the back office header read "TrioCodes Admin" for every brand, and a platform admin's console never named its platform — a mode error waiting to happen for operators who switch brands (NN/g: modes need clear, redundant indicators). In a second impersonation tab the badge read "Accessing " (empty slug).
 - **Fix:** `/auth/me` returns `scope` — the brand/platform the SESSION's token is scoped to, with names (one targeted lookup, never a brand list; impersonated sessions report the opened brand). The back office header now reads "<Brand> Admin" with the session kind (Brand admin / Opened from the console · as admin / Owner · all brands) and the footer badge names the brand; the console shows "Platform · <name>" (or "System console · all platforms").

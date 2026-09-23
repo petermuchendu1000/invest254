@@ -73,7 +73,7 @@ export function useAuthActions() {
   }
 
   function logout() {
-    // Drop any brand impersonation fence BEFORE clearing the session so a scoped superadmin token
+    // Drop any brand impersonation fence BEFORE clearing the session so a brand-scoped impersonation token
     // can never outlive the logout (the "stale fence after logout" bug). Safe when not impersonating.
     clearImpersonation();
     reset();

@@ -841,7 +841,7 @@ export class InMemoryPlatformRepository implements PlatformRepository {
   // (fn_admin_set_site_owner, migration 0104) and are covered by rolled-back live e2e. Here we only
   // gate the role and apply to the default site so route wiring/tests compile and behave sanely.
   async setDefaultMarketer(_actorId: string, actorRole: string, marketerId: string, makeDefault: boolean): Promise<SiteRow> {
-    if (!["admin", "superadmin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+    if (!["admin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
     const s = this.sites.get(DEFAULT_SITE_ID)!;
     s.ownerUserId = makeDefault ? marketerId : (s.ownerUserId === marketerId ? null : s.ownerUserId);
     const { config, ...row } = s;

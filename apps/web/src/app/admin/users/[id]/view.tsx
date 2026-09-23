@@ -396,7 +396,7 @@ function MarketerHubLink() {
 }
 
 /** Danger zone: soft-delete this account (status='deleted', login-blocked, hidden). Server-guarded:
- *  no self, superadmin-protected, admin-only-by-superadmin, default marketer must be reassigned. */
+ *  no self, operator tiers protected, admin accounts only by the system owner, default marketer must be reassigned. */
 function DeleteAccount({ id, role, username }: { id: string; role: string; username: string }) {
   const del = useDeleteUser();
   const toast = useToast();

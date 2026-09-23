@@ -40,7 +40,7 @@ const NAV = [
 ];
 
 /**
- * Operator-console shell for the platform-superadmin: a persistent left sidebar (desktop) / top
+ * Operator-console shell for the system owner and platform admins: a persistent left sidebar (desktop) / top
  * scroll-nav (mobile), a global ⌘K command palette, and capability gating (docs/42: console.enter =
  * platform admin + system owner; console.system = owner only).
  * Brand-token styling, consistent with the admin back office.

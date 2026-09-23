@@ -618,7 +618,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     let seq = 0;
     return {
       async add(actorId: string, actorRole: string, _siteId: string, marketerUserId: string, category: string, amountCents: number, note: string | null) {
-        if (!["admin", "superadmin", "platform_admin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+        if (!["admin", "platform_admin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
         if (!category.trim()) throw new Error("CATEGORY_REQUIRED");
         if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
         const row = { id: `exp-${++seq}`, marketerUserId, category: category.trim(), amountCents, note: note && note.trim() ? note.trim() : null, createdBy: actorId, createdAtMs: Date.now() };
@@ -658,7 +658,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
         return rows.filter((r) => r.marketerUserId === marketerUserId).slice(0, limit).map(mine);
       },
       async decide(actorId: string, actorRole: string, id: string, approve: boolean, note: string | null) {
-        if (!["admin", "superadmin", "platform_admin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
+        if (!["admin", "platform_admin", "platform_superadmin"].includes(actorRole)) throw new Error("NOT_AUTHORIZED");
         const row = rows.find((r) => r.id === id);
         if (!row) throw new Error("NOT_FOUND");
         if (row.status !== "requested") throw new Error("INVALID_STATE");
