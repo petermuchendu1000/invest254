@@ -121,3 +121,5 @@ pages scoped server-side never leaked other platforms' data (F-44/F-47); `enroll
 · 4. UI-5 platform dashboard · 5. UI-6 remainder · 6. UI-8 scope chips · 7. UI-11 remnants
 · 8. UI-2 owner brand picker (decided) · 9. UI-12 operators never affiliates (decided) · 10. UI-9 / UI-10 gaps
 · 11. **PAY-1** per-platform / per-brand payment-gateway configuration honoured by live payments (decided; design first).
+
+Interposed before UI-12: **DRIFT-1** (BUGLOG #57) — production's affiliate functions did not match the migrations; migration 0158 reconciles them and a nightly/post-deploy schema-drift gate now guards it. UI-12 builds on the reconciled (production-equal) definitions.
