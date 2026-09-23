@@ -33,9 +33,15 @@ function raiserOf(role: string | null): Raiser {
   return role === 'platform_admin' ? 'platform' : 'site';
 }
 const ROUTING: Record<Raiser, string> = {
-  system: "Assigned to the chosen platform's admin. If they miss the SLA it comes back to you (System admin).",
-  platform: 'Goes straight to the System admin.',
-  site: 'Assigned to your platform admin; auto-escalates to the System admin if the SLA lapses.',
+  system: "Assigned to the chosen platform's admin. If they miss the deadline it comes back to you.",
+  platform: 'Goes straight to the System owner.',
+  site: 'Assigned to your platform admin. If it passes its deadline it moves up to the System owner.',
+};
+// Page intro per tier (the old copy told every reader "As System admin you see every platform's tickets").
+const INTRO: Record<Raiser, string> = {
+  system: 'Tickets from every platform. Raise one to hand work to a platform admin.',
+  platform: 'Issues from your brand admins. A ticket that passes its deadline moves up to the System owner.',
+  site: 'Ask your platform admin for help. A ticket that passes its deadline moves up to the System owner.',
 };
 
 const URGENCY: Record<string, string> = {
@@ -51,7 +57,7 @@ const Badge = ({ cls, children }: { cls: string; children: React.ReactNode }) =>
 
 function sla(t: Ticket): { label: string; tone: string } {
   if (t.status === 'resolved' || t.status === 'closed') return { label: '—', tone: 'text-muted' };
-  if (t.escalationLevel >= 1) return { label: 'at System admin', tone: 'text-muted' };
+  if (t.escalationLevel >= 1) return { label: 'with System owner', tone: 'text-muted' };
   if (!t.slaDueAtMs) return { label: '—', tone: 'text-muted' };
   const mins = Math.round((t.slaDueAtMs - Date.now()) / 60000);
   if (mins <= 0) return { label: 'escalating…', tone: 'text-down' };
@@ -59,7 +65,7 @@ function sla(t: Ticket): { label: string; tone: string } {
   return { label: `auto-escalates in ${lbl}`, tone: mins <= 30 ? 'text-down' : mins <= 120 ? 'text-warn' : 'text-muted' };
 }
 
-export function TicketsView({ title, subtitle }: { title: string; subtitle: string }) {
+export function TicketsView({ title }: { title: string }) {
   const toast = useToast();
   const raiser = raiserOf(useEffectiveRole());
   const isSystem = raiser === 'system';
@@ -94,7 +100,7 @@ export function TicketsView({ title, subtitle }: { title: string; subtitle: stri
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={title} subtitle={subtitle} actions={<Button onClick={() => setCreateOpen(true)}>New ticket</Button>} />
+      <PageHeader title={title} subtitle={INTRO[raiser]} actions={<Button onClick={() => setCreateOpen(true)}>New ticket</Button>} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard label="Open" value={counts.open} />
         <StatCard label="In progress" value={counts.inprog} tone={counts.inprog > 0 ? 'warn' : 'default'} />
@@ -124,7 +130,7 @@ export function TicketsView({ title, subtitle }: { title: string; subtitle: stri
                     {isSystem ? <Td className="text-xs text-muted">{platformName.get(t.platformId) ?? '—'}</Td> : null}
                     <Td><Badge cls={URGENCY[t.urgency]!}>{t.urgency}</Badge></Td>
                     <Td><Badge cls={STATUS[t.status]!}>{t.status.replace('_', ' ')}</Badge></Td>
-                    <Td className="text-xs text-muted">{t.escalationLevel >= 1 ? 'System admin' : 'Platform admin'}</Td>
+                    <Td className="text-xs text-muted">{t.escalationLevel >= 1 ? 'System owner' : 'Platform admin'}</Td>
                     <Td className={`text-xs ${s.tone}`}>{s.label}</Td>
                     <Td className="text-right text-xs text-muted">{new Date(t.createdAtMs).toLocaleString()}</Td>
                   </tr>); })}
@@ -192,7 +198,7 @@ function TicketDetail({ id, canEscalate, onClose }: { id: string; canEscalate: b
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <Badge cls={URGENCY[t.urgency]!}>{t.urgency}</Badge>
             <Badge cls={STATUS[t.status]!}>{t.status.replace('_', ' ')}</Badge>
-            <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-muted">{t.escalationLevel >= 1 ? 'System admin' : 'Platform admin'}</span>
+            <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-muted">{t.escalationLevel >= 1 ? 'System owner' : 'Platform admin'}</span>
           </div>
           {t.body ? <p className="whitespace-pre-wrap rounded-xl border border-border bg-surface-2 p-3 text-sm">{t.body}</p> : null}
 
@@ -218,7 +224,7 @@ function TicketDetail({ id, canEscalate, onClose }: { id: string; canEscalate: b
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
             {canEscalate && t.escalationLevel < 1 && t.status !== 'resolved' && t.status !== 'closed'
-              ? <Button variant="down" onClick={() => act(() => escalate.mutateAsync(undefined), 'Escalated to System admin')} disabled={escalate.isPending}>Escalate to System</Button> : null}
+              ? <Button variant="down" onClick={() => act(() => escalate.mutateAsync(undefined), 'Escalated to the System owner')} disabled={escalate.isPending}>Escalate to System owner</Button> : null}
             {t.status !== 'in_progress' && t.status !== 'resolved' && t.status !== 'closed'
               ? <Button variant="outline" onClick={() => act(() => setStatus.mutateAsync({ status: 'in_progress' }), 'Marked in progress')}>Mark in progress</Button> : null}
             {t.status !== 'resolved' && t.status !== 'closed'

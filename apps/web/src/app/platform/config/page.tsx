@@ -93,7 +93,7 @@ export default function GlobalConfigPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Global configuration"
+        title="Controls & economy"
         subtitle={`One control plane over all ${activeSites.length} active brand${activeSites.length === 1 ? '' : 's'} · config v${cfg.version}`}
       />
 

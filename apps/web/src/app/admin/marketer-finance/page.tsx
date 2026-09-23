@@ -85,7 +85,7 @@ export default function MarketerFinancePage() {
   return (
     <>
       <PageHeader
-        title="Marketer & affiliate finance"
+        title="Marketer payouts"
         subtitle="Payout queues, marketer wallets, and the expense ledger — every marketer money flow in one place."
       />
 

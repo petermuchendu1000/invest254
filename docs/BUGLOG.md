@@ -5,6 +5,16 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #65 — Console shell: collapse control drawn over page content; no Log out on phones; flat, unlabelled navigation (UI-A) — FIXED (branch `ui/a-console-shell`)
+- **What (found by the docs/44 UI audit on seeded data):**
+  - System owner console: the sidebar header row had no `min-w-0`, so the long subtitle "SYSTEM CONSOLE · ALL PLATFORMS" pushed the collapse chevron out of the 240px sidebar (measured at x=250–282). It sat on top of the first letter of every page title.
+  - Every tier on a phone: the account block and Log out were `hidden md:flex`, so an operator could not sign out of a money console from a phone. The horizontal nav strip showed about 3 of 10–16 items, was not sticky, and could hide the current page.
+  - Navigation was a flat list (16 items for the owner), with duplicate icons and near-duplicate labels.
+- **Fix:** one shared `ConsoleShell` (see docs/44): a truncating workspace header, labelled groups with dividers, one current item, distinct icons, a footer with collapse (⌘/Ctrl+B) and the account with Log out, and a phone top bar plus drawer. Navigation is defined once in `components/console/nav.tsx`.
+- **Tests:** role e2e with 16 new checks. Before the fix, 15 of them failed (collapse chevron at x=250 > sidebar 240; no labelled groups; no phone menu or Log out). After the fix all pass, and so do all 98 existing checks. `nav.test.ts` covers the navigation rules.
+
+---
+
 ## #64 — Phone-only password reset + "Change number" on withdrawals = wallet theft for players (F-49) — FIXED (branch `fix/f49-payout-to-registered-phone`, migration 0161)
 - **What:**
   - The player password reset is phone-only (no OTP) while `ALLOW_UNVERIFIED_PASSWORD_RESET` is on. **Confirmed live on 2026-09-23:** a reset for an unregistered number returns `{"reset":true}` instead of `RESET_DISABLED`.

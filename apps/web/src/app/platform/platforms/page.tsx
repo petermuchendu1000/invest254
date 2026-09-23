@@ -93,7 +93,7 @@ export default function PlatformsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Platforms"
-        subtitle="You are the System Admin. Platforms group sites; each Platform Admin manages only their own platform's sites and site-admins — fully isolated from other platforms."
+        subtitle="Each platform groups brands under one platform admin, who sees only its own brands."
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setAssignOpen(true)}>Re-parent a site</Button>
@@ -120,7 +120,7 @@ export default function PlatformsPage() {
               <thead>
                 <tr>
                   <Th>Platform</Th><Th>Status</Th><Th className="text-right">Sites</Th>
-                  <Th className="text-right">Users</Th><Th className="text-right">Site admins</Th>
+                  <Th className="text-right">Users</Th><Th className="text-right">Brand admins</Th>
                   <Th className="text-right">Platform admins</Th><Th className="text-right">Actions</Th>
                 </tr>
               </thead>

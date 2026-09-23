@@ -43,7 +43,7 @@ export default function BillingPage() {
   const isSystem = useCan('console.system');   // docs/42: token role via the shared capability list
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Billing & subscriptions" subtitle={isSystem ? 'Manage every platform\'s plan, status and payments.' : 'Your platform\'s plan, status and usage.'} />
+      <PageHeader title="Billing" subtitle={isSystem ? 'Manage every platform\'s plan, status and payments.' : 'Your platform\'s plan, status and usage.'} />
       {isSystem ? <SystemBilling /> : <MyBilling />}
     </div>
   );
@@ -60,8 +60,8 @@ function MyBilling() {
   const off = sub.status === 'suspended' || sub.status === 'cancelled';
   return (
     <div className="flex flex-col gap-4">
-      {dunning ? <Card><div className="border-l-4 border-warn p-4 text-sm"><b>Payment needed.</b> Your subscription is {sub.status.replace('_', ' ')}. Settle with your System admin before {when(sub.graceEndsAt ?? sub.currentPeriodEnd)} to avoid suspension.</div></Card> : null}
-      {off ? <Card><div className="border-l-4 border-down p-4 text-sm"><b>Platform {sub.status}.</b> Your brands are offline to players. Contact your System admin to reactivate.</div></Card> : null}
+      {dunning ? <Card><div className="border-l-4 border-warn p-4 text-sm"><b>Payment needed.</b> Your subscription is {sub.status.replace('_', ' ')}. Settle with the System owner before {when(sub.graceEndsAt ?? sub.currentPeriodEnd)} to avoid suspension.</div></Card> : null}
+      {off ? <Card><div className="border-l-4 border-down p-4 text-sm"><b>Platform {sub.status}.</b> Your brands are offline to players. Contact the System owner to reactivate.</div></Card> : null}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard label="Plan" value={plan?.name ?? sub.planKey} hint={kes(sub.customPriceCents ?? plan?.priceCents) + (plan?.priceCents || sub.customPriceCents ? '/mo' : '')} />
         <StatCard label="Status" value={sub.status.replace('_', ' ')} tone={sub.status === 'active' ? 'up' : off ? 'down' : dunning ? 'warn' : 'default'} />

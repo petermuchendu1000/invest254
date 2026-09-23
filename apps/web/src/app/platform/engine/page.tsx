@@ -97,7 +97,7 @@ function FlyBody() {
 export default function FlyAdminPage() {
   return (
     <>
-      <PageHeader title="Fly.io" subtitle="Deployment controls — restart the engine after shipping updates." />
+      <PageHeader title="Deployment" subtitle="Deployment controls — restart the engine after shipping updates." />
       <RequireCapability cap="backoffice.governance" title="Owner-only area" hint="System governance is managed by the system owner from their own console session.">
         <FlyBody />
       </RequireCapability>

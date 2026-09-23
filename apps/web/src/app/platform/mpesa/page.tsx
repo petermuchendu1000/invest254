@@ -110,7 +110,7 @@ function MpesaBody() {
   return (
     <>
       <PageHeader
-        title="M-Pesa configuration"
+        title="M-Pesa defaults"
         subtitle="Daraja paybill, endpoints and credentials. Secrets are write-only — stored values are never displayed."
       />
 

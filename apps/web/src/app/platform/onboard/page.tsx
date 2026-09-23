@@ -43,7 +43,7 @@ export default function OnboardPage() {
 
   return (
     <>
-      <PageHeader title="Onboard a client" subtitle="Create a brand, seed a feasible economy, and (optionally) provision its domain on Cloudflare." />
+      <PageHeader title="Onboard a brand" subtitle="Create a brand, seed a feasible economy, and (optionally) provision its domain on Cloudflare." />
 
       <OwnerPlatformPicker value={platformId} onChange={setPlatformId} label="Onboard into platform" hint="New brands, the domain import and the registrar used all follow this choice." />
 
