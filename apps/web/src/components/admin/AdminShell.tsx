@@ -2,18 +2,19 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useSession } from '@/lib/auth/session';
-import { roleFromToken } from '@/lib/auth/token';
+import { roleFromToken, actorFromToken } from '@/lib/auth/token';
 import { can, type Capability } from '@invest254/shared/capabilities';
 import { AdminSignIn } from '@/components/auth/AdminSignIn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { useSidebarCollapsed } from '@/lib/useSidebarCollapsed';
 import { getImpersonatingBrand } from '@/lib/platform/impersonate';
+import { BrandPicker } from '@/components/admin/BrandPicker';
 
 // docs/42 P2: every nav entry is gated by a capability from packages/shared/src/capabilities.ts, evaluated
 // on the TOKEN role (what the API authorises) — never a hand-written role list.
@@ -43,29 +44,15 @@ const SECTIONS: NavSection[] = [
       { href: '/admin/tickets', label: 'Tickets', icon: <Icon d="M4 5h16v6a2 2 0 000 2v6H4v-6a2 2 0 000-2zM9 5v14" /> },
       { href: '/admin/systems', label: 'Systems', icon: <Icon d="M20 7l-9-4-9 4 9 4 9-4zM3 12l9 4 9-4M3 17l9 4 9-4" /> },
       { href: '/admin/reports', label: 'Reports', icon: <Icon d="M9 17v-6m4 6V7m4 10v-4M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" /> },
-      { href: '/admin/audit', label: 'Audit log', cap: 'backoffice.audit', icon: <Icon d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /> },
       { href: '/admin/announcements', label: 'Announcements', icon: <Icon d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.6V5a2 2 0 10-4 0v.4A6 6 0 006 11v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /> },
     ],
   },
-  {
-    title: 'Governance',
-    cap: 'backoffice.governance',
-    items: [
-      { href: '/admin/game', label: 'Game config', icon: <Icon d="M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.82 1.17V21a2 2 0 11-4 0v-.09A1.65 1.65 0 007 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 14H4a2 2 0 110-4h.09A1.65 1.65 0 006 7.6l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 0011 4.6V4a2 2 0 114 0v.09a1.65 1.65 0 002.82 1.17l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 10H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" /> },
-      { href: '/admin/mpesa', label: 'M-Pesa', icon: <Icon d="M5 7h14M5 7a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2M5 7V5a2 2 0 012-2h10a2 2 0 012 2v2M12 14a2 2 0 100-4 2 2 0 000 4z" /> },
-      { href: '/admin/fly', label: 'Fly.io', icon: <Icon d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09zM12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2zM9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /> },
-    ],
-  },
-  {
-    title: 'Platform',
-    cap: 'console.system',
-    hideWhileImpersonating: true,
-    items: [
-      { href: '/platform', label: 'All brands', icon: <Icon d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" /> },
-      { href: '/admin/logs', label: 'System logs', cap: 'backoffice.logs', icon: <Icon d="M4 5h16M4 5a1 1 0 00-1 1v12a1 1 0 001 1h16a1 1 0 001-1V6a1 1 0 00-1-1M8 9h8M8 13h8M8 17h5" /> },
-    ],
-  },
 ];
+
+const MOVED_TO_CONSOLE: Record<string, string> = {
+  '/admin/audit': '/platform/audit', '/admin/logs': '/platform/logs', '/admin/fly': '/platform/engine',
+  '/admin/mpesa': '/platform/mpesa', '/admin/game': '/platform',
+};
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const hydrated = useHydrated();
@@ -74,6 +61,13 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const user = useSession((s) => s.user);
   const { logout } = useAuthActions();
   const { collapsed, toggle } = useSidebarCollapsed('admin-sidebar-collapsed');
+  const router = useRouter();
+  // docs/42 UI-2: owner governance moved to the console — forward the owner's old bookmarks there
+  // (the shell would otherwise show the brand picker before the old page could redirect).
+  React.useEffect(() => {
+    const moved = pathname ? MOVED_TO_CONSOLE[pathname] : undefined;
+    if (moved && can(roleFromToken(token), 'console.system') && !actorFromToken(token)) router.replace(moved);
+  }, [pathname, token, router]);
   if (!hydrated) {
     return (
       <div className="mx-auto w-full max-w-app p-4">
@@ -107,6 +101,19 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   if (!can(effectiveRole, 'backoffice.enter')) {
     // Wrong tier: reveal nothing.
     return <Gate title="404" body="This page could not be found." action={null} />;
+  }
+  // docs/42 UI-2 (owner decision): the system owner's OWN session never works an unscoped back office —
+  // it picks a brand first (then works it as that brand's admin). Global settings live in the console.
+  if (can(effectiveRole, 'console.system') && !impersonating) {
+    return (
+      <div className="min-h-dvh">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <Link href="/platform" className="text-sm text-muted hover:text-fg">← System console</Link>
+          <Button variant="secondary" size="sm" onClick={logout}>Log out</Button>
+        </div>
+        <BrandPicker />
+      </div>
+    );
   }
 
   const isSuper = can(effectiveRole, 'backoffice.governance');  // owner-tier accent (system owner's own session)

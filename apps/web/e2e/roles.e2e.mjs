@@ -77,10 +77,10 @@ try {
     check('site admin: the shell names the brand (UI-8)', await page.getByText('Tamu Traders Admin').first().isVisible());
     check('site admin: NO Audit log / Governance / Platform nav', !nav.some((n) => /Audit log|Game config|M-Pesa|Fly\.io|All brands|System logs/.test(n)), nav.join('|'));
     await open(page, '/admin/audit');
-    check('site admin: /admin/audit shows the owner-only gate', await page.getByText('Audit log is owner-only').isVisible());
-    check('site admin: /admin/audit made NO audit request', !calls.includes('GET /admin/audit'), calls.filter((c) => c.includes('audit')).join());
+    check('site admin: old /admin/audit forwards to the console, which reveals nothing (404)', page.url().endsWith('/platform/audit') && await page.getByText('This page could not be found.').isVisible(), page.url());
+    check('site admin: no audit request was ever made', !calls.includes('GET /admin/audit'), calls.filter((c) => c.includes('audit')).join());
     await open(page, '/admin/game');
-    check('site admin: /admin/game shows the owner-only gate', await page.getByText('Owner-only area').isVisible());
+    check('site admin: old /admin/game forwards to the console (404 for a site admin)', await page.getByText('This page could not be found.').isVisible(), page.url());
     await open(page, '/admin/users/u-target');
     check('site admin: "Edit details" and "Role" sections visible', await page.getByText('Edit details', { exact: true }).isVisible().catch(() => false) && await page.getByText('Role', { exact: true }).first().isVisible().catch(() => false));
     check('site admin: overrides are read-only (no Save overrides)', !(await page.getByText('Save overrides').isVisible().catch(() => false)));
@@ -89,11 +89,14 @@ try {
     await ctx.close(); }
 
   // 2) Owner, own session
-  { const { ctx, page } = await session(browser, { token: T.owner, me: ME.owner });
-    await open(page, '/admin/tickets'); const nav = await navTexts(page);
-    check('owner: Audit log + Governance + Platform nav', ['Audit log', 'Game config', 'All brands', 'System logs'].every((x) => nav.includes(x)), nav.join('|'));
+  { const { ctx, page, calls } = await session(browser, { token: T.owner, me: ME.owner });
+    await open(page, '/admin/tickets');
+    check('owner (own session): /admin shows the brand picker, not an unscoped back office (UI-2)', await page.getByText('Choose a brand to open').isVisible());
+    check('owner: no back-office data request was made without a brand', !calls.some((c) => /^GET \/(admin|tickets)/.test(c)), calls.join());
     await open(page, '/platform'); const pnav = await navTexts(page);
-    check('owner console: system nav (Platforms, Payments, Global config, Add-ons)', ['Platforms', 'Payments', 'Global config'].every((x) => pnav.some((n) => n.includes(x))), pnav.join('|'));
+    check('owner console: system nav incl. moved governance (Audit log, System logs, M-Pesa, Engine)', ['Platforms', 'Payments', 'Global config', 'Audit log', 'System logs', 'M-Pesa (global)', 'Engine (Fly.io)'].every((x) => pnav.some((n) => n.includes(x))), pnav.join('|'));
+    await open(page, '/admin/mpesa');
+    check('owner: old /admin/mpesa forwards to /platform/mpesa', page.url().endsWith('/platform/mpesa'), page.url());
     await ctx.close(); }
 
   // 3) Owner impersonating, SECOND TAB (no sessionStorage stash — the pre-fix failure mode)
@@ -112,7 +115,9 @@ try {
   { const { ctx, page, calls } = await session(browser, { token: T.pa, me: ME.pa });
     await open(page, '/platform'); const pnav = await navTexts(page);
     check('platform admin console: the shell names its platform (UI-8)', await page.getByText('Platform · Alpha Platform').first().isVisible());
-    check('platform admin console: NO system nav', !pnav.some((n) => /Platforms|Payments|Global config|Add-ons/.test(n)), pnav.join('|'));
+    check('platform admin console: NO system nav', !pnav.some((n) => /Platforms|Payments|Global config|Add-ons|Audit log|System logs|M-Pesa|Engine/.test(n)), pnav.join('|'));
+    await open(page, '/platform/audit');
+    check('platform admin: /platform/audit is a 404', await page.getByText('This page could not be found.').isVisible());
     await open(page, '/platform/onboard');
     check('platform admin: onboarding never calls the owner-only platforms list', !calls.includes('GET /platform/platforms'), calls.filter((c) => c.includes('platforms')).join());
     await open(page, '/admin');
