@@ -5,6 +5,13 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #51 — A link rejected a withdrawal on page load (docs/42 UI-4) — FIXED (branch `fix/ui4-links-never-act`)
+- **What:** `/admin/withdrawals?highlight=<tx>&do=reject` executed the rejection as soon as the page loaded (the push notification's Reject action builds that URL). Any link an admin opened — or a browser prefetch — could reject a withdrawal; the only barrier was knowing the tx id. It violated safe-method semantics (RFC 9110 §9.2.1: following a link must not request a state change).
+- **Fix:** `lib/admin/deeplink.ts` parses the link into *selection + intent* only (validated tx id, known intents, `do` stripped from the address bar). The page highlights and scrolls to the row and shows a confirmation banner with the request's player, amount and phone (or its already-decided status); **the click** executes. Approve was already click-only (needs the owner password). Service-worker comment updated.
+- **Tests:** `deeplink.test.ts` 2/2; npm test 1080/1080 (+2 DB-gated); web build OK.
+
+---
+
 ## #50 — Affiliate payout approval sent real M-Pesa money without the owner password (docs/42 UI-1) — FIXED (branch `fix/ui1-affiliate-payout-password`)
 - **What:** `POST /admin/affiliate/payouts/:id/approve` and bulk approve dispatch a real M-Pesa B2C (`affiliateservice.ts:82`) but, unlike withdrawals and commission payouts, never asked for the system owner approval password. A site-admin session alone (or a stolen one) could pay out affiliates; the UI offered a plain two-step confirm.
 - **Evidence:** api `app.affiliate.ts:140,163` had no `requireApprovalPassword`; prod `affiliate_payouts` has 0 rows — latent, never exercised.
