@@ -164,7 +164,7 @@ export interface ApiDeps {
   notifications: Pick<NotificationService, "create" | "listActive" | "adminList" | "dismiss" | "resolve" | "resolveByCategory" | "listTemplates" | "audienceCount" | "broadcast" | "resolveCategory" | "ownerOf">;
   /** Admin Web Push subscriptions (Issue 1): opt-in real-time withdrawal-request alerts. Absent when
    *  push is not configured (no VAPID keys) — the /admin/push/* routes then stay unregistered. */
-  push?: Pick<PushService, "publicKey" | "upsert" | "removeByEndpoint"> | undefined;
+  push?: Pick<PushService, "publicKey" | "upsert" | "removeForUser"> | undefined;
   /** HMAC secret for email magic-link withdrawal actions (Issue 1). Absent => the /w/act routes stay off. */
   actionSecret?: string | undefined;
   /** Resolves the admin profile id recorded as approver/rejecter for email magic-link actions. */

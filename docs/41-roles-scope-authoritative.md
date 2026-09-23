@@ -27,7 +27,8 @@ SYSTEM ADMIN     platform_superadmin   global — every platform, every brand
 `ROLE_RANK` (apps/api/src/http.ts:58): player 1 < marketer 2 < admin 3 < platform_admin 4 <
 platform_superadmin 5 **[code-proven]**. `profiles_role_check` allows exactly these five (0152)
 **[DB-proven]**. The legacy `superadmin` is gone from the CHECK, but its string literal remains inert in
-~29 `fn_*` allow-lists and in `v_mfa_status` (which therefore lists no MFA state for platform tiers).
+~29 `fn_*` allow-lists. (`v_mfa_status` listed only `admin`/`superadmin` — no platform tiers — until 0157
+rebuilt it for the three live operator tiers, service_role only; F-48.)
 
 ### 1.1 How scope travels — and the one rule everything depends on
 Scope is carried in the signed JWT: `role`, `site` (brand) and, for a platform admin, `platform`.
@@ -139,9 +140,11 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
 ### 2.5 PLAYER — `player`
 - **Who / What / Where / When / Why:** an end user of one brand; own wallet/positions/transactions/
   bonuses/notifications; own rows only (`sel_own` = `auth.uid()` AND `site = current_site()`).
-- **Gaps:** ❌ a refreshed token (F-43) loses `site` → `requireSite` defaults to the default brand.
-  Support chat checks the brand but not the conversation owner (anyone holding a conversation UUID can
-  post into it; LOW, UUIDs are unguessable) (F-48).
+- **Gaps:** ✅ ~~a refreshed token loses `site`~~ (F-43). ✅ Support chat is owner-bound (F-48, 0157): a
+  write needs the logged-in owner or the conversation's capability token (issued once at creation, only
+  its SHA-256 stored); a stranger holding the id gets the same 404 as an unknown id, a different account
+  on a shared browser cannot continue it, and the widget wipes a signed-in transcript when the person
+  using the browser changes.
 
 ### 2.6 Non-human principals (easy to forget, must be scoped too)
 | Principal | Scope today | Finding |
@@ -207,6 +210,6 @@ hidden in the UI, but reachable by calling the API directly.
 | F-45 | P1 | Audit rows mis-attributed to the default brand (cross-platform leak via `/platform/sites/:id/audit`) | 26/50 fns + `recordAction` omitted `site_id`; prod: 801 rows on the wrong brand | migration 0155: derived attribution trigger + backfill; NULL = platform-level | ✅ BUGLOG #45 |
 | F-46 | P1 | DB scope ≠ API scope during impersonation; no DB brand fence for site-tier RPCs | 22 fns re-derive from actor profile; 17 RPCs fenced only `platform_admin` | migration 0156: permission/targeting split, 17-RPC fence, API names the brand | ✅ BUGLOG #46 |
 | F-47 | P2 | Platform admin sees all tenants' domains; could re-onboard another platform's brand; case-sensitive domain uniqueness | server.ts:608,647,671 | `onboardscope.ts`: foreign-slug refusal, case-insensitive domain clash, own-platform domain status/health | ✅ BUGLOG #47 |
-| F-48 | P3 | Support conversation not owner-bound; push unsubscribe by endpoint; `v_mfa_status` stale | app.support.ts:162; app.push.ts:64 | owner binding; scope | queue |
+| F-48 | P2 | Support conversation not owner-bound (post/replay/re-point escalation); shared-device transcript leak; withdrawal alerts scoped by the brand stored at opt-in (null = every brand on every platform; suspended admins included); unsubscribe not owner-bound; `v_mfa_status` stale + granted to public roles | app.support.ts:162,199; useSupportChat.ts; push.ts:239; app.push.ts:64; 0027 | capability token + owner check (0157); live-profile recipient rule `mayReceiveWithdrawalAlert` mirrored in SQL; owner-bound unsubscribe; view rebuilt service_role-only | ✅ BUGLOG #49 |
 
 Cross-references: BUGLOG #41–#42 (and the F-IDs as they land), docs/38, docs/40.

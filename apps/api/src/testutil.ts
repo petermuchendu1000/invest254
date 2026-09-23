@@ -277,7 +277,7 @@ export function makeSupportHarness(brandOf: (siteId: string) => SupportBrandInfo
       conversations.set(id, {
         id, siteId, userId: opts.userId ?? null, visitorId: opts.visitorId ?? null,
         status: "open", escalated: false, contactEmail: null, contactPhone: null,
-        createdAt: now(), lastAt: now(),
+        createdAt: now(), lastAt: now(), accessHash: opts.accessHash,
       });
       messages.set(id, []);
       return id;
@@ -409,6 +409,8 @@ export interface TestApi {
   pushSends: Array<{ endpoint: string; payload: any }>;
   /** The push subscription store, so tests can seed admin devices directly. */
   pushRepo: InMemoryPushSubscriptionRepository;
+  /** F-48 seam: site -> platform for push recipient scoping (platform_admin alerts). */
+  pushSitePlatform: Map<string, string>;
   push: PushService;
   /** Await all in-flight fire-and-forget push fan-outs (the events are dispatched un-awaited). */
   flushPush(): Promise<unknown>;
@@ -449,7 +451,18 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   // Admin Web Push fan-out (Issue 1): an in-memory subscription store + a capturing transport that
   // records every send. An endpoint containing "gone" simulates a dead subscription (HTTP 410) so
   // tests can assert the self-healing prune. The VAPID public key is a fixed test sentinel.
-  const pushRepo = new InMemoryPushSubscriptionRepository();
+  // Issue 1 / F-48: alert recipients are decided from each subscriber's LIVE profile (the identity repo,
+  // assigned below) and the withdrawal brand's platform (`pushSitePlatform`, a test seam; unmapped =
+  // no platform, so a platform_admin is alerted only for brands a test maps to its platform).
+  let identityForPush: { getProfile(userId: string): Promise<{ role: string; status: string; siteId: string | null; platformId: string | null } | null> } | undefined;
+  const pushSitePlatform = new Map<string, string>();
+  const pushRepo = new InMemoryPushSubscriptionRepository({
+    profileOf: async (userId) => {
+      const p = await identityForPush?.getProfile(userId);
+      return p ? { role: p.role, status: p.status, siteId: p.siteId, platformId: p.platformId } : null;
+    },
+    platformOfSite: (siteId) => pushSitePlatform.get(siteId) ?? null,
+  });
   const pushSends: Array<{ endpoint: string; payload: any }> = [];
   const pushTransport = {
     publicKey: (): string | null => "TEST_VAPID_PUBLIC_KEY",
@@ -487,6 +500,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const bonus = new Map<string, Cents>();
 
   const identity = new InMemoryIdentityRepository();
+  identityForPush = identity;
   const auth = new AuthService(identity, { jwtSecret: "test-secret-which-is-long-enough-123456", jwtTtlSeconds: 3600 });
   const affiliate = new AffiliateService(identity, daraja);
   const adminRepo = new InMemoryAdminRepository(identity, payRepo, engage, gameRepo);
@@ -713,7 +727,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     deps, identity, engage, payRepo, gameRepo, daraja, fairness, bonus, withdrawalSuccesses,
-    withdrawalRequests, pushSends, pushRepo, push, flushPush: () => Promise.all(pushPromises),
+    withdrawalRequests, pushSends, pushRepo, pushSitePlatform, push, flushPush: () => Promise.all(pushPromises),
     notifications,
     marketers: deps.marketers,
     referral: referralRepo,
