@@ -959,12 +959,12 @@ export class InMemoryPlatformRepository implements PlatformRepository {
     p.enabledGlobal = enabled;
   }
   async setProviderSite(_actorId: string, actorRole: string, siteId: string, code: string, enabled: boolean): Promise<void> {
-    this.gate(actorRole);
+    if (actorRole !== "platform_admin") this.gate(actorRole);   // PAY-1: platform admins switch their own brands (0160)
     if (!this.providersReg.find((x) => x.code === code)) throw new Error("PROVIDER_NOT_FOUND");
     this.providerOverrides.set(`${siteId}:${code}`, enabled);
   }
   async clearProviderSite(_actorId: string, actorRole: string, siteId: string, code: string): Promise<void> {
-    this.gate(actorRole);
+    if (actorRole !== "platform_admin") this.gate(actorRole);
     this.providerOverrides.delete(`${siteId}:${code}`);
   }
 

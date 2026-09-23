@@ -8,6 +8,7 @@ import {
   makeMegaPayClient,
   ConfiguredMegaPayClient,
   ConfiguredPayHeroClient,
+  PaymentScopeService, PgPaymentScopeRepository, loadDarajaConfigFromDb, type GlobalCallbacks,
   verifyPassword,
   type GameRepository, type EngagementRepository, type PaymentRepository,
   type Querier, type FairnessRecord, type ListenClient,
@@ -184,6 +185,46 @@ async function buildDeps(): Promise<ApiDeps> {
     return over;
   });
   log.info("payhero client ready", { dbConfigLayered: true });
+
+  // PAY-1 (docs/43): per-platform / per-brand payment accounts. Scoped clients are built ONLY from their
+  // own scope's encrypted config (never env, never the System's accounts); they reuse the System's own
+  // callback endpoints so every result still lands here. Owner/client caches are invalidated by NOTIFY
+  // (payment_scopes_changed / payment_providers_changed) with a 30 s TTL backstop.
+  let cbCache: { at: number; v: GlobalCallbacks } | null = null;
+  const globalCallbacks = async (): Promise<GlobalCallbacks> => {
+    if (cbCache && Date.now() - cbCache.at < 60_000) return cbCache.v;
+    const db = await loadDarajaConfigFromDb(q);
+    const ph = await platform.resolveDecryptedConfig("payhero", null).catch(() => null);
+    const env = process.env;
+    const v: GlobalCallbacks = {
+      stkCallbackUrl: db.stkCallbackUrl ?? env.MPESA_STK_CALLBACK_URL ?? "",
+      b2cResultUrl: db.b2cResultUrl ?? env.MPESA_B2C_RESULT_URL ?? "",
+      b2cTimeoutUrl: db.b2cTimeoutUrl ?? env.MPESA_B2C_TIMEOUT_URL ?? "",
+      payheroCallbackUrl: ph?.settings.callback_url || env.PAYHERO_CALLBACK_URL || undefined,
+    };
+    cbCache = { at: Date.now(), v };
+    return v;
+  };
+  const paymentScopes = new PaymentScopeService(new PgPaymentScopeRepository(q), { callbacks: globalCallbacks });
+  const armScopeListener = async (): Promise<void> => {
+    try {
+      const c = (await listenPool.connect()) as unknown as ListenClient;
+      c.on("notification", () => { paymentScopes.invalidate(); cbCache = null; });
+      c.on("error", (err: Error) => {
+        console.error("[api] payment scope listener:", err.message);
+        try { c.release?.(true); } catch { /* gone */ }
+        setTimeout(() => { void armScopeListener(); }, 5_000).unref?.();
+      });
+      await c.query("listen payment_scopes_changed");
+      await c.query("listen payment_providers_changed");
+      await c.query("listen mpesa_config_changed");
+    } catch (err) {
+      console.error("[api] payment scope listener connect:", (err as Error).message);
+      setTimeout(() => { void armScopeListener(); }, 5_000).unref?.();
+    }
+  };
+  void armScopeListener();
+  log.info("payment scopes ready", { ttlMs: 30_000 });
 
   // Site-aware minimum withdrawal (multi-tenant). GET /game/config serves each brand its own
   // `site_game_config.min_withdrawal` (via gameConfigForSite below), so the browser validates
@@ -487,6 +528,8 @@ async function buildDeps(): Promise<ApiDeps> {
     // forged Mega Pay callbacks can't mint balance either.
     megapay,
     payhero,
+    // PAY-1: every money flow of a brand uses its payment OWNER's accounts (docs/43).
+    gateways: paymentScopes,
     // Site-aware STK AccountReference (multi-tenant): "Account no. <Brand>" per depositing brand.
     accountRefForSite: (siteId) => siteAccountRef(siteId),
     // Per-brand entitled gateways (Issue 2): a brand only surfaces deposit rails it OWNS (mpesa always).
@@ -557,7 +600,7 @@ async function buildDeps(): Promise<ApiDeps> {
         return claims;
       })
     : null;
-  const affiliate = new AffiliateService(identity, daraja);
+  const affiliate = new AffiliateService(identity, daraja, paymentScopes);
   const admin = new AdminService(new PgAdminRepository(q));
   // platform service constructed earlier (drives Mega Pay DB-config layering + gateway config store)
   const notifications = new NotificationService(new PgNotificationRepository(q));
@@ -907,6 +950,7 @@ async function buildDeps(): Promise<ApiDeps> {
     ...(support ? { support } : {}),
     platformOnboard,
     registrarConfig,
+    paymentScopes,
     addons,
   };
 }
