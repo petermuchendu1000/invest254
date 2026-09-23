@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, rateLimit, assertTargetSiteInScope, adminScopeSite, DEFAULT_SITE_ID, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, rateLimit, assertTargetSiteInScope, adminScopeSite, adminListSite, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import type { PageQuery, AdminUserListQuery, AdminWithdrawalListQuery, AdminDepositListQuery, AdminTransactionListQuery, ReportRange, GameConfigPatch, MpesaConfigPatch, AdminPayoutListQuery, AdminUserActivityQuery, UserOverridePatch } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 
@@ -275,9 +275,9 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
       minWithdrawalsCents: numParam("minWithdrawalsCents"),
       minTurnoverCents: numParam("minTurnoverCents"),
       minBets: numParam("minBets"),
-      // Admin site scope: a token minted for a site operator carries a `site` claim -> only that
-      // brand's users; a platform admin token has no claim -> all brands (docs/22 Task E/H).
-      siteId: ctx.claims?.site,
+      // Admin site scope (Issue 1 / F-43): a site admin -> only its brand's users (fail-closed if the
+      // token lost its site claim); the system owner -> its own site claim, else all brands.
+      siteId: adminListSite(ctx),
     };
     return deps.admin.listUsers(q);
   });
@@ -538,7 +538,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   });
 
   router.get(`${BASE}/admin/withdrawals`, auth, admin, async (ctx: Ctx) => {
-    const q: AdminWithdrawalListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined, siteId: ctx.claims?.site };
+    const q: AdminWithdrawalListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined, siteId: adminListSite(ctx) };
     return deps.admin.listWithdrawals(q);
   });
 
@@ -549,7 +549,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
   });
 
   router.get(`${BASE}/admin/deposits`, auth, admin, async (ctx: Ctx) => {
-    const q: AdminDepositListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined, siteId: ctx.claims?.site };
+    const q: AdminDepositListQuery = { ...pageQuery(ctx), status: ctx.query.get("status") ?? undefined, siteId: adminListSite(ctx) };
     return deps.admin.listDeposits(q);
   });
 
@@ -565,7 +565,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
       kind: kindRaw ?? undefined,
       status: ctx.query.get("status") ?? undefined,
       q: ctx.query.get("q") ?? undefined,
-      siteId: ctx.claims?.site,
+      siteId: adminListSite(ctx),
     };
     return deps.admin.listTransactions(q);
   });

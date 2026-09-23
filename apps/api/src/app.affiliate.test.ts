@@ -118,11 +118,11 @@ test("POST /admin/affiliate/accrue: admin only, accrues 20% of referred GGR", as
     assert.equal(forbidden.status, 403);
 
     // missing date -> 400
-    const bad = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin`, body: {} });
+    const bad = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin:00000000-0000-0000-0000-000000000001`, body: {} });
     assert.equal(bad.status, 400);
 
     // admin succeeds
-    const ok = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin`, body: { date: "2026-06-10" } });
+    const ok = await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin:00000000-0000-0000-0000-000000000001`, body: { date: "2026-06-10" } });
     assert.equal(ok.status, 200);
     const body = await json(ok);
     assert.equal(body.buckets, 1);
@@ -133,7 +133,7 @@ test("POST /admin/affiliate/accrue: admin only, accrues 20% of referred GGR", as
 test("POST /admin/affiliate/accrue: optional `site` scopes the accrual and is validated (docs/22 Task B)", async () => {
   const api = await startTestApi();
   try {
-    const admin = `${TEST_ADMIN}:admin`;
+    const admin = `${TEST_ADMIN}:admin:00000000-0000-0000-0000-000000000001`;
     // A brand id is accepted and echoed back (the site-scoped accrual path).
     const scoped = await req(api, "POST", "/api/v1/admin/affiliate/accrue",
       { token: admin, body: { date: "2026-06-10", site: "00000000-0000-0000-0000-000000000001" } });
@@ -157,7 +157,7 @@ test("GET /affiliate/summary + referrals + commissions: marketer-gated dashboard
     const code: string = (await json(await req(api, "POST", "/api/v1/affiliate/enroll", { token: affId }))).referralCode;
     const refId = await register(api, "0722333444", "referred", { referral_code: code });
     api.identity.recordSettledPlay(refId, "2026-06-10", 10000, 2500); // GGR 7500 -> commission 1500
-    await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin`, body: { date: "2026-06-10" } });
+    await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin:00000000-0000-0000-0000-000000000001`, body: { date: "2026-06-10" } });
 
     // a plain player cannot see the dashboard
     assert.equal((await req(api, "GET", "/api/v1/affiliate/summary", { token: refId })).status, 403);
@@ -191,7 +191,7 @@ async function seedAccrued(api: TestApi): Promise<{ affId: string; commissionCen
   const code: string = (await json(await req(api, "POST", "/api/v1/affiliate/enroll", { token: affId }))).referralCode;
   const refId = await register(api, "0722333444", "referred", { referral_code: code });
   api.identity.recordSettledPlay(refId, "2026-06-10", 10000, 2500); // GGR 7500 -> commission 1500
-  await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin`, body: { date: "2026-06-10" } });
+  await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin:00000000-0000-0000-0000-000000000001`, body: { date: "2026-06-10" } });
   return { affId, commissionCents: 1500 };
 }
 
@@ -227,7 +227,7 @@ test("payout lifecycle: marketer requests, finance-admin approves (B2C), B2C res
     assert.equal((await req(api, "POST", "/api/v1/affiliate/payouts", { token: refToken })).status, 403);
 
     // finance-admin approves -> B2C dispatched (stub conversation id)
-    const apprRes = await req(api, "POST", `/api/v1/admin/affiliate/payouts/${payout.payoutId}/approve`, { token: `${affId}:admin` });
+    const apprRes = await req(api, "POST", `/api/v1/admin/affiliate/payouts/${payout.payoutId}/approve`, { token: `${affId}:admin:00000000-0000-0000-0000-000000000001` });
     assert.equal(apprRes.status, 200);
     const appr = await json(apprRes);
     assert.equal(appr.approved, true);
@@ -261,10 +261,10 @@ test("payout: request with nothing available -> 409; reject releases the reserva
     // now accrue + request, then admin rejects (pre-dispatch) -> availability restored
     const refId = await register(api, "0722333444", "referred", { referral_code: (await json(await req(api, "POST", "/api/v1/affiliate/enroll", { token: affId }))).referralCode });
     api.identity.recordSettledPlay(refId, "2026-06-10", 10000, 2500);
-    await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin`, body: { date: "2026-06-10" } });
+    await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin:00000000-0000-0000-0000-000000000001`, body: { date: "2026-06-10" } });
     const payout = await json(await req(api, "POST", "/api/v1/affiliate/payouts", { token: `${affId}:marketer` }));
 
-    const rej = await req(api, "POST", `/api/v1/admin/affiliate/payouts/${payout.payoutId}/reject`, { token: `${affId}:admin` });
+    const rej = await req(api, "POST", `/api/v1/admin/affiliate/payouts/${payout.payoutId}/reject`, { token: `${affId}:admin:00000000-0000-0000-0000-000000000001` });
     assert.equal(rej.status, 200);
     assert.equal((await json(rej)).rejected, true);
 

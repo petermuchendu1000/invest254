@@ -130,7 +130,7 @@ export interface ApiDeps {
   /** JWT verifier for player/admin routes; null → DEV header auth (see requireAuth). */
   verifier: Verifier | null;
   /** Self-managed phone+password auth + basic-KYC profile (G3/G4/H1). */
-  auth: Pick<AuthService, "register" | "login" | "me" | "issueToken"
+  auth: Pick<AuthService, "register" | "login" | "me" | "issueToken" | "issueSessionToken"
     | "beginMfaEnrolment" | "confirmMfa" | "disableMfa" | "mfaStatus"
     | "changePassword" | "resetPassword"
     | "setSecurityAnswers" | "securitySetupRequired" | "getResetQuestionKeys" | "assertSessionValid">;

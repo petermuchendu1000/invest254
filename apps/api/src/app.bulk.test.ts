@@ -21,7 +21,7 @@ async function register(api: TestApi, phone: string, username: string, body: Rec
   return (await json(res)).userId as string;
 }
 
-const ADMIN = `${TEST_ADMIN}:admin`;
+const ADMIN = `${TEST_ADMIN}:admin:00000000-0000-0000-0000-000000000001`;
 
 // ───────────────────────────────── withdrawals bulk ─────────────────────────────────
 test("POST /admin/withdrawals/bulk: multi-approve, partial success, idempotent, auth+validation", async () => {
@@ -72,7 +72,7 @@ async function seedPayout(api: TestApi, affPhone: string, refPhone: string, affN
   const code: string = (await json(await req(api, "POST", "/api/v1/affiliate/enroll", { token: affId }))).referralCode;
   const refId = await register(api, refPhone, refName, { referral_code: code });
   api.identity.recordSettledPlay(refId, "2026-06-10", 10000, 2500); // GGR 7500 -> commission 1500
-  await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin`, body: { date: "2026-06-10" } });
+  await req(api, "POST", "/api/v1/admin/affiliate/accrue", { token: `${affId}:admin:00000000-0000-0000-0000-000000000001`, body: { date: "2026-06-10" } });
   const payout = await json(await req(api, "POST", "/api/v1/affiliate/payouts", { token: `${affId}:marketer` }));
   return { affId, payoutId: payout.payoutId, amountCents: payout.amountCents };
 }
