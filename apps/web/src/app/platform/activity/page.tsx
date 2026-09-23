@@ -20,7 +20,7 @@ function detailText(detail: unknown): string {
   if (typeof detail === 'string') return detail;
   try { return JSON.stringify(detail); } catch { return String(detail); }
 }
-const ROLE: Record<string, string> = { admin: 'site admin', platform_admin: 'platform admin', platform_superadmin: 'system admin' };
+const ROLE: Record<string, string> = { admin: 'brand admin', platform_admin: 'platform admin', platform_superadmin: 'System owner' };
 
 function ActivityInner() {
   const [siteId, setSiteId] = useState('');
@@ -31,7 +31,7 @@ function ActivityInner() {
 
   return (
     <>
-      <PageHeader title="Brand audit" subtitle="Every privileged action across your brands — who did what, on which brand, and when." />
+      <PageHeader title="Audit log" subtitle="Every privileged action across your brands — who did what, on which brand, and when." />
       <label className="flex max-w-xs flex-col gap-1.5 text-sm">
         <span className="font-medium text-fg">Brand</span>
         <select aria-label="Brand" value={siteId} onChange={(e) => setSiteId(e.target.value)} className="h-11 rounded-brand border border-border bg-surface-2 px-3 text-fg">

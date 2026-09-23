@@ -157,7 +157,7 @@ function OwnerAddons({ siteId, rows, loading }: { siteId: string; rows: BrandAdd
       })}
       {error ? <p className="text-sm text-down">{error.message}</p> : null}
       {done ? <p className="text-sm text-up">{done}</p> : null}
-      <p className="text-xs text-muted">You are the System admin: changes apply to this brand immediately and are recorded in the audit log.</p>
+      <p className="text-xs text-muted">As the System owner, your changes apply to this brand immediately and are recorded in the audit log.</p>
     </div>
   );
 }

@@ -15,12 +15,11 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { ApiError } from '@/lib/api/client';
+import { ROLE_LABELS } from '@/lib/roles';
 import { usePlatformAdmins, useUserSearch, useAppointPlatformAdmin, useRevokePlatformAdmin } from '@/lib/platform/hooks';
 import type { DirectoryUserDto, PlatformAdminDto, PlatformDto } from '@/lib/platform/endpoints';
 
-const ROLE_LABEL: Record<string, string> = {
-  player: 'Player', marketer: 'Marketer', admin: 'Site admin', platform_admin: 'Platform admin', platform_superadmin: 'System admin',
-};
+const ROLE_LABEL = ROLE_LABELS;
 
 function useDebounced(value: string, ms = 300): string {
   const [v, setV] = useState(value);
@@ -30,7 +29,7 @@ function useDebounced(value: string, ms = 300): string {
 
 /** Why this person cannot be appointed (mirrors fn_platform_appoint_platform_admin), or null. */
 export function appointBlocker(u: DirectoryUserDto, platformId: string): string | null {
-  if (u.role === 'platform_superadmin') return 'System admins cannot be appointed.';
+  if (u.role === 'platform_superadmin') return 'The System owner cannot be appointed.';
   if (u.isDefaultMarketer) return "A brand's default marketer — reassign that brand's default marketer first.";
   if (platformId && u.role === 'platform_admin' && u.platformId === platformId) return 'Already runs this platform.';
   return null;
@@ -96,7 +95,7 @@ export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] })
                 {revoking?.userId === a.userId ? (
                   <div className="flex flex-wrap items-end gap-2">
                     <Select label="Make them" value={newRole} onChange={(e) => setNewRole(e.target.value)}>
-                      <option value="admin">Site admin (home brand)</option>
+                      <option value="admin">Brand admin (home brand)</option>
                       <option value="marketer">Marketer</option>
                       <option value="player">Player</option>
                     </Select>
