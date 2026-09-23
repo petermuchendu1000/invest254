@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import * as React from 'react';
 import { formatKes } from '@invest254/shared/money';
 import { useCan } from '@/lib/auth/can';
@@ -8,7 +10,6 @@ import { PageTabs, useTabParam } from '@/components/admin/Tabs';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Switch } from '@/components/platform/PaymentsIndex';
 import { useToast } from '@/lib/toast/ToastProvider';
@@ -18,7 +19,7 @@ import { parseKes } from '@/lib/billing/labels';
 import { useAddonBrands, useAddonCatalog, useAddonRequests, useDecideAddonRequest, useUpdateAddon } from '@/lib/addons/hooks';
 import type { AddonCategory, AddonRequestRow, BillingType, CatalogItem } from '@/lib/addons/endpoints';
 import {
-  AddonMarketplace, AddonPreview, CATEGORY, NoteField, RequestHistory, RequestSummary, errMsg, priceText,
+  AddonPreview, CATEGORY, NoteField, RequestHistory, RequestSummary, errMsg, priceText,
 } from '@/components/addons/Marketplace';
 
 /**
@@ -242,7 +243,6 @@ function EditAddon({ item, onClose }: { item: CatalogItem | null; onClose: () =>
 function BrandsMatrix({ items }: { items: CatalogItem[] }) {
   const q = useAddonBrands();
   const [search, setSearch] = React.useState('');
-  const [manage, setManage] = React.useState<{ id: string; name: string } | null>(null);
   const name = (ref: string) => items.find((i) => `${i.category}:${i.key}` === ref)?.display_name ?? ref.split(':')[1];
   const paidRef = new Set(items.filter((i) => !i.is_default).map((i) => `${i.category}:${i.key}`));
   if (q.isLoading) return <Skeleton className="h-60 w-full" />;
@@ -262,42 +262,52 @@ function BrandsMatrix({ items }: { items: CatalogItem[] }) {
                   <Td>{name(`chart:${b.chart_style}`)}</Td>
                   <Td>{name(`trade_ui:${b.trade_ui}`)}</Td>
                   <Td><div className="flex flex-wrap gap-1">{paidOwned.length ? paidOwned.map((o) => <span key={o} className="rounded-full bg-accent/15 px-2 py-0.5 text-xs text-accent">{name(o)}</span>) : <span className="text-muted">None</span>}</div></Td>
-                  <Td><Button size="sm" variant="outline" onClick={() => setManage({ id: b.site_id, name: b.name })}>Manage</Button></Td>
+                  <Td><Link href={`/platform/clients/${b.site_id}?tab=addons`} className="inline-flex h-9 items-center rounded-brand border border-border px-3 text-sm font-medium hover:bg-surface-2">Manage</Link></Td>
                 </tr>
               );
             })}
           </tbody>
         </TableWrap>
       )}
-      <Modal open={!!manage} onClose={() => setManage(null)} size="lg" title={manage ? `${manage.name} — add-ons` : ''}>
-        {manage ? <AddonMarketplace siteId={manage.id} owner canSetUpGateways /> : null}
-      </Modal>
     </div>
   );
 }
 
-/** Platform admin: its brands' marketplace + the platform's requests. */
+/**
+ * Platform admin: every brand's add-ons at a glance + the platform's requests. Managing ONE brand's add-ons
+ * has one home — the brand page's Add-ons tab (UI-F); this page links there.
+ */
 function PlatformAddons() {
   const brands = useAddonBrands();
-  const [site, setSite] = React.useState('');
+  const cat = useAddonCatalog();
   const list = brands.data?.brands ?? [];
-  React.useEffect(() => { if (!site && list[0]) setSite(list[0].site_id); }, [list, site]);
+  const items = cat.data?.items ?? [];
+  const name = (ref: string) => items.find((i) => `${i.category}:${i.key}` === ref)?.display_name ?? ref.split(':')[1];
+  const paid = new Set(items.filter((i) => !i.is_default).map((i) => `${i.category}:${i.key}`));
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Add-ons" subtitle="Extra price charts, trade screens and payment gateways for your brands. Request what you need; the System owner approves, and it is billed on your platform's invoice." />
-      {brands.isLoading ? <Skeleton className="h-60 w-full" /> : !list.length ? <Empty title="No brands yet" description="Onboard a brand first." /> : (<>
-        {list.length > 1 ? (
-          <div className="max-w-sm">
-            <Select label="Brand" value={site} onChange={(e) => setSite(e.target.value)}>
-              {list.map((b) => <option key={b.site_id} value={b.site_id}>{b.name}{b.pending ? ` (${b.pending} request${b.pending === 1 ? '' : 's'})` : ''}</option>)}
-            </Select>
-          </div>
-        ) : <p className="text-sm text-muted">Brand: <b className="text-fg">{list[0]!.name}</b></p>}
-        {site ? <AddonMarketplace key={site} siteId={site} canSetUpGateways /> : null}
-        <Section title="Requests from your brands">
-          <RequestHistory emptyText="Requests you or your brand admins send, and the System owner's answers, show here." />
-        </Section>
-      </>)}
+      <PageHeader title="Add-ons" subtitle="Extra price charts, trade screens and payment gateways for your brands. Request them on each brand; the System owner approves, and they are billed on your platform's invoice." />
+      {brands.isLoading ? <Skeleton className="h-40 w-full" /> : !list.length ? <Empty title="No brands yet" description="Onboard a brand first." /> : (
+        <ul className="grid gap-3 md:grid-cols-2" aria-label="Your brands' add-ons">
+          {list.map((b) => {
+            const owned = b.owned.filter((o) => paid.has(o));
+            return (
+              <li key={b.site_id} className="flex flex-col gap-2 rounded-2xl border border-border bg-surface p-4 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{b.name}</span>
+                  {b.pending ? <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs font-medium text-warn">{b.pending} request{b.pending === 1 ? '' : 's'} waiting</span> : null}
+                </div>
+                <div className="text-muted">Chart: <span className="text-fg">{name(`chart:${b.chart_style}`)}</span> · Trade screen: <span className="text-fg">{name(`trade_ui:${b.trade_ui}`)}</span></div>
+                <div className="flex flex-wrap gap-1">{owned.length ? owned.map((o) => <span key={o} className="rounded-full bg-accent/15 px-2 py-0.5 text-xs text-accent">{name(o)}</span>) : <span className="text-xs text-muted">No paid add-ons</span>}</div>
+                <Link href={`/platform/clients/${b.site_id}?tab=addons`} className="mt-1 w-fit text-sm font-medium text-accent hover:underline">Manage add-ons →</Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <Section title="Requests from your brands">
+        <RequestHistory emptyText="Requests you or your brand admins send, and the System owner's answers, show here." />
+      </Section>
     </div>
   );
 }

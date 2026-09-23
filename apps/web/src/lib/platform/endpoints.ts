@@ -19,6 +19,8 @@ export interface SiteRow {
   hasMpesaConsumerKey?: boolean; hasMpesaConsumerSecret?: boolean; hasMpesaPasskey?: boolean; hasMpesaB2cCredential?: boolean;
   legalCopy?: Record<string, unknown> | null;
   ownerUserId?: string | null;
+  /** UI-F: the platform the brand belongs to. */
+  platformId?: string | null;
 }
 export interface SiteWithConfig extends SiteRow { config: SiteConfig }
 export interface SiteKpis {

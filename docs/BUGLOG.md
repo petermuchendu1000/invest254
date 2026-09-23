@@ -5,6 +5,37 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #72 — The same job lived on two or three pages; some links led to a 404; "Needs setup" miscounted brands (UI-F) — FIXED (branch `ui/f-focused-pages`, no migration)
+- **What:** an audit of the console and back office found the same function on several pages, often with different rules.
+  - Pool mode and today's budget could be set from the brand page and the Withdrawal pool page.
+  - A gateway could be switched on from the Gateways list, the gateway page and the brand's Payments tab.
+  - There were two audit trails: `/platform/audit` for the owner and `/platform/activity` for platform admins.
+  - Marketer expenses could be logged from the user page and from Marketer payouts, and the two used different category lists (`tiktok_promo` against `promo`).
+  - Brand admins could be appointed from the user page for the owner only, a path no one could reach.
+  - Player overrides had an editable branch in the back office that could never render.
+  - The back-office Overview repeated the Users, Balances and RTP panels from other pages.
+- **Broken links found along the way:**
+  - Old back-office URLs (`/admin/game`, `/admin/audit`, `/admin/logs`, `/admin/mpesa`, `/admin/fly`) sent brand admins to console pages, which returned a 404.
+  - The users table nested a phone `<a>` inside the name `<Link>`, which is invalid HTML.
+  - Platform-level audit rows (no brand) never showed to platform admins.
+- **Wrong figure:** the console's "Needs setup" KPI counted a brand as not ready unless it had its own legacy M-Pesa fields. Since PAY-1, every brand gets paid through its own accounts, its platform's accounts or the System accounts, so live brands were flagged.
+- **Fix: one home per job, with links everywhere else.**
+  - Brand page tabs are now Identity, Branding, Economy, Add-ons, People and Legal. Pool, payments and audit are links to their own pages.
+  - People covers brand admins (appoint and remove) and a read-only player list with overrides. Its "Manage in back office" button opens the brand session straight on that player.
+  - There is one audit log, `/platform/audit`, scoped on the server. `listPlatformAudit` now includes platform-level rows that target the caller's platform. `/platform/activity` forwards to it.
+  - The Gateways list only shows state. Switching a gateway on happens on the gateway page, where a per-brand switch appears only for brands that own that gateway add-on; brands without it link to their Add-ons tab.
+  - The back-office Overview shows trends plus a "Needs attention" list of deep links. Game health moved to Reports → Health.
+  - Users has quick-filter pills with counts, reads `?status=` and `?role=` from the URL, and drops the repeated columns.
+  - The user page links to Marketer payouts (which reads `?marketer=`) for marketer money, and to the console for brand admins. Its overrides are read-only.
+  - Old URLs go through `MovedToConsole`: operators land on the console page, brand admins on `/admin`.
+  - Readiness now counts only a live domain.
+- **Owner request #32, done in the same change:** the Brand back office picker now has you choose a platform, then a brand. It shows brand counts per platform, keeps the platform in `?platform=`, remembers it on the device, hides archived brands unless asked, says which other platform matches a search, and uses a select on phones.
+- **Verification:**
+  - Role e2e: 198/198 (+17 new UI-F and picker checks).
+  - `npm test`: 1169/1169.
+  - `platformaudit.pg.test.ts` has a new platform-level scope case and passes.
+  - Screenshots taken on the real local stack.
+
 ## #71 — Add-ons: paid charts never reached players; catalog, requests and billing gaps (ADDON-1) — FIXED (branch `feat/addon1-marketplace`, migration 0166)
 - **What (owner request, 2026-09-23: "a complete overhaul of the /addons page … a total joke"):**
   - **Players never saw paid charts (critical, found in the audit).** `/site/brand` coerced every `chart_style` except `candlestick` to `line`. A brand sold *Area graph* (KES 50,000 in production), *OHLC bars* (60,000) or *Baseline* got the free line chart.

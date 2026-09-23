@@ -13,7 +13,7 @@ import { ApiError } from '@/lib/api/client';
 import { formatDate } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
-  useActivateAddon, useAddonBrand, useAddonRequests, useCancelAddonRequest, useDecideAddonRequest, useGrantAddon,
+  useActivateAddon, useAddonBrand, useAddonRequests, useCancelAddonRequest, useGrantAddon,
   useRequestAddon, useRevokeAddon,
 } from '@/lib/addons/hooks';
 import type { AddonCategory, AddonRequestRow, BillingType, BrandAddonRow } from '@/lib/addons/endpoints';
@@ -92,7 +92,6 @@ type Dialog =
   | { kind: 'request'; row: BrandAddonRow }
   | { kind: 'assign'; row: BrandAddonRow }
   | { kind: 'remove'; row: BrandAddonRow }
-  | { kind: 'review'; row: BrandAddonRow; req: AddonRequestRow | null }
   | null;
 
 /**
@@ -101,7 +100,6 @@ type Dialog =
  */
 export function AddonMarketplace({ siteId, owner = false, canSetUpGateways = false }: { siteId?: string; owner?: boolean; canSetUpGateways?: boolean }) {
   const q = useAddonBrand(siteId ?? null);
-  const reqs = useAddonRequests(owner ? 'requested' : undefined);
   const activate = useActivateAddon();
   const cancel = useCancelAddonRequest();
   const toast = useToast();
@@ -113,7 +111,6 @@ export function AddonMarketplace({ siteId, owner = false, canSetUpGateways = fal
   const siteBody = siteId ? { site: siteId } : {};
   const shown = rows.filter((r) => (cat === 'all' || r.category === cat) && (owner || stateOf(r) !== 'hidden'));
   const cats = (Object.keys(CATEGORY) as AddonCategory[]).filter((c) => rows.some((r) => r.category === c));
-  const openFor = (r: BrandAddonRow) => (reqs.data?.requests ?? []).find((x) => x.site_id === (siteId ?? x.site_id) && x.category === r.category && x.key === r.key && x.status === 'requested') ?? null;
 
   const use = (r: BrandAddonRow) => activate.mutate({ ...siteBody, category: r.category, key: r.key }, {
     onSuccess: () => toast.push({ tone: 'success', title: `${r.display_name} is now in use`, description: 'Players see it on their next page load.' }),
@@ -167,7 +164,7 @@ export function AddonMarketplace({ siteId, owner = false, canSetUpGateways = fal
                         {!switchable && canSetUpGateways ? <Link href="/platform/payment-accounts" className="inline-flex h-9 items-center rounded-brand border border-border px-3 text-sm font-medium hover:bg-surface-2">Set up</Link> : null}
                         {owner && !r.is_default ? <Button size="sm" variant="outline" onClick={() => setDialog({ kind: 'remove', row: r })}>Remove…</Button> : null}
                       </>) : st === 'requested' ? (
-                        owner ? <Button size="sm" onClick={() => setDialog({ kind: 'review', row: r, req: openFor(r) })}>Review request</Button>
+                        owner ? <Link href="/platform/addons" className="inline-flex h-9 items-center rounded-brand bg-accent px-3 text-sm font-medium text-accent-fg hover:opacity-90">Review request</Link>
                           : <Button size="sm" variant="outline" onClick={() => withdraw(r)} disabled={cancel.isPending}>Withdraw request</Button>
                       ) : owner ? (
                         <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'assign', row: r })}>Assign…</Button>
@@ -192,7 +189,6 @@ function AddonDialog({ dialog, siteId, onClose }: { dialog: Dialog; siteId: stri
   const request = useRequestAddon();
   const grant = useGrantAddon();
   const revoke = useRevokeAddon();
-  const decide = useDecideAddonRequest();
   const toast = useToast();
   React.useEffect(() => { setNote(''); }, [dialog]);
   if (!dialog) return null;
@@ -200,7 +196,7 @@ function AddonDialog({ dialog, siteId, onClose }: { dialog: Dialog; siteId: stri
   const bill = billingSentence(r.billing_type, r.price_cents, r.setup_fee_cents);
   const what = r.category === 'payment_gateway' ? `Players can deposit with ${r.display_name} once it is set up in Payment accounts.`
     : `${r.display_name} becomes the ${r.category === 'chart' ? 'price chart' : 'trade screen'} players see, straight away.`;
-  const busy = request.isPending || grant.isPending || revoke.isPending || decide.isPending;
+  const busy = request.isPending || grant.isPending || revoke.isPending;
   const done = (title: string) => () => { toast.push({ tone: 'success', title }); onClose(); };
   const fail = (title: string) => (e: unknown) => toast.push({ tone: 'error', title, description: errMsg(e) });
 
@@ -238,20 +234,7 @@ function AddonDialog({ dialog, siteId, onClose }: { dialog: Dialog; siteId: stri
       </Modal>
     );
   }
-  const req = dialog.req;
-  return (
-    <Modal open onClose={onClose} size="sm" title={`Review: ${r.display_name}`}
-      footer={<><Button variant="outline" onClick={onClose}>Close</Button>
-        {req ? <>
-          <Button variant="down" disabled={busy} onClick={() => decide.mutate({ id: req.id, decision: 'reject', ...(note.trim() ? { note: note.trim() } : {}) }, { onSuccess: done('Request declined'), onError: fail('Not declined') })}>Decline</Button>
-          <Button disabled={busy} onClick={() => decide.mutate({ id: req.id, decision: 'approve', ...(note.trim() ? { note: note.trim() } : {}) }, { onSuccess: done('Approved and assigned'), onError: fail('Not approved') })}>Approve</Button>
-        </> : null}</>}>
-      <div className="flex flex-col gap-3 text-sm">
-        {req ? <RequestSummary req={req} /> : <p className="text-muted">Open Add-ons → Requests to review it.</p>}
-        {req ? <NoteField value={note} onChange={setNote} label="Note to the brand" placeholder="Shown with your decision" /> : null}
-      </div>
-    </Modal>
-  );
+  return null;
 }
 
 export function RequestSummary({ req }: { req: AddonRequestRow }) {
