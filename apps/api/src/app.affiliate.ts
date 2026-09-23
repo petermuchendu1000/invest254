@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSite, adminScopeSite, assertTargetSiteInScope, rateLimit, DEFAULT_SITE_ID, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSite, adminScopeSite, adminListSite, assertTargetSiteInScope, rateLimit, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 import { parseB2cResult } from "./app.payments.js";
@@ -84,7 +84,8 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     // Enrollment promotes player -> marketer in the DB, but the caller's JWT still carries the
     // old role. Reissue a token that reflects the new role so the marketer-gated dashboard routes
     // (summary/referrals/commissions/payouts) work immediately, without forcing a re-login.
-    const token = deps.verifier ? await deps.auth.issueToken(ctx.claims!.userId, e.role) : undefined;
+    // Scope-preserving re-mint (Issue 1 / F-43): the new token keeps the account's brand claim.
+    const token = deps.verifier ? (await deps.auth.issueSessionToken(ctx.claims!.userId)).token : undefined;
     return {
       referralCode: e.referralCode,
       commissionRate: e.commissionRate,
@@ -198,7 +199,7 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     const amountCents = typeof b.amountCents === "number" ? b.amountCents : Number(b.amountCents);
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new ApiError("VALIDATION", "amountCents must be a positive integer (cents)", 400);
     const note = typeof b.note === "string" && b.note.trim() ? b.note.trim() : null;
-    const siteId = ctx.claims?.site ?? DEFAULT_SITE_ID;
+    const siteId = adminListSite(ctx) ?? DEFAULT_SITE_ID; // F-43: fail-closed for a claimless site admin
     return domain(() => deps.marketerExpenses.add(ctx.claims!.userId, ctx.claims!.role ?? "player", siteId, marketerUserId, category, amountCents, note));
   });
 

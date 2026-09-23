@@ -19,7 +19,7 @@ async function register(api: TestApi, phone: string, username: string, password 
   assert.equal(res.status, 201, `register ${username}`);
   return (await json(res)).userId as string;
 }
-const ADMIN = `${TEST_ADMIN}:admin`;
+const ADMIN = `${TEST_ADMIN}:admin:00000000-0000-0000-0000-000000000001`;
 const SUPER = `${TEST_ADMIN}:platform_superadmin`;
 
 test("soft-delete user: marks deleted, hides from list, blocks login", async () => {

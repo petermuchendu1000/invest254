@@ -346,8 +346,9 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const siteId = await resolveSiteId(ctx, b, deps);
     const id = await domain(() => deps.marketers.login(phone, pin, siteId));
     if (!id) throw new ApiError("INVALID_CREDENTIALS", "invalid phone or PIN", 401);
-    const token = await deps.auth.issueToken(id, "marketer");
     const marketerProfile = await deps.marketers.profile(id);
+    // Issue 1 / F-43: bind the marketer-app session to the marketer's brand (site claim).
+    const token = await deps.auth.issueToken(id, "marketer", marketerProfile?.site_id ?? undefined);
     return { token, marketer: marketerProfile };
   });
 
@@ -401,7 +402,8 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     if (profile.status !== "active") throw new ApiError("MARKETER_INACTIVE", `marketer is ${profile.status}`, 403);
 
     // 3) Mint a marketer-scoped token (subject = marketer id, as requireMarketer/me expect).
-    const token = await deps.auth.issueToken(profile.id, "marketer");
+    // Issue 1 / F-43: bind the marketer-app session to the marketer's brand (site claim).
+    const token = await deps.auth.issueToken(profile.id, "marketer", profile.site_id ?? undefined);
     return { token, marketer: profile };
   });
 
