@@ -66,16 +66,20 @@ test("game-withdrawal confirmation reads the marketer's OWN brand, not the flags
     // Onboard a marketer under EACH brand (admin token carries the site claim -> adminScopeSite).
     const mk = async (site: string, name: string, phone: string): Promise<string> => {
       const id = (await json(await req(api, "POST", "/api/v1/admin/marketers", { token: `u-admin:admin:${site}`, body: { name, phone } }))).id as string;
-      assert.equal((await req(api, "POST", `/api/v1/admin/marketers/${id}/pin`, { token: ADMIN, body: { pin: "1234" } })).status, 200);
+      // F-44: the marketer's OWN brand admin sets the PIN (another brand's admin is refused).
+      assert.equal((await req(api, "POST", `/api/v1/admin/marketers/${id}/pin`, { token: `u-admin:admin:${site}`, body: { pin: "1234" } })).status, 200);
       return id;
     };
     const madolarId = await mk(MADOLAR, "Alice Wanjiru", "0733000001");
     const thousandId = await mk(THOUSAND, "Bob Otieno", "0733000002");
 
     // Credit each with a game withdrawal.
-    for (const [id, ref] of [[madolarId, "game:md-1"], [thousandId, "game:tw-1"]] as const) {
+    for (const [id, ref, site] of [[madolarId, "game:md-1", MADOLAR], [thousandId, "game:tw-1", THOUSAND]] as const) {
       assert.equal((await req(api, "POST", `/api/v1/admin/marketers/${id}/credit`, {
-        token: ADMIN, body: { amountCents: 120000, ref, meta: { source: "game_withdrawal" } },
+        token: ADMIN, body: { amountCents: 1, ref: `${ref}-x` },
+      })).status, 403, "a different brand's admin must not credit this marketer (F-44)");
+      assert.equal((await req(api, "POST", `/api/v1/admin/marketers/${id}/credit`, {
+        token: `u-admin:admin:${site}`, body: { amountCents: 120000, ref, meta: { source: "game_withdrawal" } },
       })).status, 200);
     }
 

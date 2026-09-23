@@ -738,9 +738,13 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     for (const c of this.commissions) if (c.payoutId === payoutId && c.status === "accrued") c.payoutId = null; // release
     return true;
   }
-  // The in-memory mirror doesn't track a payout's brand, so it can't resolve one — return null,
-  // which the write-path guard treats as "don't block" (the site-aware RPC is the real guard).
-  async siteOfPayout(_payoutId: string): Promise<string | null> { return null; }
+  // A payout's brand is its affiliate's brand (as affiliate_payouts.site_id is in Postgres), so the
+  // strict write-path guard (Issue 1 / F-44) resolves real payouts and 404s unknown ones.
+  async siteOfPayout(payoutId: string): Promise<string | null> {
+    const p = this.payouts.get(payoutId);
+    if (!p) return null;
+    return this.byId.get(p.affiliateId)?.siteId ?? "00000000-0000-0000-0000-000000000001";
+  }
   private toProfile(u: MemUser): ProfileRow {
     return {
       userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status,

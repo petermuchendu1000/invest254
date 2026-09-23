@@ -41,9 +41,9 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
 ### 1.2 The four enforcement layers (and where they disagree)
 | # | Layer | Scope source | Status |
 |---|---|---|---|
-| 1 | JWT claims (AuthService.issueToken) | profile at login | ❌ 4 mint paths drop `site`/`platform` (F-43) |
+| 1 | JWT claims (`AuthService.issueToken` / `issueSessionToken`) | live profile | ✅ every mint path stamps site/platform (F-43) |
 | 2 | API rank gate (`requireRole`, `requireSiteAdmin`) | token `role` | ✅ |
-| 3 | API scope gate (`adminScopeSite/Platform`, `assertTarget*InScope`) | token `site`/`platform` | ❌ missing on 25+ routes (F-44); fail-open for claimless `admin` (F-43) |
+| 3 | API scope gate (`scope.ts` → `assertSiteTarget`/`assertUserTarget`) | token `site`/`platform` vs the TARGET's brand | ✅ fail-closed on all id-addressed operator routes (F-43, F-44); guarded by the route-registry attack matrix |
 | 4a | DB RPCs (SECURITY DEFINER, `p_actor_role`) | **actor's profile** (`fn_actor_target_sites`, 22 fns) | ⚠️ disagrees with layer 3 during impersonation (F-46) |
 | 4b | DB RLS for PostgREST (anon key) | JWT GUCs | ✅ after 0153 (was: 36 tables without RLS + 14 owner-run views, #42) |
 
@@ -203,7 +203,7 @@ hidden in the UI, but reachable by calling the API directly.
 | #41 | P0 | Prod `DATABASE_URL` public in repo | raw.githubusercontent → 200 | removed + CI secret-scan | ✅ merged `7135cf9`; **owner must rotate** |
 | #42 | P0 | PostgREST table/view surface open to anon key | e2e_postgrest_surface (37 fails pre-fix) | migration 0153 + CI guard | ✅ approved & merged 2026-09-23 — applied by the deploy's migrate step (fails safe if its ownership guard trips) |
 | F-43 | P0 | Tokens minted without `site`/`platform`; claimless `admin` = unrestricted | app.auth.ts:329, app.affiliate.ts:87, app.marketers.ts:349,404; http.ts:465 | `issueSessionToken` choke point; `adminScopeSite` fail-closed; `adminListSite` | ✅ BUGLOG #43, branch `fix/issue1-f43-token-scope-claims` |
-| F-44 | P0/P1 | 25+ admin routes lack target-scope checks; global audit/M-Pesa reads; cross-tenant accrual & expenses | §2.3 | uniform target guards + RPC brand checks | after F-43 |
+| F-44 | P0/P1 | 25+ admin routes lacked target-scope checks; global audit/M-Pesa reads; cross-tenant accrual & expenses | §2.3 | `scope.ts` single fail-closed tier rule on all 72 id-addressed operator routes; owner-only audit/M-Pesa; migration 0154; route-registry attack matrix | ✅ BUGLOG #44 |
 | F-45 | P1 | Audit rows mis-attributed to default brand | 26/50 fns + `recordAction` omit `site_id` | derive `site_id` (trigger) + backfill | after F-44 |
 | F-46 | P1 | DB scope ≠ API scope during impersonation | 22 fns re-derive from actor profile | carry the effective site into the RPC scope | after F-45 |
 | F-47 | P2 | Platform admin sees all tenants' domains | server.ts:647,671 | filter to own platform's brands | queue |
