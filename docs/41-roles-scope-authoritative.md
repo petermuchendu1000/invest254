@@ -76,10 +76,10 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
 - **When:** daily portfolio operations.
 - **Why:** the middle tier that makes 10k platforms independent.
 - **Gaps / over-grants:**
-  - ❌ **Over-grant (leak): `GET /platform/domains/health`** returns the Cloudflare status of **every
+  - ✅ (F-47 fixed) **Over-grant (leak): `GET /platform/domains/health`** returns the Cloudflare status of **every
     platform's** brand domains (the system Cloudflare account), i.e. every other tenant's client list
     **[code-proven server.ts:671]** (F-47).
-  - ❌ **Over-grant: `GET /platform/onboard/domain-status?domain=`** probes any domain on the system
+  - ✅ (F-47 fixed) **Over-grant: `GET /platform/onboard/domain-status?domain=`** probes any domain on the system
     Cloudflare account, not just its own (F-47).
   - ⚠️ Routes guarded by `requireRole("admin")` (notifications, push, tickets, add-ons) also admit a raw
     `platform_admin`; they are safe only where the RPC re-derives scope (tickets, broadcast, add-ons ✅;
@@ -206,7 +206,7 @@ hidden in the UI, but reachable by calling the API directly.
 | F-44 | P0/P1 | 25+ admin routes lacked target-scope checks; global audit/M-Pesa reads; cross-tenant accrual & expenses | §2.3 | `scope.ts` single fail-closed tier rule on all 72 id-addressed operator routes; owner-only audit/M-Pesa; migration 0154; route-registry attack matrix | ✅ BUGLOG #44 |
 | F-45 | P1 | Audit rows mis-attributed to the default brand (cross-platform leak via `/platform/sites/:id/audit`) | 26/50 fns + `recordAction` omitted `site_id`; prod: 801 rows on the wrong brand | migration 0155: derived attribution trigger + backfill; NULL = platform-level | ✅ BUGLOG #45 |
 | F-46 | P1 | DB scope ≠ API scope during impersonation; no DB brand fence for site-tier RPCs | 22 fns re-derive from actor profile; 17 RPCs fenced only `platform_admin` | migration 0156: permission/targeting split, 17-RPC fence, API names the brand | ✅ BUGLOG #46 |
-| F-47 | P2 | Platform admin sees all tenants' domains | server.ts:647,671 | filter to own platform's brands | queue |
+| F-47 | P2 | Platform admin sees all tenants' domains; could re-onboard another platform's brand; case-sensitive domain uniqueness | server.ts:608,647,671 | `onboardscope.ts`: foreign-slug refusal, case-insensitive domain clash, own-platform domain status/health | ✅ BUGLOG #47 |
 | F-48 | P3 | Support conversation not owner-bound; push unsubscribe by endpoint; `v_mfa_status` stale | app.support.ts:162; app.push.ts:64 | owner binding; scope | queue |
 
 Cross-references: BUGLOG #41–#42 (and the F-IDs as they land), docs/38, docs/40.
