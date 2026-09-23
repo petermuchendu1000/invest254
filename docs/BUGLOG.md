@@ -5,6 +5,27 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #68 — No C2B configuration: Pay Bill details not editable, C2B URLs never registered with Safaricom (PAY-2) — FIXED (branch `feat/pay2-c2b-config`, migration 0163)
+- **What (owner question, 2026-09-23):**
+  - `/platform/mpesa` had only STK and B2C settings.
+  - The Pay Bill players are told to pay into (`paybill_config`) was seed-only: no API or UI could change it.
+  - Nothing could set or register the C2B Confirmation and Validation URLs. Without that registration Safaricom never reports Pay Bill payments, so the manual Pay Bill rail can verify nothing. It works only if someone registers the URLs by hand outside the product.
+  - The page also said "Save 3 changes" before anything had been touched: our own auto-filled endpoints counted as edits.
+  - The warning said credential changes needed a restart, but they reload within a minute.
+- **Fix:** see docs/45.
+  - Migration 0163 adds owner-only read and update (validated and audited), Safaricom's URL rules, and a record of each registration.
+  - Daraja C2B RegisterURL v2 is wired up.
+  - The API has three routes.
+  - The M-Pesa page is split into Deposits / Payouts / Pay Bill (C2B) / Credentials. The C2B tab shows status and health, what players see, the URLs, and a Register button.
+  - Auto-filled endpoints now count as suggestions, not changes.
+- **Tests:**
+  - `e2e_c2b_config.py` (BEFORE reproduces; AFTER 18 checks).
+  - Engine: 3 tests. API: 1 test.
+  - Role e2e: 5 new checks. All 5 failed before the fix; 131/131 pass after.
+  - `e2e_c2b_paybill`, `e2e_function_grants` and `e2e_postgrest_surface` still pass.
+
+---
+
 ## #67 — Page-level P1s from the UI audit: clipped withdrawal actions, an announcement that couldn't be edited, fake trends, editable-looking read-only overrides, sideways scroll on phones (UI-C) — FIXED (branch `ui/c-page-p1-fixes`, migration 0162)
 - **What:**
   - **Withdrawals.** At 1440px the Reject and Mark paid buttons sat past the right edge of the table (Reject measured at x=1505). On a phone, Approve was at x=1146 on a 390px screen.
