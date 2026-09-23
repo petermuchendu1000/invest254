@@ -44,7 +44,7 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
 | 1 | JWT claims (`AuthService.issueToken` / `issueSessionToken`) | live profile | ✅ every mint path stamps site/platform (F-43) |
 | 2 | API rank gate (`requireRole`, `requireSiteAdmin`) | token `role` | ✅ |
 | 3 | API scope gate (`scope.ts` → `assertSiteTarget`/`assertUserTarget`) | token `site`/`platform` vs the TARGET's brand | ✅ fail-closed on all id-addressed operator routes (F-43, F-44); guarded by the route-registry attack matrix |
-| 4a | DB RPCs (SECURITY DEFINER, `p_actor_role`) | **actor's profile** (`fn_actor_target_sites`, 22 fns) | ⚠️ disagrees with layer 3 during impersonation (F-46) |
+| 4a | DB RPCs (SECURITY DEFINER, `p_actor_role`) | permission `fn_actor_scope_sites` (token tier verified against the actor's real profile) + brand named by the API | ✅ site-tier fence on 17 user/brand/advance RPCs; impersonation acts on the token's brand (F-46, 0156) |
 | 4b | DB RLS for PostgREST (anon key) | JWT GUCs | ✅ after 0153 (was: 36 tables without RLS + 14 owner-run views, #42) |
 
 ---
@@ -84,8 +84,8 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
   - ⚠️ Routes guarded by `requireRole("admin")` (notifications, push, tickets, add-ons) also admit a raw
     `platform_admin`; they are safe only where the RPC re-derives scope (tickets, broadcast, add-ons ✅;
     per-user notifications ❌ — F-44).
-  - ⚠️ **Impersonation mis-scope in the DB (F-46):** while impersonating brand X, RPCs that re-derive an
-    `admin` actor's site from its **profile** act on the platform admin's **home** brand, not X.
+  - ✅ ~~**Impersonation mis-scope in the DB (F-46):** while impersonating brand X, RPCs that re-derive an
+    `admin` actor's site from its **profile** act on the platform admin's **home** brand, not X.~~ Fixed by 0156 (BUGLOG #46).
 
 ### 2.3 SITE ADMIN — `admin`
 - **Who:** the day-to-day operator of exactly one brand.
@@ -148,7 +148,7 @@ BUGLOG #38 enforced S1 for `platform_admin` only. §5 shows S1 is violated for `
 |---|---|---|
 | Public anon key (PostgREST) | RLS only | ✅ #42 → closed by 0153 |
 | Anyone on the internet (public repo) | the repo | ❌ #41 → `.e2e.env` removed + CI secret-scan; **rotation pending (owner)** |
-| Impersonation session | token `site` at API; actor **profile** at DB | ⚠️ F-46 |
+| Impersonation session | token `site` at API; DB permission from the impersonator's real tier, brand named by the API | ✅ F-46 (0156) |
 | Payment callbacks (`/deposits/*/callback`) | STKPushQuery verify + optional CIDR | ✅ (not re-audited in depth here) |
 | Telegram / email approval links | password-gated approve | ✅ (not re-audited in depth here) |
 
@@ -205,7 +205,7 @@ hidden in the UI, but reachable by calling the API directly.
 | F-43 | P0 | Tokens minted without `site`/`platform`; claimless `admin` = unrestricted | app.auth.ts:329, app.affiliate.ts:87, app.marketers.ts:349,404; http.ts:465 | `issueSessionToken` choke point; `adminScopeSite` fail-closed; `adminListSite` | ✅ BUGLOG #43, branch `fix/issue1-f43-token-scope-claims` |
 | F-44 | P0/P1 | 25+ admin routes lacked target-scope checks; global audit/M-Pesa reads; cross-tenant accrual & expenses | §2.3 | `scope.ts` single fail-closed tier rule on all 72 id-addressed operator routes; owner-only audit/M-Pesa; migration 0154; route-registry attack matrix | ✅ BUGLOG #44 |
 | F-45 | P1 | Audit rows mis-attributed to the default brand (cross-platform leak via `/platform/sites/:id/audit`) | 26/50 fns + `recordAction` omitted `site_id`; prod: 801 rows on the wrong brand | migration 0155: derived attribution trigger + backfill; NULL = platform-level | ✅ BUGLOG #45 |
-| F-46 | P1 | DB scope ≠ API scope during impersonation | 22 fns re-derive from actor profile | carry the effective site into the RPC scope | after F-45 |
+| F-46 | P1 | DB scope ≠ API scope during impersonation; no DB brand fence for site-tier RPCs | 22 fns re-derive from actor profile; 17 RPCs fenced only `platform_admin` | migration 0156: permission/targeting split, 17-RPC fence, API names the brand | ✅ BUGLOG #46 |
 | F-47 | P2 | Platform admin sees all tenants' domains | server.ts:647,671 | filter to own platform's brands | queue |
 | F-48 | P3 | Support conversation not owner-bound; push unsubscribe by endpoint; `v_mfa_status` stale | app.support.ts:162; app.push.ts:64 | owner binding; scope | queue |
 
