@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { ApiError } from '@/lib/api/client';
-import { formatRelativeTime } from '@/lib/format';
+import { formatAgo, formatNumber, formatDate } from '@/lib/format';
 import { usePlatformUserDetail, usePlatformUserOverrides, useSetPlatformUserOverrides, usePlatformUserAction } from '@/lib/platform/hooks';
 import type { SiteWithConfig } from '@/lib/platform/endpoints';
 import type { UserOverridePatch } from '@/lib/admin/types';
@@ -42,13 +42,13 @@ export function PlayerSummary({ siteId, uid }: { siteId: string; uid: string }) 
         <Stat label="Bonus balance" value={kes(d.bonusBalanceCents)} />
         <Stat label="Deposits" value={kes(d.depositsCents)} hint={`Withdrawn ${kes(d.withdrawalsCents)}`} />
         <Stat label="Net deposits" value={kes(d.netDepositsCents)} />
-        <Stat label="Turnover" value={kes(d.turnoverCents)} hint={`${d.betCount.toLocaleString()} bets`} />
+        <Stat label="Turnover" value={kes(d.turnoverCents)} hint={`${formatNumber(d.betCount)} bets`} />
         <Stat label="House GGR" value={kes(d.ggrCents)} />
-        <Stat label="Last active" value={d.lastActiveAtMs ? `${formatRelativeTime(d.lastActiveAtMs)} ago` : 'never'} />
-        <Stat label="Joined" value={new Date(d.createdAtMs).toLocaleDateString()} hint={d.referredBy ? 'referred' : 'direct sign-up'} />
+        <Stat label="Last active" value={d.lastActiveAtMs ? `${formatAgo(d.lastActiveAtMs)}` : 'never'} />
+        <Stat label="Joined" value={formatDate(d.createdAtMs)} hint={d.referredBy ? 'referred' : 'direct sign-up'} />
       </div>
       {d.lastTxKind ? (
-        <p className="text-xs text-muted">Last transaction: {d.lastTxKind} {kes(d.lastTxAmountCents)} ({d.lastTxStatus}){d.lastTxAtMs ? `, ${formatRelativeTime(d.lastTxAtMs)} ago` : ''}.</p>
+        <p className="text-xs text-muted">Last transaction: {d.lastTxKind} {kes(d.lastTxAmountCents)} ({d.lastTxStatus}){d.lastTxAtMs ? `, ${formatAgo(d.lastTxAtMs)}` : ''}.</p>
       ) : null}
     </div>
   );
@@ -181,7 +181,7 @@ export function PlayerOverridesForm({ site, uid }: { site: SiteWithConfig; uid: 
       {errors.length ? <ul className="list-disc pl-5 text-xs text-down">{errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={save} disabled={q.isLoading || m.isPending || errors.length > 0}>{m.isPending ? 'Saving…' : 'Save overrides'}</Button>
-        {q.data?.updatedAtMs ? <span className="text-xs text-muted">Last updated {formatRelativeTime(q.data.updatedAtMs)} ago.</span> : null}
+        {q.data?.updatedAtMs ? <span className="text-xs text-muted">Last updated {formatAgo(q.data.updatedAtMs)}.</span> : null}
       </div>
     </div>
   );

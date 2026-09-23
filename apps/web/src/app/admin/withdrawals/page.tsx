@@ -10,7 +10,7 @@ import { Money } from '@/components/ui/Money';
 import { StatusBadge } from '@/components/ui/Badge';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
-import { formatExact, formatRelativeTime } from '@/lib/format';
+import { formatExact, formatAgo } from '@/lib/format';
 import { PageHeader, StatCard, Section, TableWrap, Th, Td, Empty, Toolbar, FilterSelect, ConfirmButton, PasswordConfirmButton } from '@/components/admin/ui';
 import { useRowSelection, SelectAllCheckbox, RowCheckbox, BulkBar, downloadCsv, copyText } from '@/components/admin/BulkSelect';
 import { useWithdrawals, useWithdrawalAction, useWithdrawalsEnabled, useSetWithdrawalsEnabled, useBulkWithdrawals } from '@/lib/admin/hooks';
@@ -60,7 +60,7 @@ function TimeCell({ ms }: { ms: number | null }) {
   return (
     <span className="flex flex-col leading-tight">
       <span className="whitespace-nowrap text-xs font-medium text-fg" title={formatExact(ms)}>{formatExact(ms)}</span>
-      <span className="text-[10px] text-muted">{formatRelativeTime(ms)} ago</span>
+      <span className="text-[10px] text-muted">{formatAgo(ms)}</span>
     </span>
   );
 }

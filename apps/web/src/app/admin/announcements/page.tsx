@@ -11,6 +11,7 @@ import { useSession } from '@/lib/auth/session';
 import { PageHeader, Section, FilterSelect, ConfirmButton, Empty } from '@/components/admin/ui';
 import { adminApi } from '@/lib/admin/endpoints';
 import type { BroadcastAudienceInput, NotificationTemplateRow } from '@/lib/admin/types';
+import { formatNumber } from '@/lib/format';
 
 // One-click audiences. "affected" is the key ask: only users hit by the incident (failed deposit).
 const AUDIENCES: { key: string; label: string; value: BroadcastAudienceInput }[] = [
@@ -106,12 +107,12 @@ export default function AnnouncementsPage() {
                 {countQ.isFetching ? (
                   <Skeleton className="h-4 w-10" />
                 ) : (
-                  <span className="font-semibold text-fg">{recipients.toLocaleString()}</span>
+                  <span className="font-semibold text-fg">{formatNumber(recipients)}</span>
                 )}
                 {selected?.description ? <span className="ml-auto text-xs">{selected.description}</span> : null}
               </div>
               <ConfirmButton
-                label={`Send to ${recipients.toLocaleString()} user(s)`}
+                label={`Send to ${formatNumber(recipients)} user(s)`}
                 confirmLabel="Confirm send to all selected"
                 variant="primary"
                 size="md"

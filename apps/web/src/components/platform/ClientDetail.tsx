@@ -14,6 +14,8 @@ import { BRAND_FONTS, googleFontsHref } from '@/lib/brand/fonts';
 import { ThemeGallery } from '@/components/platform/ThemeGallery';
 import { useCan } from '@/lib/auth/can';
 import { useGameConfig, useUpdateGameConfig, useWithdrawalPool, useSetWithdrawalPool, useWithdrawalsEnabled, useSetWithdrawalsEnabled } from '@/lib/admin/hooks';
+import { formatNumber } from '@/lib/format';
+import { formatKes } from '@invest254/shared/money';
 
 /** Expandable section (accordion) — remembers its own open state; the spine of Client Detail. */
 export function Expandable({
@@ -284,7 +286,7 @@ function PaletteEditor({ site }: { site: SiteWithConfig }) {
   );
 }
 
-const kes = (c: number) => `KES ${(c / 100).toLocaleString()}`;
+const kes = (c: number) => formatKes(c);
 
 /** Players in a brand — searchable table + an actions panel for the selected player. */
 function PlayersSection({ site }: { site: SiteWithConfig }) {
@@ -368,7 +370,7 @@ function PlayersSection({ site }: { site: SiteWithConfig }) {
                 <td className="px-3 py-2"><span className={pill(u.status)}>{u.status}</span></td>
                 <td className="px-3 py-2 tabular-nums">{kes(u.realBalanceCents)}</td>
                 <td className="px-3 py-2 tabular-nums">{kes(u.depositsCents)}</td>
-                <td className="px-3 py-2 tabular-nums">{u.betCount.toLocaleString()}</td>
+                <td className="px-3 py-2 tabular-nums">{formatNumber(u.betCount)}</td>
               </tr>
             ))}
             {rows.length === 0 ? <tr><td className="px-3 py-3 text-muted" colSpan={6}>{users.isLoading ? 'Loading…' : 'No players.'}</td></tr> : null}

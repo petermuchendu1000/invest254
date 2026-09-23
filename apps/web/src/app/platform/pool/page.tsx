@@ -9,6 +9,8 @@ import {
 } from '@/lib/platform/hooks';
 import { useCan } from '@/lib/auth/can';
 import { OwnerPlatformPicker, DEFAULT_PLATFORM_ID } from '@/components/platform/OwnerPlatformPicker';
+import { formatDateTime } from '@/lib/format';
+import { formatKes } from '@invest254/shared/money';
 
 /**
  * Withdrawal-pool console for PLATFORM ADMINS (Issue 1 #4). Every action is scoped server-side to the
@@ -19,7 +21,7 @@ import { OwnerPlatformPicker, DEFAULT_PLATFORM_ID } from '@/components/platform/
  * ?platform=). Before, the owner's calls had no scope, so this page distributed across every brand of
  * every platform while saying "your brands". The all-platforms distributor stays in Global config.
  */
-const money = (cents: number, cur = 'KES') => `${cur} ${(cents / 100).toLocaleString()}`;
+const money = (cents: number, _cur = 'KES') => formatKes(cents);
 const toCents = (kes: string): number => Math.round(Number(kes) * 100);
 
 export default function PlatformPoolPage() {
@@ -169,7 +171,7 @@ export default function PlatformPoolPage() {
             <tbody>
               {(distsQ.data?.distributions ?? []).map((d) => (
                 <tr key={d.id}>
-                  <Td>{new Date(d.createdAt).toLocaleString()}</Td><Td>{d.mode}</Td><Td>{d.siteCount}</Td><Td>{money(d.totalCents)}</Td>
+                  <Td className="whitespace-nowrap">{formatDateTime(d.createdAt)}</Td><Td>{d.mode}</Td><Td>{d.siteCount}</Td><Td>{money(d.totalCents)}</Td>
                 </tr>
               ))}
               {(distsQ.data?.distributions ?? []).length === 0 ? <tr><Td>No distributions yet.</Td><Td> </Td><Td> </Td><Td> </Td></tr> : null}

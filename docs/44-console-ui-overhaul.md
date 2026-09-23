@@ -49,3 +49,12 @@ helper (`lib/roles.ts`: System owner / Platform admin / Brand admin).
 Tests: `nav.test.ts` (unique routes/labels, tier separation, current-item rules); role e2e +16 checks (grouping,
 header containment, current item, all routes reachable, distinct icons, picker inside the console, phone drawer
 with current page + Log out + Escape, no sideways scroll) — 15 failed before, all pass after.
+
+## UI-B — shared formatting and primitives
+
+- One time/date/number vocabulary (`lib/format.ts`): `formatAgo`, `formatDate`, `formatDateTime`, `formatNumber`, all en-KE. Money is `formatKes` / `<Money>`, which never wraps.
+- `Th`/`Td` take `numeric` (right-aligned, tabular, no wrap). Headers never wrap, and sortable headers use the same casing as the others.
+- `StatCard` values never wrap. `StatusBadge` uses sentence case and never wraps. `Empty` takes an action. `PageHeader` caps its subtitle width and wraps its actions.
+- `SearchInput`: one 36px toolbar search with an icon.
+- Disabled buttons use a neutral style whatever their variant, and can carry a tooltip that says why.
+- Overview: "Brands" (was "Clients") and "Onboard brand". The KPI grid now wraps as 4 + 3 instead of squeezing 7 tiles until values truncate.

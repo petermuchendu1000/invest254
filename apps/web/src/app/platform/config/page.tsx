@@ -13,8 +13,10 @@ import {
 import type { GlobalConfigDto } from '@/lib/platform/endpoints';
 import Link from 'next/link';
 import { CohortEconomySection, PaymentsEconomySection } from '@/components/platform/GlobalEconomy';
+import { formatDateTime } from '@/lib/format';
+import { formatKes } from '@invest254/shared/money';
 
-const money = (cents: number, cur = 'KES') => `${cur} ${(cents / 100).toLocaleString()}`;
+const money = (cents: number, _cur = 'KES') => formatKes(cents);
 
 /** The five master switches, mapped to their DB field + a plain-language description. */
 const SYSTEMS: { key: keyof GlobalConfigDto; api: string; label: string; desc: string }[] = [
@@ -316,7 +318,7 @@ export default function GlobalConfigPage() {
               <tbody>
                 {(distQ.data?.distributions ?? []).map((d) => (
                   <tr key={d.id} className="border-t border-border">
-                    <Td>{new Date(d.createdAt).toLocaleString()}</Td>
+                    <Td className="whitespace-nowrap">{formatDateTime(d.createdAt)}</Td>
                     <Td>{d.mode}</Td>
                     <Td>{d.siteCount}</Td>
                     <Td className="text-right tabular-nums">{money(d.totalCents)}</Td>
