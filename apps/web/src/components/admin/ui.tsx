@@ -214,7 +214,7 @@ export function PasswordConfirmButton({
           value={pw}
           onChange={(e) => setPw(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setPw(''); setOpen(false); } }}
-          placeholder="Superadmin password"
+          placeholder="System owner password"
           autoComplete="off"
           className="h-8 w-44 rounded-md border border-border bg-surface px-2 text-sm outline-none focus:border-accent"
         />

@@ -3,6 +3,7 @@ import { assertUserTarget, assertSiteTarget } from "./scope.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 import { parseB2cResult } from "./app.payments.js";
+import { requireApprovalPassword } from "./approvalgate.js";
 
 /**
  * Affiliate routes:
@@ -142,6 +143,8 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
       // Per-brand write-path guard (docs/22 Task H): a site-scoped finance admin only decides its
       // own brand's payouts. Tolerant of an unknown payout — the site-aware RPC remains the guard.
       await assertSiteTarget(ctx, await deps.affiliate.siteOfPayout(ctx.params.id!), strictScope);   // F-44: fail-closed (unresolved -> 404)
+      // docs/42 UI-1: approval dispatches REAL M-Pesa B2C -> system owner password, like every other rail.
+      await requireApprovalPassword(ctx, deps.verifyApprovalPassword);
       const res = await deps.affiliate.approvePayout(ctx.params.id!, ctx.claims!.userId);
       await deps.admin.recordAction(ctx.claims!.userId, ctx.claims!.role ?? "player", "affiliate.payout.approve", "affiliate_payout", ctx.params.id!, res);
       return res;
@@ -168,6 +171,7 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     const payoutIds = [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0))];
     if (payoutIds.length === 0) throw new ApiError("VALIDATION", "payoutIds must be a non-empty array", 400);
     if (payoutIds.length > 200) throw new ApiError("VALIDATION", "at most 200 payouts per bulk action", 400);
+    if (action === "approve") await requireApprovalPassword(ctx, deps.verifyApprovalPassword); // UI-1: one password per batch
     const actorId = ctx.claims!.userId;
     const actorRole = ctx.claims!.role ?? "player";
     const results = await Promise.all(payoutIds.map(async (id) => {
