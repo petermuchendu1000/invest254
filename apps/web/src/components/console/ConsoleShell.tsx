@@ -8,6 +8,7 @@ import { useSidebarCollapsed } from '@/lib/useSidebarCollapsed';
 import { roleLabel } from '@/lib/roles';
 import { Glyph } from './icons';
 import { currentHref, type NavGroup, type NavItem } from './nav';
+import { useChatUnread } from '@/lib/chat/liveChat';
 
 /**
  * UI-A — the shared operator shell for every admin tier (brand back office + platform/System console).
@@ -293,7 +294,20 @@ function NavLink({ item, active, collapsed }: { item: NavItem; active: boolean; 
       {active ? <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-accent" /> : null}
       <span className={cn('shrink-0 transition-colors', active ? 'text-accent' : 'text-muted group-hover:text-fg')}>{item.icon}</span>
       {!collapsed ? <span className="truncate">{item.label}</span> : null}
+      {item.badge === 'chat' ? <ChatBadge collapsed={collapsed} /> : null}
     </Link>
+  );
+}
+
+/** CHAT-1: unread player chats next to "Player chats" (polls the brand-scoped count). */
+function ChatBadge({ collapsed }: { collapsed: boolean }) {
+  const q = useChatUnread();
+  const n = q.data?.count ?? 0;
+  if (!n) return null;
+  return (
+    <span aria-label={`${n} unread`} className={cn('grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg', collapsed ? 'absolute right-1 top-0.5' : 'ml-auto')}>
+      {n > 99 ? '99+' : n}
+    </span>
   );
 }
 

@@ -35,7 +35,7 @@ const PASSWORD = "sup3r-secret";
 
 interface Seed {
   userA: string; affA: string; marketerA: string; notifA: number; withdrawalA: string; advanceA: string;
-  convA: string; ticketA: string | null; betaPlatform: string; attackerPlat: string;
+  convA: string; ticketA: string | null; betaPlatform: string; attackerPlat: string; chatA: string; kycA: string;
 }
 
 async function seed(api: TestApi): Promise<Seed> {
@@ -64,7 +64,17 @@ async function seed(api: TestApi): Promise<Seed> {
   const beta = await req(api, "POST", "/api/v1/platform/platforms", OWNER, { slug: "beta", name: "Beta" });
   const betaPlatform = (await json(beta)).platformId as string;
   const attackerPlat = `pa-beta:platform_admin:${SITE_B}:${betaPlatform}`;
-  return { userA, affA, marketerA, notifA, withdrawalA, advanceA, convA, ticketA, betaPlatform, attackerPlat };
+  // CHAT-1 / ACCT-1: a brand-A live chat thread and identity submission.
+  const pA = `${userA}:player:${SITE_A}`;
+  const chat = await req(api, "POST", "/api/v1/chat/messages", pA, { body: "help me" });
+  assert.equal(chat.status, 201, "brand-A chat seeded");
+  const chatA = (await json(chat)).threadId as string;
+  const up = async () => (await json(await fetch(`${api.baseUrl}/api/v1/kyc/files`, { method: "POST", headers: { authorization: `Bearer ${pA}`, "content-type": "image/jpeg" }, body: Buffer.alloc(32, 1) }))).id as string;
+  const front = await up(); const selfie = await up();
+  const k = await req(api, "POST", "/api/v1/kyc", pA, { docType: "national_id", fullName: "Victim A", idNumber: "12345678", dateOfBirth: "1990-01-01", frontId: front, selfieId: selfie });
+  assert.equal(k.status, 201, "brand-A identity submission seeded");
+  const kycA = (await json(k)).id as string;
+  return { userA, affA, marketerA, notifA, withdrawalA, advanceA, convA, ticketA, betaPlatform, attackerPlat, chatA, kycA };
 }
 
 /** Concrete URL + a VALID body for each route pattern, targeting brand-A entities. */
@@ -83,6 +93,8 @@ function instantiate(path: string, s: Seed): { url: string; body: unknown; seede
     if (/\/platform\/sites\/:id/.test(path)) return SITE_A;
     if (/\/platform\/(platforms|subscriptions)\/:id/.test(path)) return DEFAULT_PLATFORM;
     if (/\/support\/conversations\/:id/.test(path)) return s.convA;
+    if (/\/admin\/chat\/threads\/:id/.test(path)) return s.chatA;
+    if (/\/admin\/kyc\/:id/.test(path)) return s.kycA;
     if (/\/tickets\/:id/.test(path) && s.ticketA) return s.ticketA;
     if (/\/addons\/requests\/:id/.test(path)) { seeded = false; return "1"; }
     seeded = false; return randomUUID();       // affiliate/commission payouts: not seedable in-memory
@@ -101,7 +113,7 @@ function instantiate(path: string, s: Seed): { url: string; body: unknown; seede
     messages: { message: "hi" }, escalate: { email: "a@b.co", note: "x" }, comments: { body: "x" },
     balance: { amountCents: 100, direction: "credit", reason: "x" }, assign: { platformId: s.betaPlatform },
     impersonate: {}, theme: { tokens: { primary: "#000" } }, config: { house_edge: 0.05 }, owner: { ownerUserId: null },
-    plan: { planKey: "enterprise" }, payment: { amountCents: 1 }, decide: { decision: "approve" },
+    plan: { planKey: "enterprise" }, payment: { amountCents: 1 }, decide: { decision: "approve" }, decision: { decision: "approved" }, read: {},
     marketer: { siteId: SITE_B }, global: { enabled: true }, site: { siteId: SITE_A, enabled: true }, test: {},
     revoke: {}, "make-default": {}, "clear-default": {}, activate: { payoutsEnabled: false }, deactivate: {}, remove: {},
     ":code": { enabled: false, environment: "production", shortcode: "600111", consumer_key: "k", consumer_secret: "s" },

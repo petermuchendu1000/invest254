@@ -36,6 +36,15 @@ const P: Record<string, string> = {
   arrowDownRight: 'M7 7l10 10M17 9v8H9',
   arrowUpRight: 'M7 17L17 7M9 7h8v8',
   x: 'M6 6l12 12M18 6L6 18',
+  volume: 'M11 5L6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M18.4 5.6a9 9 0 0 1 0 12.8',
+  mute: 'M11 5L6 9H3v6h3l5 4V5zM22 9l-6 6M16 9l6 6',
+  paperclip: 'M21 11l-8.6 8.6a5 5 0 0 1-7-7L14 3.9a3.3 3.3 0 0 1 4.7 4.7L10 17.3a1.7 1.7 0 0 1-2.4-2.4L15.5 7',
+  mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
+  send: 'M22 2L11 13M22 2l-7 20-4-9-9-4z',
+  headset: 'M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1zM17 20a4 4 0 0 1-4 2h-1',
+  whatsapp: 'M20.5 11.9a8.5 8.5 0 0 1-12.6 7.4L3.5 20.5l1.2-4.3A8.5 8.5 0 1 1 20.5 11.9zM9 8.5c0 3.5 3 6.5 6.5 6.5l1-1.5-2-1-1 1a4 4 0 0 1-2-2l1-1-1-2z',
+  idcard: 'M3 5h18v14H3zM7 10a2 2 0 1 0 4 0 2 2 0 0 0-4 0M5.5 16c.5-1.5 1.8-2.3 3.5-2.3s3 .8 3.5 2.3M14 9h5M14 12h5',
+  stopSquare: 'M6 6h12v12H6z',
 };
 
 export type IconName = keyof typeof P;

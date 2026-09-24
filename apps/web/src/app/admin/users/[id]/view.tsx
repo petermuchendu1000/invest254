@@ -17,6 +17,7 @@ import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td,
 import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useSetUserRole, useDeleteUser, useSetDefaultMarketer, useUpdateUserDetails, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel } from '@/lib/admin/types';
 import { formatKes } from '@invest254/shared/money';
+import { useKycList, DOC_LABEL } from '@/lib/account/accountUi';
 
 
 export default function UserDetailPage({ params }: { params: { id: string } }) {
@@ -81,6 +82,8 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
             </Card>
           </Section>
 
+          <IdentityStatus id={id} />
+
           <ActivityTimeline id={id} />
 
           {q.data.role === 'platform_superadmin' ? (
@@ -111,6 +114,32 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
         </>
       )}
     </>
+  );
+}
+
+/** ACCT-1: the player's identity check, newest first, with a link to review it. */
+const KYC_TONE: Record<string, string> = { pending: 'text-warn', approved: 'text-up', rejected: 'text-down' };
+const KYC_LABEL: Record<string, string> = { pending: 'In review', approved: 'Verified', rejected: 'Not approved' };
+function IdentityStatus({ id }: { id: string }) {
+  const q = useKycList('all', id);
+  const rows = q.data?.items ?? [];
+  return (
+    <Section title="Identity">
+      <Card className="flex flex-col gap-2 text-sm">
+        {q.isLoading ? <span className="text-muted">Loading…</span> : rows.length === 0 ? (
+          <span className="text-muted">Not submitted. The player can send an ID and a selfie from their account menu.</span>
+        ) : rows.slice(0, 3).map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              <span className={cn('font-semibold', KYC_TONE[r.status])}>{KYC_LABEL[r.status]}</span>
+              <span className="text-muted"> · {DOC_LABEL[r.docType]} · sent {formatAgo(Date.parse(r.submittedAt))}</span>
+              {r.reviewNote ? <span className="block text-xs text-muted">Note: {r.reviewNote}</span> : null}
+            </span>
+            <Link href={`/admin/identity?open=${r.id}`} className="text-xs font-semibold text-accent hover:underline">{r.status === 'pending' ? 'Review' : 'View'}</Link>
+          </div>
+        ))}
+      </Card>
+    </Section>
   );
 }
 

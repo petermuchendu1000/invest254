@@ -43,6 +43,8 @@ export interface Brand {
   fxRateFromKes?: number;
   licenceLine?: string | null;
   supportEmail?: string | null;
+  /** CHAT-1: WhatsApp support number (E.164 digits). */
+  supportWhatsapp?: string | null;
   /** Full per-brand design-token palette; maps to every --pp-* token (docs/22). */
   themeTokens?: Record<string, string> | null;
   /**

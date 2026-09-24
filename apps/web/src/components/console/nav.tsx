@@ -17,6 +17,8 @@ export interface NavItem {
   cap?: Capability;
   /** Hint shown in the command palette. */
   hint?: string;
+  /** CHAT-1: show a live count next to the label ('chat' = unread player chats). */
+  badge?: 'chat';
 }
 export interface NavGroup { id: string; label?: string; items: NavItem[] }
 
@@ -56,10 +58,11 @@ export function brandAdminNav(role: string | null | undefined): NavGroup[] {
     ] },
     { id: 'players', label: 'Players', items: [
       { href: '/admin/users', label: 'Users', icon: Icons.users, hint: 'Players, marketers and staff' },
+      { href: '/admin/identity', label: 'Identity checks', icon: Icons.identity, hint: 'Review ID documents' },
       { href: '/admin/announcements', label: 'Announcements', icon: Icons.announcements, hint: 'Notify players' },
     ] },
     { id: 'support', label: 'Support', items: [
-      { href: '/admin/support', label: 'Player chats', icon: Icons.chats, hint: 'Conversations from players' },
+      { href: '/admin/support', label: 'Player chats', icon: Icons.chats, hint: 'Conversations from players', badge: 'chat' },
       { href: '/admin/tickets', label: 'Platform tickets', icon: Icons.tickets, hint: 'Ask your platform for help' },
     ] },
     { id: 'brand', label: 'Brand', items: [

@@ -37,4 +37,5 @@ test('UI-A: exactly one current item — the most specific match', () => {
   assert.equal(currentHref(brand, '/admin/users/u1'), '/admin/users');
   assert.equal(currentHref(brand, '/admin'), '/admin');
   assert.equal(currentHref(brand, '/admin/unknown'), null);
+  assert.equal(currentHref(brand, '/admin/identity'), '/admin/identity', 'ACCT-1: identity checks has its own entry');
 });

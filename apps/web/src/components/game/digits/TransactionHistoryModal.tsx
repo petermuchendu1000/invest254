@@ -22,6 +22,7 @@ function kindText(d: DigitHistoryDto): string {
 /** Title + subtitle for one ledger line, enriched with the digit contract it belongs to (if any). */
 function describe(e: LedgerEntryDto, contract: DigitHistoryDto | undefined): { title: string; sub: string } {
   const bonus = e.balanceKind === 'bonus' ? ' · bonus' : '';
+  if (e.type === 'adjustment' && e.balanceKind === 'demo') return { title: 'Demo balance refreshed', sub: 'play money' };
   switch (e.type) {
     case 'stake':
       return { title: 'Trade Stake', sub: contract ? `${kindText(contract)} · ${instrumentById(contract.instrumentId ?? '').short}` : `trade${bonus}` };
@@ -107,7 +108,7 @@ export function TransactionHistoryModal() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[13px] font-semibold text-fg">{title}</div>
-                      <div className="truncate text-[11px] text-muted">{sub}</div>
+                      <div className="truncate text-[11px] text-muted">{sub}{e.balanceKind === 'demo' ? <span className="ml-1.5 rounded bg-warn/15 px-1 text-[9px] font-bold text-warn">DEMO</span> : null}</div>
                     </div>
                     <div className="text-right">
                       <div className={cn('font-mono text-[13px] font-bold tabular-nums', credit ? 'text-up' : 'text-warn')}>

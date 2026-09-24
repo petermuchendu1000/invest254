@@ -11,15 +11,13 @@ The owner supplied desktop and phone mocks for the digits (Deriv-style) trade sc
 | Chart | Tools (line, area, draw line, download), zoom (in, show all, out, back to live), timeframe, instrument, share badge | Same chart; tools hidden |
 | Digit row | Ten circles with share %; latest digit solid; highest share has a green arc, lowest a red arc | Same, with an amber pointer under the latest |
 | Console | Trading mode, balance, Auto/Manual, market pills, Select digit, Stake/Payout, stepper, presets, payout readout, Auto settings, stacked buy cards | Market tabs above the chart; side-by-side buy cards; Stake ⇄ Payout switch in the stepper caption |
-| Bottom nav | — | Live Chat (if enabled) or Guide, AI, Positions |
+| Bottom nav | — | Live Chat (with unread badge), AI, Positions |
 
 ## What each control is backed by
 
-- **Balance pill:** the wallet. It shows real cash plus bonus, and the breakdown opens from the chevron. Players have one real account, so there is no demo switch.
+- **Balance pill:** the wallet. It shows the active account's balance. The chevron opens the Real/Demo switcher (docs/50).
 - **History:** the wallet ledger (`GET /wallet/ledger`). Each trade line is labelled from the matching saved digit contract.
-- **Account menu:** Profile, Change password (`POST /auth/password/change`), Referrals, support email or live chat, and Sign out.
-  - Two-factor and identity verification are not offered to players, so they are not listed.
-  - A WhatsApp contact would need a brand setting that does not exist yet.
+- **Account menu:** Profile, Change password (`POST /auth/password/change`), Two-Factor Auth, Verify Identity, Referrals, Live Chat, WhatsApp Care (when the brand sets a number), support email, and Sign out. See docs/50.
 - **Notifications:** the player's brand notices (`GET /notifications`), which can be dismissed.
 - **Session (Open / Closed, P/L, W/L):** the screen's own record of `digit_settled` events this session, shared with the shell through `useDigitSession`.
 
