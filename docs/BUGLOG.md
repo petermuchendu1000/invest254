@@ -5,6 +5,25 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #74 — Digits screen: digit row overlapped AUTO/MANUAL on phones; Live Chat button did nothing; no positions, session or history view (DIGITS-UI) — FIXED (branch `ui/digits-mock`, web only; engine untouched)
+- **Found while rebuilding the digits screen to the owner's mocks (desktop and phone):**
+  - **Overlap:** on phones the digit-statistics row sat on top of the AUTO/MANUAL toggle. The centre column was `min-h-0` inside a fixed-height flex column, so it shrank below its content (visible on the pre-change screenshot at 390×844).
+  - **Dead button:** the bottom nav's "Live Chat" opened the support store even when the support widget is switched off, which is the default, so tapping it did nothing.
+  - **Missing views:** there was no Open / Closed view of positions, no session P/L, and no single transaction history. Players had to leave the trade screen for the history page.
+- **Fix (web only):**
+  - **Layout:** on phones the columns no longer shrink below their content.
+  - **Bottom nav:** Live Chat shows only when support chat is on. Otherwise "Guide" opens How to Trade.
+  - **Screen layout (to the mocks):** desktop has a positions rail (Open / Closed / History plus session totals), the chart and digit row in the centre, and the trading console on the right. Phones have market tabs on top and a bottom nav with a Positions sheet.
+  - **Top bar:** Trader's Hub, Deposit, Withdraw, History (the ledger-backed transaction list), AI, How to Trade, the balance pill, notifications and the account menu. The menu includes Change password, using the existing API.
+  - **Chart:** tools for line/area, drawing a horizontal line, PNG export, zoom, show-all and back-to-live, plus an outlined live price tag and a start dot.
+  - **Result card:** P/L, stake, payout, result digit, duration and the contract.
+  - **Auto:** STOP takes the first slot while Auto runs, and the header shows "Auto · <side>".
+  - **Unchanged:** payout figures still come from the engine's 0.95 factor. Nothing in the engine or API changed.
+- **Verification:**
+  - New `apps/web/e2e/digits.e2e.mjs` passes 34/34 against the real local stack (API, engine and web), covering a real trade from open to settle.
+  - The role e2e still passes 198/198.
+  - Screenshots checked at 320, 390, 768, 1440 and 1920 px.
+
 ## #73 — Mega Pay "rejected the API key" for the live key; test mislabelled bad keys as valid; saving config would break deposits — FIXED (branch `fix/megapay-live-endpoint`, no migration)
 - **Reported:** Test connection said "✕ Mega Pay rejected the API key" for the key that is collecting live payments.
 - **Evidence:** read-only status queries against Mega Pay with a sentinel id, which never move money.
