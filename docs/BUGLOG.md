@@ -5,6 +5,60 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #79 — Opening the sign-in window crashed the whole app (found in e2e before merge) — FIXED (branch `feat/demo-sound-chat-account`)
+- **Found by:** the new `apps/web/e2e/account.e2e.mjs`. After signing out, tapping "Log in" replaced the page with "The app failed to load". The browser console showed React error #310 ("rendered more hooks than during the previous render").
+- **Root cause:** the new two-factor step in `AuthModal` declared its three `useState` hooks after the component's `if (!open) return null`. The first render with the window open ran more hooks than the closed render before it. Every brand's sign-in would have broken. Nothing reached production.
+- **Fix:** the hooks now sit above the early return, and the code step resets when the window closes or the mode changes.
+- **Guard:** a one-off `react-hooks/rules-of-hooks` scan of all of `apps/web/src` is now clean. The repo has no ESLint set up; adding that rule to CI is recommended.
+- **Also fixed during the same e2e pass:**
+  - The account switcher stayed open after a switch. It now closes, as in Deriv's switcher.
+  - On phones the demo banner pushed the buy buttons under the bottom nav. It is now one line on phones.
+  - The chat header said "A live agent is here to help" even when nobody is online. It now says "Our support team replies here".
+
+## #78 — No identity verification for players (ACCT-1) — FIXED (migration 0168)
+- **What:** the mock's "Verify Identity" item had nothing behind it. Brands had no way to collect or review an ID.
+- **Fix:**
+  - Players choose a document type (National ID, passport or driving licence) and enter the name, number and date of birth (18+ only). They upload the front, the back when needed, and a selfie; the phone camera opens directly.
+  - The brand reviews on the new **Identity checks** page and approves, or rejects with a note the player sees. The player's page in the back office shows the latest status.
+  - The database refuses: a second pending submission, re-submitting once verified, another player's file, re-used files, a PDF selfie, over 6 MB, more than 12 unused uploads a day, and reviews outside the reviewer's brands or platform.
+  - Every decision is audited (`kyc.review`). Unused uploads are removed after two days.
+  - Files are served only through signed links that expire after one hour.
+- **Scope note:** verification does **not** block deposits or withdrawals. It is shown to the player and to staff only.
+- **Verification:**
+  - `e2e_identity_verification.py`: 34/34 (BEFORE 0167 / AFTER 0168).
+  - `app.kyc.test.ts` passes, and the scope matrix now covers `/admin/kyc/:id`.
+  - The real-stack e2e covers submit, then review with the three images, then approve, then "verified" in the player's menu.
+
+## #77 — Players could not use two-factor sign-in (ACCT-1) — FIXED (web; API unchanged)
+- **What:** the API already supported TOTP for every role, but the player sign-in window could not send a code. The account menu also had no way to turn it on. A player who enabled 2FA through the API would have been locked out.
+- **Fix:**
+  - A new **Two-Factor Auth** dialog shows a QR code, the key and 8 one-time recovery codes. Two-factor turns on only after the player ticks "I saved my recovery codes" and enters a valid code. The same dialog turns it off.
+  - When needed, sign-in asks for the 6-digit code or a recovery code.
+- **Verification:** the real-stack e2e sets up 2FA with a real TOTP and signs out. It then checks that a wrong code is refused and that the right code signs the player in.
+
+## #76 — "Live Chat" had no human behind it; no WhatsApp contact (CHAT-1) — FIXED (migration 0167)
+- **What:** Live Chat opened the AI assistant widget, or nothing when that widget was off. Players could not reach a person, and brands could not list a WhatsApp number.
+- **Fix:**
+  - **Player side:** a Customer Care chat on every brand, from the top bar, the phone bottom nav and the account menu. It supports text, photos (compressed on the phone), short videos and voice notes, and shows an unread badge. Agents appear as "Support".
+  - **Back office:** **Player chats → Live chat** lists open, resolved or all threads with search. Agents reply with the same attachments and can resolve or reopen. The nav shows an unread count.
+  - **WhatsApp:** each brand can set a WhatsApp number in the console (Brand → Identity). It is shown as "WhatsApp Care" in the account menu and in the chat greeting.
+  - **Database rules:** one open thread per player, and messages always carry the thread's brand. Limits are 5 MB for photos, 15 MB for videos and 3 MB for voice notes. The API refuses cross-brand access.
+  - **Retention:** attachments are removed after 90 days (`CHAT_MEDIA_RETENTION_DAYS`), by a job that runs every 6 hours.
+- **Verification:**
+  - `e2e_live_chat.py`: 30/30.
+  - `app.livechat.test.ts` passes, and the scope matrix covers `/admin/chat/threads/:id`.
+  - The real-stack e2e covers player text and photo, then the agent reply, then the unread badge, then resolve.
+
+## #75 — Demo mode existed in the database but the engine traded it as real money (DEMO-1) — FIXED (engine change authorised by the owner; no migration)
+- **What:** migration 0123 added `wallets.account_mode` and a separate demo balance. The engine, however, only put **marketers** on the demo path. A player switched to demo would still have traded real money against the pool. There was also no switch in the UI.
+- **Fix:**
+  - **Engine** (authorised, "with a demo label"): an account in demo mode is now handled exactly like a marketer demo account. It uses a separate balance, never touches the pool, and positions are flagged `demo`. The mode is read fresh on every trade; marketer status is cached for 60 seconds; if the check fails, the trade takes the real path.
+  - **API:** `POST /wallet/mode` switches accounts, and is refused while a contract is open. `POST /wallet/demo/topup` refills the demo balance to KES 10,000.
+  - **Web:** the balance pill now has a Real/Demo switcher (as in the mock) and a Refresh demo balance button. In demo mode a "Demo account" banner says results can differ from real-money play, and demo trades are tagged DEMO in positions and history.
+- **Verification:**
+  - `app.demo1.test.ts` and `demo1.pg.test.ts` pass.
+  - The real-stack e2e confirms a demo trade moves only the demo balance, while the real balance stays the same.
+
 ## #74 — Digits screen: digit row overlapped AUTO/MANUAL on phones; Live Chat button did nothing; no positions, session or history view (DIGITS-UI) — FIXED (branch `ui/digits-mock`, web only; engine untouched)
 - **Found while rebuilding the digits screen to the owner's mocks (desktop and phone):**
   - **Overlap:** on phones the digit-statistics row sat on top of the AUTO/MANUAL toggle. The centre column was `min-h-0` inside a fixed-height flex column, so it shrank below its content (visible on the pre-change screenshot at 390×844).

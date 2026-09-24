@@ -12,6 +12,8 @@ export interface OpenContract { label: string; stakeCents: number; openedAtMs: n
 export interface ClosedContract {
   id: string; label: string; stakeCents: number; payoutCents: number; pnlCents: number;
   won: boolean; digit: number; openedAtMs: number; settledAtMs: number;
+  /** DEMO-1: played on the demo account. */
+  demo?: boolean;
 }
 
 interface DigitSessionState {

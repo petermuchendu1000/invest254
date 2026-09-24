@@ -1,3 +1,5 @@
+import { InMemoryLiveChatStore } from "./app.livechat.js";
+import { InMemoryKycStore } from "./app.kyc.js";
 import type { AddressInfo } from "node:net";
 import { DEFAULT_CONFIG, normalizeHost, type Cents } from "@invest254/shared";
 import {
@@ -732,6 +734,9 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     positionDetail: (userId, id, siteId) => gameRepo.getPositionDetail(userId, id, siteId),
     transactions: (userId, q, siteId) => payRepo.listTransactions(userId, q, siteId),
     support: support.deps,
+    // CHAT-1 / ACCT-1: in-memory live chat + identity verification (so the F-44 matrix attacks their routes).
+    liveChat: { store: new InMemoryLiveChatStore(), mediaSecret: "test-media" },
+    kyc: { store: new InMemoryKycStore(), mediaSecret: "test-media" },
     platformOnboard: onboardDeps,
     registrarConfig,
     addons,

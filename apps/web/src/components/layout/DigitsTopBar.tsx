@@ -12,11 +12,12 @@ import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { useDigitSession } from '@/lib/game/digitSession';
 import { useEntryScanner } from '@/lib/game/entryScannerUi';
-import { useSupportChat } from '@/lib/support/useSupportChat';
+import { useLiveChat } from '@/lib/chat/liveChat';
+import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { useMyNotifications, useDismissNotification } from '@/lib/notifications/hooks';
-import { env } from '@/lib/env';
 import { DIcon, type IconName } from '@/components/game/digits/icons';
 import { AccountMenu, AccountPill } from '@/components/layout/DigitsAccount';
+import { SoundToggle } from '@/components/layout/SoundToggle';
 
 /** Brand wordmark in two tones (first word light, the rest in the accent), e.g. "Tamu" + "Traders". */
 function Wordmark({ text, className }: { text: string; className?: string }) {
@@ -109,7 +110,8 @@ export function DigitsTopBar() {
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
   const openAuth = useAuthUi((s) => s.openAuth);
   const openScanner = useEntryScanner((s) => s.setOpen);
-  const setSupportOpen = useSupportChat((s) => s.setOpen);
+  const setSupportOpen = useLiveChat((s) => s.setOpen);
+  const chatUnread = useLiveChatUnread();
   const setHistoryOpen = useDigitSession((s) => s.setHistoryOpen);
   const setHowToOpen = useDigitSession((s) => s.setHowToOpen);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -129,6 +131,7 @@ export function DigitsTopBar() {
     { icon: 'deposit', label: 'Deposit', onClick: needAuth(() => openDeposit()) },
     { icon: 'withdraw', label: 'Withdraw', onClick: needAuth(openWithdraw) },
     { icon: 'history', label: 'History', onClick: needAuth(() => setHistoryOpen(true)) },
+    { icon: 'chat', label: 'Live Chat', onClick: () => setSupportOpen(true) },
     { icon: 'book', label: 'How to Trade', onClick: () => setHowToOpen(true) },
     { icon: 'user', label: 'Account', href: '/account' },
     { icon: 'shield', label: 'Legal', href: '/legal' },
@@ -148,7 +151,7 @@ export function DigitsTopBar() {
           <NavButton icon="withdraw" label="Withdraw" onClick={needAuth(openWithdraw)} />
           <NavButton icon="history" label="History" onClick={needAuth(() => setHistoryOpen(true))} />
           <NavButton icon="sparkles" label="AI" variant="accent" onClick={() => openScanner(true)} />
-          {env.supportChatEnabled ? <NavButton icon="chat" label="Live Chat" variant="pill" onClick={() => setSupportOpen(true)} /> : null}
+          <span className="relative"><NavButton icon="chat" label="Live Chat" variant="pill" onClick={() => setSupportOpen(true)} />{chatUnread ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-down px-1 text-[9px] font-bold text-white">{chatUnread}</span> : null}</span>
           <NavButton icon="book" label="How to Trade" variant="pill" onClick={() => setHowToOpen(true)} />
 
           <div className="ml-auto flex items-center gap-3">
@@ -156,6 +159,7 @@ export function DigitsTopBar() {
               <>
                 <AccountPill />
                 <button type="button" onClick={() => openDeposit()} className="h-10 rounded-lg bg-accent px-5 text-[14px] font-semibold text-accent-fg shadow-[0_0_18px_-6px_var(--pp-accent)] transition hover:brightness-105">Deposit</button>
+                <SoundToggle />
                 <Bell />
                 <AccountMenu />
               </>
@@ -178,6 +182,7 @@ export function DigitsTopBar() {
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {authed ? (
               <>
+                <SoundToggle className="h-9 w-9" />
                 <button type="button" onClick={() => openDeposit()} className="h-9 rounded-lg bg-accent px-3 text-[13px] font-semibold text-accent-fg">Deposit</button>
                 <Bell />
               </>

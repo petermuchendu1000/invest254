@@ -67,7 +67,7 @@ function IdentitySection({ site }: { site: SiteWithConfig }) {
   const toast = useToast();
   const init = useMemo(() => ({
     name: site.name ?? '', status: site.status ?? 'active', primary_domain: site.primaryDomain ?? '',
-    wordmark_text: site.wordmarkText ?? '', support_email: site.supportEmail ?? '',
+    wordmark_text: site.wordmarkText ?? '', support_email: site.supportEmail ?? '', support_whatsapp: site.supportWhatsapp ?? '',
     currency: site.currency ?? 'KES', locale: site.locale ?? 'en-KE',
     licence_line: site.licenceLine ?? '',
   }), [site]);
@@ -97,6 +97,7 @@ function IdentitySection({ site }: { site: SiteWithConfig }) {
         <Input label="Primary domain" name={`dom-${site.siteId}`} value={form.primary_domain} onChange={set('primary_domain')} hint="apex domain, no protocol" />
         <Input label="Wordmark" name={`wm-${site.siteId}`} value={form.wordmark_text} onChange={set('wordmark_text')} hint="shown in the header; defaults to name" />
         <Input label="Support email" name={`se-${site.siteId}`} type="email" value={form.support_email} onChange={set('support_email')} />
+        <Input label="WhatsApp support number" name={`wa-${site.siteId}`} inputMode="tel" value={form.support_whatsapp} onChange={set('support_whatsapp')} hint="international format, e.g. +254712345678; shown in live chat and the account menu" />
         <div className="grid grid-cols-2 gap-3">
           <Input label="Currency" name={`cur-${site.siteId}`} value={form.currency} onChange={set('currency')} hint="display currency, e.g. KES or USD" />
           <Input label="Locale" name={`loc-${site.siteId}`} value={form.locale} onChange={set('locale')} />

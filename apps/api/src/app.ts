@@ -26,6 +26,8 @@ import type { TelegramClient, PayoutAlert, PayoutDecisionRecord } from "./telegr
 import { registerMarketerRoutes, type MarketerRepo } from "./app.marketers.js";
 import { registerReferralRoutes, type ReferralRepo } from "./app.referral.js";
 import { registerSupportRoutes, type SupportDeps } from "./app.support.js";
+import { registerLiveChatRoutes, type LiveChatDeps } from "./app.livechat.js";
+import { registerKycRoutes, type KycDeps } from "./app.kyc.js";
 import { registerSubscriptionRoutes } from "./app.subscriptions.js";
 import { registerAddonRoutes, type AddonDeps } from "./app.addons.js";
 import { registerTicketRoutes } from "./app.tickets.js";
@@ -43,7 +45,21 @@ import type { Server } from "node:http";
  * this interface — E1 ships the public surface (health, game config, fairness).
  */
 export interface BonusStatus { bonusId: string; amount: Cents; wageringX: number; wagered: Cents; required: Cents; remaining: Cents; status: string; createdAt: string; }
-export interface WalletBalance { real: Cents; bonus: Cents; currency: string; bonuses?: BonusStatus[]; }
+export interface WalletBalance {
+  /** Spendable game balance in the ACTIVE account (demo balance while in demo mode). */
+  real: Cents;
+  /** Spendable bonus (0 in demo mode — demo stakes never touch it). */
+  bonus: Cents;
+  currency: string;
+  bonuses?: BonusStatus[];
+  /** DEMO-1: the active account and every bucket, for the Real/Demo switch. */
+  mode?: "real" | "demo";
+  /** Marketers are always demo (the switch is locked). */
+  modeLocked?: boolean;
+  realBalance?: Cents;
+  bonusBalance?: Cents;
+  demoBalance?: Cents;
+}
 
 /**
  * Public brand identity for one site (docs/22 Task E). Served by `GET /site/brand?host=` and
@@ -65,6 +81,8 @@ export interface Brand {
   locale: string;
   licenceLine?: string | null;
   supportEmail?: string | null;
+  /** CHAT-1: WhatsApp support number (E.164 digits), shown in live chat and the account menu. */
+  supportWhatsapp?: string | null;
   /** Full per-brand design-token palette (docs/22): overrides the fixed --pp-* tokens end-to-end. */
   themeTokens?: Record<string, string> | null;
   /** Per-brand price chart system (0111/0147, ADDON-1): line (free default), area, candlestick, bars, baseline. Presentation only. */
@@ -250,6 +268,14 @@ export interface ApiDeps {
   scopeNames?: ((siteId: string | null, platformId: string | null) => Promise<{ siteName: string | null; platformName: string | null }>) | undefined;
   /** Wallet balances (real + bonus) for the authenticated player, scoped to their brand. */
   walletBalance(userId: string, siteId?: string): Promise<WalletBalance>;
+  /** DEMO-1: switch the caller's active account (migration 0123). Refused while a contract is open. */
+  setAccountMode?: ((userId: string, siteId: string | undefined, mode: "real" | "demo") => Promise<"real" | "demo">) | undefined;
+  /** DEMO-1: refill the demo balance to its starting amount (no-op when already at/above it). */
+  topupDemo?: ((userId: string, siteId: string | undefined) => Promise<Cents>) | undefined;
+  /** CHAT-1: human live chat (migration 0167). Absent = chat routes not registered. */
+  liveChat?: LiveChatDeps | undefined;
+  /** ACCT-1: player identity verification (migration 0168). */
+  kyc?: KycDeps | undefined;
 
   // ── F2: player history reads (each scoped to the caller's own userId AND site) ──
   ledger(userId: string, q: PageQuery, siteId?: string): Promise<Page<LedgerEntry>>;
@@ -400,6 +426,8 @@ export function createRouter(deps: ApiDeps): Router {
   registerProtectedRoutes(router, deps);
   registerHistoryRoutes(router, deps);
   registerSupportRoutes(router, deps);
+  registerLiveChatRoutes(router, deps);
+  registerKycRoutes(router, deps);
   registerSubscriptionRoutes(router, deps);
   registerAddonRoutes(router, deps);
   registerPaymentScopeRoutes(router, deps);

@@ -14,6 +14,7 @@ import { DIcon } from '@/components/game/digits/icons';
 import type { DerivChartHandle } from '@/components/game/digits/DerivChart';
 import { useDigitSession } from '@/lib/game/digitSession';
 import { useAmountText } from '@/lib/game/useAmountText';
+import { play } from '@/lib/sound/sound';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
@@ -89,7 +90,7 @@ function contractLabel(o: Outcome, barrier: number, pick: number): string {
   }
 }
 
-type Pending = { stakeCents: number; outcome: Outcome; manual: boolean; label: string; openedAtMs: number };
+type Pending = { stakeCents: number; outcome: Outcome; manual: boolean; label: string; openedAtMs: number; demo: boolean };
 
 /** Deriv-style binary/digits trade surface — trades REAL contracts against the authoritative engine. */
 export function DigitsTradeScreen() {
@@ -239,12 +240,13 @@ export function DigitsTradeScreen() {
       lossStreakRef.current = won ? 0 : lossStreakRef.current + 1;
       setPnl((x) => x + delta);
       setFlash({ won, delta });
+      play(won ? 'win' : 'loss');
       const nowMs = Date.now();
       publishOpen(null);
       if (settled) {
         publishClosed({
           id: s.positionId ?? `${nowMs}`, label: settled.label, stakeCents: settled.stakeCents, payoutCents: s.payoutCents,
-          pnlCents: delta, won, digit: s.digit, openedAtMs: settled.openedAtMs, settledAtMs: nowMs,
+          pnlCents: delta, won, digit: s.digit, openedAtMs: settled.openedAtMs, settledAtMs: nowMs, demo: settled.demo,
         });
       }
       setSettleMarker({ digit: s.digit, won, tSec: Math.floor((getLastInstrumentTick()?.t ?? Date.now()) / 1000) });
@@ -294,7 +296,10 @@ export function DigitsTradeScreen() {
         return false;
       }
       if (cents > spendable) {
-        if (manual) setNeedFunds({ requiredCents: cents, currentCents: spendable });
+        if (manual) {
+          if (wallet?.mode === 'demo') toast.push({ tone: 'info', title: 'Not enough play money', description: 'Open the account menu and tap “Refresh demo balance”.' });
+          else setNeedFunds({ requiredCents: cents, currentCents: spendable });
+        }
         return false;
       }
       if (winProbability(outcome, barrier) <= 0) {
@@ -304,15 +309,16 @@ export function DigitsTradeScreen() {
       const target = outcome === 'over' || outcome === 'under' ? barrier : outcome === 'matches' || outcome === 'differs' ? pick : 0;
       const label = contractLabel(outcome, barrier, pick);
       const openedAtMs = Date.now();
-      pendingRef.current = { stakeCents: cents, outcome, manual, label, openedAtMs };
+      pendingRef.current = { stakeCents: cents, outcome, manual, label, openedAtMs, demo: wallet?.mode === 'demo' };
       setPendingView({ label, stakeCents: cents });
       publishOpen({ label, stakeCents: cents, openedAtMs });
+      if (manual) play('place');
       setEntryMarker({ tSec: Math.floor((getLastInstrumentTick()?.t ?? Date.now()) / 1000) });
       setSettleMarker(null);
       openDigit({ instrumentId: instId, kind: outcome, target, stakeCents: cents });
       return true;
     },
-    [token, spendable, openDeposit, openAuth, toast, barrier, pick, instId, instrument, openDigit, minStakeCents, maxStakeCents, getLastInstrumentTick, fmt, both, totalReturnCents, publishOpen],
+    [token, spendable, openDeposit, openAuth, toast, barrier, pick, instId, instrument, openDigit, minStakeCents, maxStakeCents, getLastInstrumentTick, fmt, both, totalReturnCents, publishOpen, wallet?.mode],
   );
 
   // Entry (IN) + settle (result digit) markers for the CURRENT/last contract, drawn on the chart at
@@ -565,6 +571,15 @@ export function DigitsTradeScreen() {
           <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Trading mode</span>
           <span className="text-[10px] tabular-nums text-muted">Bal {amt.prefix}{amt.num(bal)}</span>
         </div>
+
+        {wallet?.mode === 'demo' ? (
+          <div role="note" className="flex items-center gap-2 rounded-xl border border-warn/40 bg-warn/10 px-3 py-1.5 text-[11px] leading-snug text-warn lg:items-start lg:py-2 lg:text-[12px]">
+            <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-warn text-[9px] font-bold text-black lg:mt-0.5">D</span>
+            {/* phone: one line, so the buy buttons stay above the fold */}
+            <span className="min-w-0 truncate lg:hidden"><b>Demo</b> · play money · results can differ from real play</span>
+            <span className="hidden lg:inline"><b>Demo account</b> — play money that can’t be withdrawn. Results can differ from real-money play.</span>
+          </div>
+        ) : null}
 
         {/* AUTO / MANUAL */}
         <div className="flex rounded-xl border border-border bg-bg/60 p-1">

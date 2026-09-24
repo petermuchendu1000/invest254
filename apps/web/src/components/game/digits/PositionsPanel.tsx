@@ -123,7 +123,7 @@ function ClosedRow({ c }: { c: ClosedContract }) {
       <div className="flex items-start gap-2.5">
         <span className={cn('mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-[11px] font-bold', c.won ? 'border-up/60 text-up' : 'border-down/60 text-down')}>{c.digit}</span>
         <div>
-          <div className="font-mono text-[13px] font-bold uppercase text-fg">{c.label}</div>
+          <div className="flex items-center gap-1.5 font-mono text-[13px] font-bold uppercase text-fg">{c.label}{c.demo ? <DemoTag /> : null}</div>
           <div className="font-mono text-[11px] text-muted">{clock(c.settledAtMs)}</div>
         </div>
       </div>
@@ -155,7 +155,7 @@ function HistoryList() {
                 <span className={cn('mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-[11px] font-bold',
                   !settled ? 'border-border text-muted' : won ? 'border-up/60 text-up' : 'border-down/60 text-down')}>{r.settleDigit ?? '·'}</span>
                 <div>
-                  <div className="font-mono text-[13px] font-bold uppercase text-fg">{kindLabel(r.kind, r.target)}</div>
+                  <div className="flex items-center gap-1.5 font-mono text-[13px] font-bold uppercase text-fg">{kindLabel(r.kind, r.target)}{r.demo ? <DemoTag /> : null}</div>
                   <div className="font-mono text-[11px] text-muted">{dayClock(r.settledAt ?? r.openedAt)}</div>
                 </div>
               </div>
@@ -179,6 +179,10 @@ function HistoryList() {
       ) : null}
     </>
   );
+}
+
+function DemoTag() {
+  return <span className="rounded bg-warn/15 px-1 py-px font-sans text-[9px] font-bold text-warn">DEMO</span>;
 }
 
 function Empty({ title, body }: { title: string; body: string }) {
