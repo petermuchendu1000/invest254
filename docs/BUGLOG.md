@@ -5,6 +5,27 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #73 — Mega Pay "rejected the API key" for the live key; test mislabelled bad keys as valid; saving config would break deposits — FIXED (branch `fix/megapay-live-endpoint`, no migration)
+- **Reported:** Test connection said "✕ Mega Pay rejected the API key" for the key that is collecting live payments.
+- **Evidence:** read-only status queries against Mega Pay with a sentinel id, which never move money.
+  - `/backend/v2` (our default host) answers every real key with "Invalid Api Key. Use Test Api Key: MGPY1EvRts3I". With the test key it answers "Invalid email. Use Test Email: megapaysandboxtest@gmail.com". It is a sandbox.
+  - `/backend/v1` is the only host in Mega Pay's documentation. With the owner's key and account email it answers "Transaction request does not exist!", meaning the key and email were accepted. A wrong key gets "Api Key does not exist!" and a wrong email gets "Email does not exist!".
+  - The email the owner typed (`cosiam22@…`) does not exist on Mega Pay. The account email is `cosialm22@…`.
+  - Live deposits keep working (386 succeeded in 3 days) because they use the deployment's `MEGAPAY_API_BASE`, not the code default.
+- **Root cause:**
+  - The code, the gateway form and the probe all defaulted to `/backend/v2` for both environments. The form's Environment also defaulted to Sandbox.
+  - The probe only looked for "invalid … key". On production it reported a wrong key or wrong email as valid.
+- **Latent risk (worse than the report):** console-saved Mega Pay config layers over env. Saving the live key with the form's default host would have moved live deposits onto the sandbox, and every deposit would have failed. The same applied to per-platform and per-brand Payment accounts, which resolve without env.
+- **Fix:**
+  - The host now follows the environment: production uses `/backend/v1`, sandbox uses `/backend/v2`.
+  - A production config carrying the old v2 default is corrected to v1. A genuinely different host is kept.
+  - The deployment's `MEGAPAY_API_BASE` is still used verbatim, so live deposits are unchanged.
+  - The probe reads Mega Pay's actual messages: wrong key, wrong email, "live key in Sandbox — set Environment to Production", or valid. It never echoes the key.
+  - The form's host field is blank by default ("Automatic (follows Environment)").
+- **Verification:**
+  - `megapay.endpoint.test.ts` has 8 tests built on the recorded live responses.
+  - The existing gateway and Mega Pay tests pass, and `npm test` passes 1177/1177.
+
 ## #72 — The same job lived on two or three pages; some links led to a 404; "Needs setup" miscounted brands (UI-F) — FIXED (branch `ui/f-focused-pages`, no migration)
 - **What:** an audit of the console and back office found the same function on several pages, often with different rules.
   - Pool mode and today's budget could be set from the brand page and the Withdrawal pool page.
