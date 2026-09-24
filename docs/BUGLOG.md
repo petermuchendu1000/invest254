@@ -35,6 +35,7 @@ entry: what, evidence, root cause, impact, and resolution.
   - `npm test`: 1169/1169.
   - `platformaudit.pg.test.ts` has a new platform-level scope case and passes.
   - Screenshots taken on the real local stack.
+- **Follow-up (caught during deploy verification):** the first merge did not deploy the API. The new pg test called `listPlatformAudit({ limit })` without `platformId: null`. `tsc -b` type-checks test files, so the deploy's verify step failed, while the per-app `--noEmit` check had passed. Fixed in the test. The pre-merge check is now the same `npx tsc -b packages/shared apps/engine apps/api` that CI runs.
 
 ## #71 — Add-ons: paid charts never reached players; catalog, requests and billing gaps (ADDON-1) — FIXED (branch `feat/addon1-marketplace`, migration 0166)
 - **What (owner request, 2026-09-23: "a complete overhaul of the /addons page … a total joke"):**

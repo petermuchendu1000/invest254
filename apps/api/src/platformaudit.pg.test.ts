@@ -43,7 +43,7 @@ test("UI-10 (real schema): platform audit = its brands only, attributed to brand
     assert.ok(p1All.includes("uif.p1") && !p1All.includes("uif.p2"), "a platform sees its own platform-level actions, never another's");
     const p1Brand = (await repo.listPlatformAudit({ platformId: p1, siteId: s2, limit: 50 })).items.map((r) => r.action);
     assert.ok(!p1Brand.includes("uif.p1"), "a brand filter excludes platform-level rows");
-    const owner = (await repo.listPlatformAudit({ limit: 50 })).items.map((r) => r.action);
+    const owner = (await repo.listPlatformAudit({ platformId: null, limit: 50 })).items.map((r) => r.action);
     assert.ok(owner.includes("uif.p1") && owner.includes("uif.p2") && owner.includes("ui10.c1"), "the owner sees everything");
   } finally {
     await c.query("rollback").catch(() => {});
