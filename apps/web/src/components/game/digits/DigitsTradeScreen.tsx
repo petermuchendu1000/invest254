@@ -213,6 +213,9 @@ export function DigitsTradeScreen() {
   // Contracts THIS screen opened, by position id (BUGLOG #91): the engine sends every settlement to all
   // of the player's sockets, so another tab's or device's result must not land here.
   const ownRef = useRef<Map<string, Pending>>(new Map());
+  // The last contract given up on (refusal / backstop). If its ack still arrives, it DID open: keep
+  // following it so its result is counted (BUGLOG #117).
+  const lastDroppedRef = useRef<Pending | null>(null);
   const pendingTimerRef = useRef<number | null>(null);
   const flashTimerRef = useRef<number | null>(null);
   const runningRef = useRef(false);
@@ -319,7 +322,9 @@ export function DigitsTradeScreen() {
       if (cents > spendable) {
         if (manual) {
           // Demo: refill in place (no menu hunt). Real: the top-up sheet with the shortfall.
-          if (wallet?.mode === 'demo') topupDemo.mutate(undefined, { onSuccess: (r) => toast.push({ tone: 'success', title: 'Demo refilled', description: amt.text(r.demoBalance) }) });
+          if (wallet?.mode === 'demo') topupDemo.mutate(undefined, { onSuccess: (r) => (r.demoBalance >= cents
+            ? toast.push({ tone: 'success', title: 'Demo refilled', description: amt.text(r.demoBalance) })
+            : toast.push({ tone: 'error', title: `Demo max ${amt.text(r.demoBalance)}` })) });   // a refill cannot cover a stake above it
           else setNeedFunds({ requiredCents: cents, currentCents: spendable });
         }
         return false;
@@ -343,6 +348,7 @@ export function DigitsTradeScreen() {
       if (pendingTimerRef.current) window.clearTimeout(pendingTimerRef.current);
       pendingTimerRef.current = window.setTimeout(() => {
         if (pendingRef.current?.openedAtMs !== openedAtMs) return;
+        if (!pendingRef.current.positionId) lastDroppedRef.current = pendingRef.current;
         clearPending();
         invalidateHistory();
       }, 20_000);
@@ -355,11 +361,15 @@ export function DigitsTradeScreen() {
   // provider already told the player why; AUTO stops rather than retrying the same refusal.
   const stopAutoRef = useRef<(reason: AutoStop | 'user' | 'rejected') => void>(() => {});
   useEffect(() => onDigitOpened((e) => {
-    const p = pendingRef.current;
-    if (p && !p.positionId) { p.positionId = e.positionId; ownRef.current.set(e.positionId, p); }
+    const cur = pendingRef.current;
+    const p = cur && !cur.positionId ? cur : lastDroppedRef.current;
+    if (!p) return;
+    if (p === lastDroppedRef.current) lastDroppedRef.current = null;
+    p.positionId = e.positionId; ownRef.current.set(e.positionId, p);
   }), [onDigitOpened]);
   useEffect(() => onDigitRejected((e) => {
     if (!pendingRef.current) return;
+    if (!pendingRef.current.positionId) lastDroppedRef.current = pendingRef.current;
     clearPending();
     if (e.code === 'NOT_CONNECTED') toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting…' });
     if (runningRef.current) stopAutoRef.current('rejected');

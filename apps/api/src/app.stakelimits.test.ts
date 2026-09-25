@@ -18,6 +18,7 @@ test("PUT /platform/sites/:id/stake-limits validates, writes enforced cents, and
       get: async (id) => store.get(id) ?? null,
       set: async (id, _u, min, max) => { store.set(id, { min, max }); },
       currency: async () => currency,
+      clear: async (id) => { store.delete(id); },
     },
     fxRate: async (c) => (c === "USD" ? 0.0077226 : 0),
     // the live config reflects what was written (as site_game_config does in production)

@@ -272,6 +272,28 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     return true;
   }, []);
 
+  // Trades that will never be sent (auth refused / timed out, socket closed): tell whoever waits
+  // (BUGLOG #116: only digit opens were told; a classic open stayed "Opening…" for good).
+  const dropQueued = (code: string) => {
+    const q = authQueueRef.current.splice(0);
+    let classic = false;
+    for (const m of q) {
+      if (m.type === 'open_digit') rejectDigit(code, '');     // the digits screen tells the player
+      if (m.type === 'open_position' && activeRef.current && !activeRef.current.positionId) {
+        activeRef.current = null; setActivePosition(null); classic = true;
+        void qc.invalidateQueries({ queryKey: ['wallet'] });
+      }
+    }
+    if (classic) toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting…' });
+  };
+  // The auth answer must come within 8 s, or whatever waits behind it is dropped (was: no timer).
+  const authTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armAuthTimer = () => {
+    if (authTimerRef.current) clearTimeout(authTimerRef.current);
+    authTimerRef.current = setTimeout(() => { authTimerRef.current = null; if (!authedRef.current) dropQueued('NOT_CONNECTED'); }, 8_000);
+  };
+  const authAnswered = () => { if (authTimerRef.current) { clearTimeout(authTimerRef.current); authTimerRef.current = null; } };
+
   const setWalletReal = useCallback(
     (real: number, currency?: string, bonus?: number) => {
       qc.setQueryData<WalletDto>(['wallet'], (old) =>
@@ -494,14 +516,12 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           const d = data as BalanceData;
           if (typeof d?.real === 'number') setWalletReal(d.real, d.currency, d.bonus);
           if (!authedRef.current) {
-            // the auth answer: release trades queued while it was verified (drop any older than 8 s)
+            // the auth answer: release trades queued while it was verified
             authedRef.current = true;
+            authAnswered();
             const q = authQueueRef.current.splice(0);
             const ws = wsRef.current;
-            for (const m of q) {
-              if (Date.now() - m.at > 8_000) { if (m.type === 'open_digit') rejectDigit('NOT_CONNECTED', ''); continue; }
-              ws?.send(JSON.stringify({ type: m.type, data: m.data }));
-            }
+            for (const m of q) ws?.send(JSON.stringify({ type: m.type, data: m.data }));
           }
           break;
         }
@@ -636,11 +656,18 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           // Signed in but the socket forgot us (restart / race): authenticate again, quietly.
           if (d.code === 'AUTH_REQUIRED' && tokenRef.current) {
             authedRef.current = false;
-            send('auth', { token: tokenRef.current });
+            if (send('auth', { token: tokenRef.current })) armAuthTimer();
           }
           if (d.code === 'AUTH_INVALID' || d.code === 'AUTH_SITE_MISMATCH') {
             // auth will not come: nothing queued behind it may wait
-            for (const m of authQueueRef.current.splice(0)) if (m.type === 'open_digit') rejectDigit(d.code, '');
+            authAnswered();
+            dropQueued(d.code);
+          } else if (d.code === 'ENGINE_ERROR' && authTimerRef.current && !authedRef.current) {
+            // the engine bound us, then failed to read the wallet for its reply: we ARE signed in
+            authedRef.current = true;
+            authAnswered();
+            const ws = wsRef.current;
+            for (const m of authQueueRef.current.splice(0)) ws?.send(JSON.stringify({ type: m.type, data: m.data }));
           }
           // BUGLOG #85: a refused digit open used to leave the screen "in play" forever. Only errors an
           // open can produce count (a stray error from another request must not clear a live contract).
@@ -683,15 +710,16 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         attemptRef.current = 0;
         authedRef.current = false;
         setStatus('open');
-        if (tokenRef.current) ws.send(JSON.stringify({ type: 'auth', data: { token: tokenRef.current } }));
+        if (tokenRef.current) { ws.send(JSON.stringify({ type: 'auth', data: { token: tokenRef.current } })); armAuthTimer(); }
         // Heartbeat + dead-socket check (BUGLOG #92): on a network switch a socket can stay "OPEN" for
-        // minutes while nothing arrives. Ticks arrive every 1–2 s, so 12 s of silence = reconnect.
+        // minutes while nothing arrives. A ping every 6 s guarantees a frame (pong) even on a brand with a
+        // slow tick rate, so 12 s of silence = a dead socket = reconnect.
         lastFrameAtRef.current = Date.now();
         let beats = 0;
         heartbeat.current = setInterval(() => {
           if (ws.readyState !== ws.OPEN) return;
           if (Date.now() - lastFrameAtRef.current > 12_000) { try { ws.close(); } catch { /* ignore */ } return; }
-          if (++beats % 5 === 0) ws.send(JSON.stringify({ type: 'ping', data: {} }));
+          if (++beats % 2 === 0) ws.send(JSON.stringify({ type: 'ping', data: {} }));
         }, 3_000);
       };
 
@@ -710,11 +738,15 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         if (heartbeat.current) clearInterval(heartbeat.current);
         heartbeat.current = null;
         authedRef.current = false;
-        // acks for opens in flight on this socket will never come (BUGLOG #85/#92)
-        if (digitAwaitingRef.current > 0) { const n = digitAwaitingRef.current; for (let i = 0; i < n; i++) rejectDigit('NOT_CONNECTED', ''); }
+        // acks for opens in flight on this socket will never come (BUGLOG #85/#92); queued ones are
+        // dropped just below (each told once)
+        const queuedDigits = authQueueRef.current.filter((m) => m.type === 'open_digit').length;
+        const inflight = Math.max(0, digitAwaitingRef.current - queuedDigits);
+        for (let i = 0; i < inflight; i++) rejectDigit('NOT_CONNECTED', '');
+        // queued trades never left: nobody may wait for them
+        authAnswered();
+        dropQueued('NOT_CONNECTED');
         digitAwaitingRef.current = 0;
-        // queued trades never left: the screen must not wait for them
-        for (const m of authQueueRef.current.splice(0)) if (m.type === 'open_digit') rejectDigit('NOT_CONNECTED', '');
         if (!closedRef.current) {
           setStatus('closed');
           scheduleReconnect();
@@ -767,6 +799,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     if (token && ws && ws.readyState === ws.OPEN) {
       authedRef.current = false;
       ws.send(JSON.stringify({ type: 'auth', data: { token } }));
+      armAuthTimer();
     }
   }, [token]);
 

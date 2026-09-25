@@ -5,6 +5,39 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #115–#119 — Regressions caught by reviewing today's own diff — FIXED (branch `fix/hunt-regressions`)
+A line-by-line review of everything changed since 136a092 (web, API, both migrations). There were no hook-order
+or circular-import problems, and grants and scope checks were right. It found:
+- **#118 (high on weak currencies):** 10,000 of a weak currency (UGX ≈ KES 350) is below
+  `fn_topup_demo_account`'s KES 1,000 floor. The switch to Demo returned 400, although the wallet was already in
+  demo mode at 0, and every refill failed. The target is now clamped to the function's bounds, and funding is
+  best-effort after the switch.
+- **#115:**
+  - **Bug:** a multiplier closed while the socket was away (another page, a drop) stayed "open" in the new store.
+    It blocked new opens and the account switch until a reload.
+  - **Fix:** while a position is shown, the screen checks `/positions?status=open` (on mount and every 15 s)
+    and clears a position that is gone.
+- **#116:**
+  - **Bug:** the auth queue had no timer and dropped non-digit trades silently. A classic rise/fall open queued
+    behind a slow or failed sign-in stayed "Opening…" for good.
+  - **Fix:**
+    - The auth answer must come within 8 s. Every dropped open is reported (digits via the screen; classic
+      rolls back and toasts).
+    - An `ENGINE_ERROR` while waiting for auth is taken as the answer, because the engine binds the socket
+      before its wallet read.
+    - The heartbeat pings every 6 s, so brands with a slow tick rate never trip the 12 s dead-socket check.
+- **#117:** when a contract was given up on (refusal race or backstop) but DID open, its ack and result were
+  ignored. It is now kept as "last dropped", so a late ack still attributes the result.
+- **#119:**
+  - Changing a brand's currency keeps no stale stake limits (KES 50 must not become $50).
+  - The commission-rate field seeds once, so an admin can clear it.
+  - A demo refill that cannot cover a stake above 10,000 says "Demo max …" instead of "Demo refilled".
+- **Tests:**
+  - digits.e2e.mjs, new: sign-in held 10 s → dropped with "Not connected", nothing in play, the next trade
+    goes through. 57/57.
+  - app.demo1.test.ts: demo target bounds.
+  - npm test 1207/1207. account 65/65. demo1.pg 2/2.
+
 ## #108–#114 — Operator console bug hunt + minimal copy — FIXED (branch `fix/console-hunt`; API: one read-only route)
 - **#108 (money):**
   - **Bug:** pressing Cancel on the reference prompt still marked a commission payout PAID, and Cancel on the

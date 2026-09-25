@@ -171,6 +171,21 @@ try {
     check('reconnect: a trade during sign-in goes through (no "Log in to trade")', await until(async () => (await closedCount()) === n1 + 1, 8000) && !/Log in to trade/.test(await toastText()), `${await closedCount()} ${await toastText()}`);
     await page.keyboard.press('Escape');
 
+    // ── BUGLOG #116: sign-in that never answers in 8 s: the tap is dropped with a reason, nothing hangs ──
+    const opens1 = page.ws.opens;
+    page.ws.holdAuthMs = 10_000;
+    page.ws.kill();
+    await until(async () => page.ws.opens > opens1, 8000, 25);
+    const n2 = await closedCount();
+    await page.getByRole('button', { name: /^Buy Even/ }).click();
+    check('slow sign-in: after 8 s the trade is dropped with "Not connected" and nothing stays in play',
+      await until(async () => /Not connected/.test(await toastText()), 11000, 100) && await until(async () => (await page.getByText(/Even · /).count()) === 0, 2000), await toastText());
+    await page.waitForTimeout(2500);   // the held sign-in now completes
+    await page.getByRole('button', { name: /^Buy Even/ }).click();
+    await page.getByRole('dialog', { name: /You won|Trade lost/ }).waitFor({ timeout: 12000 }).catch(() => {});
+    check('slow sign-in: once signed in, the next trade goes through', await until(async () => (await closedCount()) === n2 + 1, 8000), String(await closedCount()));
+    await page.keyboard.press('Escape');
+
     // ── AUTO: a finished run can be started again (BUGLOG #84) ──
     await page.getByRole('button', { name: 'auto', exact: true }).filter({ visible: true }).first().click();
     await page.getByLabel('Target').fill('1');
