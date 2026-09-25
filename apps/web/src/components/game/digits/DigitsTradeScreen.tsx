@@ -18,10 +18,11 @@ import { useDigitSession } from '@/lib/game/digitSession';
 import { useAmountText } from '@/lib/game/useAmountText';
 import { play } from '@/lib/sound/sound';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
-import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
+import { useGameSocketApi, useInstrumentResetKey, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
 import { payoutForStake, stakeForPayout } from '@/lib/game/digitPayout';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
+import { useMultiplierSync } from '@/lib/game/multSession';
 import { pillLabel } from '@/lib/game/stakeLadder';
 import { useDisplayMoney } from '@/lib/money';
 import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
@@ -93,13 +94,15 @@ function contractLabel(o: Outcome, barrier: number, pick: number): string {
   }
 }
 
-type Pending = { stakeCents: number; outcome: Outcome; manual: boolean; label: string; openedAtMs: number; demo: boolean };
+type Pending = { stakeCents: number; outcome: Outcome; manual: boolean; label: string; openedAtMs: number; demo: boolean; positionId?: string };
 
 /** Deriv-style binary/digits trade surface — trades REAL contracts against the authoritative engine. */
 export function DigitsTradeScreen() {
   const [instId, setInstId] = useState<string>(DEFAULT_INSTRUMENT_ID);
   const instrument: Instrument = instrumentById(instId);
-  const { getInstrumentTicks, getLastInstrumentTick, instrumentResetKey, subscribeInstrument, openDigit, onDigitSettled, onDigitRejected } = useGameSocket();
+  const { getInstrumentTicks, getLastInstrumentTick, subscribeInstrument, openDigit, onDigitSettled, onDigitRejected, onDigitOpened } = useGameSocketApi();
+  const instrumentResetKey = useInstrumentResetKey();
+  useMultiplierSync(); // multiplier positions survive tab switches (BUGLOG #98)
   const { both, symbol, isForeign, toKesCents, toDisplay } = useDisplayMoney();
   const token = useSession((s) => s.token);
   const openDeposit = useDepositUi((s) => s.openDeposit);
@@ -159,15 +162,12 @@ export function DigitsTradeScreen() {
   }, [amountMode, stake, payoutInput, barrier, toKesCents]);
   const stakeCents = stakeFor(outcomesFor(market)[0].key);
 
-  // Client-side stake validity (money of record is KES cents). Blocks below-min / above-max BEFORE
-  // hitting the engine, and drives a friendly currency-formatted hint (never raw cents).
-  const stakeValid =
-    Number.isFinite(stakeCents) && stakeCents >= minStakeCents && (maxStakeCents === undefined || stakeCents <= maxStakeCents);
+  // Out-of-range hint (numbers only). Each buy button checks its own side's stake (ctaMeta).
   const stakeHint =
     stakeCents > 0 && stakeCents < minStakeCents
-      ? `Minimum stake is ${both(minStakeCents)}`
+      ? `Min ${both(minStakeCents)}`
       : maxStakeCents !== undefined && stakeCents > maxStakeCents
-        ? `Maximum stake is ${both(maxStakeCents)}`
+        ? `Max ${both(maxStakeCents)}`
         : null;
 
   // Once the limits load (or change), keep the stake inside them: never below the minimum pill.
@@ -210,7 +210,11 @@ export function DigitsTradeScreen() {
   });
 
   const pendingRef = useRef<Pending | null>(null);
+  // Contracts THIS screen opened, by position id (BUGLOG #91): the engine sends every settlement to all
+  // of the player's sockets, so another tab's or device's result must not land here.
+  const ownRef = useRef<Map<string, Pending>>(new Map());
   const pendingTimerRef = useRef<number | null>(null);
+  const flashTimerRef = useRef<number | null>(null);
   const runningRef = useRef(false);
   runningRef.current = running;
   // The current AUTO run: its own P&L baseline, trade count and loss streak (autoBot.ts).
@@ -232,7 +236,8 @@ export function DigitsTradeScreen() {
   );
 
   // Subscribe the socket to the selected instrument's authoritative feed (re-subscribes on change).
-  useEffect(() => { subscribeInstrument(instId); }, [instId, subscribeInstrument]);
+  // The previous instrument's IN / result markers do not belong on the new chart.
+  useEffect(() => { subscribeInstrument(instId); setEntryMarker(null); setSettleMarker(null); }, [instId, subscribeInstrument]);
   const isDemo = wallet?.mode === 'demo';
   useEffect(() => { if (!isDemo && multi) setMulti(false); }, [isDemo, multi]);
 
@@ -247,26 +252,27 @@ export function DigitsTradeScreen() {
   // Resolve settlements authoritatively from the engine (single in-flight contract at a time).
   useEffect(() => {
     const off = onDigitSettled((s: DigitSettledData) => {
-      const settled = pendingRef.current; // capture BEFORE clearing (label + manual flag)
-      clearPending(); // contract resolved -> drop the "in play" chip
+      const settled = ownRef.current.get(s.positionId);
+      if (!settled) return;                      // another tab/device: the provider already refreshed the wallet
+      ownRef.current.delete(s.positionId);
+      const current = pendingRef.current?.positionId === s.positionId;  // false = a late answer after the backstop
+      if (current) clearPending(); // drop the "in play" chip
       const won = s.won;
       const delta = s.pnlCents; // authoritative P/L in cents
-      if (runRef.current && settled && !settled.manual) runRef.current = afterSettle(runRef.current, won);
+      if (runRef.current && !settled.manual) runRef.current = afterSettle(runRef.current, won);
       pnlRef.current += delta; // the loop may decide before React re-renders
       setPnl((x) => x + delta);
       setFlash({ won, delta });
       play(won ? 'win' : 'loss');
       const nowMs = Date.now();
-      if (settled) {
-        publishClosed({
-          id: s.positionId ?? `${nowMs}`, label: settled.label, stakeCents: settled.stakeCents, payoutCents: s.payoutCents,
-          pnlCents: delta, won, digit: s.digit, openedAtMs: settled.openedAtMs, settledAtMs: nowMs, demo: settled.demo,
-        });
-      }
+      publishClosed({
+        id: s.positionId, label: settled.label, stakeCents: settled.stakeCents, payoutCents: s.payoutCents,
+        pnlCents: delta, won, digit: s.digit, openedAtMs: settled.openedAtMs, settledAtMs: nowMs, demo: settled.demo,
+      });
       setSettleMarker({ digit: s.digit, won, tSec: Math.floor((getLastInstrumentTick()?.t ?? Date.now()) / 1000) });
       invalidateHistory(); // persist-backed receipt now exists → refresh the history panel
       // MANUAL trades open a focused result card (receipt); the AUTO bot reports P/L via its own HUD.
-      if (settled?.manual) {
+      if (settled.manual && current) {
         setResult({
           won,
           label: settled.label,
@@ -277,7 +283,8 @@ export function DigitsTradeScreen() {
           durationMs: nowMs - settled.openedAtMs,
         });
       }
-      window.setTimeout(() => setFlash(null), 900);
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = window.setTimeout(() => setFlash(null), 900);
     });
     return off;
   }, [onDigitSettled, invalidateHistory, getLastInstrumentTick, publishClosed, clearPending]);
@@ -347,11 +354,16 @@ export function DigitsTradeScreen() {
   // BUGLOG #85: the engine refused the open (funds, limits, one-at-a-time): nothing is in play. The
   // provider already told the player why; AUTO stops rather than retrying the same refusal.
   const stopAutoRef = useRef<(reason: AutoStop | 'user' | 'rejected') => void>(() => {});
-  useEffect(() => onDigitRejected(() => {
+  useEffect(() => onDigitOpened((e) => {
+    const p = pendingRef.current;
+    if (p && !p.positionId) { p.positionId = e.positionId; ownRef.current.set(e.positionId, p); }
+  }), [onDigitOpened]);
+  useEffect(() => onDigitRejected((e) => {
     if (!pendingRef.current) return;
     clearPending();
+    if (e.code === 'NOT_CONNECTED') toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting…' });
     if (runningRef.current) stopAutoRef.current('rejected');
-  }), [onDigitRejected, clearPending]);
+  }), [onDigitRejected, clearPending, toast]);
 
   // Entry (IN) + settle (result digit) markers for the CURRENT/last contract, drawn on the chart at
   // the exact ticks that opened and decided it. Kind is semantic; DerivChart maps it to brand colours.
@@ -418,7 +430,7 @@ export function DigitsTradeScreen() {
     if (!run || reason === 'rejected') return;       // the refusal was already shown
     const p = runPnl(run, pnlRef.current);
     const title = reason === 'target' ? 'Target hit' : reason === 'stoploss' ? 'Stop loss hit' : reason === 'funds' ? 'Balance too low' : reason === 'stake' ? 'Stake below minimum' : 'Auto stopped';
-    toast.push({ tone: reason === 'target' ? 'success' : reason === 'user' ? 'info' : 'error', title, description: `${amt.signed(p)} · ${run.trades}` });
+    toast.push({ tone: reason === 'target' ? 'success' : reason === 'user' ? 'info' : 'error', title, description: `${amt.signed(p)} · ${run.trades} trade${run.trades === 1 ? '' : 's'}` });
   }, [toast, amt]);
   stopAutoRef.current = stopAuto;
   const halt = () => { if (runningRef.current) stopAuto('user'); };
@@ -464,7 +476,9 @@ export function DigitsTradeScreen() {
 
   const ctaMeta = (o: Outcome) => {
     const prob = winProbability(o, barrier);
-    const disabled = prob <= 0;
+    const sc = stakeFor(o);
+    // per side (BUGLOG #86): in payout mode each side has its own stake and its own validity
+    const disabled = prob <= 0 || !(sc >= minStakeCents && (maxStakeCents === undefined || sc <= maxStakeCents));
     const profitPct = prob > 0 ? (PAYOUT_FACTOR / prob - 1) * 100 : 0;
     const ret = prob > 0 ? totalReturnCents(stakeFor(o), o) : 0;
     return { disabled, profitPct, ret };
@@ -579,7 +593,7 @@ export function DigitsTradeScreen() {
               </button>
             ) : null}
             <div ref={tfRef} className="relative shrink-0">
-              <button type="button" onClick={() => setTfOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={tfOpen} aria-label="Timeframe"
+              <button type="button" onClick={() => setTfOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={tfOpen} aria-label="Zoom"
                 className="grid h-9 w-9 place-items-center rounded-lg border border-accent/30 bg-accent/10 text-[12px] font-bold text-accent transition hover:border-accent/60">
                 {tf.label}
               </button>
@@ -621,7 +635,7 @@ export function DigitsTradeScreen() {
             <div className="absolute left-2 top-14 z-10 hidden flex-col gap-1 lg:flex">
               {toolBtn('Line chart', 'line', () => setChartVariant('line'), chartVariant === 'line')}
               {toolBtn('Area chart', 'bars', () => setChartVariant('area'), chartVariant === 'area')}
-              {toolBtn(drawMode ? 'Click the chart to draw a line' : 'Draw a horizontal line (double-click to clear)', 'pencil', () => setDrawMode((v) => !v), drawMode)}
+              {toolBtn(drawMode ? 'Click the chart to draw a line' : 'Draw a horizontal line', 'pencil', () => setDrawMode((v) => !v), drawMode)}
               {toolBtn('Download chart', 'download', () => chartRef.current?.download(`${instrument.short.replace(/\s+/g, '-')}.png`))}
             </div>
             {/* zoom (desktop) */}
@@ -629,11 +643,16 @@ export function DigitsTradeScreen() {
               {roundBtn('Zoom in', 'plus', () => chartRef.current?.zoomIn())}
               {roundBtn('Show all', 'crosshair', () => chartRef.current?.fit())}
               {roundBtn('Zoom out', 'minus', () => chartRef.current?.zoomOut())}
-              <button type="button" onClick={() => { chartRef.current?.followLive(); chartRef.current?.clearLines(); }} aria-label="Back to live price" title="Back to live price"
+              <button type="button" onClick={() => { chartRef.current?.followLive(); chartRef.current?.clearLines(); }} aria-label="Back to live price (clears drawn lines)" title="Back to live price (clears drawn lines)"
                 className="mt-1 grid h-8 w-8 place-items-center rounded-lg bg-accent text-accent-fg shadow-[0_0_14px_-4px_var(--pp-accent)]">
                 <DIcon name="refresh" className="h-4 w-4" strokeWidth={2.2} />
               </button>
             </div>
+            {/* phones: a swipe detaches the chart from live; one tap brings it back (BUGLOG #97) */}
+            <button type="button" onClick={() => chartRef.current?.followLive()} aria-label="Back to live price"
+              className="absolute bottom-2 right-2 z-10 grid h-8 w-8 place-items-center rounded-full bg-accent/90 text-accent-fg shadow lg:hidden">
+              <DIcon name="refresh" className="h-4 w-4" strokeWidth={2.2} />
+            </button>
             {pendingView ? (
               <div className="pointer-events-none absolute inset-x-0 top-14 mx-auto flex w-fit items-center gap-2 rounded-full border border-accent/40 bg-surface/90 px-3 py-1 text-[12px] font-semibold text-fg shadow-lg backdrop-blur">
                 <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
@@ -757,7 +776,7 @@ export function DigitsTradeScreen() {
           {presets.map((q) => {
             const active = Number(amountMode === 'payout' ? payoutInput : stake) === q;
             return (
-              <button key={q} type="button" aria-pressed={active} aria-label={`Stake ${q}`}
+              <button key={q} type="button" aria-pressed={active} aria-label={`${amountMode === 'payout' ? 'Payout' : 'Stake'} ${q}`}
                 onClick={() => (amountMode === 'payout' ? setPayoutInput(String(q)) : setStake(String(q)))}
                 className={cn('rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12px)] font-medium tabular-nums transition',
                   active ? 'border-accent bg-accent/15 text-fg' : 'border-border bg-bg/40 text-muted hover:text-fg')}>
@@ -804,7 +823,7 @@ export function DigitsTradeScreen() {
             return (
               <button key={outcome} type="button"
                 aria-label={`Buy ${o.label}: pays ${amt.text(meta.ret)} (${meta.profitPct.toFixed(2)}%)`}
-                disabled={meta.disabled || running || (!stakeValid)}
+                disabled={meta.disabled || running}
                 onClick={() => onCta(outcome)}
                 className={cn(
                   'group rounded-2xl border-[1.5px] text-left transition disabled:opacity-40',

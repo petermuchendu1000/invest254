@@ -12,6 +12,7 @@ import { useWallet, useSetAccountMode, useTopupDemo } from '@/lib/wallet/hooks';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useAmountText } from '@/lib/game/useAmountText';
 import { useDigitSession } from '@/lib/game/digitSession';
+import { useMultSession } from '@/lib/game/multSession';
 import { useLiveChat } from '@/lib/chat/liveChat';
 import { useAccountUi, useMyKyc, PLAYER_TWO_FACTOR } from '@/lib/account/accountUi';
 import { useToast } from '@/lib/toast/ToastProvider';
@@ -48,7 +49,8 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
   const { data } = useWallet();
   const amt = useAmountText();
   const auto = useDigitSession((s) => s.auto);
-  const inPlay = useDigitSession((s) => !!s.open || !!s.auto);
+  const multOpen = useMultSession((s) => !!s.position);
+  const inPlay = useDigitSession((s) => !!s.open || !!s.auto) || multOpen;
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
   const setMode = useSetAccountMode();

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/cn';
 import type { InstrumentTick } from '@/lib/game/useInstrument';
-import { useGameSocket, type MultEvent, type MultOpenedData } from '@/lib/game/GameSocketProvider';
+import { useGameSocketApi, type MultOpenedData } from '@/lib/game/GameSocketProvider';
+import { useMultSession } from '@/lib/game/multSession';
 import { useDisplayMoney } from '@/lib/money';
 import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
@@ -27,7 +28,6 @@ const DC_WINDOWS = [
   { label: '60m', min: 60 },
 ];
 type Dir = 'up' | 'down';
-type CloseReason = 'manual' | 'tp' | 'sl' | 'stopout' | 'cancel';
 
 const num = (s: string) => { const n = Number.parseFloat(s); return Number.isFinite(n) ? n : 0; };
 const dcFeeCents = (stakeCents: number, min: number) => (min <= 0 ? 0 : Math.round(stakeCents * 0.02 * Math.sqrt(min)));
@@ -37,7 +37,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
   const token = useSession((s) => s.token);
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const { data: wallet } = useWallet();
-  const { openMultiplier, closeMultiplier, onMultiplier } = useGameSocket();
+  const { openMultiplier, closeMultiplier } = useGameSocketApi();
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
   const topupDemo = useTopupDemo();
   const openAuth = useAuthUi((s) => s.openAuth);
@@ -60,44 +60,19 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
   const [sl, setSl] = useState(isForeign ? '5' : '500');
   const [dcMin, setDcMin] = useState(0);
 
-  const [position, setPosition] = useState<MultOpenedData | null>(null);
+  const position = useMultSession((s) => s.position);
+  const livePnl = useMultSession((s) => s.livePnl);
+  const sessionPnl = useMultSession((s) => s.sessionPnl);
+  const flash = useMultSession((s) => s.flash);
   const [pendingDir, setPendingDir] = useState<Dir | null>(null);
-  const [livePnl, setLivePnl] = useState(0);
   const [price, setPrice] = useState<number | null>(null);
-  const [sessionPnl, setSessionPnl] = useState(0);
-  const [flash, setFlash] = useState<{ pnl: number; reason: CloseReason } | null>(null);
-
-  const posRef = useRef<MultOpenedData | null>(null);
-  posRef.current = position;
+  useEffect(() => { if (position) setPendingDir(null); }, [position]);
 
   const stakeCents = num(stake) > 0 ? toKesCents(num(stake)) : 0;
   const dcActive = dcMin > 0;
   const feePreview = dcFeeCents(stakeCents, dcMin);
 
-  // Server-authoritative lifecycle: opened ack, per-tick P/L, and the final close.
-  useEffect(() => {
-    const off = onMultiplier((e: MultEvent) => {
-      if (e.type === 'opened') {
-        setPendingDir(null);
-        setPosition(e.data);
-        setLivePnl(0);
-        return;
-      }
-      const p = posRef.current;
-      if (!p || e.data.positionId !== p.positionId) return;
-      if (e.type === 'update') {
-        setLivePnl(e.data.pnlCents);
-        return;
-      }
-      // closed (manual / tp / sl / stopout / cancel) — authoritative P/L
-      setPosition(null);
-      setLivePnl(0);
-      setSessionPnl((x) => x + e.data.pnlCents);
-      setFlash({ pnl: e.data.pnlCents, reason: e.data.reason });
-      window.setTimeout(() => setFlash(null), 1400);
-    });
-    return off;
-  }, [onMultiplier]);
+  // Server-authoritative lifecycle lives in useMultiplierSync (lib/game/multSession.ts).
 
   // An open that never acked (engine refusal) → unblock the buttons.
   useEffect(() => {
@@ -127,7 +102,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
     if (!Number.isFinite(stakeCents) || stakeCents <= 0) return;
     if (!token) { openAuth('login'); return; }
     if (stakeCents < limits.minCents || (limits.maxCents !== undefined && stakeCents > limits.maxCents)) {
-      toast.push({ tone: 'error', title: stakeCents < limits.minCents ? `Min ${symbol}${limits.min}` : `Max ${symbol}${limits.max}` });
+      toast.push({ tone: 'error', title: stakeCents < limits.minCents ? `Min ${fmt(limits.minCents)}` : `Max ${fmt(limits.maxCents ?? 0)}` });
       return;
     }
     if (stakeCents > spendable) {
@@ -174,7 +149,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
             <Stat label="Entry" value={position.entry.toFixed(2)} />
-            <Stat label="Current" value={price != null ? price.toFixed(2) : '—'} />
+            <Stat label="Current" value={price != null && position.instrumentId === instrumentId ? price.toFixed(2) : '—'} />
             <Stat label="Stop out" value={stopoutPrice(position).toFixed(2)} tone="down" />
           </div>
           {position.tpCents != null || position.slCents != null ? (

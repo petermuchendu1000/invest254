@@ -41,15 +41,18 @@ export function DigitResultModal({ result, onClose }: { result: DigitResult | nu
 
   useEffect(() => { setReduce(prefersReducedMotion()); }, []);
 
+  // Focus once per open (BUGLOG #94: an inline onClose re-ran this on every tick and pulled focus back).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     cardRef.current?.focus();
     return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow; };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!result) return null;
   const { won, label, digit, stakeCents, payoutCents, pnlCents, durationMs } = result;
@@ -78,7 +81,6 @@ export function DigitResultModal({ result, onClose }: { result: DigitResult | nu
         </div>
 
         <h2 className={cn('mt-3 font-mono text-[22px] font-black tracking-wide', won ? 'text-up' : 'text-down')}>{won ? 'YOU WON!' : 'YOU LOST'}</h2>
-        <p className="mt-0.5 text-[13px] text-muted">{won ? 'Your contract settled in your favour.' : 'Your contract did not settle in your favour.'}</p>
 
         <div className="mt-4 rounded-xl border border-border bg-bg/40 px-3 py-3">
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Profit / Loss</div>

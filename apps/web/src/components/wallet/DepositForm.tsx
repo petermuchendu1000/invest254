@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { centsToKes, formatKes, kesToCents } from '@invest254/shared/money';
 import { normalizeMsisdn, MIN_DEPOSIT_CENTS } from '@invest254/shared/payments';
@@ -8,7 +8,7 @@ import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { api } from '@/lib/api/endpoints';
-import { useDeposit, useDepositMegapay, useDepositPayhero, useWallet } from '@/lib/wallet/hooks';
+import { useDeposit, useDepositMegapay, useDepositPayhero } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useAuthUi } from '@/lib/auth/ui';
@@ -37,7 +37,6 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
 
   const token = useSession((s) => s.token);
   const accountPhone = useSession((s) => s.user?.phone ?? null);
-  const { data: wallet } = useWallet();
   const mpesaDeposit = useDeposit();
   const megaDeposit = useDepositMegapay();
   const payheroDeposit = useDepositPayhero();
@@ -69,7 +68,9 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
   const [touched, setTouched] = useState(false);
   const [amount, setAmount] = useState(() => {
     if (prefillAmountCents && prefillAmountCents > 0) {
-      return isForeign ? String(Math.ceil(toDisplay(prefillAmountCents) * 100) / 100) : String(Math.ceil(centsToKes(prefillAmountCents)));
+      // a shortfall below the minimum deposit starts at the minimum (never a refused amount)
+      const c = Math.max(prefillAmountCents, minDepositCents);
+      return isForeign ? String(Math.ceil(toDisplay(c) * 100) / 100) : String(Math.ceil(centsToKes(c)));
     }
     return String(chipBase);
   });
@@ -89,7 +90,6 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
   const [serverError, setServerError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [txId, setTxId] = useState<string | null>(null);
-  const balanceAtSubmitRef = useRef<number>(0);
 
   // While the STK callback settles, poll THIS deposit's status so the sheet can react the
   // instant M-Pesa confirms (success) or rejects/expires (failed) — no manual "Done" tap.
@@ -106,9 +106,9 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
     },
   });
 
-  const balanceNow = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
-  // Success = the tx flipped to success OR the polled balance rose above the pre-deposit total.
-  const settled = done && (depositTx?.status === 'success' || balanceNow > balanceAtSubmitRef.current);
+  // Success = THIS deposit's transaction says so. (A rising balance is not proof: AUTO wins, a demo
+  // account or a take-profit also raise it — BUGLOG #90.)
+  const settled = done && depositTx?.status === 'success';
   const failed = done && !settled && depositTx?.status === 'failed';
 
   // Auto-dismiss shortly after a confirmed deposit (long enough to show the success tick).
@@ -144,7 +144,6 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
       return;
     }
     try {
-      balanceAtSubmitRef.current = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
       const res = await deposit.mutateAsync({ amount: amountKesCents, phone: effectivePhone });
       setTxId(res.transactionId);
       setDone(true);
@@ -191,11 +190,6 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
           We sent a prompt to <span className="font-medium text-fg">{maskMsisdn(normalizeMsisdn(effectivePhone))}</span>.
           Enter your M-Pesa PIN to approve {formatKes(amountKesCents)}.
         </p>
-        <p className="text-xs text-muted">
-          {intentLabel
-            ? `This updates automatically — your ${intentLabel} trade will be ready the moment the deposit lands.`
-            : 'This screen updates automatically once M-Pesa confirms — no need to refresh.'}
-        </p>
         <Button variant="ghost" fullWidth onClick={close}>Cancel</Button>
       </div>
     );
@@ -215,7 +209,7 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
           <span className="text-2xl font-bold text-muted">{symbol}</span>
           <input
             name="amount"
-            inputMode="numeric"
+            inputMode={isForeign ? 'decimal' : 'numeric'}
             autoComplete="off"
             autoFocus
             aria-label={`Amount to deposit in ${currency}`}
@@ -299,11 +293,6 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
         </p>
       ) : null}
 
-      <p className="text-xs leading-relaxed text-muted">
-        {token
-          ? 'You’ll get a payment prompt on your phone — enter your M-Pesa PIN to confirm. Your PIN is never entered in this app.'
-          : 'Create your free account next, then approve the payment prompt to fund this deposit.'}
-      </p>
       <Button type="submit" size="lg" fullWidth disabled={deposit.isPending}>
         {!token
           ? 'Sign up to deposit'

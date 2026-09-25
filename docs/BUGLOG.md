@@ -5,6 +5,65 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #90–#98 — Deriv client bug hunt, round 1 — FIXED (branch `fix/deriv-hunt`, web only; engine untouched)
+Found by a line-by-line audit of the digits screen, socket provider and wallet sheet, then checked against the code.
+- **#90 (money):**
+  - **Bug:** the deposit sheet said "Deposit received" when the balance rose. AUTO wins, a demo account or a
+    take-profit could do that with no deposit at all, and the sheet closed as if paid.
+  - **Fix:** success is now only THIS deposit's transaction status. A shortfall below the minimum deposit is
+    pre-filled at the minimum, so the pre-filled amount is never refused.
+- **#91:**
+  - **Bug:** the engine sends every `digit_settled` to all of a player's sockets. With two tabs or devices, one
+    tab's result cleared the other's contract, showed a mixed result card, and fed AUTO the wrong P&L.
+  - **Fix:** the provider passes on `digit_opened` (sent only to the opening socket). The screen keeps the
+    position ids it opened and ignores anyone else's settlements. A late answer after the 20 s backstop is
+    still counted, without a card.
+- **#92 (socket):**
+  - **Bugs:**
+    - A dead socket that still read "open" was never detected.
+    - The awaiting-ack counter leaked across reconnects, so a stray error could clear a live contract.
+    - The provider's value was a new object on every render, and brand-wide `online` counts re-rendered the
+      whole trade screen and chart.
+  - **Fix:**
+    - 12 s of silence (ticks arrive every 1–2 s) forces a reconnect.
+    - The counter resets on close, and only open-related errors count as refusals.
+    - The context is split into stable API / state / instrument key, and heavy consumers use the stable API.
+    - `useInvalidateDigitHistory` is stable, and FitText re-fits only when its figure changes, not with a
+      reflow on every render.
+- **#93:**
+  - **Bug:** signing out or in as someone else kept the socket bound to the previous user, who went on
+    receiving balance and settlements. Their wallet, history and session list also stayed on screen.
+  - **Fix:** a different user reconnects the socket and drops the user-scoped caches and the session stores.
+- **#94:** the result and insufficient-balance cards re-focused themselves on every tick (an inline `onClose`
+  in the deps), pulling keyboard and screen-reader users back. They now focus once per open.
+- **#95:**
+  - **Bug:** Session P/L summed demo and real (for example +5,000 demo and −200 real showed +4,800).
+  - **Fix:** the totals are per account. The footer is numbers only: "7 · 4W 3L  +240 KES".
+- **#96:**
+  - **Bug:** the scanner compared Over 5 (40% expected) with Under 5 (50%) on raw share, so it nearly always said
+    "Under". It also showed the base rate as a lean.
+  - **Fix:** each side is measured against its own expectation, and the edge (+x.x points) is ranked and shown.
+- **#97:**
+  - **Bug:** on phones a swipe detached the chart from live, with no way back.
+  - **Fix:** a phone live button. The instrument's old IN / result markers are cleared on switch, and each
+    buy button checks its own side's stake.
+- **#98:**
+  - **Bug:** an open multiplier lived in the panel's local state. Switching to a digits tab hid it (no Close,
+    and a second open was possible). The price of another instrument showed as "Current", and switching account
+    ignored it.
+  - **Fix:** the position lives in `multSession` and is synced by the always-mounted screen. "Current" shows
+    only for its own instrument, and an open multiplier blocks an account switch.
+- **Copy:**
+  - Removed: repeated sentences on the result card, the insufficient-balance card, the deposit sheet (both
+    paragraphs) and the positions empty states.
+  - Withdraw sheet: "Paid instantly" corrected to "M-Pesa · Secured", since payouts are held for approval.
+  - Foreign brands get the decimal keypad.
+  - "Min KES250" now has its space.
+  - The AUTO summary reads "· 7 trades".
+- **Tests:**
+  - digits.e2e.mjs, new: two tabs; scanner edge; footer format. 55/55.
+  - account.e2e.mjs, new: the multiplier survives a tab switch; the Real footer excludes demo. 63/63.
+
 ## #89 — Saving the economy more than 6 times an hour showed "Something went wrong" (a bare 500) — FIXED (branch `feat/stake-ladder`, API only)
 - **What:** the DB guard `fn_guard_config_change_rate` (6 economy changes per brand per hour) raises
   `CONFIG_CHANGE_RATE_LIMIT`. That code was not mapped, so the console showed a generic 500 and the admin could

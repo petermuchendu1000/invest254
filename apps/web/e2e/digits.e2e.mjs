@@ -129,13 +129,26 @@ try {
     await page.keyboard.press('Escape');
     await rail.getByRole('tab', { name: /Closed/ }).click();
     check('desktop: the settled trade is listed under Closed', /EVEN/i.test(await rail.innerText()));
-    check('desktop: session footer counts the trade', /1 trades \(\dW \/ \dL\)/.test(await rail.locator('footer').innerText()));
+    check('desktop: session footer counts the trade (1 · xW yL)', /^1 · \dW \dL$/.test((await rail.getByTestId('session-trades').innerText()).trim()), await rail.getByTestId('session-trades').innerText());
     await rail.getByRole('tab', { name: /History/ }).click();
     await page.waitForTimeout(800);
     check('desktop: History tab lists saved contracts', /EVEN/i.test(await rail.innerText()));
 
+    // ── BUGLOG #91: another tab's settlement never lands on this screen ──
+    const page2 = await ctx.newPage();
+    await page2.goto(`http://${HOST}/`, { waitUntil: 'networkidle' });
+    await page2.waitForTimeout(2500);
+    const rail2 = page2.locator('aside').first();
+    const t2before = (await rail2.getByTestId('session-trades').innerText()).trim();
+    await page.getByRole('button', { name: /^Buy Even/ }).click();
+    await page.getByRole('dialog', { name: /You won|Trade lost/ }).waitFor({ timeout: 10000 }).catch(() => {});
+    await page2.waitForTimeout(1500);
+    check('two tabs: the other tab shows no result card and keeps its own count', (await page2.getByRole('dialog', { name: /You won|Trade lost/ }).count()) === 0 && (await rail2.getByTestId('session-trades').innerText()).trim() === t2before, `${t2before} -> ${await rail2.getByTestId('session-trades').innerText()}`);
+    await page2.close();
+    await page.keyboard.press('Escape');
+
     // ── BUGLOG #85: a refused open never freezes the screen ──
-    const closedCount = async () => Number((/(\d+) trades/.exec(await rail.locator('footer').innerText()) ?? [])[1] ?? 0);
+    const closedCount = async () => Number((/^(\d+) ·/.exec((await rail.getByTestId('session-trades').innerText()).trim()) ?? [])[1] ?? 0);
     const toastText = () => page.locator('[role="status"], [role="alert"]').allInnerTexts().then((a) => a.join(' | '));
     page.ws.refuseNext = true;
     await page.getByRole('button', { name: /^Buy Even/ }).click();
@@ -182,7 +195,7 @@ try {
     await sc.getByRole('button', { name: 'Scan' }).click();
     check('scanner: shows progress while scanning', await until(async () => /\d+%/.test(await sc.innerText()), 3000, 100));
     const runBtn = sc.getByRole('button', { name: 'Run' });
-    check('scanner: finds a best entry with its share', await until(() => runBtn.isVisible(), 15000) && /\d+%/.test(await sc.innerText()));
+    check('scanner: finds a best entry with its share and edge', await until(() => runBtn.isVisible(), 15000) && /\d+%/.test(await sc.innerText()) && /[+-]\d+\.\d/.test(await sc.innerText()), await sc.innerText());
     const beforeAi = await closedCount();
     await runBtn.click();
     check('scanner: Run closes the sheet and starts AUTO', !(await sc.isVisible()) && await until(() => stopBtn.isVisible(), 3000, 50));
