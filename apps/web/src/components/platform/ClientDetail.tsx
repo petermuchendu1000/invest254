@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { PlayerSummary, PlayerOverridesForm } from '@/components/platform/PlayerConsolePanels';
 import { OpenBrandButton } from '@/components/platform/OpenBrandButton';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { ConfirmButton } from '@/components/admin/ui';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { checkFeasible } from '@invest254/shared/config';
@@ -60,6 +61,22 @@ function SaveBar({ dirty, saving, onSave, onReset }: { dirty: number; saving: bo
   );
 }
 
+/**
+ * A form seeded from server data that NEVER overwrites unsaved edits (BUGLOG #110): when the server
+ * value changes (a save in another section, another admin, a refetch), the form follows it only if the
+ * admin has not changed anything since the last server value.
+ */
+function useSyncedForm<T>(init: T) {
+  const [form, setForm] = useState<T>(init);
+  const prev = useRef(init);
+  useEffect(() => {
+    const was = JSON.stringify(prev.current);
+    prev.current = init;
+    setForm((cur) => (JSON.stringify(cur) === was ? init : cur));
+  }, [init]);
+  return [form, setForm] as const;
+}
+
 const STATUSES = ['active', 'paused', 'archived'] as const;
 
 /** Identity, status, domain, locale & legal — all persisted via PATCH /platform/sites/:id. */
@@ -72,8 +89,7 @@ function IdentitySection({ site }: { site: SiteWithConfig }) {
     currency: site.currency ?? 'KES', locale: site.locale ?? 'en-KE',
     licence_line: site.licenceLine ?? '',
   }), [site]);
-  const [form, setForm] = useState(init);
-  useEffect(() => setForm(init), [init]);
+  const [form, setForm] = useSyncedForm(init);
   const set = (k: keyof typeof init) => (e: { target: { value: string } }) => setForm((s) => ({ ...s, [k]: e.target.value }));
   const patch = useMemo(() => Object.fromEntries(Object.entries(form).filter(([k, v]) => v !== (init as Record<string, string>)[k])), [form, init]);
   const dirty = Object.keys(patch).length;
@@ -196,15 +212,20 @@ function EconomySection({ site }: { site: SiteWithConfig }) {
   const toast = useToast();
   const c = site.config;
   const init = useMemo(() => Object.fromEntries(EFIELDS.map((f) => [f.key, toField(c, f)])) as Record<EK, string>, [c]);
-  const [form, setForm] = useState<Record<EK, string>>(init);
-  useEffect(() => setForm(init), [init]);
+  const [form, setForm] = useSyncedForm<Record<EK, string>>(init);
 
   // Min withdrawal is CURRENCY-NATIVE (docs/25 §16): entered in the brand's own currency (e.g. 100 =>
   // $100 for a USD brand, 2000 => KES 2,000). The API converts it to the enforced KES-cents floor at
   // the live FX rate, so KES brands are unchanged and foreign brands get an exact native minimum.
   const currency = site.currency || 'KES';
   const [minWd, setMinWd] = useState<string>(c.minWithdrawalNative != null ? String(c.minWithdrawalNative) : '');
-  useEffect(() => setMinWd(c.minWithdrawalNative != null ? String(c.minWithdrawalNative) : ''), [c.minWithdrawalNative]);
+  const minWdPrev = useRef(minWd);
+  useEffect(() => {
+    const next = c.minWithdrawalNative != null ? String(c.minWithdrawalNative) : '';
+    setMinWd((cur) => (cur === minWdPrev.current ? next : cur));   // keep an unsaved edit
+    minWdPrev.current = next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.minWithdrawalNative]);
 
   const patch = useMemo(() => {
     const out: Record<string, number> = {};
@@ -363,7 +384,7 @@ function PeopleSection({ site }: { site: SiteWithConfig }) {
           {adminRows.map((u) => (
             <li key={u.userId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
               <span><span className="font-medium">@{u.username}</span> <span className="text-muted">{u.phone}</span></span>
-              <Button size="sm" variant="outline" disabled={action.isPending} onClick={() => setRole(u.userId, 'player', `@${u.username} is no longer a brand admin`)}>Remove</Button>
+              <ConfirmButton label="Remove" confirmLabel="Remove admin" variant="outline" busy={action.isPending} onConfirm={() => setRole(u.userId, 'player', `@${u.username} removed`)} />
             </li>
           ))}
           {!adminRows.length ? <li className="px-3 py-2 text-sm text-muted">{admins.isLoading ? 'Loading…' : 'No brand admin yet.'}</li> : null}
@@ -445,8 +466,7 @@ function LegalSection({ site }: { site: SiteWithConfig }) {
   const toast = useToast();
   const lc = (site.legalCopy ?? {}) as Record<string, string>;
   const init = useMemo(() => ({ terms: lc.terms ?? '', privacy: lc.privacy ?? '', responsible: lc.responsible ?? '', about: lc.about ?? '' }), [site]);
-  const [form, setForm] = useState(init);
-  useEffect(() => setForm(init), [init]);
+  const [form, setForm] = useSyncedForm(init);
   const dirty = JSON.stringify(form) !== JSON.stringify(init);
   const FIELDS: [keyof typeof init, string][] = [['terms', 'Terms & Conditions'], ['privacy', 'Privacy Policy'], ['responsible', 'Responsible Gaming'], ['about', 'About']];
   return (
