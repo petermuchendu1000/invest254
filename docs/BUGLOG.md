@@ -5,6 +5,54 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #86 — Payout mode: the second side used the first side's stake, so it paid a different amount than typed — FIXED (branch `fix/deriv-auto-ai`, web only)
+- **What:** in Payout mode the stake was derived from the PRIMARY side's odds only. For example, a Matches/Differs
+  payout typed as 100 staked the Matches stake on Differs and paid about 11, not 100.
+- **Fix:** `stakeFor(side)` derives each side's stake from its own win probability. Manual trades, AUTO and each
+  button's figure use it.
+
+## #85 — A refused trade froze the Deriv screen "in play" for good (manual and AUTO) — FIXED (branch `fix/deriv-auto-ai`, web only; engine untouched)
+- **What:** when the engine refused a digit open (insufficient balance, stake limits, one contract per market,
+  paused play), the screen kept its local "pending" contract. After that, every tap said "Trade in progress" and
+  AUTO silently stopped placing, until a reload. The same happened when the socket was offline at the moment
+  of the tap, because the contract was marked pending before the send.
+- **Root cause:** the engine answers a refused open with an `error` frame. The socket provider only toasted it,
+  and the screen had no way to learn that its open was refused.
+- **Fix:**
+  - The provider counts unacknowledged digit opens. An `error` while one is outstanding is that open's refusal,
+    and it goes to `onDigitRejected` listeners. `openDigit` returns false when nothing was sent, and the screen
+    only marks a contract pending after a successful send.
+  - The screen clears the pending contract on a refusal, and AUTO stops instead of retrying the same refusal.
+  - A 20 s backstop clears any contract that never settles and re-syncs history.
+  - Engine codes now read in plain words ("Insufficient balance · Top up or lower the stake") instead of
+    "Trade rejected · INSUFFICIENT_FUNDS".
+- **Perf (same change):** the 250 ms loop re-rendered the whole screen four times a second even without a new tick.
+  It was also torn down and rebuilt on every balance or stake change. It now re-renders only on a new tick, and
+  one interval lives for the screen's lifetime (it reads a ref).
+- **Tests:** digits.e2e.mjs routes the socket and refuses the next open. It checks the plain-words reason, that
+  nothing is left in play, and that the next trade goes through.
+
+## #84 — AUTO could not be started again after a run finished; the AI scanner only "loaded" and never traded, and could get stuck — FIXED (branch `fix/deriv-auto-ai`, web only)
+- **What (owner):** "After clicking the auto button, once it completes the rounds, clicking again does not do
+  anything" and "The AI functionality on loading best conditions and clicking the button does not work".
+- **Root causes:**
+  - Target and stop loss were compared to the SESSION P&L, which never reset. After a run hit its target, every
+    new run was already "at target" and stopped on its first tick.
+  - "Load Deep Scanner Bot" only switched the market and highlighted a button for 5 s. Nothing traded.
+  - Closing the scanner mid-scan left `scanning` true forever, so both buttons stayed disabled until a reload.
+  - AUTO stopped silently. It also looped for ever without trading when the martingale stake exceeded the balance
+    but was below the minimum.
+- **Fix:**
+  - `lib/game/autoBot.ts` (pure, 6 unit tests) gives each run its own P&L baseline, trade count and loss streak.
+    It stops on target / stop loss / funds / below-minimum stake with a reason. The stop shows a
+    numbers-only summary (for example "Target hit · +240 KES · 3").
+  - The scanner is now Scan → Run. Run loads the best entry and starts AUTO on its side at once, with the current
+    stake, target, stop loss and multiplier. The scan always ends.
+  - Copy cut to numbers: progress %, the index being scanned, and the share.
+- **Tests:** digits.e2e.mjs checks two consecutive AUTO runs that both trade and stop, and the summary. It checks
+  that Scan shows progress and a best entry, that Run closes the sheet and the bot trades and stops by itself,
+  and that the scanner is usable after closing it mid-scan. 53/53.
+
 ## #83 — A new demo account showed 0 until the player found "Refresh demo balance"; a USD brand's demo was KES 10,000 (≈ $77) — FIXED (branch `fix/deriv-demo-money`, migration 0169; engine untouched)
 - **What:** a player who signed up and switched to Demo saw a 0 balance and could not trade until they opened the
   account menu and pressed "Refresh demo balance". On the USD brand (muchwins) the refill was KES 10,000, shown as
