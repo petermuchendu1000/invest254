@@ -5,6 +5,47 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #83 — A new demo account showed 0 until the player found "Refresh demo balance"; a USD brand's demo was KES 10,000 (≈ $77) — FIXED (branch `fix/deriv-demo-money`, migration 0169; engine untouched)
+- **What:** a player who signed up and switched to Demo saw a 0 balance and could not trade until they opened the
+  account menu and pressed "Refresh demo balance". On the USD brand (muchwins) the refill was KES 10,000, shown as
+  about $77, not $10,000.
+- **Root cause:** `wallets.demo_balance` defaults to 0 and was only funded by the manual refresh
+  (`fn_topup_demo_account`, a fixed KES 1,000,000-cent target).
+- **Fix:**
+  - The switch to Demo (`demo.pg.ts setMode`) funds the demo account when it cannot cover the brand's minimum
+    stake (new or spent). The switch response carries the funded wallet, so the pill shows 10,000 at once.
+  - The target is 10,000 of the brand currency, converted to KES cents at the live rate and rounded up so it
+    never reads 9,999.99 (`demoTargetCents`). `fn_topup_demo_account` takes that target, bounded to
+    KES 1,000–100M, and callable by service_role only.
+  - Marketers keep their own demo flow.
+- **Tests:**
+  - demo1.pg.test.ts (real schema): the first switch opens funded; USD opens at $10,000; a spent demo refills on
+    the next switch; a balance that can still trade is left alone; the marketer is untouched.
+  - e2e_account_demo_mode.py §G: target, no-op, 2-arg compatibility, bounds, ledger, grants. 34/34.
+  - account.e2e.mjs: "a new demo account opens at 10,000 (no refresh)".
+
+## #82 — Demo money showed as withdrawable, and a withdrawal in Demo took REAL money — FIXED (branch `fix/deriv-demo-money`, migration 0169; engine untouched)
+- **What (owner):** "users can withdraw demo money".
+- **Evidence:**
+  - In Demo, the wallet sheet's "Available to withdraw" and the 25/50/75/Max chips used `wallet.real`, which is
+    the ACTIVE account's balance, so the demo balance was offered.
+  - `fn_create_withdrawal` had no mode check and debits `real_balance`. A player with real money who withdrew
+    "their demo balance" silently lost real money. A player without real money got a confusing
+    "Insufficient balance" for a figure the sheet said was available.
+- **Fix (defence in depth):**
+  - The API refuses `DEMO_ACCOUNT` (409) before any money path runs. Marketers are demo-locked and keep their
+    demo transfer.
+  - `fn_create_withdrawal` refuses `DEMO_ACCOUNT` under the wallet row lock, so a switch cannot race it.
+  - Web: `walletFigures()` is the one source for the wallet figures. Withdrawable is the Real cash only, and 0 in
+    Demo. In Demo the sheet shows the Real balance and a single "Switch to Real" button, with no amount entry.
+    The sheet header reads the Real account (Real balance / Withdrawable).
+- **Tests:**
+  - figures.test.ts (5).
+  - app.demo1.test.ts: DEMO_ACCOUNT in demo; marketer and Real reach the service.
+  - e2e_account_demo_mode.py §E: demo-only, real+demo refused with nothing debited, Real proceeds, and demo is
+    never counted.
+  - account.e2e.mjs: the sheet, the API refusal, and no money moved.
+
 ## #81 — Digits screen: Markets picker, Trade types sheet and scanner list to the mock; Multipliers built but never reachable — FIXED (branch `ui/deriv-markets-tradetypes`, web only; engine untouched)
 - **What (owner's Deriv mocks):**
   - The instrument menu was a plain list: no categories, search or favourites.
