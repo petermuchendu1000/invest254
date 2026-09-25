@@ -61,9 +61,29 @@ try {
     check('console: no page errors', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
 
+  // ── 1b. Stake limits in the brand currency → the player's pills (STAKE-1, BUGLOG #87) ──
+  // start from a different saved value so the run is repeatable
+  await api(`/platform/sites/${SITE}/stake-limits`, OWNER_TOKEN, { method: 'PUT', body: JSON.stringify({ min: 300, max: 60000 }) });
+  { const { ctx, page, errors } = await session(OWNER_TOKEN, `${CONSOLE}/platform/clients/${SITE}?tab=economy`);
+    const card = page.getByTestId('stake-limits');
+    check('stake: the Economy tab has the Stake card', await until(() => card.isVisible(), 8000));
+    await card.getByLabel(/^Min/).fill('252');
+    check('stake: a minimum that is not a multiple of 5 is refused before saving', await card.getByRole('alert').isVisible() && await card.getByRole('button', { name: 'Save' }).isDisabled());
+    await card.getByLabel(/^Min/).fill('250');
+    await card.getByLabel(/^Max/).fill('50000');
+    check('stake: the preview shows the pills (min ×1 2 4 5 10 20)', /KES 250\s*KES 500\s*KES 1k\s*KES 1\.25k\s*KES 2\.5k\s*KES 5k/.test(await card.innerText()), await card.innerText());
+    await card.getByRole('button', { name: 'Save' }).click();
+    const cfg = async () => (await api(`/game/config?site=${HOST}`, null)).body;
+    check('stake: saved — the public config carries 250 / 50,000 and the engine limits in cents', await until(async () => { const c = await cfg(); return c.minStakeNative === 250 && c.maxStakeNative === 50000 && c.minStakeCents === 25000 && c.maxStakeCents === 5000000; }, 6000), JSON.stringify(await cfg()));
+    check('stake console: no page errors', errors.length === 0, errors.join(' | '));
+    await ctx.close(); }
+
   const player = await session(TOKEN, `http://${HOST}/`);
   const { page } = player;
   const header = page.locator('header');
+
+  check('stake: the player sees pills 250 · 500 · 1k · 1.25k · 2.5k · 5k', await until(async () => (await page.getByTestId('stake-pills').innerText()).replace(/\s+/g, ' ').trim() === '250 500 1k 1.25k 2.5k 5k', 6000), await page.getByTestId('stake-pills').innerText().catch(() => ''));
+  check('stake: the stake starts at the minimum pill', (await page.getByLabel('Stake amount').first().inputValue()) === '250');
 
   // ── 2. Real / Demo switch ──
   const pill = page.getByRole('button', { name: /account, .*Switch account$/ }).first();

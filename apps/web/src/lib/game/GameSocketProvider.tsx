@@ -206,6 +206,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   // Digit opens sent and not yet acknowledged: an 'error' frame while one is outstanding is its refusal.
   const digitAwaitingRef = useRef(0);
   const digitRejectRef = useRef<Set<(e: { code: string; message: string }) => void>>(new Set());
+  const rejectDigit = (code: string, message: string) => {
+    digitAwaitingRef.current = Math.max(0, digitAwaitingRef.current - 1);
+    digitRejectRef.current.forEach((cb) => { try { cb({ code, message }); } catch { /* non-fatal */ } });
+  };
   const multListenersRef = useRef<Set<(e: MultEvent) => void>>(new Set());
 
   /** Keep ref + state in lockstep so socket handlers can read the current value. */
@@ -239,6 +243,19 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     return false;
   }, []);
 
+  // BUGLOG #88: the engine verifies `auth` asynchronously, so a trade sent in the moments after a
+  // (re)connect was refused AUTH_REQUIRED ("Log in to trade" while signed in). Trades wait for the
+  // auth answer (the `balance` frame) — at most a few seconds — then go out in order.
+  const authedRef = useRef(false);
+  const authQueueRef = useRef<Array<{ type: string; data: unknown; at: number }>>([]);
+  const sendTrade = useCallback((type: string, data: unknown): boolean => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== ws.OPEN) return false;
+    if (authedRef.current) { ws.send(JSON.stringify({ type, data })); return true; }
+    authQueueRef.current.push({ type, data, at: Date.now() });
+    return true;
+  }, []);
+
   const setWalletReal = useCallback(
     (real: number, currency?: string, bonus?: number) => {
       qc.setQueryData<WalletDto>(['wallet'], (old) =>
@@ -257,7 +274,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         toast.push({ tone: 'error', title: 'Log in to trade' });
         return;
       }
-      if (!send('open_position', input)) {
+      if (!sendTrade('open_position', input)) {
         toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — try again shortly.' });
         return;
       }
@@ -312,7 +329,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         toast.push({ tone: 'error', title: 'Log in to trade' });
         return false;
       }
-      if (!send('open_digit', input)) {
+      if (!sendTrade('open_digit', input)) {
         toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — try again shortly.' });
         return false;
       }
@@ -338,7 +355,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         toast.push({ tone: 'error', title: 'Log in to trade' });
         return;
       }
-      if (!send('open_multiplier', input)) {
+      if (!sendTrade('open_multiplier', input)) {
         toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — try again shortly.' });
       }
     },
@@ -455,6 +472,16 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         case 'balance': {
           const d = data as BalanceData;
           if (typeof d?.real === 'number') setWalletReal(d.real, d.currency, d.bonus);
+          if (!authedRef.current) {
+            // the auth answer: release trades queued while it was verified (drop any older than 8 s)
+            authedRef.current = true;
+            const q = authQueueRef.current.splice(0);
+            const ws = wsRef.current;
+            for (const m of q) {
+              if (Date.now() - m.at > 8_000) { if (m.type === 'open_digit') rejectDigit('NOT_CONNECTED', ''); continue; }
+              ws?.send(JSON.stringify({ type: m.type, data: m.data }));
+            }
+          }
           break;
         }
         case 'position_opened': {
@@ -582,12 +609,17 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         }
         case 'error': {
           const d = data as WsErrorData;
-          if (digitAwaitingRef.current > 0) {
-            // BUGLOG #85: a refused digit open used to leave the screen "in play" forever
-            digitAwaitingRef.current -= 1;
-            const e = { code: String(d.code ?? ''), message: String(d.message ?? '') };
-            digitRejectRef.current.forEach((cb) => { try { cb(e); } catch { /* non-fatal */ } });
+          // Signed in but the socket forgot us (restart / race): authenticate again, quietly.
+          if (d.code === 'AUTH_REQUIRED' && tokenRef.current) {
+            authedRef.current = false;
+            send('auth', { token: tokenRef.current });
           }
+          if (d.code === 'AUTH_INVALID' || d.code === 'AUTH_SITE_MISMATCH') {
+            // auth will not come: nothing queued behind it may wait
+            for (const m of authQueueRef.current.splice(0)) if (m.type === 'open_digit') rejectDigit(d.code, '');
+          }
+          // BUGLOG #85: a refused digit open used to leave the screen "in play" forever
+          if (digitAwaitingRef.current > 0) rejectDigit(String(d.code ?? ''), String(d.message ?? ''));
           const a = activeRef.current;
           if (a && !a.positionId) {
             // optimistic open never acked → roll back and re-sync balance
@@ -623,6 +655,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
 
       ws.onopen = () => {
         attemptRef.current = 0;
+        authedRef.current = false;
         setStatus('open');
         if (tokenRef.current) ws.send(JSON.stringify({ type: 'auth', data: { token: tokenRef.current } }));
         heartbeat.current = setInterval(() => {
@@ -643,6 +676,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       ws.onclose = () => {
         if (heartbeat.current) clearInterval(heartbeat.current);
         heartbeat.current = null;
+        authedRef.current = false;
+        // queued trades never left: the screen must not wait for them
+        for (const m of authQueueRef.current.splice(0)) if (m.type === 'open_digit') rejectDigit('NOT_CONNECTED', '');
         if (!closedRef.current) {
           setStatus('closed');
           scheduleReconnect();

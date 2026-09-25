@@ -2,7 +2,6 @@
 
 import { FitText } from '@/components/ui/FitText';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/cn';
 import { DigitHeatmap } from '@/components/game/digits/DigitHeatmap';
 import { DerivChart } from '@/components/game/digits/DerivChart';
@@ -22,9 +21,9 @@ import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocket, type DigitSettledData } from '@/lib/game/GameSocketProvider';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
 import { payoutForStake, stakeForPayout } from '@/lib/game/digitPayout';
-import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
-import { api } from '@/lib/api/endpoints';
-import { useBrand } from '@/lib/brand/BrandProvider';
+import { useStakeLimits } from '@/lib/game/useStakeLimits';
+import { pillLabel } from '@/lib/game/stakeLadder';
+import { useDisplayMoney } from '@/lib/money';
 import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
 import { afterSettle, nextAuto, runPnl, startRun, type AutoRun, type AutoStop } from '@/lib/game/autoBot';
 import { useSession } from '@/lib/auth/session';
@@ -101,8 +100,7 @@ export function DigitsTradeScreen() {
   const [instId, setInstId] = useState<string>(DEFAULT_INSTRUMENT_ID);
   const instrument: Instrument = instrumentById(instId);
   const { getInstrumentTicks, getLastInstrumentTick, instrumentResetKey, subscribeInstrument, openDigit, onDigitSettled, onDigitRejected } = useGameSocket();
-  const { fmt, both, symbol, isForeign, toKesCents, toDisplay, limit } = useDisplayMoney();
-  const brand = useBrand();
+  const { both, symbol, isForeign, toKesCents, toDisplay } = useDisplayMoney();
   const token = useSession((s) => s.token);
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openAuth = useAuthUi((s) => s.openAuth);
@@ -121,16 +119,11 @@ export function DigitsTradeScreen() {
   const [drawMode, setDrawMode] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
 
-  // Site stake limits. Money of record is KES cents; rendered in the brand's display currency.
-  // Foreign brands floor at USD_LIMITS.minStake ($5) and never below the site's KES min (mirrors
-  // BetPanel via `limit`). This is the SINGLE source of the min so the UI never shows raw cents.
-  const { data: gameConfig } = useQuery({
-    queryKey: ['gameConfig', brand.slug],
-    queryFn: () => api.gameConfig(brand.slug),
-    staleTime: 5 * 60_000,
-  });
-  const minStakeCents = limit(USD_LIMITS.minStake, gameConfig?.minStakeCents ?? 25000);
-  const maxStakeCents = gameConfig?.maxStakeCents;
+  // Stake limits + pills (STAKE-1): the admin's range in the brand currency, pills in multiples of 5
+  // from the minimum (×1 2 4 5 10 20), and the KES cents the client validates against.
+  const limits = useStakeLimits();
+  const minStakeCents = limits.minCents;
+  const maxStakeCents = limits.maxCents;
 
   const [market, setMarket] = useState<Market>('evenodd');
   // DERIV-UI: Multipliers sits beside the digits contracts (Demo account only — see TradeTypes.tsx).
@@ -145,9 +138,9 @@ export function DigitsTradeScreen() {
   const [tfOpen, setTfOpen] = useState(false);
   const tfRef = useRef<HTMLDivElement | null>(null);
 
-  const presets = useMemo(() => (isForeign ? [5, 10, 25, 50, 100, 250] : [50, 100, 200, 500, 1000, 5000]), [isForeign]);
-  const step = isForeign ? 1 : 50;
-  const [stake, setStake] = useState<string>(String(isForeign ? USD_LIMITS.minStake : 200));
+  const presets = limits.ladder;
+  const step = isForeign ? 5 : 50;
+  const [stake, setStake] = useState<string>(String(limits.min));
   // Stake <-> Payout entry. In 'payout' mode the input is a TARGET gross payout and the stake is
   // derived from the PRIMARY outcome's odds (mirrors the reference, whose readout tracks the green
   // side). `stake`/`stakeCents` stay the single source of truth for place()/onCta/AUTO.
@@ -177,14 +170,14 @@ export function DigitsTradeScreen() {
         ? `Maximum stake is ${both(maxStakeCents)}`
         : null;
 
-  // Once site config loads, raise the stake to the minimum so the default is never below it.
+  // Once the limits load (or change), keep the stake inside them: never below the minimum pill.
   useEffect(() => {
-    if (!gameConfig) return;
-    const minU = isForeign ? Math.ceil(toDisplay(minStakeCents)) : Math.round(toDisplay(minStakeCents));
+    if (!limits.ready) return;
     const cur = Number.parseFloat(stake);
-    if (!Number.isFinite(cur) || cur < minU) setStake(String(minU));
+    if (!Number.isFinite(cur) || cur < limits.min) setStake(String(limits.min));
+    else if (limits.max != null && cur > limits.max) setStake(String(limits.max));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameConfig, minStakeCents, isForeign]);
+  }, [limits.ready, limits.min, limits.max]);
 
   // AUTO-bot params (display-currency units for money, plain number for the multiplier).
   const [targetProfit, setTargetProfit] = useState(isForeign ? '20' : '2000');
@@ -454,7 +447,8 @@ export function DigitsTradeScreen() {
   const stepStake = (dir: 1 | -1) => {
     const cur = amountMode === 'payout' ? payoutInput : stake;
     const setter = amountMode === 'payout' ? setPayoutInput : setStake;
-    const n = Math.max(0, (Number.parseFloat(cur) || 0) + dir * step);
+    const floor = amountMode === 'stake' ? limits.min : 0;
+    const n = Math.max(floor, (Number.parseFloat(cur) || 0) + dir * step);
     setter(isForeign ? String(Math.round(n * 100) / 100) : String(Math.round(n)));
   };
 
@@ -686,7 +680,7 @@ export function DigitsTradeScreen() {
         {marketTabs('console')}
 
         {multi ? (
-          <MultipliersPanel getLastTick={getLastInstrumentTick} resetKey={instId} instrumentId={instId} minStakeCents={minStakeCents} />
+          <MultipliersPanel getLastTick={getLastInstrumentTick} resetKey={instId} instrumentId={instId} />
         ) : (<>
 
         {/* SELECT DIGIT — barrier (Over/Under) or prediction (Match/Differ) */}
@@ -759,16 +753,15 @@ export function DigitsTradeScreen() {
         </div>
 
         {/* presets */}
-        <div className="grid grid-cols-6 gap-1.5">
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }} data-testid="stake-pills">
           {presets.map((q) => {
             const active = Number(amountMode === 'payout' ? payoutInput : stake) === q;
-            const belowMin = amountMode === 'stake' && toKesCents(q) < minStakeCents;
             return (
-              <button key={q} type="button" disabled={belowMin}
+              <button key={q} type="button" aria-pressed={active} aria-label={`Stake ${q}`}
                 onClick={() => (amountMode === 'payout' ? setPayoutInput(String(q)) : setStake(String(q)))}
-                className={cn('rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12px)] font-medium tabular-nums transition disabled:cursor-not-allowed disabled:opacity-30',
+                className={cn('rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12px)] font-medium tabular-nums transition',
                   active ? 'border-accent bg-accent/15 text-fg' : 'border-border bg-bg/40 text-muted hover:text-fg')}>
-                {isForeign ? `${symbol}${q}` : q >= 1000 ? `${q / 1000}k` : q}
+                {isForeign ? symbol : ''}{pillLabel(q)}
               </button>
             );
           })}

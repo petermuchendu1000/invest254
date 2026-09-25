@@ -5,6 +5,55 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #89 — Saving the economy more than 6 times an hour showed "Something went wrong" (a bare 500) — FIXED (branch `feat/stake-ladder`, API only)
+- **What:** the DB guard `fn_guard_config_change_rate` (6 economy changes per brand per hour) raises
+  `CONFIG_CHANGE_RATE_LIMIT`. That code was not mapped, so the console showed a generic 500 and the admin could
+  not tell why the save failed.
+- **Fix:** it maps to 429 with "6 economy changes in the last hour for this brand. Try again later." The stake
+  card also skips re-writing an unchanged pair, so it does not use up the budget.
+
+## #88 — "Log in to trade" while signed in: a trade tapped right after the socket (re)connected was refused — FIXED (branch `feat/stake-ladder`, web only; engine untouched)
+- **What:** the engine verifies `auth` asynchronously (JWT, then a wallet read). A digit, multiplier or
+  rise/fall open that reached it before that finished was refused `AUTH_REQUIRED`. The player saw "Log in to
+  trade" while signed in. It hit anyone tapping during a reconnect (mobile networks), and it showed up as a
+  rare e2e flake.
+- **Fix:** the socket provider holds trades until the auth answer (the `balance` frame) and then sends them in
+  order.
+  - Anything older than 8 s is dropped as not sent, and the screen is told.
+  - On a close, or on `AUTH_INVALID` / `AUTH_SITE_MISMATCH`, queued digit opens are reported as not sent, so
+    nothing waits for ever.
+  - An unexpected `AUTH_REQUIRED` while signed in re-sends `auth` quietly.
+- **Test:** digits.e2e.mjs closes the socket, holds the next `auth` for 1.5 s and taps Buy during the gap. The trade
+  settles and there is no "Log in to trade".
+
+## #87 — Stake pills were fixed lists, not multiples of 5 from the admin's minimum; min/max only in KES — FIXED (branch `feat/stake-ladder`, migration 0170; engine untouched)
+- **What (owner):** "Stake pills should be in multiples of 5… if min is $5, the next pill is double, then quad,
+  then pent… dynamic based on the min stake… admin has UI to control min and max".
+- **Before:**
+  - Pills were hard-coded (USD 5 · 10 · 25 · 50 · 100 · 250; KES 50 · … · 5000). Some sat below the minimum and
+    were greyed out.
+  - Admins could set min/max stake only in KES cents.
+  - The classic panel had its own fixed chips, and Multipliers had none.
+- **Fix:**
+  - `site_stake_native` (0170, service_role only) holds min/max in the brand currency. Each is a multiple of
+    5, and the DB checks it too.
+  - `PUT /platform/sites/:id/stake-limits` validates the pair and writes the engine's KES-cents limits through the
+    normal economy path (versioned, audited): KES exactly, foreign currencies with a 10% FX margin so a rate move
+    never refuses a pill.
+  - `GET /game/config` returns `minStakeNative` / `maxStakeNative`.
+  - Player: `stakeLadder()` gives min ×1, 2, 4, 5, 10, 20, capped at max ($5 → 5 · 10 · 20 · 25 · 50 · 100). It is
+    never below what the server enforces. `useStakeLimits()` feeds the Deriv screen, Multipliers (new pills) and
+    the classic panel (first three pills).
+  - The stake starts at the minimum pill. The stepper moves in 5s ($) or 50s (KES) and never goes below the
+    minimum.
+  - Console → Economy has a Stake card: Min / Max in the brand currency, a live preview of the pills, and a
+    refusal before saving for any value that is not a multiple of 5.
+  - Server refetches no longer overwrite what the admin is typing.
+- **Tests:**
+  - stakeLadder.test.ts (7) and stakelimits.test.ts (3).
+  - app.stakelimits.test.ts: gate, validation, USD margin, KES exact, no re-write, no rate → 503.
+  - account.e2e.mjs: console refusal, preview, save → public config, and the player's pills and starting stake.
+
 ## #86 — Payout mode: the second side used the first side's stake, so it paid a different amount than typed — FIXED (branch `fix/deriv-auto-ai`, web only)
 - **What:** in Payout mode the stake was derived from the PRIMARY side's odds only. For example, a Matches/Differs
   payout typed as 100 staked the Matches stake on Differs and paid about 11, not 100.

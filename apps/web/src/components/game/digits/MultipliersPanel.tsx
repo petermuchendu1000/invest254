@@ -5,7 +5,11 @@ import { cn } from '@/lib/cn';
 import type { InstrumentTick } from '@/lib/game/useInstrument';
 import { useGameSocket, type MultEvent, type MultOpenedData } from '@/lib/game/GameSocketProvider';
 import { useDisplayMoney } from '@/lib/money';
-import { useWallet } from '@/lib/wallet/hooks';
+import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
+import { useStakeLimits } from '@/lib/game/useStakeLimits';
+import { pillLabel } from '@/lib/game/stakeLadder';
+import { useAuthUi } from '@/lib/auth/ui';
+import { useToast } from '@/lib/toast/ToastProvider';
 import { useSession } from '@/lib/auth/session';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 
@@ -28,16 +32,27 @@ type CloseReason = 'manual' | 'tp' | 'sl' | 'stopout' | 'cancel';
 const num = (s: string) => { const n = Number.parseFloat(s); return Number.isFinite(n) ? n : 0; };
 const dcFeeCents = (stakeCents: number, min: number) => (min <= 0 ? 0 : Math.round(stakeCents * 0.02 * Math.sqrt(min)));
 
-export function MultipliersPanel({ getLastTick, resetKey, instrumentId, minStakeCents = 0 }: { getLastTick: () => InstrumentTick | null; resetKey: string; instrumentId: string; minStakeCents?: number }) {
+export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getLastTick: () => InstrumentTick | null; resetKey: string; instrumentId: string }) {
   const { fmt, symbol, isForeign, toKesCents } = useDisplayMoney();
   const token = useSession((s) => s.token);
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const { data: wallet } = useWallet();
   const { openMultiplier, closeMultiplier, onMultiplier } = useGameSocket();
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
+  const topupDemo = useTopupDemo();
+  const openAuth = useAuthUi((s) => s.openAuth);
+  const toast = useToast();
+  const limits = useStakeLimits();
 
-  // Start at the brand's minimum stake (at least KES 250-ish), so the first trade is never refused.
-  const [stake, setStake] = useState<string>(String(isForeign ? 10 : Math.max(200, Math.ceil(minStakeCents / 100))));
+  // Start at the brand's minimum pill, so the first trade is never refused.
+  const [stake, setStake] = useState<string>(String(limits.min));
+  useEffect(() => {
+    if (!limits.ready) return;
+    const n = num(stake);
+    if (n < limits.min) setStake(String(limits.min));
+    else if (limits.max != null && n > limits.max) setStake(String(limits.max));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limits.ready, limits.min, limits.max]);
   const [multiplier, setMultiplier] = useState(100);
   const [tpOn, setTpOn] = useState(false);
   const [tp, setTp] = useState(isForeign ? '5' : '500');
@@ -91,24 +106,36 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId, minStake
     return () => window.clearTimeout(t);
   }, [pendingDir]);
 
-  // Current price readout for the stats row (display only; the engine evaluates server-side).
+  // Current price readout for the stats row (display only). Re-renders only when the price moves.
   useEffect(() => {
+    let last = Number.NaN;
     const id = window.setInterval(() => {
-      const last = getLastTick();
-      if (last) setPrice(last.rate);
+      const t = getLastTick();
+      if (t && t.rate !== last) { last = t.rate; setPrice(t.rate); }
     }, 250);
     return () => window.clearInterval(id);
   }, [getLastTick]);
 
   const stepStake = (d: 1 | -1) => {
-    const s = Math.max(isForeign ? 0 : minStakeCents / 100, num(stake) + d * (isForeign ? 1 : 50));
+    let s = Math.max(limits.min, num(stake) + d * (isForeign ? 5 : 50));
+    if (limits.max != null) s = Math.min(limits.max, s);
     setStake(isForeign ? String(Math.round(s * 100) / 100) : String(Math.round(s)));
   };
 
   const open = (dir: Dir) => {
     if (position || pendingDir) return;
     if (!Number.isFinite(stakeCents) || stakeCents <= 0) return;
-    if (!token || stakeCents > spendable) { openDeposit({ amountCents: stakeCents }); return; }
+    if (!token) { openAuth('login'); return; }
+    if (stakeCents < limits.minCents || (limits.maxCents !== undefined && stakeCents > limits.maxCents)) {
+      toast.push({ tone: 'error', title: stakeCents < limits.minCents ? `Min ${symbol}${limits.min}` : `Max ${symbol}${limits.max}` });
+      return;
+    }
+    if (stakeCents > spendable) {
+      // Multipliers are Demo-only: refill the demo account in place (never the real deposit sheet).
+      if (wallet?.mode === 'demo') topupDemo.mutate(undefined, { onSuccess: (r) => toast.push({ tone: 'success', title: 'Demo refilled', description: fmt(r.demoBalance) }) });
+      else openDeposit({ amountCents: stakeCents });
+      return;
+    }
     setPendingDir(dir);
     openMultiplier({
       instrumentId,
@@ -159,10 +186,10 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId, minStake
           <div className="grid grid-cols-2 gap-2">
             {position.dcUntilMs && dcRemaining > 0 ? (
               <div className="rounded-xl border border-border bg-surface px-3 py-2.5 text-center text-[11px] text-muted">
-                Deal cancellation · auto-refund on stop-out · {Math.ceil(dcRemaining / 60000)}m left
+                DC · {Math.ceil(dcRemaining / 60000)}m
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-border px-3 py-2.5 text-center text-[11px] text-muted">No deal cancellation</div>
+              <div className="rounded-xl border border-dashed border-border px-3 py-2.5 text-center text-[11px] text-muted">DC off</div>
             )}
             <button type="button" onClick={() => closeMultiplier(position.positionId)}
               className="rounded-xl bg-accent px-3 py-2.5 text-sm font-extrabold text-accent-fg hover:opacity-90">
@@ -188,6 +215,15 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId, minStake
             </div>
             <button type="button" onClick={() => stepStake(1)} aria-label="Increase stake"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-2 text-base font-bold text-fg hover:border-accent/60">+</button>
+          </div>
+          <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${limits.ladder.length}, minmax(0, 1fr))` }}>
+            {limits.ladder.map((q) => (
+              <button key={q} type="button" aria-pressed={num(stake) === q} aria-label={`Stake ${q}`} onClick={() => setStake(String(q))}
+                className={cn('rounded-lg border py-1.5 text-xs font-medium tabular-nums transition',
+                  num(stake) === q ? 'border-accent bg-accent/15 text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg')}>
+                {isForeign ? symbol : ''}{pillLabel(q)}
+              </button>
+            ))}
           </div>
 
           {/* Multiplier */}
@@ -230,12 +266,12 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId, minStake
             <button type="button" disabled={pendingDir !== null} onClick={() => open('up')}
               className="flex flex-col items-start gap-0.5 rounded-xl bg-up px-3.5 py-2.5 text-left text-white transition hover:opacity-90 disabled:opacity-50">
               <span className="text-sm font-extrabold">{pendingDir === 'up' ? 'Opening…' : 'Up'}</span>
-              <span className="text-[10px] font-semibold text-white/85">Profit if price rises · x{multiplier}</span>
+              <span className="text-[10px] font-semibold tabular-nums text-white/85">x{multiplier}</span>
             </button>
             <button type="button" disabled={pendingDir !== null} onClick={() => open('down')}
               className="flex flex-col items-start gap-0.5 rounded-xl bg-down px-3.5 py-2.5 text-left text-white transition hover:opacity-90 disabled:opacity-50">
               <span className="text-sm font-extrabold">{pendingDir === 'down' ? 'Opening…' : 'Down'}</span>
-              <span className="text-[10px] font-semibold text-white/85">Profit if price falls · x{multiplier}</span>
+              <span className="text-[10px] font-semibold tabular-nums text-white/85">x{multiplier}</span>
             </button>
           </div>
         </>
