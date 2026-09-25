@@ -28,10 +28,17 @@ async function session(viewport) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // Pass-through socket so a test can make the engine "refuse" the next digit open (BUGLOG #85).
-  const ws = { refuseNext: false };
+  const ws = { refuseNext: false, holdAuthMs: 0, opens: 0, kill: () => {} };
   await page.routeWebSocket(/:8791|\/ws/, (sock) => {
     const server = sock.connectToServer();
+    ws.opens++;
+    ws.kill = () => sock.close();
     sock.onMessage((m) => {
+      if (ws.holdAuthMs && typeof m === 'string' && m.includes('"type":"auth"')) {
+        const hold = ws.holdAuthMs; ws.holdAuthMs = 0;
+        setTimeout(() => server.send(m), hold);                  // a slow auth after a reconnect
+        return;
+      }
       if (ws.refuseNext && typeof m === 'string' && m.includes('"open_digit"')) {
         ws.refuseNext = false;
         sock.send(JSON.stringify({ type: 'error', data: { code: 'ENGINE_ERROR', message: 'INSUFFICIENT_FUNDS' } }));
@@ -138,6 +145,17 @@ try {
     await page.getByRole('button', { name: /^Buy Even/ }).click();
     await page.getByRole('dialog', { name: /You won|Trade lost/ }).waitFor({ timeout: 10000 }).catch(() => {});
     check('refused open: the next trade goes through', await until(async () => (await closedCount()) === n0 + 1, 8000), String(await closedCount()));
+    await page.keyboard.press('Escape');
+
+    // ── BUGLOG #88: a trade tapped while a fresh socket is still signing in waits for it ──
+    const opens0 = page.ws.opens;
+    page.ws.holdAuthMs = 1500;
+    page.ws.kill();
+    await until(async () => page.ws.opens > opens0, 8000, 25);
+    const n1 = await closedCount();
+    await page.getByRole('button', { name: /^Buy Even/ }).click();
+    await page.getByRole('dialog', { name: /You won|Trade lost/ }).waitFor({ timeout: 12000 }).catch(() => {});
+    check('reconnect: a trade during sign-in goes through (no "Log in to trade")', await until(async () => (await closedCount()) === n1 + 1, 8000) && !/Log in to trade/.test(await toastText()), `${await closedCount()} ${await toastText()}`);
     await page.keyboard.press('Escape');
 
     // ── AUTO: a finished run can be started again (BUGLOG #84) ──

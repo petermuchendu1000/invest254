@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { checkFeasible } from '@invest254/shared/config';
-import { useUpdateSite, useSetSiteConfig, useSetSiteTheme, usePlatformSiteUsers, usePlatformUserAction } from '@/lib/platform/hooks';
+import { useStakeLimitsAdmin, useSetStakeLimits, useUpdateSite, useSetSiteConfig, useSetSiteTheme, usePlatformSiteUsers, usePlatformUserAction } from '@/lib/platform/hooks';
 import type { SiteWithConfig, SiteConfig, SiteUserRow } from '@/lib/platform/endpoints';
 import { deriveMinimalPalette } from '@/lib/brand/derivePalette';
 import { groupedPresets, presetForSeed } from '@/lib/brand/presets';
@@ -17,6 +17,7 @@ import { ThemeGallery } from '@/components/platform/ThemeGallery';
 import { useGameConfig } from '@/lib/admin/hooks';
 import { formatNumber } from '@/lib/format';
 import { formatKes } from '@invest254/shared/money';
+import { isMultipleOf5, pillLabel, stakeLadder } from '@/lib/game/stakeLadder';
 import { PageTabs, useTabParam } from '@/components/admin/Tabs';
 
 /** Expandable section (accordion) — remembers its own open state; the spine of Client Detail. */
@@ -120,8 +121,7 @@ type EK = 'targetWinRate' | 'houseEdge' | 'minStakeCents' | 'maxStakeCents' | 'd
 const EFIELDS: { key: EK; label: string; hint: string; kes?: boolean; pct?: boolean; step?: string }[] = [
   { key: 'targetWinRate', label: 'Win rate (%)', hint: 'Share of rounds a player wins', pct: true, step: '1' },
   { key: 'houseEdge', label: 'House edge (%)', hint: 'House margin; RTP = 100% − edge', pct: true, step: '0.5' },
-  { key: 'minStakeCents', label: 'Min stake (KES)', hint: 'Smallest stake', kes: true, step: '1' },
-  { key: 'maxStakeCents', label: 'Max stake (KES)', hint: 'Largest stake', kes: true, step: '1' },
+  // Min / max stake are set in the brand's own currency on the Stake card (STAKE-1).
   // Min withdrawal is edited separately as a CURRENCY-NATIVE value (docs/25 §16) — see EconomySection.
   { key: 'defaultDurationS', label: 'Round duration (s)', hint: '1–3600', step: '1' },
   { key: 'maxMultiplier', label: 'Max payout ×', hint: 'Cap on a single win', step: '0.1' },
@@ -135,6 +135,61 @@ const toField = (c: SiteConfig, f: (typeof EFIELDS)[number]): string => {
   if (f.pct) return String(Math.round(raw * 1000) / 10);
   return String(raw);
 };
+
+/**
+ * STAKE-1 (BUGLOG #87): min / max stake in the brand's own currency, multiples of 5. The player's
+ * pills are min ×1 2 4 5 10 20 up to max (previewed live). The API writes the engine's KES-cents limits.
+ */
+function StakeLimitsCard({ siteId, currency }: { siteId: string; currency: string }) {
+  const { data } = useStakeLimitsAdmin(siteId);
+  const save = useSetStakeLimits(siteId);
+  const toast = useToast();
+  const kes = currency === 'KES';
+  const fallback = (c: number | null | undefined) => (kes && c != null ? String(Math.round(c / 100)) : '');
+  const [min, setMin] = useState('');
+  const [max, setMax] = useState('');
+  // Server values fill the form only while the admin has not typed (a refetch never clobbers input).
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (!data || touched) return;
+    setMin(data.min != null ? String(data.min) : fallback(data.minStakeCents));
+    setMax(data.max != null ? String(data.max) : fallback(data.maxStakeCents));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, touched]);
+  const a = Number(min), b = Number(max);
+  const err = min === '' || max === '' ? null
+    : !isMultipleOf5(a) || a < 5 ? 'Min: multiple of 5'
+    : !isMultipleOf5(b) || b < a ? 'Max: multiple of 5, ≥ min'
+    : null;
+  const dirty = data ? String(data.min ?? '') !== min || String(data.max ?? '') !== max : false;
+  const pills = !err && min !== '' && max !== '' ? stakeLadder(a, b) : [];
+  const sym = kes ? 'KES ' : currency === 'USD' ? '$' : `${currency} `;
+  return (
+    <div className="rounded-brand border border-border bg-surface-2 p-3" data-testid="stake-limits">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-semibold text-fg">Stake</span>
+        <span className="text-xs text-muted">{currency}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Input type="number" inputMode="numeric" step="5" min="5" label={`Min (${currency})`} value={min} disabled={!data} onChange={(e) => { setTouched(true); setMin(e.target.value); }} />
+        <Input type="number" inputMode="numeric" step="5" min="5" label={`Max (${currency})`} value={max} disabled={!data} onChange={(e) => { setTouched(true); setMax(e.target.value); }} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label="Player stake pills">
+        {pills.map((p) => <span key={p} className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-semibold tabular-nums text-fg">{sym}{pillLabel(p)}</span>)}
+        {err ? <span className="text-xs text-down" role="alert">{err}</span> : null}
+      </div>
+      <div className="mt-3">
+        <Button size="sm" disabled={!!err || !dirty || min === '' || max === '' || save.isPending}
+          onClick={() => save.mutate({ min: a, max: b }, {
+            onSuccess: () => { setTouched(false); toast.push({ tone: 'success', title: 'Stake saved', description: `${sym}${a} – ${sym}${b}` }); },
+            onError: (e) => toast.push({ tone: 'error', title: 'Not saved', description: (e as Error).message }),
+          })}>
+          {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function EconomySection({ site }: { site: SiteWithConfig }) {
   const setConfig = useSetSiteConfig();
@@ -194,6 +249,7 @@ function EconomySection({ site }: { site: SiteWithConfig }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <StakeLimitsCard siteId={site.siteId} currency={currency} />
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted">
         <span title="Return to player: the share of stakes paid back over time">Return to player: <span className="font-medium text-fg tabular-nums">{((1 - c.houseEdge) * 100).toFixed(2)}%</span></span>
         <span>Settings version <span className="font-medium text-fg tabular-nums">{c.version}</span></span>

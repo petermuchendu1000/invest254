@@ -8,7 +8,9 @@ import { cn } from '@/lib/cn';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DisplayMoney as Money } from '@/lib/money';
-import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
+import { useStakeLimits } from '@/lib/game/useStakeLimits';
+import { pillLabel } from '@/lib/game/stakeLadder';
+import { useDisplayMoney } from '@/lib/money';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { api } from '@/lib/api/endpoints';
 import { useSession } from '@/lib/auth/session';
@@ -19,7 +21,6 @@ import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { LivePnl } from '@/components/game/LivePnl';
 
-const CHIP_CENTS = [25000, 50000, 100000];
 const DURATION_OPTIONS = [10, 30, 60, 120];
 // Stepper granularity for the +/- buttons on the stake field (KES).
 const STEP_KES = 50;
@@ -34,13 +35,11 @@ export function BetPanel() {
   const clearPending = useDepositUi((s) => s.clearPending);
 
   const brand = useBrand();
-  const { fmt, both, symbol, isForeign, toDisplay, toKesCents, currency, limit } = useDisplayMoney();
-  // Quick stakes in the ENTRY unit: fixed $ presets for foreign brands ($5/$10/$50/$100), the KES
-  // presets otherwise. Each chip's value is what lands in the stake field; KES cents are derived
-  // from it for validation/placing the trade.
-  const chips = isForeign
-    ? [5, 25, 100].map((v) => ({ key: v, value: v, label: `${symbol}${v}` }))
-    : CHIP_CENTS.slice(0, 3).map((c) => ({ key: c, value: centsToKes(c), label: String(centsToKes(c)) }));
+  const { fmt, both, symbol, isForeign, toDisplay, toKesCents, currency } = useDisplayMoney();
+  // Quick stakes (STAKE-1): the first pills of the brand's ladder — the admin's minimum, ×2, ×4 —
+  // every one a multiple of 5 in the brand currency.
+  const limits = useStakeLimits();
+  const chips = limits.ladder.slice(0, 3).map((v) => ({ key: v, value: v, label: `${isForeign ? symbol : ''}${pillLabel(v)}` }));
   const { data: config } = useQuery({
     queryKey: ['gameConfig', brand.slug],
     queryFn: () => api.gameConfig(brand.slug),
@@ -49,8 +48,8 @@ export function BetPanel() {
   const { data: wallet } = useWallet();
   const { status, activePosition, openPosition, sell } = useGameSocket();
 
-  const minStakeCents = limit(USD_LIMITS.minStake, config?.minStakeCents ?? 25000);
-  const maxStakeCents = config?.maxStakeCents;
+  const minStakeCents = limits.minCents;
+  const maxStakeCents = limits.maxCents;
   const defaultDurationS = config?.defaultDurationS ?? 10;
 
   const [stake, setStake] = useState<string>('');
@@ -61,13 +60,10 @@ export function BetPanel() {
   // "funds added" hint after a deposit settles. It never gates or re-fires the trade.
   const [resumeDir, setResumeDir] = useState<Direction | null>(null);
 
-  // Seed the stake with a sensible default (KES 250) once config arrives, never below the minimum.
+  // Seed the stake with the minimum pill once the limits load.
   useEffect(() => {
-    if (stake === '') {
-      const cents = Math.max(minStakeCents, 25000);
-      setStake(isForeign ? String(USD_LIMITS.minStake) : String(centsToKes(cents)));
-    }
-  }, [minStakeCents, stake, isForeign]);
+    if (stake === '' && limits.ready) setStake(String(limits.min));
+  }, [limits.ready, limits.min, stake]);
   useEffect(() => {
     if (config) setDurationS((d) => (d === 10 && defaultDurationS !== 10 ? defaultDurationS : d));
   }, [config, defaultDurationS]);
