@@ -1,13 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { centsToKes, kesToCents } from '@invest254/shared/money';
 import type { Direction } from '@invest254/shared';
 import { cn } from '@/lib/cn';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { DisplayMoney as Money } from '@/lib/money';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { pillLabel } from '@/lib/game/stakeLadder';
 import { useDisplayMoney } from '@/lib/money';
@@ -60,9 +59,13 @@ export function BetPanel() {
   // "funds added" hint after a deposit settles. It never gates or re-fires the trade.
   const [resumeDir, setResumeDir] = useState<Direction | null>(null);
 
-  // Seed the stake with the minimum pill once the limits load.
+  // Seed the stake with the minimum pill ONCE when the limits load (BUGLOG #103: re-seeding whenever
+  // the field was empty turned "delete, type 200" into "50200").
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (stake === '' && limits.ready) setStake(String(limits.min));
+    if (seededRef.current || !limits.ready) return;
+    seededRef.current = true;
+    if (stake === '') setStake(String(limits.min));
   }, [limits.ready, limits.min, stake]);
   useEffect(() => {
     if (config) setDurationS((d) => (d === 10 && defaultDurationS !== 10 ? defaultDurationS : d));
@@ -102,7 +105,7 @@ export function BetPanel() {
 
   const errorHint = (() => {
     if (!Number.isFinite(stakeCents)) return null;
-    if (!validStake) return `Minimum stake is ${both(minStakeCents)}.`;
+    if (!validStake) return `Min ${both(minStakeCents)}`;
     if (overMax && maxStakeCents !== undefined) return `Maximum stake is ${both(maxStakeCents)}.`;
     return null;
   })();
@@ -176,9 +179,6 @@ export function BetPanel() {
               ? 'Cash Out'
               : 'Auto-sells at expiry'}
         </Button>
-        <p className="text-center text-[11px] text-muted">
-          Trades settle automatically at the timer.
-        </p>
       </Card>
     );
   }
@@ -259,19 +259,12 @@ export function BetPanel() {
           <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-accent text-xs font-bold tabular-nums text-accent">
             {durationS}
           </span>
-          <span className="flex flex-col text-left leading-tight">
-            <span className="text-[10px] uppercase tracking-wide text-muted">Auto-sell</span>
-            <span className="text-xs text-fg">Trade duration</span>
-          </span>
+          <span className="text-xs text-muted">s</span>
         </button>
-        <div className="flex flex-col items-end leading-tight">
-          <span className="text-[10px] uppercase tracking-wide text-muted">Live P&amp;L</span>
-          <Money cents={0} className="text-sm font-semibold text-fg" />
-        </div>
       </div>
 
       {connecting ? (
-        <p className="text-center text-xs text-muted">Connecting to the live market…</p>
+        <p className="text-center text-xs text-muted">Connecting…</p>
       ) : null}
 
       {/* BUY / SELL — primary CTAs: largest, most saturated, gain/loss framed. */}
@@ -290,7 +283,6 @@ export function BetPanel() {
             </svg>
             BUY
           </span>
-          <span className="text-[10px] font-medium opacity-90">Price rises</span>
         </Button>
         <Button
           variant="down"
@@ -306,16 +298,11 @@ export function BetPanel() {
             </svg>
             SELL
           </span>
-          <span className="text-[10px] font-medium opacity-90">Price falls</span>
         </Button>
       </div>
 
       {resumeDir ? (
-        <p className="text-center text-[11px] font-medium text-up">
-          Funds added — tap {resumeDir === 'buy' ? 'BUY' : 'SELL'} to place your {fmt(stakeCents)} trade.
-        </p>
-      ) : !token ? (
-        <p className="text-center text-[11px] text-muted">Deposit to buy or sell.</p>
+        <p className="text-center text-[11px] font-semibold tabular-nums text-up">{resumeDir === 'buy' ? 'BUY' : 'SELL'} · {fmt(stakeCents)}</p>
       ) : null}
     </Card>
   );

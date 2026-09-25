@@ -74,8 +74,10 @@ function Bell() {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [open]);
   const items = data?.items ?? [];
   return (
@@ -88,7 +90,7 @@ function Bell() {
       {open ? (
         <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-xl border border-border bg-surface p-1.5 shadow-2xl">
           <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted">Notifications</div>
-          {items.length === 0 ? <p className="px-3 pb-3 text-[13px] text-muted">You’re all caught up.</p> : (
+          {items.length === 0 ? <p className="px-3 pb-3 text-[13px] text-muted">None</p> : (
             <ul className="max-h-80 overflow-y-auto">
               {items.map((n) => (
                 <li key={n.id} className="flex items-start gap-2 rounded-lg px-3 py-2 hover:bg-surface-2">
@@ -132,6 +134,12 @@ export function DigitsTopBar() {
   const setHistoryOpen = useDigitSession((s) => s.setHistoryOpen);
   const setHowToOpen = useDigitSession((s) => s.setHowToOpen);
   const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
