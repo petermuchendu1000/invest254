@@ -66,6 +66,9 @@ export default function UsersPage() {
 
   const [applied, setApplied] = useState<UsersFilter>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // A bulk action applies only to what is on screen (BUGLOG #109: rows hidden by a new filter stayed
+  // selected and were banned / cleared too).
+  useEffect(() => { setSelected(new Set()); }, [applied]);
 
   useEffect(() => {
     const id = setTimeout(() => {
@@ -118,7 +121,6 @@ export default function UsersPage() {
     <>
       <PageHeader
         title="Users"
-        subtitle="Every account on this brand. Click a name to manage one person; tick several to act on them together."
       />
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Quick filters">
@@ -249,10 +251,7 @@ function BulkBar({ ids, onDone }: { ids: string[]; onDone: () => void }) {
     }
     m.mutate(body, {
       onSuccess: (res) => {
-        const failMsg = res.failCount > 0
-          ? ` · ${res.failCount} failed${res.results.find((x) => !x.ok)?.error ? ` (${res.results.find((x) => !x.ok)!.error})` : ''}`
-          : '';
-        toast.push({ tone: res.failCount === 0 ? 'success' : 'error', title: `Bulk ${action}: ${res.okCount}/${res.total} ok`, description: `${res.okCount} succeeded${failMsg}.` });
+        toast.push({ tone: res.failCount === 0 ? 'success' : 'error', title: `${res.okCount}/${res.total} done`, ...(res.failCount ? { description: `${res.failCount} failed` } : {}) });
         if (res.failCount === 0) { setAction(''); setReason(''); setAmount(''); setTitle(''); setBodyText(''); onDone(); }
       },
       onError: (e) => toast.push({ tone: 'error', title: 'Bulk action failed', description: e instanceof ApiError ? e.message : 'Try again.' }),

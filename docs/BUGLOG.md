@@ -5,6 +5,55 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #108–#114 — Operator console bug hunt + minimal copy — FIXED (branch `fix/console-hunt`; API: one read-only route)
+- **#108 (money):**
+  - **Bug:** pressing Cancel on the reference prompt still marked a commission payout PAID, and Cancel on the
+    note prompt still APPROVED an advance, because `window.prompt()` returns null and that was treated as an
+    empty note.
+  - **Fix:** Cancel now does nothing.
+  - **Also:** many console actions failed silently: payout approve/paid/reject with a wrong owner password,
+    advance decisions, expenses, the platform master switches and banner, the global economy saves, and
+    manual pool distribution. All of them now show the server's reason (`useFailToast`).
+- **#109:**
+  - **Bug:** users ticked under one filter stayed selected after switching filter, so a bulk Ban or
+    Clear-balance also hit people no longer on screen.
+  - **Fix:** the selection clears when the filter changes. The bulk toast is now "3/3 done", with no raw
+    exception text.
+- **#110:**
+  - **Bug:** brand Economy / Identity / Legal forms were overwritten whenever the brand refetched (for
+    example after saving the Stake card on the same tab), losing unsaved edits.
+  - **Fix:** `useSyncedForm` follows server changes only while nothing has been edited. The native
+    min-withdrawal field works the same way.
+- **#111:**
+  - **Bug:** a marketer's commission rate always showed 20%, and "Update rate" wrote 20%.
+  - **Fix:** a new `GET /admin/affiliates/:id/rate` (brand-scoped; the F-44 matrix covers it) feeds the real
+    value. The button is disabled until the value changes.
+- **#112:** player overrides took win rate and house edge as 0–1 fractions, unlike every other editor. They are now
+  entered in % with the brand limits in %.
+- **#113 and other fixes:**
+  - Confirmation is now required before removing a brand admin and before turning a brand's withdrawals OFF.
+  - The ban toast read "Account band".
+  - The user page showed the raw role code.
+  - Reconciliation tiles were labelled `success` / `pending`.
+  - "TypeError: Failed to fetch" was shown as an error.
+  - Tables nested inside `TableWrap` broke the 640 px scroll on phones.
+  - Credit and Clear no longer both run while one is in flight.
+- **#114:**
+  - **Bug:** overview windows used UTC or the browser's midnight, and "last 30 days" covered 31 days. A
+    half-picked or reversed custom range showed all-time totals under a custom label.
+  - **Fix:** days are EAT (UTC+3), the window is exactly 30 days, and an incomplete range shows "—".
+- **Copy:**
+  - Prose subtitles removed from 22 console pages. Config now reads "N active brands".
+  - Removed the withdrawal-switch helper text, the global-economy per-field hints (one of them was wrong: "Fraction
+    of positions that win" on a % input) and the overrides paragraph (now "Blank = brand · win ≤ 40% · edge ≥ 5% ·
+    ×≤ 5").
+  - Kept: the irreversible-money warnings and confirm dialogs.
+- **Tests:**
+  - roles.e2e.mjs 198/198 (updated for %).
+  - app.commissionrate.test.ts.
+  - The scope matrix caught the new route answering 501 before its scope check. Fixed: scope is checked first.
+  - npm test 1206/1206. account 65/65, digits 55/55.
+
 ## #99–#107 — Player UI bug hunt, round 2 + minimal copy — FIXED (branch `fix/player-ui-hunt`, web only)
 - **#99:**
   - **Bug:** signing out (or a 401 reset, or signing in as someone else) left the previous player's cached

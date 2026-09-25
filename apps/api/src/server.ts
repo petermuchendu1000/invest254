@@ -871,6 +871,10 @@ async function buildDeps(): Promise<ApiDeps> {
       return Object.assign(mapConfigRow(row), { minStakeNative: nat(row.min_stake_native), maxStakeNative: nat(row.max_stake_native) });
     },
     stakeNative: makePgStakeNativeStore(q),
+    commissionRateOf: async (userId: string) => {
+      const r = await q.query("select commission_rate from affiliates where user_id = $1::uuid limit 1", [userId]);
+      return r.rows[0] ? Number(r.rows[0].commission_rate) : null;
+    },
     fxRate: kesToCurrencyRate,
     fairnessById: async (gameDayId: number): Promise<FairnessRecord | null> => {
       const r = await q.query(

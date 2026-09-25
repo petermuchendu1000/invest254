@@ -144,7 +144,6 @@ export default function WithdrawalsPage() {
     <>
       <PageHeader
         title="Withdrawals"
-        subtitle="Approve to pay the player by M-Pesa, or reject to return the money to their balance."
         actions={<WithdrawalAlertsToggle />}
       />
 
@@ -251,13 +250,17 @@ function WithdrawalsSwitch() {
 
   if (q.isLoading) return <div className="mb-4"><Skeleton className="h-16 w-full" /></div>;
 
-  const flip = () =>
+  // Turning withdrawals OFF halts every payout for the brand: ask first (BUGLOG #113). ON is safe.
+  const flip = () => {
+    if (enabled && !window.confirm('Stop all withdrawals for this brand?')) return;
+    doFlip();
+  };
+  const doFlip = () =>
     setEnabled.mutate(!enabled, {
       onSuccess: (r) =>
         toast.push({
           tone: r.enabled ? 'success' : 'error',
           title: r.enabled ? 'Withdrawals enabled' : 'Withdrawals DISABLED',
-          description: r.enabled ? 'Payouts resume for this brand.' : 'All new withdrawals (players + marketers) are halted.',
         }),
       onError: (e) => toast.push({ tone: 'error', title: "Couldn't change setting", description: e instanceof ApiError ? e.message : 'Try again.' }),
     });
@@ -268,12 +271,7 @@ function WithdrawalsSwitch() {
       <div className="flex min-w-0 flex-col">
         <span className="flex items-center gap-2 text-sm font-medium text-fg">
           <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${enabled ? 'bg-up' : 'bg-down'}`} />
-          {enabled ? 'Withdrawals are on for this brand' : 'Withdrawals are OFF for this brand'}
-        </span>
-        <span className="mt-0.5 text-xs text-muted">
-          {enabled
-            ? 'Turn off to stop all new withdrawals (players and marketers) straight away.'
-            : 'New requests are refused. You can still review the pending ones below.'}
+          {enabled ? 'Withdrawals on' : 'Withdrawals OFF'}
         </span>
       </div>
       <button

@@ -242,6 +242,8 @@ export interface ApiDeps {
   gameConfigForSite?(ref: string): Promise<(GameConfig | VersionedGameConfig) | null>;
   /** STAKE-1 (0170): stake limits in the brand's own currency + the FX rate used to enforce them. */
   stakeNative?: import("./stakelimits.js").StakeNativeStore | undefined;
+  /** A marketer's current commission rate (0..1), or null when not an affiliate. */
+  commissionRateOf?: ((userId: string) => Promise<number | null>) | undefined;
   fxRate?: ((currency: string) => Promise<number>) | undefined;
   /** Public fairness record for a game-day id (commitment always; seed only after reveal). */
   fairnessById(gameDayId: number): Promise<FairnessRecord | null>;
