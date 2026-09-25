@@ -107,7 +107,9 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
     }
     if (stakeCents > spendable) {
       // Multipliers are Demo-only: refill the demo account in place (never the real deposit sheet).
-      if (wallet?.mode === 'demo') topupDemo.mutate(undefined, { onSuccess: (r) => toast.push({ tone: 'success', title: 'Demo refilled', description: fmt(r.demoBalance) }) });
+      if (wallet?.mode === 'demo') topupDemo.mutate(undefined, { onSuccess: (r) => (r.demoBalance >= stakeCents
+        ? toast.push({ tone: 'success', title: 'Demo refilled', description: fmt(r.demoBalance) })
+        : toast.push({ tone: 'error', title: `Demo max ${fmt(r.demoBalance)}` })) });
       else openDeposit({ amountCents: stakeCents });
       return;
     }

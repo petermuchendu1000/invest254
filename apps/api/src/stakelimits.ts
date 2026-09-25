@@ -11,6 +11,8 @@ export interface StakeNativeStore {
   get(siteId: string): Promise<{ min: number; max: number } | null>;
   set(siteId: string, userId: string, min: number, max: number): Promise<void>;
   currency(siteId: string): Promise<string | null>;
+  /** The brand changed currency: native values no longer mean anything (BUGLOG #119). */
+  clear(siteId: string): Promise<void>;
 }
 
 export const FX_MARGIN = 0.1;
@@ -50,6 +52,9 @@ export function makePgStakeNativeStore(q: PgLike): StakeNativeStore {
          on conflict (site_id) do update set min_native = excluded.min_native, max_native = excluded.max_native,
            updated_by = excluded.updated_by, updated_at = now()`,
         [siteId, min, max, userId]);
+    },
+    async clear(siteId) {
+      await q.query("delete from site_stake_native where site_id = $1::uuid", [siteId]);
     },
     async currency(siteId) {
       const r = await q.query("select coalesce(currency, 'KES') as c from sites where id = $1::uuid", [siteId]);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
@@ -702,7 +702,8 @@ function CommissionRate({ id }: { id: string }) {
   const current = useCommissionRate(id);
   const serverPct = current.data?.rate != null ? String(Math.round(current.data.rate * 10000) / 100) : '';
   const [ratePct, setRatePct] = useState('');
-  useEffect(() => { if (serverPct && ratePct === '') setRatePct(serverPct); }, [serverPct, ratePct]);
+  const seeded = useRef(false);   // seed once: an admin can clear the field while typing
+  useEffect(() => { if (serverPct && !seeded.current) { seeded.current = true; setRatePct(serverPct); } }, [serverPct]);
   const pct = Number(ratePct);
   const valid = Number.isFinite(pct) && pct >= 0 && pct <= 100;
 

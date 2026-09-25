@@ -459,7 +459,10 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     // may not set them via a site patch — it requests them (addon flow) and the system admin grants.
     if ((ctx.claims?.role ?? "") !== "platform_superadmin" && ("chart_style" in patch || "trade_ui" in patch))
       throw new ApiError("ADDON_SYSTEM_ADMIN_ONLY", "price chart and trade interface are assigned by the system admin — request the change instead", 403);
-    return domain(() => deps.platform.updateSite(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
+    const out = await domain(() => deps.platform.updateSite(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
+    // a currency change voids stake limits set in the old currency (KES 50 must not become $50)
+    if ("currency" in patch && deps.stakeNative) await deps.stakeNative.clear(ctx.params.id!);
+    return out;
   });
 
   // ── STAKE-1 (0170): stake limits in the brand's own currency (multiples of 5). The engine keeps
