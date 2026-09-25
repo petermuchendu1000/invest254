@@ -28,8 +28,7 @@ export default function AccountPage() {
   if (!token) {
     return (
       <EmptyState
-        title="Sign in to view your account"
-        description="Log in or create an account to manage your profile."
+        title="Account"
         action={<Button onClick={() => openAuth('login')}>Log in</Button>}
       />
     );

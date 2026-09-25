@@ -294,24 +294,24 @@ export function DigitsTradeScreen() {
       // Every rejection communicates WHY — but only for MANUAL trades; the AUTO bot fires every
       // ~250ms and must never spam toasts.
       if (!Number.isFinite(cents) || cents <= 0) {
-        if (manual) toast.push({ tone: 'error', title: 'Enter a stake', description: 'Type a valid amount to trade.' });
+        if (manual) toast.push({ tone: 'error', title: 'Enter a stake' });
         return false;
       }
       if (pendingRef.current) {
-        if (manual) toast.push({ tone: 'info', title: 'Trade in progress', description: 'Wait for your current trade to settle.' });
+        if (manual) toast.push({ tone: 'info', title: 'Trade in progress' });
         return false;
       }
       if (cents < minStakeCents) {
-        if (manual) toast.push({ tone: 'error', title: 'Stake too low', description: `Minimum stake is ${both(minStakeCents)}.` });
+        if (manual) toast.push({ tone: 'error', title: `Min ${both(minStakeCents)}` });
         return false;
       }
       if (maxStakeCents !== undefined && cents > maxStakeCents) {
-        if (manual) toast.push({ tone: 'error', title: 'Stake too high', description: `Maximum stake is ${both(maxStakeCents)}.` });
+        if (manual) toast.push({ tone: 'error', title: `Max ${both(maxStakeCents)}` });
         return false;
       }
       if (!token) {
         if (manual) {
-          toast.push({ tone: 'info', title: 'Sign in to trade', description: 'Log in or create an account to place a trade.' });
+          toast.push({ tone: 'info', title: 'Log in to trade' });
           openAuth('login');
         }
         return false;
@@ -325,7 +325,7 @@ export function DigitsTradeScreen() {
         return false;
       }
       if (winProbability(outcome, barrier) <= 0) {
-        if (manual) toast.push({ tone: 'error', title: 'Not available', description: 'This pick has no valid payout — choose another barrier.' });
+        if (manual) toast.push({ tone: 'error', title: 'No payout at this barrier' });
         return false;
       }
       const target = outcome === 'over' || outcome === 'under' ? barrier : outcome === 'matches' || outcome === 'differs' ? pick : 0;

@@ -13,8 +13,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { formatKes } from '@invest254/shared/money';
 import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
 import { env } from '@/lib/env';
-import { useDigitSession } from '@/lib/game/digitSession';
-import { useMultSession } from '@/lib/game/multSession';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { wsUrlForSite } from '@/lib/brand/brand';
 import { useSession } from '@/lib/auth/session';
@@ -763,16 +761,14 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     const ws = wsRef.current;
     if (prev && prev !== token && subOf(prev) !== subOf(token)) {
       authedRef.current = false;
-      for (const k of ['wallet', 'digit-history', 'positions', 'ledger', 'wallet-ledger', 'transactions']) qc.removeQueries({ queryKey: [k] });
-      useDigitSession.getState().reset();
-      useMultSession.getState().reset();
+      // caches and session stores are dropped app-wide by SessionCacheGuard
       if (ws && (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING)) { ws.close(); return; } // onclose reconnects; onopen authenticates
     }
     if (token && ws && ws.readyState === ws.OPEN) {
       authedRef.current = false;
       ws.send(JSON.stringify({ type: 'auth', data: { token } }));
     }
-  }, [token, qc]);
+  }, [token]);
 
   // Perf (BUGLOG #92): the value used to be a new object every render, and `online` changes on every
   // connect/disconnect across the brand — re-rendering the whole trade screen and chart each time.

@@ -5,6 +5,57 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #99–#107 — Player UI bug hunt, round 2 + minimal copy — FIXED (branch `fix/player-ui-hunt`, web only)
+- **#99:**
+  - **Bug:** signing out (or a 401 reset, or signing in as someone else) left the previous player's cached
+    queries on screen, because no key names the user. The next person saw that player's notification
+    banners (including blocking ones), chat and unread badge, identity status, referral earnings and
+    session list.
+  - **Fix:** `SessionCacheGuard` (global) clears the query cache and the session, multiplier, dialog and chat
+    stores whenever the signed-in account changes. The banners render only with a token.
+- **#100:**
+  - **Bug:** on the classic trade screen the floating chat button sat on top of SELL on phones.
+  - **Fix:** chat is now a CHAT item in the phone bottom bar, and the floating button is desktop-only.
+- **#101:**
+  - **Bug:** an autofilled or pasted "+254 712 345 678" was cut to "2547123456" and refused.
+  - **Fix:** it now becomes "0712345678". Login no longer applies the NEW-password rules (older passwords
+    reach the server), and Change password uses the server's rules.
+- **#102:** the welcome-bonus card said "Deposit $1.93" on a USD brand (raw KES cents). It now uses the enforced
+  minimum stake.
+- **#103:** the classic stake field re-seeded itself whenever it was emptied, so deleting "100" and typing "200"
+  gave "50200". It now seeds once.
+- **#104:** a chat voice note wiped the typed draft and a staged photo, and closing the chat while recording left
+  the microphone on. The composer now clears only what was sent and releases the mic on close.
+- **#105:** KES amounts in the digits UI were rounded UP (KES 99.50 showed as "100", and a 100 stake was then
+  refused). They now show cents when there are any.
+- **#106:**
+  - **Bug:** the win overlay put "+" on the gross payout, overstating a win by the stake. The near-miss
+    "Just missed the mark" line has gone.
+  - **Fix:** the big figure is now the net result, with the payout and stake on the line below.
+- **#107 (and minor fixes):**
+  - The Modal no longer steals focus from an autofocused field.
+  - Escape now closes the bell, the drawer, Change password, and a zoomed chat photo (and only the photo).
+  - The account switcher fits at 320 px.
+  - The price header re-renders only on a new tick; "24H H/L" becomes "H/L", since it is the buffer's
+    extremes.
+  - The referral card uses the brand currency and has separate "Copied" states.
+  - Hard-coded "Invest254" / "P" / "BTC/KES" are gone from the referral landing, offline and 404 pages.
+- **Copy cut (numbers first):**
+  - Auth subtitles and trust line.
+  - Classic BetPanel: "Trades settle automatically", "Auto-sell / Trade duration", the idle "Live P&L 0",
+    "Price rises / falls", "Deposit to buy or sell".
+  - The welcome-bonus sales sentence (now "Min stake $5 · Bonus · withdrawable once won").
+  - Chat greeting paragraph (now WhatsApp / email chips).
+  - Switcher toasts (now "Demo · 10,000 KES").
+  - KYC sub and toast text.
+  - Trade toasts ("Min $5", "Trade in progress").
+  - Offline / 404 / error bodies.
+  - Footer taglines. The risk sentence, 18+ badge, helpline 1190, licence and Terms / Responsible Gaming
+    links stay.
+- **Tests:**
+  - account.e2e.mjs, new: sign-out leaves no trace; "+254" autofill. 65/65.
+  - digits.e2e.mjs 55/55.
+
 ## #90–#98 — Deriv client bug hunt, round 1 — FIXED (branch `fix/deriv-hunt`, web only; engine untouched)
 Found by a line-by-line audit of the digits screen, socket provider and wallet sheet, then checked against the code.
 - **#90 (money):**

@@ -224,8 +224,8 @@ try {
     const menu = await page.getByRole('menu').innerText();
     check('desktop: account menu has Profile, Change Password, Referrals, Sign Out', ['Profile', 'Change Password', 'Referrals', 'Sign Out'].every((x) => menu.includes(x)), menu);
     await page.getByRole('button', { name: 'Change Password' }).click();
-    await page.getByPlaceholder('New password', { exact: true }).fill('abcdefgh');
-    await page.getByPlaceholder('Repeat new password').fill('abcdefgX');
+    await page.getByPlaceholder('New password', { exact: true }).fill('abcdefg1');
+    await page.getByPlaceholder('Repeat new password').fill('abcdefg2');
     check('desktop: change password catches a mismatch before sending', await page.getByText('The new passwords do not match.').isVisible());
     await page.keyboard.press('Escape');
     check('desktop: no page errors', errors.length === 0, errors.join(' | '));

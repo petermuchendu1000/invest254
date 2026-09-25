@@ -216,7 +216,7 @@ try {
   await kyc.locator('input[type=file][aria-label="Back of the document"]').setInputFiles({ name: 'back.png', ...img });
   await kyc.locator('input[type=file][aria-label="Selfie"]').setInputFiles({ name: 'selfie.png', ...img });
   await kyc.getByRole('button', { name: 'Send for review' }).click();
-  check('kyc: submitting shows "Under review"', await until(() => kyc.getByText('Under review.').isVisible(), 15000));
+  check('kyc: submitting shows "Under review"', await until(() => kyc.getByText('Under review', { exact: true }).isVisible(), 15000));
   await kyc.getByRole('button', { name: 'Close' }).last().click();
 
   await agent.page.goto(`${CONSOLE}/admin/identity`, { waitUntil: 'networkidle' });
@@ -247,10 +247,16 @@ try {
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('menu').last().getByRole('button', { name: 'Sign Out' }).click();
   await until(() => header.getByRole('button', { name: 'Log in' }).first().isVisible());
+  // BUGLOG #99: nothing of the signed-out player stays on screen (session list, balance, cached queries)
+  check('sign-out: no trace of the previous player (session totals cleared, no balance pill)', await until(async () =>
+    (await page.getByRole('button', { name: /account, .*Switch account$/ }).count()) === 0
+    && /^0 · 0W 0L$/.test((await page.locator('aside').first().getByTestId('session-trades').innerText().catch(() => '0 · 0W 0L')).trim()), 5000));
   await header.getByRole('button', { name: 'Log in' }).first().click();
   check('sign-in: the window opens without crashing', await until(() => page.getByPlaceholder('07XX XXX XXX').isVisible()));
   const auth = page.locator('form', { has: page.getByPlaceholder('07XX XXX XXX') });
-  await auth.getByPlaceholder('07XX XXX XXX').fill(`07${suffix}`);
+  // BUGLOG #101: an autofilled international number is accepted
+  await auth.getByPlaceholder('07XX XXX XXX').fill(`+254 7${suffix.slice(0, 2)} ${suffix.slice(2, 5)} ${suffix.slice(5)}`);
+  check('sign-in: "+254 7…" autofill becomes 07…', (await auth.getByPlaceholder('07XX XXX XXX').inputValue()) === `07${suffix}`, await auth.getByPlaceholder('07XX XXX XXX').inputValue());
   await auth.locator('input[type=password]').first().fill(PASSWORD);
   await auth.getByRole('button', { name: 'Log in', exact: true }).last().click();
   check('sign-in: phone + password signs the player straight in (no code step)', await until(() => page.getByRole('button', { name: 'Account menu' }).isVisible(), 10000)
