@@ -130,14 +130,21 @@ try {
   await page.getByRole('button', { name: /^Up/ }).click();
   const mClose = page.getByRole('button', { name: /^Close [+-]/ });
   check('multipliers (demo): a contract opens', await until(() => mClose.isVisible(), 8000));
-  await page.waitForTimeout(1500);
+  // BUGLOG #98: leaving the Multipliers tab and coming back keeps the open position (and its Close)
+  await page.getByRole('button', { name: 'Even / Odd' }).click();
+  await page.getByRole('button', { name: 'Multipliers', exact: true }).filter({ visible: true }).first().click();
+  check('multipliers (demo): the open position survives a tab switch', await until(() => mClose.isVisible(), 4000));
+  await page.waitForTimeout(1000);
   await mClose.click();
   check('multipliers (demo): closing settles it', await until(async () => /Closed|Stopped out/.test(await page.locator('body').innerText()), 8000));
   const wm1 = (await api('/wallet', TOKEN)).body;
   check('multipliers (demo): only the demo balance moved', wm1.realBalance === wm0.realBalance && wm1.demoBalance !== wm0.demoBalance, `${JSON.stringify(wm0)} -> ${JSON.stringify(wm1)}`);
   await pill.click();
   await sw.getByRole('menuitemradio', { name: /Real Account/ }).click();
+  // BUGLOG #95: session totals are per account — back on Real, the demo trades are not counted
+  const realFooterOk = async () => /^0 · 0W 0L$/.test((await page.locator('aside').first().getByTestId('session-trades').innerText()).trim());
   check('demo: switching back returns to Real and closes the switcher', await until(async () => /^Real account/.test(await pill.getAttribute('aria-label'))) && (await api('/wallet', TOKEN)).body.mode === 'real' && !(await sw.isVisible()));
+  check('demo: back on Real, the session footer does not count demo trades', await until(realFooterOk, 4000), await page.locator('aside').first().getByTestId('session-trades').innerText());
 
   // ── 3. Sound toggle ──
   const snd = header.getByRole('button', { name: /^Turn sound (on|off)$/ }).first();

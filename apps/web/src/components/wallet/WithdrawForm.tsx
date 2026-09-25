@@ -187,7 +187,7 @@ export function WithdrawForm() {
           <span className="text-2xl font-bold text-muted">{symbol}</span>
           <input
             name="amount"
-            inputMode="numeric"
+            inputMode={isForeign ? 'decimal' : 'numeric'}
             autoComplete="off"
             autoFocus
             aria-label={`Amount to withdraw in ${currency}`}
@@ -286,7 +286,7 @@ export function WithdrawForm() {
           <path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6l7-3Z" />
           <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        Paid instantly to M-Pesa · Secured
+        M-Pesa · Secured
       </p>
     </form>
   );

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
-import { useGameSocket } from '@/lib/game/GameSocketProvider';
+import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { INSTRUMENTS, instrumentById } from '@/lib/game/instruments';
 import { useEntryScanner } from '@/lib/game/entryScannerUi';
 
@@ -16,6 +16,8 @@ export interface ScanSuggestion {
   side: ScanSide;
   /** Observed share (%) of the suggested side over the sampled window (honest, not inflated). */
   share: number;
+  /** Percentage points above that side's expected share (even/odd 50, over 5 40, under 5 50, a digit 10). */
+  edge: number;
   /** Over/Under barrier or Matches digit, when relevant. */
   digit?: number;
 }
@@ -45,14 +47,16 @@ function computeLean(
     const even = f[0]! + f[2]! + f[4]! + f[6]! + f[8]!;
     const side: ScanSide = even >= 50 ? 'even' : 'odd';
     const share = Math.max(even, 100 - even);
-    return { side, share, strength: Math.abs(even - 50) };
+    return { side, share, strength: share - 50 };
   }
   if (market === 'overunder') {
-    const over = f[6]! + f[7]! + f[8]! + f[9]!; // digit > 5
-    const under = f[0]! + f[1]! + f[2]! + f[3]! + f[4]!; // digit < 5
-    const side: ScanSide = over >= under ? 'over' : 'under';
-    const share = side === 'over' ? over : under;
-    return { side, share, strength: Math.abs(over - under), digit: OVERUNDER_BARRIER };
+    // Over 5 wins on 6–9 (40% expected), Under 5 on 0–4 (50%). Compare each to ITS OWN expectation
+    // (BUGLOG #96: raw shares always favoured Under, and ~50% was shown as if it were a lean).
+    const over = f[6]! + f[7]! + f[8]! + f[9]!;
+    const under = f[0]! + f[1]! + f[2]! + f[3]! + f[4]!;
+    const dOver = over - 40, dUnder = under - 50;
+    const side: ScanSide = dOver >= dUnder ? 'over' : 'under';
+    return { side, share: side === 'over' ? over : under, strength: Math.max(dOver, dUnder), digit: OVERUNDER_BARRIER };
   }
   // matches/differs: surface the hottest digit to MATCH
   let hot = 0;
@@ -94,7 +98,7 @@ export function EntryScanner({
 }) {
   const open = useEntryScanner((s) => s.open);
   const setOpen = useEntryScanner((s) => s.setOpen);
-  const { subscribeInstrument, getInstrumentTicks } = useGameSocket();
+  const { subscribeInstrument, getInstrumentTicks } = useGameSocketApi();
 
   const [market, setMarket] = useState<ScanMarket>('evenodd');
   const [ddOpen, setDdOpen] = useState(false);
@@ -139,18 +143,15 @@ export function EntryScanner({
         if (cancelledRef.current) return;
         const lean = computeLean(getInstrumentTicks(), market);
         if (lean) {
-          const sug: ScanSuggestion = { instrumentId: inst.id, market, side: lean.side, share: lean.share };
+          const sug: ScanSuggestion = { instrumentId: inst.id, market, side: lean.side, share: lean.share, edge: lean.strength };
           if (lean.digit != null) sug.digit = lean.digit;
           found.push(sug);
         }
         setProgress(i + 1);
       }
-      found.sort((a, b) => b.share - a.share);
-      // strongest lean = the entry with the highest observed share for its suggested side
-      const ranked = found
-        .map((s) => ({ s, strength: s.market === 'evenodd' ? s.share - 50 : s.market === 'overunder' ? s.share - 50 : s.share - 10 }))
-        .sort((a, b) => b.strength - a.strength);
-      setBest(ranked[0]?.s ?? null);
+      // strongest lean = the biggest gap between observed and expected share for its side
+      found.sort((a, b) => b.edge - a.edge);
+      setBest(found[0] ?? null);
     } finally {
       // Always restore the user's instrument feed, and always end the scan: closing the sheet mid-scan
       // used to leave it "Scanning…" with both buttons disabled for good (BUGLOG #84).
@@ -250,7 +251,10 @@ export function EntryScanner({
                   <div className="truncate text-[15px] font-extrabold text-fg">{instrumentById(best.instrumentId).label}</div>
                   <div className="text-[13px] font-semibold text-fg">{sideLabel(best)}</div>
                 </div>
-                <span className="shrink-0 rounded-full bg-accent/20 px-2.5 py-1 text-[13px] font-bold tabular-nums text-accent">{Math.round(best.share)}%</span>
+                <span className="shrink-0 text-right">
+                  <span className="block rounded-full bg-accent/20 px-2.5 py-1 text-[13px] font-bold tabular-nums text-accent">{Math.round(best.share)}%</span>
+                  <span className="mt-0.5 block text-[11px] font-semibold tabular-nums text-muted" title="Points above the expected share">{best.edge >= 0 ? '+' : ''}{best.edge.toFixed(1)}</span>
+                </span>
               </div>
             </div>
           </div>
