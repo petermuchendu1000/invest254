@@ -5,7 +5,7 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
-## #120–#126 — Apple pass: every UI measured on real phone widths — FIXED (branch `ui/apple-pass`)
+## #120–#130 — Apple pass: every UI measured on real phone widths — FIXED (branches `ui/apple-pass`, `ui/apple-pass-2`)
 Reported: the Entry Scanner's Market dropdown opened off the bottom of a phone screen. A scripted audit then
 walked every player, admin and owner screen and overlay at 320/360/390/430 (touch) and 1440. It checked five
 things: clipped overlays, sideways scroll, hit targets under 44 pt (Apple HIG; under 32 fails), inputs under
@@ -37,8 +37,25 @@ things: clipped overlays, sideways scroll, hit targets under 44 pt (Apple HIG; u
   - Market names drop the redundant "Index", so "Volatility 10 (1s)" fits.
 - **#126:** native checkboxes were white on the dark theme. `color-scheme` and `accent-color` now follow the
   theme and the brand.
-- **Result:** 172 screen×width checks. COVERED 0, CLIP 0, HSCROLL 0, ZOOM 0, TARGET<32 0, target<44 0.
-- **Tests:** digits 57/57, account 65/65, roles 198/198, npm test 1207/1207, typecheck clean.
+- **#127 (classic brands, e.g. invest254.com):** the SELL button was grey and looked disabled. The brand's
+  stored theme had `down: #8fa396`. Gain and loss now stay green and red on every brand: an up/down token
+  outside that colour family is ignored, and the default applies (`semanticColourOk`, brand.test.ts). All
+  56 preset themes pass.
+- **#128 (classic):**
+  - **Bug:** the duration was a hidden tap-to-cycle circle ("10 s"), undiscoverable.
+  - **Fix:** it is now a segmented control showing 10s · 30s · 1m · 2m at once.
+  - Stake pills and ± steppers are 44 pt on phones. The chart's interval keys are 44 wide on touch, and the
+    zoom buttons are hidden there (pinch zooms).
+- **#129 (classic, short phones):** at 320×568 the chart was about 100 px tall. The decorative ticker hides
+  on screens under 640 px tall, and the chart keeps at least 160 px.
+- **#130:**
+  - The account card said "Identity" twice.
+  - The auth switch link ("Log in") was 41 px wide; it is now at least 44 px.
+  - Selected segments use the brand accent, like every active pill. The old raised surface read as
+    recessed on dark themes.
+- **Result:** 172 screen×width checks (digits brand) and 70 (classic brand). COVERED 0, CLIP 0, HSCROLL 0,
+  ZOOM 0, TARGET<32 0. The only remaining note is the TradingView attribution logo (third-party, 35×44).
+- **Tests:** digits 57/57, account 65/65, roles 198/198, npm test 1208/1208 (new brand.test case), typecheck clean.
 
 ## #115–#119 — Regressions caught by reviewing today's own diff — FIXED (branch `fix/hunt-regressions`)
 A line-by-line review of everything changed since 136a092 (web, API, both migrations). There were no hook-order

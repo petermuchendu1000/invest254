@@ -11,6 +11,7 @@ import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { pillLabel } from '@/lib/game/stakeLadder';
 import { useDisplayMoney } from '@/lib/money';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Segmented } from '@/components/ui/Segmented';
 import { api } from '@/lib/api/endpoints';
 import { useSession } from '@/lib/auth/session';
 import { useDepositUi } from '@/lib/wallet/depositUi';
@@ -129,10 +130,10 @@ export function BetPanel() {
     setStake(String(next));
   }
 
-  function cycleDuration() {
-    const i = durations.indexOf(durationS);
-    setDurationS(durations[(i + 1) % durations.length] ?? durations[0]!);
-  }
+  const durationOptions = useMemo(
+    () => durations.map((d) => ({ id: String(d), label: d < 60 || d % 60 ? `${d}s` : `${d / 60}m` })),
+    [durations],
+  );
 
   function handleDirection(dir: Direction) {
     if (!validStake || overMax) return;
@@ -194,7 +195,7 @@ export function BetPanel() {
             type="button"
             onClick={() => { setStake(String(chip.value)); setCustomOpen(false); }}
             className={cn(
-              'h-9 rounded-lg border text-sm font-semibold tabular-nums transition',
+              'h-11 rounded-xl border text-sm font-semibold tabular-nums transition lg:h-9 lg:rounded-lg',
               !customOpen && chipActive(chip.value)
                 ? 'border-accent bg-accent/10 text-accent'
                 : 'border-border bg-surface-2 text-fg hover:border-accent/60',
@@ -208,7 +209,7 @@ export function BetPanel() {
           onClick={() => setCustomOpen((v) => !v)}
           aria-expanded={customOpen}
           className={cn(
-            'h-9 rounded-lg border text-sm font-semibold transition',
+            'h-11 rounded-xl border text-sm font-semibold transition lg:h-9 lg:rounded-lg',
             customOpen || !chips.some((c) => chipActive(c.value))
               ? 'border-accent bg-accent/10 text-accent'
               : 'border-border bg-surface-2 text-fg hover:border-accent/60',
@@ -219,7 +220,7 @@ export function BetPanel() {
       </div>
 
       {customOpen ? (
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 transition focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
+      <label className="flex cursor-text items-center gap-2 rounded-xl border border-border bg-surface-2 py-1 pl-3 pr-1 transition focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
         <span className="rounded-md bg-surface px-2 py-1 text-xs font-semibold text-muted">{symbol}</span>
         <input
           inputMode="decimal"
@@ -235,7 +236,7 @@ export function BetPanel() {
             type="button"
             aria-label="Decrease stake"
             onClick={() => bumpStake(isForeign ? -1 : -STEP_KES)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg"
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg lg:h-9 lg:w-9"
           >
             −
           </button>
@@ -243,25 +244,18 @@ export function BetPanel() {
             type="button"
             aria-label="Increase stake"
             onClick={() => bumpStake(isForeign ? 1 : STEP_KES)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg"
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface text-lg font-bold leading-none text-muted transition hover:text-fg lg:h-9 lg:w-9"
           >
             +
           </button>
         </div>
-      </div>
+      </label>
       ) : null}
 
       {errorHint ? <p className="text-xs text-down">{errorHint}</p> : null}
 
-      {/* Auto-sell duration + idle Live P&L */}
-      <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 px-3 py-1.5">
-        <button type="button" onClick={cycleDuration} className="flex items-center gap-3" aria-label="Cycle trade duration">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-accent text-xs font-bold tabular-nums text-accent">
-            {durationS}
-          </span>
-          <span className="text-xs text-muted">s</span>
-        </button>
-      </div>
+      {/* Auto-sell duration: every option visible, one tap (was a hidden tap-to-cycle circle). */}
+      <Segmented label="Duration" value={String(durationS)} onChange={(v) => setDurationS(Number(v))} options={durationOptions} />
 
       {connecting ? (
         <p className="text-center text-xs text-muted">Connecting…</p>
