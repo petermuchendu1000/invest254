@@ -572,7 +572,7 @@ export function AuthModal() {
             <button
               type="button"
               onClick={() => openAuth(isRegister ? 'login' : 'register')}
-              className="font-semibold text-accent transition hover:underline"
+              className="min-w-11 px-1 font-semibold text-accent transition hover:underline"
             >
               {isRegister ? 'Log in' : 'Create one'}
             </button>

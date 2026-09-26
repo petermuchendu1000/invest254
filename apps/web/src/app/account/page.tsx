@@ -85,7 +85,7 @@ function PlayerSecurityCard() {
         </div>
       ) : null}
       <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="text-muted">Identity · <span className={st === 'approved' ? 'text-up' : st === 'rejected' ? 'text-down' : 'text-fg'}>{label}</span></span>
+        <span className="text-muted">{PLAYER_TWO_FACTOR ? 'Identity · ' : null}<span className={st === 'approved' ? 'text-up' : st === 'rejected' ? 'text-down' : 'text-fg'}>{label}</span></span>
         <Button variant="secondary" size="sm" onClick={() => open('verify')}>{st === 'approved' ? 'View' : 'Verify'}</Button>
       </div>
     </Card>

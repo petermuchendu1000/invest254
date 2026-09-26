@@ -4,7 +4,7 @@ import { cn } from '@/lib/cn';
 
 /**
  * Segmented control (Apple HIG): 2–5 mutually exclusive choices shown at once — no dropdown to open,
- * nothing to clip. 48 px tall (44 px segments), equal segments, the selected one raised. Keyboard: arrow keys move.
+ * nothing to clip. 48 px tall (44 px segments), equal segments, the selected one in the brand accent (as every active pill). Keyboard: arrow keys move.
  */
 export function Segmented<T extends string>({
   value, onChange, options, label, disabled, className,
@@ -35,7 +35,7 @@ export function Segmented<T extends string>({
           <button key={o.id} type="button" role="radio" data-compact aria-checked={on} tabIndex={on ? 0 : -1} disabled={disabled}
             onClick={() => onChange(o.id)}
             className={cn('min-w-0 truncate rounded-xl font-semibold transition', options.length >= 3 ? 'px-1 text-[12px]' : 'px-2 text-[13px]',
-              on ? 'bg-surface text-fg shadow-[0_1px_3px_rgba(0,0,0,0.35)]' : 'text-muted hover:text-fg')}>
+              on ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/40' : 'text-muted hover:text-fg')}>
             {o.label}
           </button>
         );
