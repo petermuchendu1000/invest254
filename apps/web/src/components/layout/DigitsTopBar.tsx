@@ -16,7 +16,8 @@ import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { useMyNotifications, useDismissNotification } from '@/lib/notifications/hooks';
 import { DIcon, type IconName } from '@/components/game/digits/icons';
-import { AccountMenu, AccountPill } from '@/components/layout/DigitsAccount';
+import { AccountMenu, AccountPill, ChangePasswordModal } from '@/components/layout/DigitsAccount';
+import { useAccountUi } from '@/lib/account/accountUi';
 import { SoundToggle } from '@/components/layout/SoundToggle';
 import { useSound } from '@/lib/sound/sound';
 
@@ -58,7 +59,7 @@ function SoundMenuRow() {
   const toggle = useSound((s) => s.toggle);
   return (
     <button type="button" role="switch" aria-checked={!muted} onClick={toggle}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-muted transition hover:bg-surface-2 hover:text-fg">
+      className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-muted transition hover:bg-surface-2 hover:text-fg">
       <DIcon name={muted ? 'mute' : 'volume'} className="h-5 w-5" />Sound
       <span className={cn('ml-auto text-xs font-semibold', muted ? 'text-muted' : 'text-up')}>{muted ? 'Off' : 'On'}</span>
     </button>
@@ -134,6 +135,8 @@ export function DigitsTopBar() {
   const setHistoryOpen = useDigitSession((s) => s.setHistoryOpen);
   const setHowToOpen = useDigitSession((s) => s.setHowToOpen);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
+  const openAccountDialog = useAccountUi((st) => st.open);
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
@@ -159,6 +162,11 @@ export function DigitsTopBar() {
     { icon: 'chat', label: 'Live Chat', onClick: () => setSupportOpen(true) },
     { icon: 'book', label: 'How to Trade', onClick: () => setHowToOpen(true) },
     { icon: 'user', label: 'Account', href: '/account' },
+    // phones had no way to these two (the avatar menu is desktop-only)
+    ...(authed ? [
+      { icon: 'idcard' as IconName, label: 'Verify Identity', onClick: () => openAccountDialog('verify') },
+      { icon: 'lock' as IconName, label: 'Change Password', onClick: () => setPwOpen(true) },
+    ] : []),
     { icon: 'shield', label: 'Legal', href: '/legal' },
   ];
 
@@ -227,7 +235,7 @@ export function DigitsTopBar() {
       {menuOpen ? (
         <div className="fixed inset-0 z-50 flex lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
           <button aria-label="Close menu" className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMenuOpen(false)} />
-          <nav className="relative flex h-full w-72 max-w-[80vw] flex-col border-r border-border bg-surface p-4 shadow-2xl">
+          <nav className="relative flex h-full w-72 max-w-[80vw] flex-col overflow-y-auto overscroll-contain border-r border-border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
               <Wordmark text={wordmark} className="text-[17px]" />
               <button type="button" onClick={() => setMenuOpen(false)} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg">
@@ -264,6 +272,7 @@ export function DigitsTopBar() {
           </nav>
         </div>
       ) : null}
+      <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
     </>
   );
 }

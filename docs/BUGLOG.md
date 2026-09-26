@@ -5,6 +5,41 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #120–#126 — Apple pass: every UI measured on real phone widths — FIXED (branch `ui/apple-pass`)
+Reported: the Entry Scanner's Market dropdown opened off the bottom of a phone screen. A scripted audit then
+walked every player, admin and owner screen and overlay at 320/360/390/430 (touch) and 1440. It checked five
+things: clipped overlays, sideways scroll, hit targets under 44 pt (Apple HIG; under 32 fails), inputs under
+16 px (iOS Safari zooms on focus), and controls covered by other layers.
+- **#120 (reported):**
+  - **Bug:** the scanner's Market list was a dropdown inside a bottom panel, so it clipped.
+  - **Fix:** new `Sheet` (bottom sheet on phones, card on desktop, grabber, safe area, scrolling body) and
+    `Segmented` (HIG segmented control, 48 px, arrow keys). The scanner is a Sheet with a
+    Even/Odd · Match/Differ · Over/Under segment. Nothing can open off-screen.
+- **#121:**
+  - **Bug:** the Markets sheet rendered *under* the bottom nav. It was `fixed z-50` inside a z-20 stacking
+    context.
+  - **Fix:** portalled to `<body>`.
+  - Positions is now a real bottom sheet too.
+- **#122:** the side drawer could not scroll on short phones, so its last items were unreachable. It now
+  scrolls and respects the safe area. Verify Identity and Change Password are in it.
+- **#123:**
+  - **Bug:** 41 controls failed the target check: digit keys, stake steppers, pills, table links, checkboxes,
+    and the withdrawals switch.
+  - **Fix:** under a coarse pointer every control is at least 44 pt, checkboxes are 24 px (WCAG 2.2), and
+    pill switches get an invisible 44 pt hit area.
+  - Digits are 5 × 2 keys on phones. Stake/Payout is a segment.
+- **#124:** inputs at 12–14 px made iOS zoom the page on focus. Fields are 16 px on phones; the amount heroes
+  stay large.
+- **#125:**
+  - Brand name and balance wrapped onto two lines at 320 px. They no longer wrap, and the mark stands alone
+    under 360 px.
+  - The chat placeholder was cut off; it is now "Message".
+  - Market names drop the redundant "Index", so "Volatility 10 (1s)" fits.
+- **#126:** native checkboxes were white on the dark theme. `color-scheme` and `accent-color` now follow the
+  theme and the brand.
+- **Result:** 172 screen×width checks. COVERED 0, CLIP 0, HSCROLL 0, ZOOM 0, TARGET<32 0, target<44 0.
+- **Tests:** digits 57/57, account 65/65, roles 198/198, npm test 1207/1207, typecheck clean.
+
 ## #115–#119 — Regressions caught by reviewing today's own diff — FIXED (branch `fix/hunt-regressions`)
 A line-by-line review of everything changed since 136a092 (web, API, both migrations). There were no hook-order
 or circular-import problems, and grants and scope checks were right. It found:

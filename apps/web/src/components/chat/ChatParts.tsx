@@ -78,7 +78,7 @@ function recorderMime(): string | undefined {
  * CHAT-1: composer — attach a photo or short video, record a voice note (tap the mic to start, tap
  * again to send; Cancel discards), type and send. File size limits match the server's.
  */
-export function ChatComposer({ onSend, busy, disabled, placeholder = 'Type your message…' }: {
+export function ChatComposer({ onSend, busy, disabled, placeholder = 'Message' }: {
   onSend: (v: { body: string; file?: Blob | null }) => Promise<unknown>; busy?: boolean; disabled?: boolean; placeholder?: string;
 }) {
   const [text, setText] = useState('');

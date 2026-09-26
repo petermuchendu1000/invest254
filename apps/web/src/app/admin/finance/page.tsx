@@ -51,9 +51,9 @@ function UserCell({ userId, username }: { userId: string; username: string }) {
 function PhoneCell({ phone }: { phone: string | null }) {
   if (!phone) return <span className="text-muted">—</span>;
   return (
-    <a href={`tel:${phone}`} className="tabular-nums text-fg hover:text-accent hover:underline">
+    <span className="tabular-nums text-fg">
       {phone}
-    </a>
+    </span>
   );
 }
 

@@ -97,7 +97,7 @@ function TrendsSection() {
           {/* Full daily cash-flow + GGR charts and per-day/per-player breakdowns live on Reports —
               linked here (not duplicated) so the Overview stays a compact launchpad. */}
           <Link href="/admin/reports" className="self-start text-xs font-medium text-accent hover:underline">
-            Full daily / date-range breakdowns → Reports
+            Reports →
           </Link>
         </div>
       )}
