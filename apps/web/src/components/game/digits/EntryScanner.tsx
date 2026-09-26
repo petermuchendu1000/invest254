@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
+import { Sheet } from '@/components/ui/Sheet';
+import { Segmented } from '@/components/ui/Segmented';
 import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { INSTRUMENTS, instrumentById } from '@/lib/game/instruments';
 import { useEntryScanner } from '@/lib/game/entryScannerUi';
@@ -23,9 +25,9 @@ export interface ScanSuggestion {
 }
 
 const MARKET_OPTIONS: { id: ScanMarket; label: string }[] = [
-  { id: 'evenodd', label: 'Even / Odd' },
-  { id: 'matchesdiffers', label: 'Match / Differ' },
-  { id: 'overunder', label: 'Over / Under' },
+  { id: 'evenodd', label: 'Even/Odd' },
+  { id: 'matchesdiffers', label: 'Match/Differ' },
+  { id: 'overunder', label: 'Over/Under' },
 ];
 
 const OVERUNDER_BARRIER = 5;
@@ -101,7 +103,6 @@ export function EntryScanner({
   const { subscribeInstrument, getInstrumentTicks } = useGameSocketApi();
 
   const [market, setMarket] = useState<ScanMarket>('evenodd');
-  const [ddOpen, setDdOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [best, setBest] = useState<ScanSuggestion | null>(null);
@@ -118,12 +119,6 @@ export function EntryScanner({
     return () => { cancelledRef.current = true; };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, setOpen]);
 
   if (!open) return null;
 
@@ -162,69 +157,46 @@ export function EntryScanner({
 
   const pct = total ? Math.round((progress / total) * 100) : 0;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label="AI Entry Scanner">
-      <button aria-label="Close" className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
-      <div className="relative w-full max-w-app rounded-t-2xl border border-border bg-surface p-4 shadow-2xl sm:max-w-md sm:rounded-2xl">
-        {/* header */}
-        <div className="mb-3 flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/15 text-accent ring-1 ring-accent/30">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-5 w-5">
-              <line x1="12" y1="2" x2="12" y2="4.6" />
-              <circle cx="12" cy="1.9" r="1" fill="currentColor" stroke="none" />
-              <rect x="4" y="4.6" width="16" height="13.8" rx="4" />
-              <rect x="1.5" y="9.6" width="2" height="4" rx="1" />
-              <rect x="20.5" y="9.6" width="2" height="4" rx="1" />
-              <circle cx="9" cy="11" r="2.2" />
-              <circle cx="15" cy="11" r="2.2" />
-              <circle cx="9" cy="11" r="0.85" fill="currentColor" stroke="none" />
-              <circle cx="15" cy="11" r="0.85" fill="currentColor" stroke="none" />
-              <path d="M8.6 14.4c1 1.4 5.8 1.4 6.8 0" />
-            </svg>
-          </span>
-          <h2 className="text-base font-extrabold text-fg">Entry Scanner</h2>
-          <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg">
-            <Icon path="M6 6l12 12M18 6L6 18" className="h-4 w-4" />
-          </button>
-        </div>
+  const robot = (
+    <span className="grid h-8 w-8 place-items-center rounded-full bg-accent/15 text-accent ring-1 ring-accent/30">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-[18px] w-[18px]">
+        <rect x="4" y="4.6" width="16" height="13.8" rx="4" />
+        <circle cx="9" cy="11" r="2.2" />
+        <circle cx="15" cy="11" r="2.2" />
+        <path d="M8.6 14.4c1 1.4 5.8 1.4 6.8 0" />
+      </svg>
+    </span>
+  );
 
-        {/* market dropdown */}
-        <div className="mt-4">
-          <label className="text-[13px] font-semibold text-fg">Market</label>
-          <div className="relative mt-1.5">
+  return (
+    // Sheet + segmented control (BUGLOG #120): the market list was a dropdown inside a bottom sheet
+    // that ran off the bottom of the screen on phones, with nothing to scroll.
+    <Sheet open={open} onClose={() => setOpen(false)} title="Entry Scanner" label="AI Entry Scanner" icon={robot}
+      footer={
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={runScan}
+            disabled={scanning || busy}
+            className={cn('flex items-center justify-center gap-2 rounded-xl py-3 text-[15px] font-bold transition disabled:opacity-40',
+              best ? 'border border-border text-fg hover:border-accent/60' : 'col-span-2 bg-accent text-accent-fg hover:brightness-105')}
+          >
+            <Icon path="M11 4a7 7 0 105.2 11.7l3.5 3.6M11 4a7 7 0 015.2 11.7" className="h-4 w-4" />
+            {scanning ? `${pct}%` : busy ? 'Auto running' : best ? 'Rescan' : 'Scan'}
+          </button>
+          {best ? (
             <button
               type="button"
-              onClick={() => setDdOpen((v) => !v)}
-              aria-haspopup="listbox"
-              aria-expanded={ddOpen}
               disabled={scanning}
-              className={cn(
-                'flex h-11 w-full items-center rounded-xl border bg-surface-2 px-3.5 text-left text-[15px] font-semibold text-fg transition disabled:opacity-60',
-                ddOpen ? 'border-accent' : 'border-border hover:border-accent/60',
-              )}
+              onClick={() => { onApply(best); setOpen(false); }}
+              className="flex items-center justify-center gap-2 rounded-xl bg-accent py-3 text-[15px] font-bold text-accent-fg transition hover:brightness-105 disabled:opacity-40"
             >
-              {MARKET_OPTIONS.find((o) => o.id === market)?.label}
-              <Icon path="M6 9l6 6 6-6" className={cn('ml-auto h-4 w-4 text-muted transition-transform', ddOpen ? 'rotate-180' : '')} />
+              <Icon path="M7 5l12 7-12 7V5z" className="h-4 w-4" />Run
             </button>
-            {ddOpen ? (
-              <div role="listbox" className="absolute left-0 top-[calc(100%+6px)] z-10 w-full overflow-hidden rounded-xl border border-border bg-surface-2 py-1 shadow-2xl">
-                {MARKET_OPTIONS.map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    role="option"
-                    aria-selected={o.id === market}
-                    onClick={() => { setMarket(o.id); setDdOpen(false); }}
-                    className={cn('flex w-full items-center px-3.5 py-3 text-left text-[15px] font-medium transition', o.id === market ? 'bg-white/10 text-fg' : 'text-fg/80 hover:bg-white/5 hover:text-fg')}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          ) : null}
         </div>
-
+      }>
+      <Segmented label="Market" value={market} onChange={setMarket} options={MARKET_OPTIONS} disabled={scanning} className="mt-1" />
         {/* progress / result */}
         {scanning ? (
           <div className="mt-4">
@@ -260,30 +232,6 @@ export function EntryScanner({
           </div>
         ) : null}
 
-        {/* actions: Scan, then Run (loads the entry and trades it on AUTO) */}
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={runScan}
-            disabled={scanning || busy}
-            className={cn('flex items-center justify-center gap-2 rounded-xl py-3 text-[15px] font-bold transition disabled:opacity-40',
-              best ? 'border border-border text-fg hover:border-accent/60' : 'col-span-2 bg-accent text-accent-fg hover:brightness-105')}
-          >
-            <Icon path="M11 4a7 7 0 105.2 11.7l3.5 3.6M11 4a7 7 0 015.2 11.7" className="h-4 w-4" />
-            {scanning ? `${pct}%` : busy ? 'Auto running' : best ? 'Rescan' : 'Scan'}
-          </button>
-          {best ? (
-            <button
-              type="button"
-              disabled={scanning}
-              onClick={() => { onApply(best); setOpen(false); }}
-              className="flex items-center justify-center gap-2 rounded-xl bg-accent py-3 text-[15px] font-bold text-accent-fg transition hover:brightness-105 disabled:opacity-40"
-            >
-              <Icon path="M7 5l12 7-12 7V5z" className="h-4 w-4" />Run
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

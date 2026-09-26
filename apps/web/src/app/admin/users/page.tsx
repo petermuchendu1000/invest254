@@ -372,7 +372,7 @@ function UserRow({ r, selected, onToggle }: { r: AdminUserRow; selected: boolean
             {r.role !== 'player' ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">{ROLE_LABEL[r.role] ?? r.role}</span> : null}
           </span>
           {r.phone ? (
-            <a href={`tel:${r.phone}`} className="text-[11px] tabular-nums text-muted hover:text-accent hover:underline">{r.phone}</a>
+            <span className="text-[11px] tabular-nums text-muted">{r.phone}</span>
           ) : (
             <span className="font-mono text-[10px] text-muted">{r.userId.slice(0, 8)}…</span>
           )}

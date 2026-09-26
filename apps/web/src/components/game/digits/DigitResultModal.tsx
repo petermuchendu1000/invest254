@@ -83,14 +83,14 @@ export function DigitResultModal({ result, onClose }: { result: DigitResult | nu
         <h2 className={cn('mt-3 font-mono text-[22px] font-black tracking-wide', won ? 'text-up' : 'text-down')}>{won ? 'YOU WON!' : 'YOU LOST'}</h2>
 
         <div className="mt-4 rounded-xl border border-border bg-bg/40 px-3 py-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Profit / Loss</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">P/L</div>
           <div className={cn('mt-1 font-mono text-[26px] font-bold tabular-nums', won ? 'text-up' : 'text-down')}>{amt.signed(pnlCents)}</div>
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2 text-left">
           <Tile icon="dollar" label="Stake" value={amt.num(stakeCents)} prefix={amt.prefix} />
           <Tile icon="dollar" label="Payout" value={amt.num(payoutCents)} prefix={amt.prefix} />
-          <Tile icon="hash" label="Result digit" value={String(digit)} />
+          <Tile icon="hash" label="Digit" value={String(digit)} />
           <Tile icon="clock" label="Duration" value={secs != null ? `${secs}s` : '—'} />
         </div>
 

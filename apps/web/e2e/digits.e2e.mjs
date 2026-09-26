@@ -77,7 +77,7 @@ try {
     await page.getByRole('button', { name: 'Even / Odd' }).click();
 
     // DERIV-UI: Markets picker (category rail, search, favourites) and the Trade types sheet
-    await page.getByRole('button', { name: /Volatility \d+ (\(1s\) )?Index/ }).first().click();
+    await page.getByRole('button', { name: /Volatility \d+( \(1s\))?/ }).first().click();
     const mp = page.getByRole('dialog', { name: 'Markets' });
     check('markets: picker opens with Favorites + Synthetic indices and 12 indices', await mp.isVisible()
       && await mp.getByRole('navigation', { name: 'Market categories' }).getByText('Favorites').isVisible()
@@ -89,7 +89,7 @@ try {
     await mp.getByRole('navigation', { name: 'Market categories' }).getByRole('button', { name: /Favorites/ }).click();
     check('markets: a starred index is listed under Favorites', (await mp.getByRole('option').count()) === 1 && /250/.test(await mp.getByRole('option').first().innerText()));
     await mp.getByRole('option').first().click();
-    check('markets: picking an index switches the chart', await page.getByRole('button', { name: /Volatility 250 \(1s\) Index/ }).first().isVisible() && !(await mp.isVisible()));
+    check('markets: picking an index switches the chart', await page.getByRole('button', { name: /Volatility 250 \(1s\)/ }).first().isVisible() && !(await mp.isVisible()));
     await page.getByRole('button', { name: 'All trade types' }).filter({ visible: true }).first().click();
     const tt = page.getByRole('dialog', { name: 'Trade types' });
     check('trade types: sheet lists Multipliers + the three Digits types', /Multipliers[\s\S]*Matches\/Differs[\s\S]*Even\/Odd[\s\S]*Over\/Under/.test(await tt.innerText()));
@@ -99,7 +99,7 @@ try {
     await tt.getByRole('button', { name: /Over\/Under/ }).click();
     check('trade types: picking Over/Under switches the console', await page.getByText('Select digit').isVisible());
     await page.getByRole('button', { name: 'Even / Odd' }).click();
-    await page.getByRole('button', { name: /Volatility 250 \(1s\) Index/ }).first().click();
+    await page.getByRole('button', { name: /Volatility 250 \(1s\)/ }).first().click();
     await page.getByRole('dialog', { name: 'Markets' }).getByLabel('Search markets').fill('10 (1s)');
     await page.getByRole('dialog', { name: 'Markets' }).getByRole('option').first().click();
 
@@ -118,14 +118,14 @@ try {
     let sawOpen = false, openTab = '';
     for (let t = 0; t < 60 && !sawOpen; t++) {
       openTab = await rail.getByRole('tab', { name: /Open/ }).innerText();
-      sawOpen = /\(1\)/.test(openTab) || (await rail.getByText('settling…').count()) > 0 || (await page.getByText(/Even · /).count()) > 0;
+      sawOpen = /Open\s*1\b/.test(openTab) || (await rail.getByText('settling…').count()) > 0 || (await page.getByText(/Even · /).count()) > 0;
       if (!sawOpen) await page.waitForTimeout(50);
     }
     const modal = page.getByRole('dialog', { name: /You won|Trade lost/ });
     await modal.waitFor({ timeout: 10000 }).catch(() => {});
     check('desktop: a manual trade shows as open while it settles', sawOpen, openTab);
     const m = await modal.innerText().catch(() => '');
-    check('desktop: result card shows P/L, stake, payout, result digit, duration and the contract', /PROFIT \/ LOSS/i.test(m) && /STAKE/i.test(m) && /PAYOUT/i.test(m) && /RESULT DIGIT/i.test(m) && /DURATION/i.test(m) && /EVEN/.test(m), m);
+    check('desktop: result card shows P/L, stake, payout, result digit, duration and the contract', /\bP\/L\b/i.test(m) && /STAKE/i.test(m) && /PAYOUT/i.test(m) && /\bDIGIT\b/i.test(m) && /DURATION/i.test(m) && /EVEN/.test(m), m);
     await page.keyboard.press('Escape');
     await rail.getByRole('tab', { name: /Closed/ }).click();
     check('desktop: the settled trade is listed under Closed', /EVEN/i.test(await rail.innerText()));

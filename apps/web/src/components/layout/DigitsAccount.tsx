@@ -209,7 +209,7 @@ export function AccountMenu() {
 }
 
 /** Change password (existing POST /auth/password/change). */
-function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const token = useSession((s) => s.token);
   const toast = useToast();
   const [cur, setCur] = useState('');

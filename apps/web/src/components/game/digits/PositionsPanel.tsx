@@ -64,8 +64,7 @@ export function PositionsPanel({ onClose, className }: { onClose?: () => void; c
               tab === id ? 'text-fg' : 'text-muted hover:text-fg',
             )}
           >
-            <span>{label}</span>
-            {n != null ? <span className="tabular-nums">({n})</span> : null}
+            <span className="flex items-center gap-1.5">{label}{n != null ? <span className="rounded-full bg-surface-2 px-1.5 text-[11px] tabular-nums text-muted">{n}</span> : null}</span>
             {tab === id ? <span aria-hidden className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-accent" /> : null}
           </button>
         ))}

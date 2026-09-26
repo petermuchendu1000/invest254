@@ -37,7 +37,7 @@ const MARKPAYABLE = new Set(['pending', 'requested', 'processing']);
 /** Clickable player identity → user detail page. */
 function UserCell({ userId, username }: { userId: string; username: string }) {
   return (
-    <Link href={`/admin/users/${userId}`} className="font-medium text-accent hover:underline">@{username || 'unknown'}</Link>
+    <Link href={`/admin/users/${userId}`} className="relative font-medium text-accent before:absolute before:-inset-x-1 before:-inset-y-3 before:content-[''] hover:underline">@{username || 'unknown'}</Link>
   );
 }
 
@@ -281,9 +281,11 @@ function WithdrawalsSwitch() {
         disabled={setEnabled.isPending}
         aria-checked={enabled}
         aria-label={enabled ? 'Turn withdrawals off' : 'Turn withdrawals on'}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:opacity-50 ${enabled ? 'bg-up' : 'bg-down'}`}
+        className="inline-flex h-11 w-14 shrink-0 items-center justify-center disabled:opacity-50"
       >
-        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        <span className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${enabled ? 'bg-up' : 'bg-down'}`}>
+          <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        </span>
       </button>
     </div>
   );
@@ -344,7 +346,7 @@ function PlayerCell({ r }: { r: AdminWithdrawalRow }) {
   return (
     <span className="flex flex-col leading-tight">
       <UserCell userId={r.userId} username={r.username} />
-      <a href={`tel:${r.phone}`} className="mt-0.5 text-xs tabular-nums text-muted hover:text-accent hover:underline">{r.phone}</a>
+      <span className="mt-0.5 text-xs tabular-nums text-muted">{r.phone}</span>
       {r.mpesaReceipt ? <span className="font-mono text-[10px] text-muted">{r.mpesaReceipt}</span> : null}
     </span>
   );

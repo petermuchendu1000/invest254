@@ -24,6 +24,7 @@ import { payoutForStake, stakeForPayout } from '@/lib/game/digitPayout';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useMultiplierSync } from '@/lib/game/multSession';
 import { pillLabel } from '@/lib/game/stakeLadder';
+import { Segmented } from '@/components/ui/Segmented';
 import { useDisplayMoney } from '@/lib/money';
 import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
 import { afterSettle, nextAuto, runPnl, startRun, type AutoRun, type AutoStop } from '@/lib/game/autoBot';
@@ -561,7 +562,7 @@ export function DigitsTradeScreen() {
               currentType === m.id ? 'border-accent bg-accent/10 text-fg' : 'border-border text-muted hover:text-fg',
             )}
           >
-            {variant === 'console' ? m.console : m.label}
+            {variant === 'console' ? m.console : m.label.replace('Matches/Differs', 'Match/Differ')}
           </button>
         ))}
       </div>
@@ -719,11 +720,12 @@ export function DigitsTradeScreen() {
               <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted">Select digit</span>
               <span className="text-[12px] font-bold tabular-nums text-accent">{selectorValue}</span>
             </div>
-            <div className="grid grid-cols-10 gap-1">
+            {/* phones: 2 rows of 5 at 44 pt (10 in a row were 31 pt); desktop: one row */}
+            <div className="grid grid-cols-5 gap-1.5 lg:grid-cols-10 lg:gap-1">
               {Array.from({ length: 10 }, (_, d) => (
-                <button key={d} type="button" onClick={() => onSelectDigit(d)} aria-pressed={selectorValue === d}
+                <button key={d} type="button" onClick={() => onSelectDigit(d)} aria-pressed={selectorValue === d} data-compact
                   aria-label={`${market === 'overunder' ? 'Barrier' : 'Prediction'} digit ${d}`}
-                  className={cn('grid aspect-square place-items-center rounded-md border text-[12px] font-semibold tabular-nums transition',
+                  className={cn('grid h-11 place-items-center rounded-lg border text-[15px] font-semibold tabular-nums transition lg:aspect-square lg:h-auto lg:rounded-md lg:text-[12px]',
                     selectorValue === d ? 'border-accent bg-accent/15 text-fg shadow-[0_0_10px_-3px_var(--pp-accent)]' : 'border-border text-muted hover:text-fg')}>
                   {d}
                 </button>
@@ -732,40 +734,20 @@ export function DigitsTradeScreen() {
           </div>
         ) : null}
 
-        {/* STAKE AMOUNT + Stake/Payout (desktop; on phones the caption in the stepper toggles it) */}
-        <div className="hidden items-center justify-between lg:flex">
-          <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted">{amountMode === 'payout' ? 'Payout amount' : 'Stake amount'}</span>
-          <div className="flex rounded-lg border border-border bg-bg/60 p-0.5 text-[11px] font-semibold">
-            {(['stake', 'payout'] as const).map((mm) => (
-              <button key={mm} type="button" aria-pressed={amountMode === mm}
-                onClick={() => {
-                  if (mm === amountMode) return;
-                  if (mm === 'payout') setPayoutInput(toAmountStr(payoutForStake(stakeCents, primaryProb, PAYOUT_FACTOR)));
-                  else setStake(toAmountStr(stakeCents));
-                  setAmountMode(mm);
-                }}
-                className={cn('rounded-md px-2.5 py-1 capitalize transition', amountMode === mm ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg')}>
-                {mm}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Stake / Payout — one segmented control on every size (the phone caption toggle was a 15 pt target) */}
+        <Segmented label="Amount" value={amountMode} options={[{ id: 'stake', label: 'Stake' }, { id: 'payout', label: 'Payout' }] as const}
+          onChange={(mm) => {
+            if (mm === amountMode) return;
+            if (mm === 'payout') setPayoutInput(toAmountStr(payoutForStake(stakeCents, primaryProb, PAYOUT_FACTOR)));
+            else setStake(toAmountStr(stakeCents));
+            setAmountMode(mm);
+          }} />
 
         {/* stepper */}
         <div className="flex items-center gap-3 rounded-xl border border-border bg-bg/40 px-3 py-2.5">
           <button type="button" onClick={() => stepStake(-1)} aria-label="Decrease amount"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted transition hover:text-fg"><DIcon name="minus" className="h-4 w-4" /></button>
-          <div className="flex-1 text-center">
-            <button type="button" onClick={() => {
-                const mm = amountMode === 'payout' ? 'stake' : 'payout';
-                if (mm === 'payout') setPayoutInput(toAmountStr(payoutForStake(stakeCents, primaryProb, PAYOUT_FACTOR)));
-                else setStake(toAmountStr(stakeCents));
-                setAmountMode(mm);
-              }}
-              title="Switch between entering a stake and a target payout"
-              className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted lg:hidden">
-              {amountMode === 'payout' ? 'Payout ⇄' : 'Stake ⇄'}
-            </button>
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted transition hover:text-fg"><DIcon name="minus" className="h-4 w-4" /></button>
+          <label className="flex min-h-11 flex-1 cursor-text items-center justify-center text-center">
             <div className="flex items-baseline justify-center gap-3">
               <span className="text-[15px] font-semibold text-accent">{symbol}</span>
               <input inputMode="decimal" value={amountMode === 'payout' ? payoutInput : stake}
@@ -776,9 +758,9 @@ export function DigitsTradeScreen() {
                 aria-label={amountMode === 'payout' ? 'Target payout' : 'Stake amount'}
                 className="w-24 bg-transparent text-center font-mono text-[22px] font-bold tabular-nums text-fg outline-none" />
             </div>
-          </div>
+          </label>
           <button type="button" onClick={() => stepStake(1)} aria-label="Increase amount"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted transition hover:text-fg"><DIcon name="plus" className="h-4 w-4" /></button>
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted transition hover:text-fg"><DIcon name="plus" className="h-4 w-4" /></button>
         </div>
 
         {/* presets */}
@@ -786,9 +768,9 @@ export function DigitsTradeScreen() {
           {presets.map((q) => {
             const active = Number(amountMode === 'payout' ? payoutInput : stake) === q;
             return (
-              <button key={q} type="button" aria-pressed={active} aria-label={`${amountMode === 'payout' ? 'Payout' : 'Stake'} ${q}`}
+              <button key={q} type="button" aria-pressed={active} aria-label={`${amountMode === 'payout' ? 'Payout' : 'Stake'} ${q}`} data-compact
                 onClick={() => (amountMode === 'payout' ? setPayoutInput(String(q)) : setStake(String(q)))}
-                className={cn('rounded-lg border py-1.5 text-[clamp(10.5px,2.8vw,12px)] font-medium tabular-nums transition',
+                className={cn('h-11 min-w-0 rounded-lg border text-[clamp(11px,3.4vw,13px)] font-semibold tabular-nums transition lg:h-8 lg:text-[12px]',
                   active ? 'border-accent bg-accent/15 text-fg' : 'border-border bg-bg/40 text-muted hover:text-fg')}>
                 {isForeign ? symbol : ''}{pillLabel(q)}
               </button>
