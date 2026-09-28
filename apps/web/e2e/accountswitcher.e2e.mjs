@@ -32,7 +32,9 @@ const wallet = (mode) => ({
 const results = [];
 const check = (n, ok, d = '') => { results.push({ n, ok }); console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${n}${!ok && d ? ` -- ${d}` : ''}`); };
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' });
+// `undefined` (not a hard-coded path) so playwright-core uses its own installed browser on CI, the
+// same as roles.e2e.mjs. A literal fallback path only works on the machine that happens to have it.
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 
 async function session({ width = 390, height = 844, mode = 'real', touch = true } = {}) {
   const ctx = await browser.newContext({
