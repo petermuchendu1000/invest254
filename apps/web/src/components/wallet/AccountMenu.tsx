@@ -48,8 +48,12 @@ export function AccountMenu({
   wallet, fmt, onSwitch, onDeposit, onWithdraw, onTopupDemo, switching, toppingUp,
 }: AccountMenuProps) {
   const f = walletFigures(wallet);
-  const active = wallet.mode === 'demo' ? 'demo' : 'real';
-  const bonus = wallet.bonusBalance ?? 0;
+  // A MARKETER's Real/Demo switch is `marketerPractice` (account_mode stays 'demo' server-side); a
+  // player's is `mode`. Either way this is which tab is active.
+  const active = wallet.modeLocked
+    ? (wallet.marketerPractice ? 'demo' : 'real')
+    : (wallet.mode === 'demo' ? 'demo' : 'real');
+  const bonus = wallet.modeLocked ? 0 : (wallet.bonusBalance ?? 0);
 
   const Row = ({ mode, label, cents, sub }: { mode: 'real' | 'demo'; label: string; cents: number; sub?: string }) => {
     const on = active === mode;
@@ -99,37 +103,17 @@ export function AccountMenu({
           'overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl shadow-black/50',
         )}
       >
-        {/* A MARKETER is presented as a normal player on their REAL account. Their funny money IS their
-            Real balance: it is what they stake, and what they withdraw — the server routes their
-            `POST /withdrawals` to the instant game→marketer-wallet transfer, so the Withdraw action
-            below works for them exactly as it reads. It shows as the accent "R" account, never the
-            yellow "Demo" (or a "Marketer"/"Balance" euphemism) that would tell a watching player the
-            account is not a real one — the one thing this covert surface must never do.
+        {/* A MARKETER is a normal player with two accounts (0176): Real is their funny money
+            (withdrawn via the instant marketer transfer), Demo is their separate practice bucket. The
+            switch and rows are identical to a player's — indistinguishable — so nothing here names the
+            account type. Their switch toggles the practice flag server-side; account_mode stays 'demo'. */}
+        <div role="menu" aria-label="Accounts" className="flex flex-col">
+          <Row mode="real" label="Real" cents={f.realTotal} {...(bonus > 0 ? { sub: `${fmt(bonus)} bonus` } : {})} />
+          <div className="mx-3 h-px bg-border" />
+          <Row mode="demo" label="Demo" cents={f.demoBalance} />
+        </div>
 
-            It is a status line, not a switch: a marketer has a single account, so this never calls a
-            mode switch (the server refuses a marketer's switch to Real with MODE_LOCKED). A separate,
-            playable Demo practice bucket is not offered because the money layer keeps every marketer
-            trade on that one bucket — a second one would need a money-layer change, not presentation. */}
-        {wallet.modeLocked ? (
-          <div role="group" aria-label="Account" className="flex flex-col">
-            <div className="flex min-h-[3.5rem] w-full items-center gap-3 bg-surface-2 px-3 text-left">
-              <span aria-hidden className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent/20 text-[11px] font-extrabold text-accent">R</span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-semibold leading-tight text-fg">Real</span>
-                <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight tabular-nums text-muted">{fmt(f.realTotal)}</span>
-              </span>
-              <Check className="h-4 w-4 shrink-0 text-accent" />
-            </div>
-          </div>
-        ) : (
-          <div role="menu" aria-label="Accounts" className="flex flex-col">
-            <Row mode="real" label="Real" cents={f.realTotal} {...(bonus > 0 ? { sub: `${fmt(bonus)} bonus` } : {})} />
-            <div className="mx-3 h-px bg-border" />
-            <Row mode="demo" label="Demo" cents={f.demoBalance} />
-          </div>
-        )}
-
-        {active === 'demo' && !wallet.modeLocked ? (
+        {active === 'demo' ? (
           <>
             <div className="h-px bg-border" />
             <button
@@ -165,7 +149,7 @@ export function AccountMenu({
               </button>
             ) : null}
           </div>
-          {active === 'demo' && !wallet.modeLocked ? (
+          {active === 'demo' ? (
             <p className="px-1 pt-2 text-[11px] leading-snug text-muted">
               Practice money — never withdrawable.
             </p>

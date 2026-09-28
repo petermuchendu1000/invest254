@@ -106,18 +106,38 @@ The money layer is unchanged and remains the source of truth:
   Daraja B2C hold path. Their earnings live in `marketer_wallets` / the marketer app at `/dashboard`.
 
 So the funny money **is** their Real account, and the UI now says exactly that. A marketer is rendered
-through the identical player path — the top-bar pill reads **R / Real** in the accent colour (its
-`demo` flag is forced off for `modeLocked`), and the account panel shows one active **Real** row with
-that balance, a check, and Deposit + Withdraw (the Withdraw the server routes to their transfer). No
-`DEMO` pill, no greyed **Unavailable** Real row, no "Balance" euphemism, no account type named —
-`AccountMenu` prints neither "marketer" nor "demo" for them, so nothing over their shoulder gives it
-away.
+through the identical player path — the account panel shows an active **Real** row (funny money, a
+check, Deposit + Withdraw — the Withdraw the server routes to their transfer). No account type is named:
+`AccountMenu` prints neither "marketer" nor "demo type" for them, so nothing over their shoulder gives
+it away.
 
-What is **not** offered is a second, playable **Demo** practice bucket. A player's Demo is a separate
-balance the server routes play to on a mode switch; a marketer has no such bucket and cannot switch, so
-a Demo tab for them would be a control that cannot do what it says. Giving marketers a real practice
-bucket is a money-layer change (move the funny money into `real_balance` and free `demo_balance` for
-practice), deliberately **not** done here — this change is presentation-only, no money moves.
+## 8. …with a real, separate Demo practice bucket (DEMO-6, migration 0176)
+
+DEMO-5 stopped short of a second bucket: it presented a marketer's single funny-money account as Real
+and left them no Demo tab. A player has BOTH — Real (withdrawable) and a Demo they practise with — so a
+marketer without a Demo is still not quite indistinguishable. `0176` closes that with a genuinely
+separate, playable practice bucket, entirely additive so real players are byte-for-byte unaffected.
+
+- `wallets.practice_balance` — the new bucket. Nothing else reads or writes it, so it cannot leak into
+  real cash, deposits, withdrawals, bonuses or reporting.
+- `wallets.marketer_practice` — the marketer's Real/Demo switch. `account_mode` is **untouched**
+  (`'demo'`), so pool exemption (`fn_account_is_demo`), the funny-money path and reporting are exactly
+  as before. This flag ONLY redirects a marketer's play / top-up.
+- `positions.practice` — the bucket a position was staked from, decided AT OPEN, so `fn_settle_position`
+  pays it back there (checked before the marketer-identity fallback, which would otherwise divert a
+  practice win to the funny money).
+
+The only new branch in the betting/settlement RPCs is `fn_marketer_in_practice` (marketer AND the flag),
+so a non-marketer, and a marketer on their funny money, are byte-for-byte the 0123 bodies. A marketer's
+Real/Demo switch (`POST /wallet/mode`) toggles the flag instead of `account_mode`; the pill and menu
+read `marketerPractice`, so a marketer on Real shows **R / Real** (accent) and on practice shows
+**D / Demo** (warn) — exactly like a player. Real is withdrawable (`canWithdraw`); the practice bucket
+never is, and it starts empty and top-up-able (`fn_topup_demo_account` targets it while in practice).
+
+Invariants held (proved by a rolled-back prod dry-run — open+settle round-trip + isolation): a marketer
+never withdraws real cash; practice play/settlement touches `practice_balance` ONLY (funny + real
+untouched); every marketer position stays out of the real cohort by identity; global existing money is
+unchanged by the migration.
 
 ### The client was the last layer trusting the JWT role claim
 
