@@ -76,7 +76,7 @@ const shot = (page, name) => (SHOTS ? page.screenshot({ path: `${OUT}/${name}.pn
 
 try {
   // ── 1. PHONE, real mode: open the account menu and tap Demo ──
-  {
+  await (async () => {
     const { ctx, page, calls, errors } = await session({ mode: 'real' });
     await page.goto(`${WEB}${process.env.PROBE_PATH ?? '/wallet'}`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(1200);
@@ -100,7 +100,16 @@ try {
         db ? `y=${db.y} h=${db.height} x=${db.x} w=${db.width}` : 'no box');
     }
 
+    // A marketer has no Real/Demo rows at all (they have one account), so the row assertions below
+    // only apply to a player's wallet.
     const demoRow = page.getByRole('menuitemradio', { name: /Demo account/ });
+    if (LOCKED) {
+      check('marketer: the switcher offers no Real/Demo rows', (await demoRow.count()) === 0
+        && (await page.getByRole('menuitemradio', { name: /Real account/ }).count()) === 0);
+      check('marketer: no page errors', errors.length === 0, errors.join(' | '));
+      await ctx.close();
+      return;
+    }
     check('phone: the Demo row exists', (await demoRow.count()) === 1);
     if (await demoRow.count()) {
       const rb = await demoRow.boundingBox();
@@ -129,7 +138,7 @@ try {
     check('phone: an outside tap dismisses the menu', (await page.getByRole('dialog', { name: 'Switch account' }).count()) === 0);
     check('phone: no page errors', errors.length === 0, errors.join(' | '));
     await ctx.close();
-  }
+  })();
 
   // ── 2. PHONE, demo mode: no withdrawal affordance anywhere ──
   {
@@ -149,7 +158,7 @@ try {
     // correct for them (the deliberate carve-out in walletFigures). Only a player in demo loses it.
     const wd = await page.getByRole('button', { name: /^withdraw$/i }).count();
     check(LOCKED ? 'demo-locked marketer: keeps its own Withdraw' : 'demo: the switcher offers no Withdraw',
-      LOCKED ? wd === 1 : wd === 0, `withdraw buttons=${wd}`);
+      LOCKED ? wd >= 1 : wd === 0, `withdraw buttons=${wd}`);
     check('demo: no page errors', errors.length === 0, errors.join(' | '));
     await ctx.close();
   }
@@ -163,21 +172,28 @@ try {
     await page.waitForTimeout(400);
 
     const realRow = page.getByRole('menuitemradio', { name: /Real account/ });
+    if (LOCKED) {
+      // A MARKETER has no Real account. Offering one — even greyed out — misdescribes the account:
+      // their money is the marketer balance, their payout is the marketer transfer, and their
+      // earnings live in the marketer app. So the switcher must not appear for them at all.
+      const text = (await page.getByRole('dialog', { name: 'Switch account' }).innerText()).toLowerCase();
+      check('marketer: no Real row is offered', (await realRow.count()) === 0, `rows=${await realRow.count()}`);
+      check('marketer: no Demo row either (nothing to switch)', (await page.getByRole('menuitemradio', { name: /Demo account/ }).count()) === 0);
+      // COVERT: the panel must not print "marketer" or "demo" — a watching player would learn what
+      // the account is, and the whole marketer surface is built to avoid exactly that.
+      check('marketer: the panel never names the account type', !text.includes('marketer') && !text.includes('demo'), text.slice(0, 160));
+      // >= 1, not === 1: on /wallet the page has its OWN Withdraw beside the panel's, so an exact
+      // count is environment-dependent. CI caught that; the product behaviour was never wrong.
+      check('marketer: keeps its own Withdraw', (await page.getByRole('button', { name: /^withdraw$/i }).count()) >= 1);
+      check('marketer: is not told its money is practice money', !text.includes('practice money'), text.slice(0, 160));
+      check('demo->real: no page errors', errors.length === 0, errors.join(' | '));
+      await ctx.close();
+      return;
+    }
     check('demo->real: the Real row exists', (await realRow.count()) === 1);
     if (await realRow.count()) {
       const isDisabled = await realRow.isDisabled();
       const op = await realRow.evaluate((el) => getComputedStyle(el).opacity);
-      const text = (await page.getByRole('dialog', { name: 'Switch account' }).innerText()).toLowerCase();
-      if (LOCKED) {
-        // A mode-locked wallet (this phone is a marketer on this brand) MAY refuse Real — but it must
-        // never look like a broken button. Full contrast, an explicit badge, and a stated reason.
-        check('locked: the Real row is refused', isDisabled === true, `disabled=${isDisabled}`);
-        check('locked: it keeps full contrast (not a dead grey row)', Number(op) > 0.9, `opacity=${op}`);
-        check('locked: it is badged Unavailable', text.includes('unavailable'), text.slice(0, 120));
-        check('locked: the reason is stated', text.includes('marketer'), text.slice(0, 160));
-        await ctx.close();
-        return;
-      }
       check('demo->real: the Real row is NOT disabled', isDisabled === false, `disabled=${isDisabled}`);
       check('demo->real: the Real row does not LOOK disabled', Number(op) > 0.9, `opacity=${op}`);
       const pe = await realRow.evaluate((el) => getComputedStyle(el).pointerEvents);

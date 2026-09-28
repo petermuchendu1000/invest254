@@ -109,19 +109,29 @@ export function AccountMenu({
           'overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl shadow-black/50',
         )}
       >
-        <div role="menu" aria-label="Accounts" className="flex flex-col">
-          <Row mode="real" label="Real" cents={f.realTotal} {...(bonus > 0 ? { sub: `${fmt(bonus)} bonus` } : {})} />
-          <div className="mx-3 h-px bg-border" />
-          <Row mode="demo" label="Demo" cents={f.demoBalance} />
-        </div>
-
+        {/* A MARKETER has no Real account to switch to — offering one (even greyed out) misdescribes
+            the account. Their balance is their own, their payout is the marketer transfer, and their
+            earnings live in their own app.
+            NAMED NEUTRALLY ON PURPOSE. The marketer system is covert by design — the dashboard entry
+            is an invisible hotspot precisely so "NO visible button a watching player could notice".
+            Printing "Marketer" (or "Demo") here would tell anyone looking over their shoulder exactly
+            what the account is, which is the one thing this surface must not do. So: balance only. */}
         {wallet.modeLocked ? (
-          <p className="border-t border-border px-3 py-2 text-[11px] leading-snug text-muted">
-            This phone is registered as a marketer on this brand, so it trades on the Demo account only.
-          </p>
-        ) : null}
+          <div className="flex min-h-[3.5rem] items-center px-3">
+            <span className="min-w-0 flex-1">
+              <span className="block text-[11px] font-medium uppercase tracking-wider text-muted">Balance</span>
+              <span className="mt-0.5 block truncate font-mono text-[18px] font-bold leading-tight tabular-nums text-fg">{fmt(f.realTotal)}</span>
+            </span>
+          </div>
+        ) : (
+          <div role="menu" aria-label="Accounts" className="flex flex-col">
+            <Row mode="real" label="Real" cents={f.realTotal} {...(bonus > 0 ? { sub: `${fmt(bonus)} bonus` } : {})} />
+            <div className="mx-3 h-px bg-border" />
+            <Row mode="demo" label="Demo" cents={f.demoBalance} />
+          </div>
+        )}
 
-        {active === 'demo' ? (
+        {active === 'demo' && !wallet.modeLocked ? (
           <>
             <div className="h-px bg-border" />
             <button
@@ -157,7 +167,7 @@ export function AccountMenu({
               </button>
             ) : null}
           </div>
-          {active === 'demo' ? (
+          {active === 'demo' && !wallet.modeLocked ? (
             <p className="px-1 pt-2 text-[11px] leading-snug text-muted">
               Practice money — never withdrawable.
             </p>
