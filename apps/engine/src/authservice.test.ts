@@ -162,32 +162,6 @@ test("assertAccountActive fails CLOSED when a privileged profile is missing (#7)
   await assert.rejects(() => auth.assertAccountActive("00000000-0000-0000-0000-000000000000", "admin"), /ACCOUNT_INACTIVE/);
 });
 
-test("setDisplayCurrency saves a supported code, clears on null, and is echoed by me() (#10)", async () => {
-  const repo = new InMemoryIdentityRepository();
-  const { auth } = svc(repo);
-  const reg = await auth.register({ phone: "0712345678", username: "alice", password: "Password1" });
-  // Default: no preference.
-  assert.equal((await auth.me(reg.userId)).displayCurrency, null);
-  // Set a supported currency (normalized upper-case).
-  assert.deepEqual(await auth.setDisplayCurrency(reg.userId, "usd"), { displayCurrency: "USD" });
-  assert.equal((await auth.me(reg.userId)).displayCurrency, "USD");
-  // Clear it with null / empty.
-  assert.deepEqual(await auth.setDisplayCurrency(reg.userId, null), { displayCurrency: null });
-  assert.equal((await auth.me(reg.userId)).displayCurrency, null);
-  assert.deepEqual(await auth.setDisplayCurrency(reg.userId, "  "), { displayCurrency: null });
-});
-
-test("setDisplayCurrency rejects an unsupported currency and an unknown user (#10)", async () => {
-  const repo = new InMemoryIdentityRepository();
-  const { auth } = svc(repo);
-  const reg = await auth.register({ phone: "0712345678", username: "alice", password: "Password1" });
-  await assert.rejects(() => auth.setDisplayCurrency(reg.userId, "JPY"), /UNSUPPORTED_CURRENCY/);
-  await assert.rejects(() => auth.setDisplayCurrency(reg.userId, "ZZZ"), /UNSUPPORTED_CURRENCY/);
-  // A rejected value never persists.
-  assert.equal((await auth.me(reg.userId)).displayCurrency, null);
-  await assert.rejects(() => auth.setDisplayCurrency("00000000-0000-0000-0000-000000000000", "USD"), /NOT_FOUND/);
-});
-
 test("AuthService requires a jwt secret", () => {
   assert.throws(() => new AuthService(new InMemoryIdentityRepository(), { jwtSecret: "" }), /JWT_SECRET_REQUIRED/);
 });

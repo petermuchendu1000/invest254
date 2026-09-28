@@ -154,8 +154,7 @@ export interface ApiDeps {
   auth: Pick<AuthService, "register" | "login" | "me" | "issueToken" | "issueSessionToken"
     | "beginMfaEnrolment" | "confirmMfa" | "disableMfa" | "mfaStatus"
     | "changePassword" | "resetPassword"
-    | "setSecurityAnswers" | "securitySetupRequired" | "getResetQuestionKeys" | "assertSessionValid"
-    | "setDisplayCurrency">;
+    | "setSecurityAnswers" | "securitySetupRequired" | "getResetQuestionKeys" | "assertSessionValid">;
   /** Marketer enrollment, commission accrual, dashboard reads (I1/I2/I3) + payouts (I4). */
   affiliate: Pick<AffiliateService,
     "enroll" | "accrueDaily" | "summary" | "listReferrals" | "listCommissions"

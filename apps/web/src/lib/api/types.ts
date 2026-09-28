@@ -32,11 +32,6 @@ export interface MeDto {
    * forces a mandatory, non-dismissible 2FA enrolment gate when true (mirrors securitySetupRequired).
    */
   mfaSetupRequired?: boolean;
-  /**
-   * #10 geo-currency: the user's saved display-currency preference (ISO-4217, e.g. 'USD'), or null to
-   * use the geo/brand default. Presentation only — money of record is always KES cents.
-   */
-  displayCurrency?: string | null;
   /** docs/42 UI-8: the brand / platform THIS session acts on (from the token), with display names. */
   scope?: {
     site: { id: string; name: string | null } | null;

@@ -17,52 +17,6 @@ function req(api: TestApi, method: string, path: string, opts: ReqOpts = {}): Pr
   return fetch(`${api.baseUrl}${path}`, init);
 }
 
-const REG = { phone: "0712345678", username: "alice", password: "Password1" };
-
-// The stub verifier treats the bearer string as the userId, so authenticate as the freshly
-// registered account by using its userId as the token (its profile then exists in the identity repo).
-async function registerToken(api: TestApi): Promise<string> {
-  const res = await req(api, "POST", "/api/v1/auth/register", { body: REG });
-  return (await json(res)).userId as string;
-}
-
-test("POST /auth/currency requires authentication", async () => {
-  const api = await startTestApi();
-  try {
-    assert.equal((await req(api, "POST", "/api/v1/auth/currency", { body: { currency: "USD" } })).status, 401);
-  } finally { await api.close(); }
-});
-
-test("POST /auth/currency saves a supported preference and /auth/me echoes it", async () => {
-  const api = await startTestApi();
-  try {
-    const token = await registerToken(api);
-    // Default: no preference.
-    assert.equal((await json(await req(api, "GET", "/api/v1/auth/me", { token }))).displayCurrency, null);
-    // Set (lower-case accepted, normalized to upper).
-    const set = await req(api, "POST", "/api/v1/auth/currency", { token, body: { currency: "usd" } });
-    assert.equal(set.status, 200);
-    assert.equal((await json(set)).displayCurrency, "USD");
-    assert.equal((await json(await req(api, "GET", "/api/v1/auth/me", { token }))).displayCurrency, "USD");
-    // Clear with null.
-    const cleared = await req(api, "POST", "/api/v1/auth/currency", { token, body: { currency: null } });
-    assert.equal(cleared.status, 200);
-    assert.equal((await json(cleared)).displayCurrency, null);
-    assert.equal((await json(await req(api, "GET", "/api/v1/auth/me", { token }))).displayCurrency, null);
-  } finally { await api.close(); }
-});
-
-test("POST /auth/currency rejects an unsupported currency (400) and a non-string (400)", async () => {
-  const api = await startTestApi();
-  try {
-    const token = await registerToken(api);
-    const bad = await req(api, "POST", "/api/v1/auth/currency", { token, body: { currency: "JPY" } });
-    assert.equal(bad.status, 400);
-    assert.equal((await json(bad)).error.code, "UNSUPPORTED_CURRENCY");
-    assert.equal((await req(api, "POST", "/api/v1/auth/currency", { token, body: { currency: 42 } })).status, 400);
-  } finally { await api.close(); }
-});
-
 test("GET /site/brand: an unsupported/unknown geo or preference leaves the brand currency untouched (KES)", async () => {
   const api = await startTestApi();
   try {

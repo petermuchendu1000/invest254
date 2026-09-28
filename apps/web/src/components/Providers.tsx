@@ -9,7 +9,6 @@ import { ReferralCapture } from '@/components/ReferralCapture';
 import { SecurityQuestionsGate } from '@/components/auth/SecurityQuestionsGate';
 import { MfaEnrolmentGate } from '@/components/auth/MfaEnrolmentGate';
 import { SessionCacheGuard } from '@/components/auth/SessionCacheGuard';
-import { CurrencySync } from '@/components/layout/CurrencySync';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -25,8 +24,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <ToastProvider>
         {children}
         <SessionCacheGuard />
-        {/* #10: adopt a signed-in user's saved display currency into the SSR cookie (cross-device). */}
-        <CurrencySync />
         <ReferralCapture />
         <OutcomeOverlay />
         <WelcomeBonusOverlay />

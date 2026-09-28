@@ -85,9 +85,6 @@ export const api = {
     apiFetch<AuthResult>('/auth/admin/login', { method: 'POST', body }),
   me: (token: string) => apiFetch<MeDto>('/auth/me', { token }),
   refreshToken: (token: string) => apiFetch<AuthResult>('/auth/refresh', { method: 'POST', token }),
-  /** #10 geo-currency: save (or clear, with null) the user's display-currency preference. */
-  setCurrency: (token: string, currency: string | null) =>
-    apiFetch<{ displayCurrency: string | null }>('/auth/currency', { method: 'POST', token, body: { currency } }),
   /**
    * Set a new password (0097). For a PRIVILEGED account (admin/superadmin/platform_superadmin) the
    * three security `answers` are REQUIRED and verified server-side; for a player they are ignored and

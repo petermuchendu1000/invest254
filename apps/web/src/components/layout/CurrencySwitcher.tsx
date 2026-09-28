@@ -5,20 +5,19 @@ import { useRouter } from 'next/navigation';
 import { SUPPORTED_DISPLAY_CURRENCIES } from '@invest254/shared/geo';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { readCurrencyCookie, writeCurrencyCookie } from '@/lib/brand/currency';
-import { useSession } from '@/lib/auth/session';
-import { api } from '@/lib/api/endpoints';
 
 /**
  * #10 geo-currency: lets the visitor choose the DISPLAY currency (presentation only — money of record
  * stays KES cents). "Auto" clears the choice and falls back to geo-detection, then the brand currency.
- * The choice is written to the `pp-currency` cookie (so SSR re-resolves the currency + live FX rate)
- * and, when signed in, saved to the account so it follows the user across devices. `router.refresh()`
- * re-runs the server layout, which is the single place that resolves the effective currency.
+ *
+ * The choice is stored in the `pp-currency` cookie, which the server layout reads to resolve the
+ * currency + live FX rate during SSR — so `router.refresh()` is all that's needed to re-render every
+ * amount (and the deposit forms' local→KES conversion) in the new currency. The cookie is per-device
+ * and lasts a year; it is deliberately NOT persisted to the account, so no schema change is required.
  */
 export function CurrencySwitcher({ className = '' }: { className?: string }) {
   const router = useRouter();
   const brand = useBrand();
-  const token = useSession((s) => s.token);
   // The explicit choice (cookie). '' = Auto. Read after mount to avoid a hydration mismatch.
   const [choice, setChoice] = useState('');
   useEffect(() => { setChoice(readCurrencyCookie()); }, []);
@@ -26,8 +25,6 @@ export function CurrencySwitcher({ className = '' }: { className?: string }) {
   function onChange(next: string) {
     setChoice(next);
     writeCurrencyCookie(next || null);
-    // Best-effort server save so the preference follows the account to other devices; never blocks UI.
-    if (token) void api.setCurrency(token, next || null).catch(() => {});
     router.refresh();
   }
 
