@@ -165,6 +165,7 @@ export interface ApiDeps {
     | "adjustBalance" | "resetBalanceToLastFunded" | "listDeposits" | "depositsReconcile" | "reportDaily" | "reportByUser" | "reportDay"
     | "getGameConfig" | "updateGameConfig" | "getMpesaConfig" | "updateMpesaConfig" | "rtpMonitor" | "realCashRtp" | "configChangeReview" | "listSeeds" | "rotateSeed"
     | "getWithdrawalPool" | "setWithdrawalPool" | "setDefaultPool" | "getWithdrawalsEnabled" | "setWithdrawalsEnabled"
+    | "getBonusSwitches" | "setBonusesEnabled"
     | "listAffiliatePayouts" | "recordAction"
     | "adjustBalanceKind" | "clearBalance" | "getUserOverrides" | "setUserOverrides"
     | "siteOfUser" | "siteOfTransaction">;
@@ -175,7 +176,7 @@ export interface ApiDeps {
     | "poolDemand" | "distributePoolDynamic"
     | "listPaymentProviders" | "setProviderGlobal" | "setProviderSite" | "clearProviderSite"
     | "gatewaySchemas" | "getProviderConfig" | "setProviderConfig" | "testProviderConnection"
-    | "listPlatforms" | "platformsOverview" | "createPlatform" | "updatePlatform" | "assignSiteToPlatform"
+    | "listPlatforms" | "platformsOverview" | "createPlatform" | "updatePlatform" | "assignSiteToPlatform" | "setPlatformBonusesEnabled"
     | "appointPlatformAdmin" | "revokePlatformAdmin" | "platformOfSite" | "listPlatformAdmins" | "searchUsers">;
   /** Subscription plans + per-platform billing/status (Issue 2). Absent -> /subscriptions routes off. */
   subscriptions?: SubscriptionService | undefined;
