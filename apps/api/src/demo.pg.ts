@@ -78,6 +78,17 @@ export function makeWalletModeDeps(q: WalletModeQuerier, rate: (currency: string
       // 'demo'). Real => funny money (their withdrawable account); Demo => the separate practice bucket.
       if (m.rows[0]?.m === true) {
         await q.query("select fn_set_marketer_practice($1, $2, $3)", [userId, site, mode === "demo"]);
+        // DEMO-2 parity: a marketer's practice (Demo) bucket opens FUNDED to 10,000 too, so it is never
+        // an empty 0 the way a player's demo never is. fn_topup_demo_account targets practice now that
+        // the flag is set, and only tops up when it cannot place the minimum stake (spent, or new).
+        if (mode === "demo") {
+          const b = await q.query(
+            `select w.practice_balance, coalesce(c.min_stake, 1) as min_stake from wallets w
+               left join site_game_config c on c.site_id = w.site_id
+              where w.user_id = $1 and ($2::uuid is null or w.site_id = $2)`, [userId, site]);
+          const x = b.rows[0];
+          if (x && toCents(x.practice_balance) < Math.max(1, toCents(x.min_stake))) await topupDemo(userId, site ?? undefined).catch(() => 0);
+        }
         return mode;
       }
       const r = await q.query("select fn_set_account_mode($1, $2, $3) as mode", [userId, site, mode]);

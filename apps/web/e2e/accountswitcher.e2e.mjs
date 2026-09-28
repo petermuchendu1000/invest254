@@ -73,7 +73,11 @@ async function session({ width = 390, height = 844, mode = 'real', touch = true 
     else if (path === '/wallet') body = wallet(st);
     else if (path === '/wallet/mode') {
       let b = {}; try { b = req.postDataJSON(); } catch {}
-      if (LOCKED) st.practice = b.mode === 'demo'; else st.mode = b.mode ?? st.mode;
+      if (LOCKED) {
+        st.practice = b.mode === 'demo';
+        // DEMO-2 parity: entering practice opens the Demo bucket funded to 10,000 (like a player's demo).
+        if (st.practice && st.practiceBal < 25_000) st.practiceBal = 1_000_000;
+      } else st.mode = b.mode ?? st.mode;
       body = { mode: LOCKED ? (st.practice ? 'demo' : 'real') : st.mode, wallet: wallet(st) };
     }
     else if (path === '/wallet/demo/topup') { if (LOCKED) st.practiceBal = 1_000_000; body = { wallet: wallet(st), demoBalance: LOCKED ? st.practiceBal : 1_000_000 }; }
@@ -210,6 +214,8 @@ try {
         JSON.stringify(calls.filter((c) => c.includes('wallet'))));
       const plabel = await page.locator('#balance-pill').getAttribute('aria-label');
       check('marketer: the pill now reads Demo (on the practice bucket)', /^Demo account/.test(plabel ?? ''), String(plabel));
+      // DEMO-2 parity: the practice bucket opens FUNDED to 10,000, never an empty 0.
+      check('marketer: the Demo (practice) bucket opens funded at 10,000', /10[,.]?000/.test(plabel ?? '') && !/\bKES 0\b/.test(plabel ?? ''), String(plabel));
       // The switch closes the menu (onSuccess), so re-open it to inspect the practice tab.
       await page.locator('#balance-pill').tap();
       await page.waitForTimeout(400);
