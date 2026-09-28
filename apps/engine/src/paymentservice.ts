@@ -276,6 +276,32 @@ export class PaymentService {
   }
 
   /**
+   * Initiate a PayHero **Lipwa** (hosted multi-channel) deposit — card, bank, mobile-money, cross-border.
+   * We do NOT collect card data (PayHero's PCI-hosted page does); we only mint a pending 'payhero'
+   * transaction keyed by its own id and hand back the Lipwa URL (embedded in-app). PayHero echoes our
+   * txId as the ledger row's external_reference, so `reconcilePayHeroLedger` credits it through the SAME
+   * idempotent fn_complete_deposit as every other rail. Same floors/limits as STK — no rail bypasses them.
+   */
+  async initiateLipwaDeposit(userId: string, amountCents: number, siteId?: string): Promise<{ txId: string; lipwaUrl: string; reference: string }> {
+    const owner = await this.ownerOf(siteId);
+    if (owner.scope === "global" && !this.payhero) throw new Error("PAYHERO_NOT_CONFIGURED");
+    if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
+    const minDep = await this.currentMinDeposit();
+    if (amountCents < minDep) throw new Error("BELOW_MIN");
+    const maxDep = await this.currentMaxDeposit();
+    if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
+    await this.assertRail(owner, "payhero");
+    const client = await this.payheroForScope(owner.scope);
+    if (!(await client.lipwaLink({ reference: "probe" }))) throw new Error("PAYHERO_LIPWA_NOT_CONFIGURED");
+    // external_reference we pass to Lipwa === our txId === the tx's checkout_request_id, so the ledger match is unambiguous.
+    const txId = await this.repo.createDepositProvider(userId, amountCents, "", "payhero", siteId);
+    await this.stamp(txId, owner.scope);
+    await this.repo.attachStk(txId, `lipwa:${txId}`, txId);
+    const lipwaUrl = (await client.lipwaLink({ amountKes: Math.round(amountCents / 100), reference: txId }))!;
+    return { txId, lipwaUrl, reference: txId };
+  }
+
+  /**
    * PayHero callback handler. Like the Mega Pay/Daraja model, the callback body is NEVER trusted to
    * credit. We run the authoritative sweep, which re-queries PayHero server-to-server for each recent
    * unsettled PayHero deposit — by the `reference` WE stored — and settles only the verified-paid ones
@@ -310,6 +336,50 @@ export class PaymentService {
       }
     }
     return { scanned: rows.length, settled, stillPending, errors };
+  }
+
+  /**
+   * Ledger reconcile — the settlement path for Lipwa (card/bank/multi-country) AND manual paybill C2B.
+   * Reads PayHero's authoritative account ledger (GET /transactions, one shared account) and, per inbound
+   * payment:
+   *   • external_reference set (STK/Lipwa) → credit the matching pending tx via fn_complete_deposit.
+   *     A row whose tx is already terminal returns applied=false and is left alone (no double credit);
+   *     TX_NOT_FOUND means no tx owns that reference, so it falls through to be claimable by code.
+   *   • no external_reference (manual paybill) → ingest into c2b_payments so the payer claims it by
+   *     M-PESA code through the SAME fraud-safe fn_claim_c2b_deposit as the Daraja paybill.
+   * Money-safe by construction: a payment is EITHER auto-credited to its own tx OR made claimable once —
+   * never both — and every write (fn_complete_deposit, fn_ingest_c2b) is idempotent, so re-runs are no-ops.
+   */
+  async reconcilePayHeroLedger(opts: { page?: number } = {}): Promise<{ scanned: number; settled: number; ingested: number; errors: number }> {
+    if (!this.payhero && !this.gateways) return { scanned: 0, settled: 0, ingested: 0, errors: 0 };
+    let rows: Awaited<ReturnType<PayHeroClient["listInboundPayments"]>> = [];
+    try { rows = await (await this.payheroForScope(null)).listInboundPayments({ page: opts.page ?? 1 }); }
+    catch { return { scanned: 0, settled: 0, ingested: 0, errors: 1 }; }
+    let settled = 0, ingested = 0, errors = 0;
+    for (const p of rows) {
+      try {
+        if (p.externalReference) {
+          try {
+            const res = await this.repo.completeDeposit(p.externalReference, 0, "ledger:payhero", p.mpesaCode,
+              { ledger: true, provider: "payhero", mpesaCode: p.mpesaCode, at: new Date().toISOString() });
+            if (res.applied) settled += 1;
+            continue; // a tx owns this reference (credited now, or already terminal) — never also ingest it
+          } catch (err) {
+            if (!/TX_NOT_FOUND/.test((err as Error).message)) throw err; // real error -> count it, don't lose the payment
+            // else: reference we don't own -> fall through to claimable-by-code so nothing is stranded
+          }
+        }
+        const stored = await this.repo.ingestC2b({
+          transId: p.mpesaCode, amountCents: p.amountCents, msisdn: p.msisdn,
+          billRef: p.externalReference ?? p.reference, shortcode: "payhero", raw: { provider: "payhero", ledger: true },
+        });
+        if (stored) ingested += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(`[payments] PayHero ledger reconcile failed for ${p.mpesaCode}: ${(err as Error).message}`);
+      }
+    }
+    return { scanned: rows.length, settled, ingested, errors };
   }
 
   /**

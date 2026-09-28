@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   StubPayHeroClient, HttpPayHeroClient, UnconfiguredPayHeroClient, ConfiguredPayHeroClient,
   mapPayHeroStatus, toLocalMsisdn, resolvePayHeroConfig, missingPayHeroCredentials, type PayHeroConfig,
-  parsePayerMsisdn, toInboundPayment,
+  parsePayerMsisdn, toInboundPayment, buildLipwaUrl,
 } from "./payhero.js";
 
 function fakeFetch(spec: { status?: number; body?: unknown; capture?: (url: string, init: any) => void }): typeof fetch {
@@ -140,4 +140,21 @@ test("initiateStk defaults provider m-pesa and forwards provider/network_code wh
 
 test("StubPayHeroClient.listInboundPayments is empty (no network in dev/tests)", async () => {
   assert.deepEqual(await new StubPayHeroClient().listInboundPayments(), []);
+});
+
+test("buildLipwaUrl composes amount + reference and is robust to a messy base", () => {
+  assert.equal(buildLipwaUrl("https://app.payhero.africa/lipwa/12038", { amountKes: 200, reference: "tx-1" }),
+    "https://app.payhero.africa/lipwa/12038?amount=200&reference=tx-1");
+  // trailing slash / stray query on the base are stripped; amount omitted when absent/invalid
+  assert.equal(buildLipwaUrl("https://app.payhero.africa/lipwa/12038/?x=1", { reference: "tx-2" }),
+    "https://app.payhero.africa/lipwa/12038?reference=tx-2");
+  assert.equal(buildLipwaUrl("https://app.payhero.africa/lipwa/12038", { amountKes: 0, reference: "t" }),
+    "https://app.payhero.africa/lipwa/12038?reference=t");
+});
+
+test("HttpPayHeroClient.lipwaLink returns null unless a Lipwa URL is configured", async () => {
+  const withLipwa = new HttpPayHeroClient({ ...cfg, lipwaUrl: "https://app.payhero.africa/lipwa/12038" }, fakeFetch({}));
+  assert.match((await withLipwa.lipwaLink({ amountKes: 200, reference: "r" }))!, /reference=r/);
+  const noLipwa = new HttpPayHeroClient(cfg, fakeFetch({}));
+  assert.equal(await noLipwa.lipwaLink({ reference: "r" }), null);
 });

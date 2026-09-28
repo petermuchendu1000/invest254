@@ -51,6 +51,8 @@ export interface PayHeroClient {
   queryStatus(reference: string): Promise<PayHeroStatusResult>;
   /** Read recent inbound payments from PayHero's authoritative ledger (C2B ingest/reconcile). */
   listInboundPayments(opts?: { page?: number }): Promise<PayHeroInboundPayment[]>;
+  /** Build the hosted Lipwa checkout URL for a multi-channel deposit, or null when not configured. */
+  lipwaLink(opts: { amountKes?: number; reference: string }): Promise<string | null>;
 }
 
 /** Extract the payer MSISDN from PayHero's inbound description, e.g. "Received KES 200 from 0798661061". */
@@ -109,6 +111,9 @@ export class StubPayHeroClient implements PayHeroClient {
     return { resultCode: 0, processing: false, receipt: "STUBRCPT" };
   }
   async listInboundPayments(): Promise<PayHeroInboundPayment[]> { return []; }
+  async lipwaLink(opts: { amountKes?: number; reference: string }): Promise<string | null> {
+    return `https://lipwa.stub/pay?amount=${opts.amountKes ?? 0}&reference=${encodeURIComponent(opts.reference)}`;
+  }
 }
 
 export interface PayHeroConfig {
@@ -120,6 +125,24 @@ export interface PayHeroConfig {
   channelId: string;
   /** Optional callback URL PayHero posts the result to. */
   callbackUrl?: string;
+  /** Optional hosted Lipwa checkout link for this account, e.g. https://app.payhero.africa/lipwa/12038.
+   *  When set, card / bank / other-country deposits route through it (embedded in-app), settling via the
+   *  same authoritative ledger. Absent => the Lipwa (multi-channel) option is simply not offered. */
+  lipwaUrl?: string;
+}
+
+/**
+ * Build a ready-to-open Lipwa checkout URL for a hosted multi-channel (card/bank/mobile-money) payment.
+ * `reference` is echoed back by PayHero as the ledger row's external_reference, which is how we match the
+ * completed payment to our pending transaction. `amountKes` (whole KES) pre-fills the amount when given.
+ */
+export function buildLipwaUrl(lipwaUrl: string, opts: { amountKes?: number; reference: string }): string {
+  const base = String(lipwaUrl ?? "").trim().replace(/[?#].*$/, "").replace(/\/+$/, "");
+  const q = new URLSearchParams();
+  if (opts.amountKes != null && Number.isFinite(opts.amountKes) && opts.amountKes > 0) q.set("amount", String(Math.round(opts.amountKes)));
+  if (opts.reference) q.set("reference", opts.reference);
+  const s = q.toString();
+  return s ? `${base}?${s}` : base;
 }
 
 const DEFAULT_BASE = "https://backend.payhero.co.ke/api/v2";
@@ -183,6 +206,11 @@ export class HttpPayHeroClient implements PayHeroClient {
       .map(toInboundPayment)
       .filter((x): x is PayHeroInboundPayment => x !== null);
   }
+
+  async lipwaLink(opts: { amountKes?: number; reference: string }): Promise<string | null> {
+    if (!this.cfg.lipwaUrl) return null;
+    return buildLipwaUrl(this.cfg.lipwaUrl, opts);
+  }
 }
 
 /**
@@ -197,6 +225,8 @@ export class UnconfiguredPayHeroClient implements PayHeroClient {
   async queryStatus(_r: string): Promise<PayHeroStatusResult> { return this.fail(); }
   /** A poller over an unconfigured client simply finds nothing (never throws to spam the reconcile loop). */
   async listInboundPayments(): Promise<PayHeroInboundPayment[]> { return []; }
+  /** Not configured => the Lipwa (multi-channel) option is simply not offered. */
+  async lipwaLink(): Promise<string | null> { return null; }
 }
 
 /** The credentials the real PayHero path cannot run without. Empty array = fully configured. */
@@ -209,11 +239,13 @@ export function missingPayHeroCredentials(cfg: PayHeroConfig): string[] {
 
 export function resolvePayHeroConfig(over: Partial<PayHeroConfig> = {}, env: NodeJS.ProcessEnv = process.env): PayHeroConfig {
   const callbackUrl = over.callbackUrl ?? env.PAYHERO_CALLBACK_URL;
+  const lipwaUrl = over.lipwaUrl ?? env.PAYHERO_LIPWA_URL;
   return {
     baseUrl: over.baseUrl ?? env.PAYHERO_API_BASE ?? DEFAULT_BASE,
     basicAuthToken: over.basicAuthToken ?? env.PAYHERO_BASIC_AUTH_TOKEN ?? "",
     channelId: over.channelId ?? env.PAYHERO_CHANNEL_ID ?? "",
     ...(callbackUrl ? { callbackUrl } : {}),
+    ...(lipwaUrl ? { lipwaUrl } : {}),
   };
 }
 
@@ -253,12 +285,14 @@ export class ConfiguredPayHeroClient implements PayHeroClient {
     if (over.basicAuthToken) clean.basicAuthToken = over.basicAuthToken;
     if (over.channelId) clean.channelId = over.channelId;
     if (over.callbackUrl) clean.callbackUrl = over.callbackUrl;
+    if (over.lipwaUrl) clean.lipwaUrl = over.lipwaUrl;
     const cfg = resolvePayHeroConfig(clean, this.env);
-    const fp = `${cfg.baseUrl}|${cfg.basicAuthToken}|${cfg.channelId}|${cfg.callbackUrl ?? ""}`;
+    const fp = `${cfg.baseUrl}|${cfg.basicAuthToken}|${cfg.channelId}|${cfg.callbackUrl ?? ""}|${cfg.lipwaUrl ?? ""}`;
     if (!this.cache || this.cache.fp !== fp) this.cache = { fp, client: makePayHeroClientFromConfig(clean, this.env) };
     return this.cache.client;
   }
   async initiateStk(a: PayHeroStkArgs): Promise<PayHeroStkResult> { return (await this.pick()).initiateStk(a); }
   async queryStatus(reference: string): Promise<PayHeroStatusResult> { return (await this.pick()).queryStatus(reference); }
   async listInboundPayments(opts?: { page?: number }): Promise<PayHeroInboundPayment[]> { return (await this.pick()).listInboundPayments(opts); }
+  async lipwaLink(opts: { amountKes?: number; reference: string }): Promise<string | null> { return (await this.pick()).lipwaLink(opts); }
 }
