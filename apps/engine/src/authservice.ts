@@ -3,7 +3,7 @@ import { SignJWT } from "jose";
 import { validatePassword, validateUsername, validateReferralCode, normalizeMsisdn,
   generateTotpSecret, verifyTotp, otpauthUrl, generateRecoveryCodes, normalizeRecoveryCode,
   normalizeSecurityAnswer, validateSecurityAnswerSet, isValidSecurityQuestionKey,
-  SECURITY_ANSWERS_REQUIRED } from "@invest254/shared";
+  SECURITY_ANSWERS_REQUIRED, isSupportedDisplayCurrency, normalizeCurrency } from "@invest254/shared";
 import type { IdentityRepository, MfaRecord, CredentialRecord, SecurityAnswerHash } from "./identity.js";
 
 /**
@@ -90,6 +90,8 @@ export interface Profile {
   userId: string; username: string; phone: string; role: string; status: string;
   /** Live scope (profiles.site_id / profiles.platform_id) — see issueSessionToken. */
   siteId?: string | null; platformId?: string | null;
+  /** Per-user display-currency preference (#10). NULL = use the geo/brand default. */
+  displayCurrency?: string | null;
 }
 
 /** A freshly minted session token plus the scope it carries. */
@@ -519,5 +521,20 @@ export class AuthService {
     const p = await this.repo.getProfile(userId);
     if (!p) throw new Error("NOT_FOUND");
     return p;
+  }
+
+  /**
+   * Set (or clear) the caller's display-currency preference (#10). `null`/empty clears it → the web
+   * reverts to the geo-detected default, then the brand currency. A non-empty value must be one of the
+   * supported display currencies (enforced here, not in the DB, so the set and the code never drift);
+   * anything else is rejected as UNSUPPORTED_CURRENCY. Presentation only — no money moves.
+   */
+  async setDisplayCurrency(userId: string, currency: string | null | undefined): Promise<{ displayCurrency: string | null }> {
+    const raw = normalizeCurrency(currency);
+    if (raw != null && !isSupportedDisplayCurrency(raw)) throw new Error("UNSUPPORTED_CURRENCY");
+    const value = raw; // normalized upper-case code, or null to clear
+    const ok = await this.repo.setDisplayCurrency(userId, value);
+    if (!ok) throw new Error("NOT_FOUND");
+    return { displayCurrency: value };
   }
 }

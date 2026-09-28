@@ -23,6 +23,8 @@ export interface ProfileRow {
   /** The account's brand (profiles.site_id) and, for a platform_admin, its platform (profiles.platform_id).
    *  Read LIVE so every re-minted session token carries its holder's scope (Issue 1 / F-43). */
   siteId: string | null; platformId: string | null;
+  /** Per-user display-currency preference (#10, migration 0171). NULL = use geo/brand default. */
+  displayCurrency: string | null;
 }
 
 /** An affiliate (marketer) enrollment: the stable referral code + commission terms + current role. */
@@ -105,6 +107,8 @@ export interface IdentityRepository {
   findAllByPhone(phone: string): Promise<CredentialRecord[]>;
   /** Load the profile by user id, or null if not found. */
   getProfile(userId: string): Promise<ProfileRow | null>;
+  /** Set (or clear, with null) the user's display-currency preference (#10). False if no such user. */
+  setDisplayCurrency(userId: string, currency: string | null): Promise<boolean>;
   /** Replace an account's password hash. False when there is no such credential row. */
   setPasswordHash(userId: string, passwordHash: string): Promise<boolean>;
   /** Load MFA state for an account, or null when enrolment was never begun. */
@@ -416,7 +420,7 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
   }
   async getProfile(userId: string): Promise<ProfileRow | null> {
     const r = await this.q.query(
-      "select id, username, phone, role, status, site_id, platform_id from profiles where id = $1", [userId]);
+      "select id, username, phone, role, status, site_id, platform_id, display_currency from profiles where id = $1", [userId]);
     if (!r.rows.length) return null;
     return this.rowToProfile(r.rows[0]);
   }
@@ -424,7 +428,13 @@ export class PgIdentityRepository implements IdentityRepository, AffiliateReposi
     return {
       userId: String(x.id), username: String(x.username), phone: String(x.phone), role: String(x.role), status: String(x.status),
       siteId: x.site_id == null ? null : String(x.site_id), platformId: x.platform_id == null ? null : String(x.platform_id),
+      displayCurrency: x.display_currency == null ? null : String(x.display_currency),
     };
+  }
+  /** Persist a user's display-currency preference (#10). NULL clears it (revert to geo/brand default). */
+  async setDisplayCurrency(userId: string, currency: string | null): Promise<boolean> {
+    const r = await this.q.query("update profiles set display_currency = $2 where id = $1 returning id", [userId, currency]);
+    return r.rows.length > 0;
   }
   async setSecurityAnswers(userId: string, answers: SecurityAnswerHash[]): Promise<void> {
     // Single atomic statement: upsert the submitted (key, hash) pairs and delete any stored key not
@@ -467,6 +477,8 @@ interface MemUser {
   passwordHash: string; referredBy: string | null; createdAtMs: number; siteId: string | null;
   /** profiles.platform_id — set only for a platform_admin (see setPlatformId). */
   platformId?: string | null;
+  /** profiles.display_currency (#10) — per-user display preference; undefined/null = default. */
+  displayCurrency?: string | null;
 }
 
 /** Per-site identity key so the same phone/username can exist on different brands. */
@@ -749,7 +761,14 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     return {
       userId: u.userId, username: u.username, phone: u.phone, role: u.role, status: u.status,
       siteId: u.siteId ?? null, platformId: u.platformId ?? null,
+      displayCurrency: u.displayCurrency ?? null,
     };
+  }
+  async setDisplayCurrency(userId: string, currency: string | null): Promise<boolean> {
+    const u = this.byId.get(userId);
+    if (!u) return false;
+    u.displayCurrency = currency;
+    return true;
   }
   /** Test seam: bind an account to a platform (profiles.platform_id), as appointing a platform_admin does. */
   setPlatformId(userId: string, platformId: string | null): void {

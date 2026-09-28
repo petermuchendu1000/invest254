@@ -32,6 +32,7 @@ const AUTH_STATUS: Readonly<Record<string, number>> = {
   SECURITY_ANSWERS_MISMATCH: 401,  // one or more supplied answers did not verify
   USER_NOT_FOUND: 404,
   NOT_FOUND: 404,
+  UNSUPPORTED_CURRENCY: 400,
 };
 
 function statusFor(code: string): number {
@@ -327,11 +328,26 @@ export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
       phone: profile?.phone ?? null,
       securitySetupRequired,
       mfaSetupRequired,
+      // #10 geo-currency: the user's saved display-currency preference, or null to use the geo/brand
+      // default. The web treats this as the top-priority override when rendering money.
+      displayCurrency: profile?.displayCurrency ?? null,
       scope: {
         site: siteId ? { id: siteId, name: names.siteName } : null,
         platform: platformId ? { id: platformId, name: names.platformName } : null,
       },
     };
+  });
+
+  // #10 geo-currency: set (or clear) the caller's display-currency preference. Presentation only —
+  // money of record stays KES cents. Body { currency: "USD" | null }; null/"" clears the preference.
+  const currencyLimit = rateLimit({ name: "currency", by: "user", limit: Number(process.env.RATE_LIMIT_CURRENCY_PER_MIN) || 30, windowMs: 60_000 });
+  router.post(`${BASE}/auth/currency`, auth, currencyLimit, async (ctx: Ctx) => {
+    const body = asObject(ctx.body);
+    const raw = body.currency;
+    if (raw !== null && raw !== undefined && typeof raw !== "string") {
+      throw new ApiError("VALIDATION", "currency must be a string or null", 400);
+    }
+    return domain(() => deps.auth.setDisplayCurrency(ctx.claims!.userId, raw ?? null));
   });
 
   // Re-issue a token reflecting the caller's CURRENT role + status — no credentials required.
