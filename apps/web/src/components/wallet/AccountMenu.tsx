@@ -66,7 +66,9 @@ export function AccountMenu({
         className={cn(
           'flex min-h-[3.5rem] w-full items-center gap-3 px-3 text-left transition',
           on ? 'bg-surface-2' : 'active:bg-surface-2/70 sm:hover:bg-surface-2/60',
-          locked && 'cursor-not-allowed opacity-40',
+          // A locked row keeps FULL contrast and says why on the right. Dimming it to 40% with no
+          // explanation is what made this read as a broken button rather than an unavailable account.
+          locked && 'cursor-not-allowed',
         )}
       >
         <span
@@ -78,11 +80,17 @@ export function AccountMenu({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-semibold leading-tight text-fg">{label}</span>
-          <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight tabular-nums text-muted">
-            {fmt(cents)}{sub ? <span className="font-sans"> · {sub}</span> : null}
-          </span>
+          {/* No figure on an unavailable account: it competes with the badge for width (truncating
+              both), and for a locked marketer the "real" figure is their demo balance anyway. */}
+          {locked ? null : (
+            <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight tabular-nums text-muted">
+              {fmt(cents)}{sub ? <span className="font-sans"> · {sub}</span> : null}
+            </span>
+          )}
         </span>
-        {on ? <Check className="h-4 w-4 shrink-0 text-accent" /> : null}
+        {locked
+          ? <span className="shrink-0 whitespace-nowrap rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">Unavailable</span>
+          : on ? <Check className="h-4 w-4 shrink-0 text-accent" /> : null}
       </button>
     );
   };
@@ -106,6 +114,12 @@ export function AccountMenu({
           <div className="mx-3 h-px bg-border" />
           <Row mode="demo" label="Demo" cents={f.demoBalance} />
         </div>
+
+        {wallet.modeLocked ? (
+          <p className="border-t border-border px-3 py-2 text-[11px] leading-snug text-muted">
+            This phone is registered as a marketer on this brand, so it trades on the Demo account only.
+          </p>
+        ) : null}
 
         {active === 'demo' ? (
           <>
