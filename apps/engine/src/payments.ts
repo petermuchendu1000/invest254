@@ -81,6 +81,13 @@ export interface PaymentRepository {
   /** The deposit gateways effective-enabled for a brand (global switch + per-site override, migration 0116). */
   listEffectiveProviders(siteId?: string): Promise<DepositProvider[]>;
   attachStk(txId: string, merchantRequestId: string, checkoutRequestId: string): Promise<boolean>;
+  /**
+   * 0174 — close out a deposit the gateway REFUSED, so a rejection cannot leave a `pending` row that
+   * nothing will ever settle (the callback and the reconcile sweep both key on `checkout_request_id`,
+   * which such a row never got). The RPC refuses any row that actually reached the gateway or that
+   * holds ledger entries, so this can never touch money. Returns whether a row was closed.
+   */
+  abandonDeposit(txId: string, reason: string): Promise<boolean>;
   completeDeposit(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult>;
   createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents, siteId?: string): Promise<CreateWithdrawalResult>;
   /**
@@ -119,7 +126,7 @@ export interface PaymentRepository {
   getPaybillConfig(): Promise<PaybillConfig>;
 }
 
-interface MemTx { id: string; userId: string; kind: "deposit" | "withdrawal"; amount: Cents; status: string; phone: string; checkoutId?: string; seq: number; createdAtMs: number; receipt: string | null; siteId?: string | null; provider?: string; marketerId?: string; paymentScope?: string; }
+interface MemTx { id: string; userId: string; kind: "deposit" | "withdrawal"; amount: Cents; status: string; phone: string; checkoutId?: string; seq: number; createdAtMs: number; receipt: string | null; siteId?: string | null; provider?: string; marketerId?: string; paymentScope?: string; resultDesc?: string; }
 interface MemLedger { userId: string; type: string; amount: Cents; ref: string; }
 
 export class InMemoryPaymentRepository implements PaymentRepository {
@@ -153,6 +160,14 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     const id = randomUUID();
     this.txns.set(id, { id, userId, kind: "deposit", amount: amountCents, status: "pending", phone, seq: ++this.txSeq, createdAtMs: this.now(), receipt: null, siteId: siteId ?? null, provider });
     return id;
+  }
+  async abandonDeposit(txId: string, reason: string): Promise<boolean> {
+    // Mirrors fn_abandon_deposit: only a still-pending deposit that never reached the gateway.
+    const t = this.txns.get(txId);
+    if (!t || t.kind !== "deposit" || t.status !== "pending" || t.checkoutId) return false;
+    t.status = "failed";
+    t.resultDesc = reason.slice(0, 200);
+    return true;
   }
   async attachStk(txId: string, _merchant: string, checkoutId: string): Promise<boolean> {
     const tx = this.txns.get(txId);
@@ -408,6 +423,10 @@ export class PgPaymentRepository implements PaymentRepository {
   }
   async attachStk(txId: string, merchantRequestId: string, checkoutRequestId: string): Promise<boolean> {
     const r = await this.q.query("select fn_attach_stk($1,$2,$3) as ok", [txId, merchantRequestId, checkoutRequestId]);
+    return Boolean(r.rows[0]?.ok);
+  }
+  async abandonDeposit(txId: string, reason: string): Promise<boolean> {
+    const r = await this.q.query("select fn_abandon_deposit($1,$2) as ok", [txId, reason]);
     return Boolean(r.rows[0]?.ok);
   }
   async completeDeposit(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult> {

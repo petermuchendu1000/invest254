@@ -37,6 +37,9 @@ const DOMAIN_STATUS: Readonly<Record<string, number>> = {
   // Mega Pay rail (migration 0116)
   PROVIDER_NOT_FOUND: 400,
   PROVIDER_DISABLED: 403,
+  // 0174 / docs/52 — the initiate guard. Client-safe by design: these say "slow down", never "failed".
+  DEPOSIT_TOO_SOON: 429,
+  PROVIDER_BUSY: 429,
   MEGAPAY_NOT_CONFIGURED: 503,
   MEGAPAY_INITIATE_REJECTED: 502,
   MEGAPAY_VERIFY_PENDING: 409,   // callback arrived but status not yet final -> caller/retry + reconcile settles it
