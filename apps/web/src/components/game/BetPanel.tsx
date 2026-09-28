@@ -150,7 +150,7 @@ export function BetPanel() {
       return;
     }
     // One tap = one trade. No confirmation step: the stake is already explicit on screen,
-    // the position is reversible via Cash Out, and every extra tap is measurable drop-off.
+    // the position is reversible via Close Trade, and every extra tap is measurable drop-off.
     openPosition({ stakeCents, direction: dir, durationS });
     setResumeDir(null);
   }
@@ -166,19 +166,22 @@ export function BetPanel() {
     );
   }
 
-  // ── A position is in flight — live P&L + cash-out (single-open rule) ─────────
+  // ── A position is in flight — live P&L + early close (single-open rule) ─────────
   if (activePosition) {
-    const canCashOut =
+    const canClose =
       activePosition.phase === 'open' && activePosition.sellable && !!activePosition.positionId;
     return (
       <Card className="flex flex-col gap-2.5 rounded-xl p-3">
         <LivePnl pos={activePosition} />
-        <Button variant="secondary" size="md" fullWidth className="!h-11" disabled={!canCashOut} onClick={sell}>
+        {/* "Cash Out" was a misnomer: this closes the trade EARLY and returns the payout to the
+            in-app balance — no money leaves the platform, and on the Demo account it moves play
+            money only. "Close Trade" says what actually happens and promises nothing about cash. */}
+        <Button variant="secondary" size="md" fullWidth className="!h-11" disabled={!canClose} onClick={sell}>
           {activePosition.phase === 'settling'
-            ? 'Cashing out…'
-            : canCashOut
-              ? 'Cash Out'
-              : 'Auto-sells at expiry'}
+            ? 'Closing…'
+            : canClose
+              ? 'Close Trade'
+              : 'Closes at expiry'}
         </Button>
       </Card>
     );
