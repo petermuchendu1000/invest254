@@ -47,6 +47,28 @@ export interface PaybillConfig { enabled: boolean; shortcode: string; accountNum
 /** A deposit gateway effective-enabled for a brand (migration 0116) — shown on the deposit page. */
 export interface DepositProvider { code: string; displayName: string; }
 
+/**
+ * One deposit CHANNEL a player can actually complete right now, resolved server-side.
+ *
+ * A gateway being effective-enabled is NOT sufficient to offer every one of its channels: PayHero's
+ * Lipwa checkout additionally needs `lipwa_url` (which is optional for `depositsReady`), and the
+ * manual Pay Bill is the System owner's and must be hidden for a brand on its own accounts. The
+ * client used to infer channels from provider codes alone and so could render a tab that throws on
+ * submit (PAYHERO_LIPWA_NOT_CONFIGURED). The server now declares the usable set instead.
+ *
+ * `label` is the CONSUMER-facing method name — the gateway brand is never exposed (docs/35).
+ */
+export interface DepositMethod {
+  /** Stable id the client keys its body off, e.g. `payhero-stk`, `payhero-lipwa`, `mpesa-paybill`. */
+  id: string;
+  /** The gateway serving this channel (`mpesa` | `megapay` | `payhero`) — internal, never displayed. */
+  provider: string;
+  /** Which rail of that gateway this is. */
+  channel: "stk" | "lipwa" | "paybill";
+  /** What the player sees, e.g. "M-Pesa", "Card & Bank", "Pay Bill". */
+  label: string;
+}
+
 export interface PaymentRepository {
   getBalance(userId: string, siteId?: string): Promise<Cents>;
   createDeposit(userId: string, amountCents: Cents, phone: string, siteId?: string): Promise<string>;

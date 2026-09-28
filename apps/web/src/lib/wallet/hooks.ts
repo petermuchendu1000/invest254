@@ -136,14 +136,21 @@ export function useDepositLipwa() {
   });
 }
 
-/** Deposit gateways effective-enabled for this player's brand (system owner switch + per-site override). */
+/**
+ * The deposit CHANNELS the server says this player can actually complete (plus the raw gateway list).
+ * The sheet renders `methods` verbatim — see DepositMethodDto. Older API builds omit `methods`; the
+ * panel falls back to deriving a single M-Pesa entry per gateway in that case.
+ */
 export function useDepositProviders() {
   const token = useSession((s) => s.token);
   return useQuery({
     queryKey: ['deposit-providers'],
     enabled: !!token,
     staleTime: 60_000,
-    queryFn: async () => (await api.depositProviders(token as string)).providers,
+    queryFn: async () => {
+      const r = await api.depositProviders(token as string);
+      return { providers: r.providers ?? [], methods: r.methods };
+    },
   });
 }
 

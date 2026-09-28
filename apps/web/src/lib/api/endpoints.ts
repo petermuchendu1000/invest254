@@ -7,6 +7,7 @@ import type {
   CommissionRecord,
   DepositResult,
   DepositProviderDto,
+  DepositMethodDto,
   MegaPayDepositResult,
   DigitHistoryDto,
   GameConfigDto,
@@ -162,7 +163,7 @@ export const api = {
     apiFetch<DepositResult>('/deposits', { method: 'POST', token, body }),
   // Deposit gateways to render for the player's brand (migration 0116) + the Mega Pay STK deposit.
   depositProviders: (token: string) =>
-    apiFetch<{ providers: DepositProviderDto[] }>('/deposits/providers', { token }),
+    apiFetch<{ providers: DepositProviderDto[]; methods?: DepositMethodDto[] }>('/deposits/providers', { token }),
   createMegapayDeposit: (token: string, body: { amount: number; phone: string }) =>
     apiFetch<MegaPayDepositResult>('/deposits/megapay', { method: 'POST', token, body }),
   // PayHero (Lipwa) STK deposit — the third rail.

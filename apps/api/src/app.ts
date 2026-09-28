@@ -265,7 +265,8 @@ export interface ApiDeps {
     "initiateDeposit" | "requestWithdrawal" | "handleStkCallback" | "handleB2cResult" | "approveWithdrawal" | "rejectWithdrawal" | "markWithdrawalPaid" | "reconcileDeposits"
     | "ingestC2b" | "claimPaybillDeposit" | "paybillConfig"
     | "initiateMegaPayDeposit" | "handleMegaPayCallback" | "reconcileMegaPayDeposits"
-    | "initiatePayHeroDeposit" | "initiateLipwaDeposit" | "handlePayHeroCallback" | "reconcilePayHeroDeposits" | "reconcilePayHeroLedger" | "listDepositProviders">;
+    | "initiatePayHeroDeposit" | "initiateLipwaDeposit" | "handlePayHeroCallback" | "reconcilePayHeroDeposits" | "reconcilePayHeroLedger" | "listDepositProviders"
+    | "listDepositMethods">;
   /** Resolve a player's display handle (falls back to a guest handle). */
   resolveHandle(userId: string): Promise<string>;
   /** docs/42 UI-8: display names of the brand/platform a session is scoped to (for the shells' scope chip).

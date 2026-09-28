@@ -250,12 +250,21 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     return { status: 202, body: { transactionId: out.txId, checkoutRequestId: out.checkoutRequestId } };
   });
 
-  // The deposit gateways to render for THIS player's brand (migration 0116): the superadmin's global
-  // switch resolved against any per-site override. Fail-open to M-Pesa inside the service, so this
-  // never returns an empty list that would hide the working rail.
+  // What the deposit sheet may render for THIS player's brand.
+  //  - `providers`: the effective-enabled gateways (migration 0116) — kept for compatibility.
+  //  - `methods`:   the deposit CHANNELS that can actually be completed right now. The client renders
+  //                 these verbatim instead of inferring tabs from provider codes, which is what made it
+  //                 offer PayHero's Lipwa checkout on brands where `lipwa_url` is unset (submitting
+  //                 threw PAYHERO_LIPWA_NOT_CONFIGURED) and hid Pay Bill behind the wrong condition.
+  // The platform deposits kill-switch is honoured here too: every deposit POST refuses with
+  // SYSTEM_DISABLED while it is off, so offering methods the server will reject is a broken promise.
+  // We still return 200 with an empty `methods` (rather than 403) so the sheet shows its normal
+  // "temporarily unavailable" state instead of an error.
   router.get(`${BASE}/deposits/providers`, auth, site, async (ctx: Ctx) => {
     const providers = await deps.payments.listDepositProviders(ctx.siteId);
-    return { providers };
+    const depositsOn = deps.platformGate ? await deps.platformGate.allows("deposits") : true;
+    const methods = depositsOn ? await deps.payments.listDepositMethods(ctx.siteId) : [];
+    return { providers, methods };
   });
 
   // Mega Pay STK deposit (migration 0116). Mirrors /deposits but routes through the Mega Pay rail.
