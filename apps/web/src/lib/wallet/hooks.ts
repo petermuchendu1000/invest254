@@ -119,6 +119,23 @@ export function useDepositPayhero() {
   });
 }
 
+/**
+ * PayHero Lipwa hosted-checkout deposit (card / bank / mobile money / cross-border). Returns the
+ * checkout URL, which the UI opens in an IN-APP modal. Settlement is by the ledger reconcile; the
+ * sheet then polls this deposit's transaction status to react the instant it lands.
+ */
+export function useDepositLipwa() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { amount: number }) => api.createPayheroLipwaDeposit(token as string, vars),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['wallet'] });
+      void qc.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+}
+
 /** Deposit gateways effective-enabled for this player's brand (system owner switch + per-site override). */
 export function useDepositProviders() {
   const token = useSession((s) => s.token);

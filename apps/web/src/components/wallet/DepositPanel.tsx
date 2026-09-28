@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { cn } from '@/lib/cn';
 import { DepositForm } from '@/components/wallet/DepositForm';
 import { PayBillDeposit } from '@/components/wallet/PayBillDeposit';
+import { LipwaDeposit } from '@/components/wallet/LipwaDeposit';
 import { useDepositProviders } from '@/lib/wallet/hooks';
 
-type Method = 'stk' | 'megapay' | 'payhero' | 'paybill';
+type Method = 'stk' | 'megapay' | 'payhero' | 'lipwa' | 'paybill';
 interface MethodDef { id: Method; label: string }
 
 /**
@@ -30,6 +31,8 @@ export function DepositPanel() {
     ...(mpesaOn ? [{ id: 'stk' as Method, label: 'M-Pesa' }] : []),
     ...(megapayOn ? [{ id: 'megapay' as Method, label: mpesaOn ? 'M-Pesa (2)' : 'M-Pesa' }] : []),
     ...(payheroOn ? [{ id: 'payhero' as Method, label: priorStk > 0 ? `M-Pesa (${priorStk + 1})` : 'M-Pesa' }] : []),
+    // PayHero Lipwa: card / bank / mobile money / cross-border, in an embedded in-app checkout.
+    ...(payheroOn ? [{ id: 'lipwa' as Method, label: 'Card & Bank' }] : []),
     ...(mpesaOn ? [{ id: 'paybill' as Method, label: 'Pay Bill' }] : []),
   ];
 
@@ -78,6 +81,7 @@ export function DepositPanel() {
       {active === 'stk' ? <DepositForm key="stk" provider="mpesa" /> : null}
       {active === 'megapay' ? <DepositForm key="megapay" provider="megapay" /> : null}
       {active === 'payhero' ? <DepositForm key="payhero" provider="payhero" /> : null}
+      {active === 'lipwa' ? <LipwaDeposit key="lipwa" /> : null}
       {active === 'paybill' ? <PayBillDeposit key="paybill" /> : null}
     </div>
   );

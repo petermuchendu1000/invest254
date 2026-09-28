@@ -309,8 +309,13 @@ export class PaymentService {
    */
   async handlePayHeroCallback(_raw: unknown): Promise<{ settled: number }> {
     if (!this.payhero && !this.gateways) throw new Error("PAYHERO_NOT_CONFIGURED");
-    const r = await this.reconcilePayHeroDeposits({ olderThanMs: 0 });
-    return { settled: r.settled };
+    // Run BOTH authoritative sweeps: the status sweep settles STK deposits by reference, and the ledger
+    // sweep settles Lipwa (card/bank) + ingests manual paybill payments. The body is never trusted.
+    const [status, ledger] = await Promise.all([
+      this.reconcilePayHeroDeposits({ olderThanMs: 0 }),
+      this.reconcilePayHeroLedger().catch(() => ({ settled: 0 })),
+    ]);
+    return { settled: status.settled + ledger.settled };
   }
 
   /**

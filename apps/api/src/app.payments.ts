@@ -287,6 +287,35 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     return { status: 202, body: { transactionId: out.txId, reference: out.reference, checkoutRequestId: out.checkoutRequestId } };
   });
 
+  // PayHero Lipwa — hosted multi-channel checkout (card / bank / mobile money / cross-border), kept IN-APP
+  // by the web client via an embedded modal. We only mint a pending tx and hand back the checkout URL;
+  // PayHero's PCI-hosted page takes the card details (they never touch us), and the ledger reconcile
+  // credits the payment by our reference. Same server-authoritative enable gate + deposits master switch.
+  router.post(`${BASE}/deposits/payhero/lipwa`, auth, site, depositLimit, async (ctx: Ctx) => {
+    if (deps.platformGate && !(await deps.platformGate.allows("deposits")))
+      throw new ApiError("SYSTEM_DISABLED", "Deposits are temporarily disabled by the platform.", 403);
+    if (!(await deps.payments.listDepositProviders(ctx.siteId)).some((p) => p.code === "payhero"))
+      throw new ApiError("PROVIDER_DISABLED", "PayHero is not available.", 403);
+    const body = asObject(ctx.body);
+    const amount = requireIntAmount(body);
+    const out = await domain(() => deps.payments.initiateLipwaDeposit(ctx.claims!.userId, amount, ctx.siteId), ctx);
+    return { status: 202, body: { transactionId: out.txId, reference: out.reference, lipwaUrl: out.lipwaUrl } };
+  });
+
+  // PayHero manual Pay Bill — the player paid the PayHero paybill directly, then submits the M-PESA code.
+  // The ledger reconcile ingests that payment into c2b_payments; claim credits the Safaricom-recorded
+  // amount once through the SAME fraud-safe fn_claim_c2b_deposit as the Daraja paybill.
+  router.post(`${BASE}/deposits/payhero/paybill/claim`, auth, site, depositLimit, async (ctx: Ctx) => {
+    if (deps.platformGate && !(await deps.platformGate.allows("deposits")))
+      throw new ApiError("SYSTEM_DISABLED", "Deposits are temporarily disabled by the platform.", 403);
+    if (!(await deps.payments.listDepositProviders(ctx.siteId)).some((p) => p.code === "payhero"))
+      throw new ApiError("PROVIDER_DISABLED", "PayHero is not available.", 403);
+    const body = asObject(ctx.body);
+    const code = body.code;
+    if (typeof code !== "string" || code.trim() === "") throw new ApiError("VALIDATION", "code is required", 400);
+    return domain(() => deps.payments.claimPaybillDeposit(ctx.claims!.userId, code, ctx.siteId), ctx);
+  });
+
   router.post(`${BASE}/withdrawals`, auth, site, withdrawLimit, async (ctx: Ctx) => {
     if (deps.platformGate && !(await deps.platformGate.allows("withdrawals")))
       throw new ApiError("SYSTEM_DISABLED", "Withdrawals are temporarily disabled by the platform.", 403);
