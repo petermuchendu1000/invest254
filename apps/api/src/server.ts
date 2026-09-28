@@ -620,7 +620,17 @@ async function buildDeps(): Promise<ApiDeps> {
   const verifier = baseVerifier
     ? (async (token: string) => {
         const claims = await baseVerifier(token);
-        await auth.assertSessionValid(claims.userId, claims.role, (claims.raw as { iat?: unknown })?.iat);
+        // Two privileged-only gates, run concurrently (a player token no-ops both with no DB read):
+        //  - 0097 force-logout: reject a token issued before the account's sessions_valid_after epoch.
+        //  - #7 live-status: reject a banned/suspended/deleted operator's token even before it expires
+        //    (banning does not force-logout, and admin authz trusts the role claim, so without this a
+        //    banned admin keeps authority until the token lapses).
+        // Fails CLOSED — any throw becomes a 401 in requireAuth, forcing re-login, which the login
+        // gate then refuses for a non-active operator.
+        await Promise.all([
+          auth.assertSessionValid(claims.userId, claims.role, (claims.raw as { iat?: unknown })?.iat),
+          auth.assertAccountActive(claims.userId, claims.role),
+        ]);
         return claims;
       })
     : null;
