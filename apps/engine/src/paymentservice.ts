@@ -151,41 +151,44 @@ export class PaymentService {
   }
 
   // ── Deposit (STK Push) ──
-  // ── Initiate guard (docs/52) ────────────────────────────────────────────────────────────────────
+  // ── Initiate gate (docs/52, migration 0175) ─────────────────────────────────────────────────────
   // PayHero answers a burst of STK initiations with
   //   400 {"error_code":"BAD_REQUEST","error_message":"The merchant has been blocked for spamming"}
-  // and the block is merchant-wide, so ONE player's retry loop stops deposits for every brand sharing
+  // and the block is MERCHANT-WIDE, so one player's retry loop stops deposits for every brand sharing
   // those credentials. The route's rate limit is per USER (20/min), which the observed loop — six
   // requests in 27 seconds — slipped under.
   //
+  // The gate lives in POSTGRES, not in this process. An in-process counter bounds each API machine
+  // independently, so with N machines the real ceiling is N x the configured one and a player's
+  // post-rejection hold is honoured only by the machine that served the rejection. `fn_deposit_gate`
+  // takes a row lock per key, so the count is exact however many machines are running.
+  //
+  // FAILS CLOSED. If the gate cannot be consulted the initiate is refused (429), never sent to the
+  // gateway — so there is no path to a provider without a granted slot. The cost is nearly
+  // theoretical: the deposit row is created in the same database on the same request, so a gate that
+  // cannot be reached is a request that was about to fail anyway.
+  //
   // What is throttled is deliberately NARROW: a retry that follows a REJECTION, plus a per-merchant
-  // ceiling. A normal sequence of deposits is untouched, because throttling every attempt would break
-  // a real contract (a player whose deposit just succeeded may immediately make another, and the
-  // API's own e2e suite drives exactly that). Only the loop that provokes the provider is stopped.
-  private readonly lastRejectAt = new Map<string, number>();
-  private readonly merchantWindow = new Map<string, { count: number; resetAt: number }>();
+  // ceiling. A normal sequence of deposits is untouched — throttling every attempt would break a real
+  // contract (a player whose deposit just succeeded may immediately make another).
   private static readonly REJECT_COOLDOWN_MS = Number(process.env.DEPOSIT_REJECT_COOLDOWN_MS ?? 6_000);
   private static readonly MERCHANT_PER_MIN = Number(process.env.DEPOSIT_MERCHANT_PER_MIN ?? 60);
+  private static gateUserKey(provider: string, userId: string): string { return `dep:reject:${provider}:${userId}`; }
+  private static gateMerchantKey(provider: string, scope: string): string { return `dep:merchant:${provider}:${scope}`; }
 
-  private guardInitiate(userId: string, provider: string, scope: string): void {
-    const now = Date.now();
-    if (this.lastRejectAt.size > 10_000) {
-      for (const [k, t] of this.lastRejectAt) if (now - t > 60_000) this.lastRejectAt.delete(k);
+  private async guardInitiate(userId: string, provider: string, scope: string): Promise<void> {
+    let verdict: "ok" | "too_soon" | "busy";
+    try {
+      verdict = await this.repo.depositGate(
+        PaymentService.gateUserKey(provider, userId),
+        PaymentService.gateMerchantKey(provider, scope),
+        PaymentService.MERCHANT_PER_MIN, 60_000);
+    } catch {
+      // Fail closed: a gate we cannot consult is a slot we cannot grant.
+      throw new Error("PROVIDER_BUSY: payments are briefly unavailable, try again shortly");
     }
-    // 1) Straight after a rejection, hold this player off — retrying into a provider that just said
-    //    no is what escalates a single refusal into a merchant-wide block.
-    const last = this.lastRejectAt.get(`${provider}:${userId}`);
-    if (last !== undefined && now - last < PaymentService.REJECT_COOLDOWN_MS) {
-      throw new Error("DEPOSIT_TOO_SOON: that payment was refused a moment ago — wait a few seconds before trying again");
-    }
-    // 2) Backstop for several players at once, per merchant (the scope decides whose credentials are
-    //    used). In-process, so across several API machines the ceiling is per machine — a mitigation,
-    //    not a guarantee, and set far above real traffic so it never touches a genuine deposit.
-    const mKey = `${provider}:${scope}`;
-    const w = this.merchantWindow.get(mKey);
-    if (!w || now >= w.resetAt) this.merchantWindow.set(mKey, { count: 1, resetAt: now + 60_000 });
-    else if (w.count >= PaymentService.MERCHANT_PER_MIN) throw new Error("PROVIDER_BUSY: too many payment requests right now, try again shortly");
-    else w.count += 1;
+    if (verdict === "too_soon") throw new Error("DEPOSIT_TOO_SOON: that payment was refused a moment ago — wait a few seconds before trying again");
+    if (verdict === "busy") throw new Error("PROVIDER_BUSY: too many payment requests right now, try again shortly");
   }
 
   /**
@@ -193,17 +196,20 @@ export class PaymentService {
    *   * close the row out (0174) — otherwise a rejection leaves a `pending` deposit nothing will ever
    *     settle, because the callback and the reconcile sweep both key on `checkout_request_id`, which
    *     a refused deposit never receives (199 such ghosts had accumulated);
-   *   * remember the rejection, so `guardInitiate` holds this player's next attempt off.
+   *   * record the rejection in the shared gate, so this player's next attempt is held off on EVERY
+   *     machine, not just this one.
    * The original error is always rethrown; the clean-up never masks it.
    */
   private async withAbandonOnReject<T>(txId: string, userId: string, provider: string, fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (err) {
-      this.lastRejectAt.set(`${provider}:${userId}`, Date.now());
       const reason = err instanceof Error ? err.message : String(err);
+      try {
+        await this.repo.depositGateReject(PaymentService.gateUserKey(provider, userId), PaymentService.REJECT_COOLDOWN_MS);
+      } catch { /* never let the gate hide the provider error */ }
       try { await this.repo.abandonDeposit(txId, `abandoned:${reason}`.slice(0, 200)); }
-      catch { /* never let the clean-up hide the provider error */ }
+      catch { /* likewise */ }
       throw err;
     }
   }
@@ -219,7 +225,7 @@ export class PaymentService {
     // re-routed, when that owner has no complete M-Pesa account).
     const owner = await this.ownerOf(siteId);
     await this.assertRail(owner, "mpesa");
-    this.guardInitiate(userId, "mpesa", owner.scope);
+    await this.guardInitiate(userId, "mpesa", owner.scope);
     const txId = await this.repo.createDeposit(userId, amountCents, msisdn, siteId);
     await this.stamp(txId, owner.scope);
     // Site-aware AccountReference: show the depositing brand's account, not a hardcoded one. And
@@ -250,7 +256,7 @@ export class PaymentService {
     const msisdn = normalizeMsisdn(phoneRaw);
     await this.assertRail(owner, "megapay");
     const client = await this.megapayForScope(owner.scope);
-    this.guardInitiate(userId, "megapay", owner.scope);
+    await this.guardInitiate(userId, "megapay", owner.scope);
     const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn, "megapay", siteId);
     await this.stamp(txId, owner.scope);
     // The reference becomes the "Account no." shown to the payer — send the brand/site name in
@@ -325,7 +331,7 @@ export class PaymentService {
     const msisdn = normalizeMsisdn(phoneRaw);
     await this.assertRail(owner, "payhero");
     const client = await this.payheroForScope(owner.scope);
-    this.guardInitiate(userId, "payhero", owner.scope);
+    await this.guardInitiate(userId, "payhero", owner.scope);
     const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn, "payhero", siteId);
     await this.stamp(txId, owner.scope);
     const res = await this.withAbandonOnReject(txId, userId, "payhero", () => client.initiateStk({ amountCents, msisdn, externalReference: txId }));
@@ -354,7 +360,7 @@ export class PaymentService {
     const client = await this.payheroForScope(owner.scope);
     if (!(await client.lipwaLink({ reference: "probe" }))) throw new Error("PAYHERO_LIPWA_NOT_CONFIGURED");
     // external_reference we pass to Lipwa === our txId === the tx's checkout_request_id, so the ledger match is unambiguous.
-    this.guardInitiate(userId, "payhero", owner.scope);
+    await this.guardInitiate(userId, "payhero", owner.scope);
     const txId = await this.repo.createDepositProvider(userId, amountCents, "", "payhero", siteId);
     await this.stamp(txId, owner.scope);
     // Mint the link FIRST: attaching the checkout id before the call would make a refused deposit

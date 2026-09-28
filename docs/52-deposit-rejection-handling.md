@@ -61,7 +61,7 @@ STK, PayHero Lipwa) and rethrows the provider's error unchanged — the clean-up
 Lipwa additionally had its `attachStk` moved to **after** the link is minted; attaching the checkout id
 first would have made a refused Lipwa deposit un-abandonable by the guard above.
 
-## 4. The throttle — narrow on purpose
+## 4. The gate — narrow on purpose, and EXACT (migration 0175)
 
 `guardInitiate` stops two things:
 
@@ -78,8 +78,29 @@ whose deposit just succeeded may immediately make another. Only the loop that pr
 is stopped. `paymentservice.initiateguard.test.ts` pins this with a test that drives five successful
 deposits back to back.
 
-> **Honest limit:** the guard is in-process, so across several API machines the ceiling is per machine.
-> A mitigation, not a guarantee — the durable protection is not provoking the provider at all.
+### It is a guarantee, not a mitigation
+
+The first version kept the counters in process memory. That bounds each API machine independently: with
+N machines the real ceiling is N x the configured one, and a player's post-rejection hold is honoured
+only by the machine that served the rejection. For a **merchant-wide** block, one machine's view of the
+rate is not the rate.
+
+`0175` moves the gate into **Postgres** — the shared store this stack already has, and the one the
+deposit row is created in on the same request, so a gate here cannot be "down" while deposits are
+otherwise working. Adding Redis would have put a new availability dependency on the money path for no
+benefit.
+
+`fn_deposit_gate` takes a **row lock per key**, so concurrent initiations serialise on that key and the
+counter cannot be raced. The two keys are disjoint namespaces and are always locked in the same order
+(user, then merchant), so it cannot deadlock against itself. A refused caller consumes **no** slot.
+
+**FAILS CLOSED.** An initiate whose gate cannot be consulted is refused with a 429 and never sent to
+the gateway, so there is no path to a provider without a granted slot. The cost is nearly theoretical,
+per the paragraph above.
+
+**Proven under real concurrency, not asserted:** 24 parallel independent connections against a ceiling
+of 10 returned exactly 10 `ok` and 14 `busy`, and the counter landed on exactly 10 — no over-grant, no
+lost update.
 
 ## 5. Client side
 

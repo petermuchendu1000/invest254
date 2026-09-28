@@ -88,6 +88,14 @@ export interface PaymentRepository {
    * holds ledger entries, so this can never touch money. Returns whether a row was closed.
    */
   abandonDeposit(txId: string, reason: string): Promise<boolean>;
+  /**
+   * 0175 — the SHARED deposit initiate gate. Exact across every API machine (it takes a row lock per
+   * key), which an in-process counter cannot be: PayHero's block is merchant-wide, so one machine's
+   * view of the rate is not the rate. Returns 'ok' only when a slot was consumed.
+   */
+  depositGate(userKey: string, merchantKey: string, limit: number, windowMs: number): Promise<DepositGate>;
+  /** 0175 — record a gateway rejection so this player's next attempt is held off. */
+  depositGateReject(userKey: string, holdMs: number): Promise<void>;
   completeDeposit(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult>;
   createWithdrawal(userId: string, amountCents: Cents, phone: string, minCents: Cents, siteId?: string): Promise<CreateWithdrawalResult>;
   /**
@@ -129,6 +137,9 @@ export interface PaymentRepository {
 interface MemTx { id: string; userId: string; kind: "deposit" | "withdrawal"; amount: Cents; status: string; phone: string; checkoutId?: string; seq: number; createdAtMs: number; receipt: string | null; siteId?: string | null; provider?: string; marketerId?: string; paymentScope?: string; resultDesc?: string; }
 interface MemLedger { userId: string; type: string; amount: Cents; ref: string; }
 
+/** 0175 — the gate's three answers. 'ok' is the only one that consumed a slot. */
+export type DepositGate = "ok" | "too_soon" | "busy";
+
 export class InMemoryPaymentRepository implements PaymentRepository {
   private balances = new Map<string, Cents>();
   /** In-memory marketer-wallet balances, credited only on approval (mirrors marketer_wallets). */
@@ -160,6 +171,24 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     const id = randomUUID();
     this.txns.set(id, { id, userId, kind: "deposit", amount: amountCents, status: "pending", phone, seq: ++this.txSeq, createdAtMs: this.now(), receipt: null, siteId: siteId ?? null, provider });
     return id;
+  }
+  /** Mirrors fn_deposit_gate / fn_deposit_gate_reject (single process, so a plain map is exact here). */
+  private readonly gates = new Map<string, { windowStart: number; count: number; blockedUntil?: number }>();
+  async depositGate(userKey: string, merchantKey: string, limit: number, windowMs: number): Promise<DepositGate> {
+    const now = this.now();
+    const u = this.gates.get(userKey);
+    if (u?.blockedUntil !== undefined && u.blockedUntil > now) return "too_soon";
+    const m = this.gates.get(merchantKey);
+    if (!m || now - m.windowStart >= windowMs) { this.gates.set(merchantKey, { windowStart: now, count: 1 }); return "ok"; }
+    if (m.count >= Math.max(limit, 1)) return "busy";
+    m.count += 1;
+    return "ok";
+  }
+  async depositGateReject(userKey: string, holdMs: number): Promise<void> {
+    const until = this.now() + Math.max(holdMs, 0);
+    const g = this.gates.get(userKey);
+    if (g) g.blockedUntil = Math.max(g.blockedUntil ?? until, until);
+    else this.gates.set(userKey, { windowStart: this.now(), count: 0, blockedUntil: until });
   }
   async abandonDeposit(txId: string, reason: string): Promise<boolean> {
     // Mirrors fn_abandon_deposit: only a still-pending deposit that never reached the gateway.
@@ -428,6 +457,14 @@ export class PgPaymentRepository implements PaymentRepository {
   async abandonDeposit(txId: string, reason: string): Promise<boolean> {
     const r = await this.q.query("select fn_abandon_deposit($1,$2) as ok", [txId, reason]);
     return Boolean(r.rows[0]?.ok);
+  }
+  async depositGate(userKey: string, merchantKey: string, limit: number, windowMs: number): Promise<DepositGate> {
+    const r = await this.q.query("select fn_deposit_gate($1,$2,$3,$4) as verdict", [userKey, merchantKey, limit, windowMs]);
+    const v = String(r.rows[0]?.verdict ?? "");
+    return v === "ok" || v === "too_soon" || v === "busy" ? v : "busy";   // unknown answer => refuse
+  }
+  async depositGateReject(userKey: string, holdMs: number): Promise<void> {
+    await this.q.query("select fn_deposit_gate_reject($1,$2)", [userKey, holdMs]);
   }
   async completeDeposit(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult> {
     const r = await this.q.query("select applied, status, new_balance from fn_complete_deposit($1,$2,$3,$4,$5)", [checkoutRequestId, resultCode, resultDesc, receipt, JSON.stringify(raw ?? {})]);
