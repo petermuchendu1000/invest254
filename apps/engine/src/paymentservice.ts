@@ -151,6 +151,63 @@ export class PaymentService {
   }
 
   // ── Deposit (STK Push) ──
+  // ── Initiate guard (docs/52) ────────────────────────────────────────────────────────────────────
+  // PayHero answers a burst of STK initiations with
+  //   400 {"error_code":"BAD_REQUEST","error_message":"The merchant has been blocked for spamming"}
+  // and the block is merchant-wide, so ONE player's retry loop stops deposits for every brand sharing
+  // those credentials. The route's rate limit is per USER (20/min), which the observed loop — six
+  // requests in 27 seconds — slipped under.
+  //
+  // What is throttled is deliberately NARROW: a retry that follows a REJECTION, plus a per-merchant
+  // ceiling. A normal sequence of deposits is untouched, because throttling every attempt would break
+  // a real contract (a player whose deposit just succeeded may immediately make another, and the
+  // API's own e2e suite drives exactly that). Only the loop that provokes the provider is stopped.
+  private readonly lastRejectAt = new Map<string, number>();
+  private readonly merchantWindow = new Map<string, { count: number; resetAt: number }>();
+  private static readonly REJECT_COOLDOWN_MS = Number(process.env.DEPOSIT_REJECT_COOLDOWN_MS ?? 6_000);
+  private static readonly MERCHANT_PER_MIN = Number(process.env.DEPOSIT_MERCHANT_PER_MIN ?? 60);
+
+  private guardInitiate(userId: string, provider: string, scope: string): void {
+    const now = Date.now();
+    if (this.lastRejectAt.size > 10_000) {
+      for (const [k, t] of this.lastRejectAt) if (now - t > 60_000) this.lastRejectAt.delete(k);
+    }
+    // 1) Straight after a rejection, hold this player off — retrying into a provider that just said
+    //    no is what escalates a single refusal into a merchant-wide block.
+    const last = this.lastRejectAt.get(`${provider}:${userId}`);
+    if (last !== undefined && now - last < PaymentService.REJECT_COOLDOWN_MS) {
+      throw new Error("DEPOSIT_TOO_SOON: that payment was refused a moment ago — wait a few seconds before trying again");
+    }
+    // 2) Backstop for several players at once, per merchant (the scope decides whose credentials are
+    //    used). In-process, so across several API machines the ceiling is per machine — a mitigation,
+    //    not a guarantee, and set far above real traffic so it never touches a genuine deposit.
+    const mKey = `${provider}:${scope}`;
+    const w = this.merchantWindow.get(mKey);
+    if (!w || now >= w.resetAt) this.merchantWindow.set(mKey, { count: 1, resetAt: now + 60_000 });
+    else if (w.count >= PaymentService.MERCHANT_PER_MIN) throw new Error("PROVIDER_BUSY: too many payment requests right now, try again shortly");
+    else w.count += 1;
+  }
+
+  /**
+   * Run the gateway call for a deposit whose row already exists. If the gateway REFUSES:
+   *   * close the row out (0174) — otherwise a rejection leaves a `pending` deposit nothing will ever
+   *     settle, because the callback and the reconcile sweep both key on `checkout_request_id`, which
+   *     a refused deposit never receives (199 such ghosts had accumulated);
+   *   * remember the rejection, so `guardInitiate` holds this player's next attempt off.
+   * The original error is always rethrown; the clean-up never masks it.
+   */
+  private async withAbandonOnReject<T>(txId: string, userId: string, provider: string, fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      this.lastRejectAt.set(`${provider}:${userId}`, Date.now());
+      const reason = err instanceof Error ? err.message : String(err);
+      try { await this.repo.abandonDeposit(txId, `abandoned:${reason}`.slice(0, 200)); }
+      catch { /* never let the clean-up hide the provider error */ }
+      throw err;
+    }
+  }
+
   async initiateDeposit(userId: string, amountCents: number, phoneRaw: string, siteId?: string): Promise<{ txId: string; checkoutRequestId: string }> {
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
     const minDep = await this.currentMinDeposit();
@@ -162,13 +219,14 @@ export class PaymentService {
     // re-routed, when that owner has no complete M-Pesa account).
     const owner = await this.ownerOf(siteId);
     await this.assertRail(owner, "mpesa");
+    this.guardInitiate(userId, "mpesa", owner.scope);
     const txId = await this.repo.createDeposit(userId, amountCents, msisdn, siteId);
     await this.stamp(txId, owner.scope);
     // Site-aware AccountReference: show the depositing brand's account, not a hardcoded one. And
     // route through the brand's OWN Daraja client when it has registered its own paybill (else shared).
     const accountRef = await this.resolveAccountRef(siteId);
     const client = owner.scope === "global" ? await this.resolveDaraja(siteId) : await this.darajaForScope(owner.scope);
-    const stk = await client.stkPush({ amountCents, msisdn, accountRef, desc: "Deposit" });
+    const stk = await this.withAbandonOnReject(txId, userId, "mpesa", () => client.stkPush({ amountCents, msisdn, accountRef, desc: "Deposit" }));
     await this.repo.attachStk(txId, stk.merchantRequestId, stk.checkoutRequestId);
     return { txId, checkoutRequestId: stk.checkoutRequestId };
   }
@@ -192,12 +250,13 @@ export class PaymentService {
     const msisdn = normalizeMsisdn(phoneRaw);
     await this.assertRail(owner, "megapay");
     const client = await this.megapayForScope(owner.scope);
+    this.guardInitiate(userId, "megapay", owner.scope);
     const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn, "megapay", siteId);
     await this.stamp(txId, owner.scope);
     // The reference becomes the "Account no." shown to the payer — send the brand/site name in
     // UPPERCASE for a clean, consistent prompt (e.g. "Account no. TAMUTRADERS").
     const reference = (await this.resolveAccountRef(siteId)).toUpperCase();
-    const res = await client.initiateStk({ amountCents, msisdn, reference });
+    const res = await this.withAbandonOnReject(txId, userId, "megapay", () => client.initiateStk({ amountCents, msisdn, reference }));
     await this.repo.attachStk(txId, res.merchantRequestId, res.transactionRequestId);
     return { txId, transactionRequestId: res.transactionRequestId, checkoutRequestId: res.checkoutRequestId };
   }
@@ -266,9 +325,10 @@ export class PaymentService {
     const msisdn = normalizeMsisdn(phoneRaw);
     await this.assertRail(owner, "payhero");
     const client = await this.payheroForScope(owner.scope);
+    this.guardInitiate(userId, "payhero", owner.scope);
     const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn, "payhero", siteId);
     await this.stamp(txId, owner.scope);
-    const res = await client.initiateStk({ amountCents, msisdn, externalReference: txId });
+    const res = await this.withAbandonOnReject(txId, userId, "payhero", () => client.initiateStk({ amountCents, msisdn, externalReference: txId }));
     // Store PayHero's `reference` in checkout_request_id (its status endpoint + reconcile query by it);
     // keep the ws_CO CheckoutRequestID in merchant_request_id for reference.
     await this.repo.attachStk(txId, res.checkoutRequestId, res.reference);
@@ -294,10 +354,13 @@ export class PaymentService {
     const client = await this.payheroForScope(owner.scope);
     if (!(await client.lipwaLink({ reference: "probe" }))) throw new Error("PAYHERO_LIPWA_NOT_CONFIGURED");
     // external_reference we pass to Lipwa === our txId === the tx's checkout_request_id, so the ledger match is unambiguous.
+    this.guardInitiate(userId, "payhero", owner.scope);
     const txId = await this.repo.createDepositProvider(userId, amountCents, "", "payhero", siteId);
     await this.stamp(txId, owner.scope);
+    // Mint the link FIRST: attaching the checkout id before the call would make a refused deposit
+    // un-abandonable (fn_abandon_deposit refuses any row that carries one, by design).
+    const lipwaUrl = (await this.withAbandonOnReject(txId, userId, "payhero", () => client.lipwaLink({ amountKes: Math.round(amountCents / 100), reference: txId })))!;
     await this.repo.attachStk(txId, `lipwa:${txId}`, txId);
-    const lipwaUrl = (await client.lipwaLink({ amountKes: Math.round(amountCents / 100), reference: txId }))!;
     return { txId, lipwaUrl, reference: txId };
   }
 
