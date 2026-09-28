@@ -89,17 +89,35 @@ The server halves stay covered by `app.demo1.test.ts` ("a player in demo mode ca
 demo-locked marketer still can") and the `0169` lock-held check.
 
 
-## 7. Marketers are a THIRD kind of account, not a locked player (DEMO-4)
+## 7. A marketer is presented as a normal player on their Real account (DEMO-5)
 
-A marketer is not "a player who cannot reach Real". They are a separate account type:
+Earlier this section made a marketer's panel a neutral **Balance**-only card with no Real/Demo rows —
+on the reasoning that a marketer "has no Real account". That was right about the money and wrong about
+the *presentation*: it made a marketer's surface visibly different from a player's, which is the one
+thing a covert social-proof account must never be.
 
-- their game money is `wallets.demo_balance` — **never** real (`0084`, docs/27);
-- `fn_create_withdrawal` refuses them outright (`MARKETER_NO_REAL_WITHDRAWAL`);
-- they **can** withdraw — via the instant game→marketer-wallet transfer, and their earnings live in
-  `marketer_wallets` / the marketer app at `/dashboard`.
+The money layer is unchanged and remains the source of truth:
 
-So the account panel must not offer them a Real account at all — not even greyed out, which
-misdescribes what they have. They get their balance and their actions, and no switcher.
+- a marketer's game money is `wallets.demo_balance` — the "funny money", **never** `real_balance`
+  (`0084`, docs/27); the server pins every marketer trade to that one bucket (`fn_account_is_demo`);
+- they cannot switch to real mode — `fn_set_account_mode` / `demo.pg.ts` refuse it (`MODE_LOCKED`);
+- they **can** withdraw: `POST /withdrawals` detects the marketer (`requestWithdrawal → mode:'marketer'`)
+  and routes to the instant game→marketer-wallet transfer, paid at once (200, `paid:true`), never the
+  Daraja B2C hold path. Their earnings live in `marketer_wallets` / the marketer app at `/dashboard`.
+
+So the funny money **is** their Real account, and the UI now says exactly that. A marketer is rendered
+through the identical player path — the top-bar pill reads **R / Real** in the accent colour (its
+`demo` flag is forced off for `modeLocked`), and the account panel shows one active **Real** row with
+that balance, a check, and Deposit + Withdraw (the Withdraw the server routes to their transfer). No
+`DEMO` pill, no greyed **Unavailable** Real row, no "Balance" euphemism, no account type named —
+`AccountMenu` prints neither "marketer" nor "demo" for them, so nothing over their shoulder gives it
+away.
+
+What is **not** offered is a second, playable **Demo** practice bucket. A player's Demo is a separate
+balance the server routes play to on a mode switch; a marketer has no such bucket and cannot switch, so
+a Demo tab for them would be a control that cannot do what it says. Giving marketers a real practice
+bucket is a money-layer change (move the funny money into `real_balance` and free `demo_balance` for
+practice), deliberately **not** done here — this change is presentation-only, no money moves.
 
 ### The client was the last layer trusting the JWT role claim
 
@@ -119,8 +137,11 @@ lands on a page whose calls 403.
 The dashboard entry is an invisible hotspot so that "NO visible button a watching player could
 notice". The panel therefore names **no account type** — not "Marketer", not "Demo". A marketer shows
 their phone to players as social proof; printing what the account is would defeat the entire surface.
-It shows `Balance` and the figure, nothing more.
+Since DEMO-5 it goes further than hiding the type: it presents the funny money as a normal **Real**
+account (badge, balance, Deposit + Withdraw), so the surface does not merely omit the tell — it reads
+exactly like a player's.
 
-> **Still leaking, NOT changed here:** the top-bar pill itself reads `DEMO` for a marketer, because
-> `mode === 'demo'` is true for them. That predates this work and changing it alters what every
-> marketer sees on the trade screen, so it is raised rather than silently altered.
+> **Resolved (DEMO-5):** the top-bar pill used to read `DEMO` for a marketer because `mode === 'demo'`
+> is true for them. Both pills (`AccountSwitcher`, `DigitsAccount`) now force the `demo` presentation
+> flag off when `modeLocked`, so a marketer's pill reads **R / Real** with their funny money — matching
+> a player exactly. The money layer is untouched; only what the marketer's surface *says* changed.

@@ -79,7 +79,11 @@ export function AccountSwitcher() {
 
   if (!hydrated || !token || !data) return null;
 
-  const demo = data.mode === 'demo';
+  // A MARKETER is presented as a normal player on their REAL account: their funny money IS their Real
+  // balance (staked, and withdrawn via the instant marketer transfer), so the pill reads "Real" in
+  // the accent colour, never the yellow "Demo" that would out the account to a watching player.
+  const marketer = data.modeLocked === true;
+  const demo = !marketer && data.mode === 'demo';
 
   const switchTo = (mode: 'real' | 'demo') => {
     if (mode === data.mode || setMode.isPending) return;

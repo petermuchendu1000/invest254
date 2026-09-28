@@ -64,7 +64,12 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   if (!data) return null;
-  const demo = data.mode === 'demo';
+  // A MARKETER is presented as a normal player on their REAL account. Their funny money IS their Real
+  // balance — it is what they stake and what they withdraw (via the instant marketer transfer the
+  // server routes `POST /withdrawals` to) — so the pill must read "Real" in the accent colour, never
+  // the yellow "Demo" that tells a watching player the account is not a real one (docs/51 §7 leak).
+  const marketer = data.modeLocked === true;
+  const demo = !marketer && data.mode === 'demo';
   const spend = (data.real ?? 0) + (data.bonus ?? 0);
 
   const switchTo = (mode: 'real' | 'demo') => {

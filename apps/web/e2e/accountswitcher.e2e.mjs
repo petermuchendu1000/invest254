@@ -100,12 +100,20 @@ try {
         db ? `y=${db.y} h=${db.height} x=${db.x} w=${db.width}` : 'no box');
     }
 
-    // A marketer has no Real/Demo rows at all (they have one account), so the row assertions below
-    // only apply to a player's wallet.
+    // A MARKETER is presented as a normal player on their REAL account: their funny money shows as the
+    // Real balance (accent, never the yellow Demo). There are no INTERACTIVE switch rows — they have a
+    // single account — so the menuitemradio assertions below only apply to a player's wallet.
     const demoRow = page.getByRole('menuitemradio', { name: /Demo account/ });
     if (LOCKED) {
-      check('marketer: the switcher offers no Real/Demo rows', (await demoRow.count()) === 0
+      const mlabel = await pill.getAttribute('aria-label');
+      check('marketer: the pill reads Real, never Demo', /^Real account/.test(mlabel ?? ''), String(mlabel));
+      check('marketer: the menu offers no interactive switch rows', (await demoRow.count()) === 0
         && (await page.getByRole('menuitemradio', { name: /Real account/ }).count()) === 0);
+      if (await dialog.count()) {
+        const dtext = (await dialog.innerText()).toLowerCase();
+        check('marketer: the menu presents a Real account (funny money), not a euphemism', dtext.includes('real'), dtext.slice(0, 160));
+        check('marketer: the menu never names the account type', !dtext.includes('marketer') && !dtext.includes('demo'), dtext.slice(0, 160));
+      }
       check('marketer: no page errors', errors.length === 0, errors.join(' | '));
       await ctx.close();
       return;
@@ -173,12 +181,14 @@ try {
 
     const realRow = page.getByRole('menuitemradio', { name: /Real account/ });
     if (LOCKED) {
-      // A MARKETER has no Real account. Offering one — even greyed out — misdescribes the account:
-      // their money is the marketer balance, their payout is the marketer transfer, and their
-      // earnings live in the marketer app. So the switcher must not appear for them at all.
+      // A MARKETER is presented as a normal player on their REAL account: their funny money shows as
+      // the Real balance and is withdrawable (the server routes their withdrawal to the instant
+      // marketer transfer). There are no INTERACTIVE switch rows — they have a single account — and
+      // the panel must never print "marketer" or "demo", which would out the account to a watcher.
       const text = (await page.getByRole('dialog', { name: 'Switch account' }).innerText()).toLowerCase();
-      check('marketer: no Real row is offered', (await realRow.count()) === 0, `rows=${await realRow.count()}`);
-      check('marketer: no Demo row either (nothing to switch)', (await page.getByRole('menuitemradio', { name: /Demo account/ }).count()) === 0);
+      check('marketer: no interactive Real switch row', (await realRow.count()) === 0, `rows=${await realRow.count()}`);
+      check('marketer: no interactive Demo switch row', (await page.getByRole('menuitemradio', { name: /Demo account/ }).count()) === 0);
+      check('marketer: presents a Real account (funny money as Real)', text.includes('real'), text.slice(0, 160));
       // COVERT: the panel must not print "marketer" or "demo" — a watching player would learn what
       // the account is, and the whole marketer surface is built to avoid exactly that.
       check('marketer: the panel never names the account type', !text.includes('marketer') && !text.includes('demo'), text.slice(0, 160));

@@ -53,7 +53,6 @@ export function AccountMenu({
 
   const Row = ({ mode, label, cents, sub }: { mode: 'real' | 'demo'; label: string; cents: number; sub?: string }) => {
     const on = active === mode;
-    const locked = mode === 'real' && wallet.modeLocked;
     return (
       <button
         type="button"
@@ -61,14 +60,11 @@ export function AccountMenu({
         aria-checked={on}
         // The visible label is one word; assistive tech gets the whole sentence.
         aria-label={`${label} account, ${fmt(cents)}${on ? ', active' : ''}`}
-        disabled={locked || switching}
+        disabled={switching}
         onClick={() => onSwitch(mode)}
         className={cn(
           'flex min-h-[3.5rem] w-full items-center gap-3 px-3 text-left transition',
           on ? 'bg-surface-2' : 'active:bg-surface-2/70 sm:hover:bg-surface-2/60',
-          // A locked row keeps FULL contrast and says why on the right. Dimming it to 40% with no
-          // explanation is what made this read as a broken button rather than an unavailable account.
-          locked && 'cursor-not-allowed',
         )}
       >
         <span
@@ -80,17 +76,11 @@ export function AccountMenu({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-semibold leading-tight text-fg">{label}</span>
-          {/* No figure on an unavailable account: it competes with the badge for width (truncating
-              both), and for a locked marketer the "real" figure is their demo balance anyway. */}
-          {locked ? null : (
-            <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight tabular-nums text-muted">
-              {fmt(cents)}{sub ? <span className="font-sans"> · {sub}</span> : null}
-            </span>
-          )}
+          <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight tabular-nums text-muted">
+            {fmt(cents)}{sub ? <span className="font-sans"> · {sub}</span> : null}
+          </span>
         </span>
-        {locked
-          ? <span className="shrink-0 whitespace-nowrap rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">Unavailable</span>
-          : on ? <Check className="h-4 w-4 shrink-0 text-accent" /> : null}
+        {on ? <Check className="h-4 w-4 shrink-0 text-accent" /> : null}
       </button>
     );
   };
@@ -109,19 +99,27 @@ export function AccountMenu({
           'overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl shadow-black/50',
         )}
       >
-        {/* A MARKETER has no Real account to switch to — offering one (even greyed out) misdescribes
-            the account. Their balance is their own, their payout is the marketer transfer, and their
-            earnings live in their own app.
-            NAMED NEUTRALLY ON PURPOSE. The marketer system is covert by design — the dashboard entry
-            is an invisible hotspot precisely so "NO visible button a watching player could notice".
-            Printing "Marketer" (or "Demo") here would tell anyone looking over their shoulder exactly
-            what the account is, which is the one thing this surface must not do. So: balance only. */}
+        {/* A MARKETER is presented as a normal player on their REAL account. Their funny money IS their
+            Real balance: it is what they stake, and what they withdraw — the server routes their
+            `POST /withdrawals` to the instant game→marketer-wallet transfer, so the Withdraw action
+            below works for them exactly as it reads. It shows as the accent "R" account, never the
+            yellow "Demo" (or a "Marketer"/"Balance" euphemism) that would tell a watching player the
+            account is not a real one — the one thing this covert surface must never do.
+
+            It is a status line, not a switch: a marketer has a single account, so this never calls a
+            mode switch (the server refuses a marketer's switch to Real with MODE_LOCKED). A separate,
+            playable Demo practice bucket is not offered because the money layer keeps every marketer
+            trade on that one bucket — a second one would need a money-layer change, not presentation. */}
         {wallet.modeLocked ? (
-          <div className="flex min-h-[3.5rem] items-center px-3">
-            <span className="min-w-0 flex-1">
-              <span className="block text-[11px] font-medium uppercase tracking-wider text-muted">Balance</span>
-              <span className="mt-0.5 block truncate font-mono text-[18px] font-bold leading-tight tabular-nums text-fg">{fmt(f.realTotal)}</span>
-            </span>
+          <div role="group" aria-label="Account" className="flex flex-col">
+            <div className="flex min-h-[3.5rem] w-full items-center gap-3 bg-surface-2 px-3 text-left">
+              <span aria-hidden className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent/20 text-[11px] font-extrabold text-accent">R</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[14px] font-semibold leading-tight text-fg">Real</span>
+                <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight tabular-nums text-muted">{fmt(f.realTotal)}</span>
+              </span>
+              <Check className="h-4 w-4 shrink-0 text-accent" />
+            </div>
           </div>
         ) : (
           <div role="menu" aria-label="Accounts" className="flex flex-col">
