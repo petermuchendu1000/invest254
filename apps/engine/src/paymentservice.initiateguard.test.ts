@@ -16,6 +16,11 @@ import { StubDarajaClient } from "./daraja.js";
  *      per user (20/min) and the observed loop ran at ~4s intervals, comfortably under it.
  */
 
+/** A repository whose shared gate is unreachable — the case the service must FAIL CLOSED on. */
+class BrokenGateRepo extends InMemoryPaymentRepository {
+  override async depositGate(): Promise<never> { throw new Error("connection terminated unexpectedly"); }
+}
+
 /** A Daraja stub whose STK push always fails, the way a blocked merchant behaves. */
 class RejectingDaraja extends StubDarajaClient {
   calls = 0;
@@ -122,4 +127,52 @@ test("abandonDeposit refuses a deposit that reached the gateway", async () => {
   const { txId } = await svc.initiateDeposit("u1", 100_000, "0712345678");
   // It carries a checkout id, so it is in flight: the reconcile sweep owns it, not the clean-up.
   assert.equal(await repo.abandonDeposit(txId, "should not happen"), false);
+});
+
+
+// ── 0175: the gate is SHARED (Postgres), and the service fails closed ────────────────────────────
+
+test("an unreachable gate refuses the deposit — it is never sent to the gateway", async () => {
+  // Fail closed is the whole point of the guarantee: there must be no path to a provider without a
+  // granted slot. An in-process counter could be bypassed by restarting a machine; this cannot.
+  const repo = new BrokenGateRepo();
+  repo.seed("u1", 0);
+  const daraja = new RejectingDaraja();
+  const svc = new PaymentService(repo, daraja);
+
+  await assert.rejects(() => svc.initiateDeposit("u1", 100_000, "0712345678"), /PROVIDER_BUSY/);
+  assert.equal(daraja.calls, 0, "the gateway was never called");
+  const txs = await repo.listTransactions("u1", {});
+  assert.equal(txs.items.length, 0, "and no row was created");
+});
+
+test("the merchant ceiling is enforced across players, not per player", async () => {
+  // PayHero's block is merchant-wide, so the ceiling must count every player's initiations together.
+  const repo = new InMemoryPaymentRepository();
+  const svc = new PaymentService(repo, new StubDarajaClient());
+  const merchantKey = "dep:merchant:mpesa:global";
+  // consume the window through the repo the service shares
+  for (let i = 0; i < 60; i += 1) {
+    assert.equal(await repo.depositGate(`dep:reject:mpesa:filler${i}`, merchantKey, 60, 60_000), "ok");
+  }
+  assert.equal(await repo.depositGate("dep:reject:mpesa:u-new", merchantKey, 60, 60_000), "busy",
+    "a different player still hits the merchant's ceiling");
+});
+
+test("the post-rejection hold is recorded in the shared gate, so every machine honours it", async () => {
+  const repo = new InMemoryPaymentRepository();
+  repo.seed("u1", 0);
+  const svc = new PaymentService(repo, new RejectingDaraja());
+  await assert.rejects(() => svc.initiateDeposit("u1", 100_000, "0712345678"), /DARAJA_INITIATE_REJECTED_400/);
+  // The hold lives in the repository, not in the service instance — a second service (a second API
+  // machine) sharing the same store sees it too.
+  const other = new PaymentService(repo, new StubDarajaClient());
+  await assert.rejects(() => other.initiateDeposit("u1", 100_000, "0712345678"), /DEPOSIT_TOO_SOON/);
+});
+
+test("a rejection never shortens an existing hold", async () => {
+  const repo = new InMemoryPaymentRepository();
+  await repo.depositGateReject("k", 60_000);
+  await repo.depositGateReject("k", 1);          // a second rejection must not buy a shorter wait
+  assert.equal(await repo.depositGate("k", "m", 60, 60_000), "too_soon");
 });
