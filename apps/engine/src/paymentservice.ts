@@ -1,5 +1,5 @@
 import { normalizeMsisdn, MIN_DEPOSIT_CENTS, MIN_WITHDRAWAL_CENTS, type Cents } from "@invest254/shared";
-import type { PaymentRepository, CompleteResult, CreateWithdrawalResult, WithdrawalOutcome, C2bPayment, ClaimResult, PaybillConfig, DepositProvider } from "./payments.js";
+import type { PaymentRepository, CompleteResult, CreateWithdrawalResult, WithdrawalOutcome, C2bPayment, ClaimResult, PaybillConfig, DepositProvider, DepositMethod } from "./payments.js";
 import type { DarajaClient } from "./daraja.js";
 import type { MegaPayClient } from "./megapay.js";
 import type { PayHeroClient } from "./payhero.js";
@@ -276,6 +276,32 @@ export class PaymentService {
   }
 
   /**
+   * Initiate a PayHero **Lipwa** (hosted multi-channel) deposit — card, bank, mobile-money, cross-border.
+   * We do NOT collect card data (PayHero's PCI-hosted page does); we only mint a pending 'payhero'
+   * transaction keyed by its own id and hand back the Lipwa URL (embedded in-app). PayHero echoes our
+   * txId as the ledger row's external_reference, so `reconcilePayHeroLedger` credits it through the SAME
+   * idempotent fn_complete_deposit as every other rail. Same floors/limits as STK — no rail bypasses them.
+   */
+  async initiateLipwaDeposit(userId: string, amountCents: number, siteId?: string): Promise<{ txId: string; lipwaUrl: string; reference: string }> {
+    const owner = await this.ownerOf(siteId);
+    if (owner.scope === "global" && !this.payhero) throw new Error("PAYHERO_NOT_CONFIGURED");
+    if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
+    const minDep = await this.currentMinDeposit();
+    if (amountCents < minDep) throw new Error("BELOW_MIN");
+    const maxDep = await this.currentMaxDeposit();
+    if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
+    await this.assertRail(owner, "payhero");
+    const client = await this.payheroForScope(owner.scope);
+    if (!(await client.lipwaLink({ reference: "probe" }))) throw new Error("PAYHERO_LIPWA_NOT_CONFIGURED");
+    // external_reference we pass to Lipwa === our txId === the tx's checkout_request_id, so the ledger match is unambiguous.
+    const txId = await this.repo.createDepositProvider(userId, amountCents, "", "payhero", siteId);
+    await this.stamp(txId, owner.scope);
+    await this.repo.attachStk(txId, `lipwa:${txId}`, txId);
+    const lipwaUrl = (await client.lipwaLink({ amountKes: Math.round(amountCents / 100), reference: txId }))!;
+    return { txId, lipwaUrl, reference: txId };
+  }
+
+  /**
    * PayHero callback handler. Like the Mega Pay/Daraja model, the callback body is NEVER trusted to
    * credit. We run the authoritative sweep, which re-queries PayHero server-to-server for each recent
    * unsettled PayHero deposit — by the `reference` WE stored — and settles only the verified-paid ones
@@ -283,8 +309,13 @@ export class PaymentService {
    */
   async handlePayHeroCallback(_raw: unknown): Promise<{ settled: number }> {
     if (!this.payhero && !this.gateways) throw new Error("PAYHERO_NOT_CONFIGURED");
-    const r = await this.reconcilePayHeroDeposits({ olderThanMs: 0 });
-    return { settled: r.settled };
+    // Run BOTH authoritative sweeps: the status sweep settles STK deposits by reference, and the ledger
+    // sweep settles Lipwa (card/bank) + ingests manual paybill payments. The body is never trusted.
+    const [status, ledger] = await Promise.all([
+      this.reconcilePayHeroDeposits({ olderThanMs: 0 }),
+      this.reconcilePayHeroLedger().catch(() => ({ settled: 0 })),
+    ]);
+    return { settled: status.settled + ledger.settled };
   }
 
   /**
@@ -310,6 +341,50 @@ export class PaymentService {
       }
     }
     return { scanned: rows.length, settled, stillPending, errors };
+  }
+
+  /**
+   * Ledger reconcile — the settlement path for Lipwa (card/bank/multi-country) AND manual paybill C2B.
+   * Reads PayHero's authoritative account ledger (GET /transactions, one shared account) and, per inbound
+   * payment:
+   *   • external_reference set (STK/Lipwa) → credit the matching pending tx via fn_complete_deposit.
+   *     A row whose tx is already terminal returns applied=false and is left alone (no double credit);
+   *     TX_NOT_FOUND means no tx owns that reference, so it falls through to be claimable by code.
+   *   • no external_reference (manual paybill) → ingest into c2b_payments so the payer claims it by
+   *     M-PESA code through the SAME fraud-safe fn_claim_c2b_deposit as the Daraja paybill.
+   * Money-safe by construction: a payment is EITHER auto-credited to its own tx OR made claimable once —
+   * never both — and every write (fn_complete_deposit, fn_ingest_c2b) is idempotent, so re-runs are no-ops.
+   */
+  async reconcilePayHeroLedger(opts: { page?: number } = {}): Promise<{ scanned: number; settled: number; ingested: number; errors: number }> {
+    if (!this.payhero && !this.gateways) return { scanned: 0, settled: 0, ingested: 0, errors: 0 };
+    let rows: Awaited<ReturnType<PayHeroClient["listInboundPayments"]>> = [];
+    try { rows = await (await this.payheroForScope(null)).listInboundPayments({ page: opts.page ?? 1 }); }
+    catch { return { scanned: 0, settled: 0, ingested: 0, errors: 1 }; }
+    let settled = 0, ingested = 0, errors = 0;
+    for (const p of rows) {
+      try {
+        if (p.externalReference) {
+          try {
+            const res = await this.repo.completeDeposit(p.externalReference, 0, "ledger:payhero", p.mpesaCode,
+              { ledger: true, provider: "payhero", mpesaCode: p.mpesaCode, at: new Date().toISOString() });
+            if (res.applied) settled += 1;
+            continue; // a tx owns this reference (credited now, or already terminal) — never also ingest it
+          } catch (err) {
+            if (!/TX_NOT_FOUND/.test((err as Error).message)) throw err; // real error -> count it, don't lose the payment
+            // else: reference we don't own -> fall through to claimable-by-code so nothing is stranded
+          }
+        }
+        const stored = await this.repo.ingestC2b({
+          transId: p.mpesaCode, amountCents: p.amountCents, msisdn: p.msisdn,
+          billRef: p.externalReference ?? p.reference, shortcode: "payhero", raw: { provider: "payhero", ledger: true },
+        });
+        if (stored) ingested += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(`[payments] PayHero ledger reconcile failed for ${p.mpesaCode}: ${(err as Error).message}`);
+      }
+    }
+    return { scanned: rows.length, settled, ingested, errors };
   }
 
   /**
@@ -343,6 +418,65 @@ export class PaymentService {
     } catch (err) {
       console.warn(`[payments] listDepositProviders failed (${(err as Error).message}); falling back to M-Pesa only`);
       return [{ code: "mpesa", displayName: "M-Pesa" }];
+    }
+  }
+
+  /**
+   * The deposit CHANNELS a player on this brand can actually complete — the single source of truth for
+   * the deposit sheet. Built on top of listDepositProviders (the 0116 enable/disable resolution) and
+   * then narrowed by per-channel readiness, because an enabled gateway does not imply every one of its
+   * rails works:
+   *   - STK: one entry per effective gateway. The gateway BRAND is never shown (docs/35) — every STK
+   *     rail reads "M-Pesa", numbered only in the rare case that several are enabled at once.
+   *   - Lipwa (card/bank): PayHero only, and ONLY when `lipwa_url` is configured. It is optional for
+   *     `depositsReady`, so without this probe the tab renders and then throws
+   *     PAYHERO_LIPWA_NOT_CONFIGURED on submit — which is exactly what it did.
+   *   - Pay Bill: the System owner's Daraja paybill, so it needs M-Pesa live for this brand AND
+   *     `paybillConfig().enabled` (false for a brand on its own accounts, docs/43 §3.6).
+   * Never throws: any probe failure omits that channel rather than hiding the whole sheet.
+   */
+  async listDepositMethods(siteId?: string): Promise<DepositMethod[]> {
+    const providers = await this.listDepositProviders(siteId);
+    const enabled = new Set(providers.map((p) => p.code));
+    const methods: DepositMethod[] = [];
+
+    providers.forEach((p, i) => {
+      methods.push({
+        id: `${p.code}-stk`,
+        provider: p.code,
+        channel: "stk",
+        label: providers.length > 1 ? `M-Pesa (${i + 1})` : "M-Pesa",
+      });
+    });
+
+    if (enabled.has("payhero") && (await this.lipwaAvailable(siteId))) {
+      methods.push({ id: "payhero-lipwa", provider: "payhero", channel: "lipwa", label: "Card & Bank" });
+    }
+
+    if (enabled.has("mpesa")) {
+      try {
+        const cfg = await this.paybillConfig(siteId);
+        if (cfg.enabled) methods.push({ id: "mpesa-paybill", provider: "mpesa", channel: "paybill", label: "Pay Bill" });
+      } catch { /* paybill unavailable for this brand -> simply not offered */ }
+    }
+    return methods;
+  }
+
+  /**
+   * True when PayHero's hosted Lipwa checkout is actually usable for this brand. Mirrors EVERY
+   * precondition initiateLipwaDeposit enforces, so the sheet can never offer a channel the initiate
+   * call would reject: the global scope needs a configured PayHero client (`payheroForScope` returns a
+   * stub rather than throwing, which is why initiate guards on `!this.payhero` first), and the account
+   * needs `lipwa_url` (absent → `lipwaLink` resolves null). Any probe failure ⇒ not offered.
+   */
+  private async lipwaAvailable(siteId?: string): Promise<boolean> {
+    try {
+      const owner = await this.ownerOf(siteId);
+      if (owner.scope === "global" && !this.payhero) return false;
+      const client = await this.payheroForScope(owner.scope);
+      return Boolean(await client.lipwaLink({ reference: "probe" }));
+    } catch {
+      return false;
     }
   }
 
