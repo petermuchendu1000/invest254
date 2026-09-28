@@ -11,6 +11,7 @@ import { api, type TransactionFilter } from '@/lib/api/endpoints';
 import type { Paginated, TransactionDto, LedgerEntryDto } from '@/lib/api/types';
 import { useSession } from '@/lib/auth/session';
 import { siteFromToken } from '@/lib/auth/token';
+import { walletFigures, type WalletFigures } from '@/lib/wallet/figures';
 
 export function useWallet() {
   const token = useSession((s) => s.token);
@@ -19,6 +20,14 @@ export function useWallet() {
     queryFn: () => api.wallet(token as string),
     enabled: !!token,
   });
+}
+
+/**
+ * DEMO-2: the figures every wallet surface renders from, resolved once. `canWithdraw` is the gate a
+ * surface asks before offering ANY way out — see `walletFigures`.
+ */
+export function useWalletFigures(): WalletFigures {
+  return walletFigures(useWallet().data);
 }
 
 /** DEMO-1: switch between the Real and Demo account; the server returns the new wallet. */
