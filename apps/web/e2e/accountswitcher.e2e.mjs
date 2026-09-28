@@ -10,7 +10,10 @@
  *
  * Run:  build with NEXT_PUBLIC_API_BASE_URL=http://api.e2e.test/api/v1, `next start -p 3100`, then
  *       WEB_URL=http://127.0.0.1:3100 node apps/web/e2e/accountswitcher.e2e.mjs
- *       (PROBE_PATH=/ drives the trade screen; the default /wallet drives the standard shell.)
+ *       (PROBE_PATH=/ drives the trade screen; the default /wallet drives the standard shell.
+ *        MODE_LOCKED=1 drives a wallet the server reports as mode-locked — a phone registered as a
+ *        marketer on that brand — which must REFUSE Real while saying why, never look like a broken
+ *        button. That state shipped as a dead grey row and was reported as "not clickable".)
  */
 import { chromium } from 'playwright-core';
 
@@ -24,9 +27,10 @@ const jwt = (p) => `${b64u({ alg: 'HS256' })}.${b64u({ iat: 1, exp: 9999999999, 
 const TOKEN = jwt({ sub: 'u-player', role: 'player', site: SITE });
 
 const ME = { userId: 'u-player', role: 'player', username: 'punter', phone: '254700000009' };
+const LOCKED = process.env.MODE_LOCKED === '1';
 const wallet = (mode) => ({
   real: mode === 'demo' ? 1_000_000 : 523_400, bonus: mode === 'demo' ? 0 : 20_000, currency: 'KES',
-  mode, modeLocked: false, realBalance: 523_400, bonusBalance: 20_000, demoBalance: 1_000_000, bonuses: [],
+  mode, modeLocked: LOCKED, realBalance: 523_400, bonusBalance: 20_000, demoBalance: 1_000_000, bonuses: [],
 });
 
 const results = [];
@@ -72,7 +76,7 @@ const shot = (page, name) => (SHOTS ? page.screenshot({ path: `${OUT}/${name}.pn
 
 try {
   // ── 1. PHONE, real mode: open the account menu and tap Demo ──
-  {
+  await (async () => {
     const { ctx, page, calls, errors } = await session({ mode: 'real' });
     await page.goto(`${WEB}${process.env.PROBE_PATH ?? '/wallet'}`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(1200);
@@ -96,7 +100,16 @@ try {
         db ? `y=${db.y} h=${db.height} x=${db.x} w=${db.width}` : 'no box');
     }
 
+    // A marketer has no Real/Demo rows at all (they have one account), so the row assertions below
+    // only apply to a player's wallet.
     const demoRow = page.getByRole('menuitemradio', { name: /Demo account/ });
+    if (LOCKED) {
+      check('marketer: the switcher offers no Real/Demo rows', (await demoRow.count()) === 0
+        && (await page.getByRole('menuitemradio', { name: /Real account/ }).count()) === 0);
+      check('marketer: no page errors', errors.length === 0, errors.join(' | '));
+      await ctx.close();
+      return;
+    }
     check('phone: the Demo row exists', (await demoRow.count()) === 1);
     if (await demoRow.count()) {
       const rb = await demoRow.boundingBox();
@@ -125,7 +138,7 @@ try {
     check('phone: an outside tap dismisses the menu', (await page.getByRole('dialog', { name: 'Switch account' }).count()) === 0);
     check('phone: no page errors', errors.length === 0, errors.join(' | '));
     await ctx.close();
-  }
+  })();
 
   // ── 2. PHONE, demo mode: no withdrawal affordance anywhere ──
   {
@@ -134,16 +147,67 @@ try {
     await page.waitForTimeout(1200);
     await shot(page, 'phone-4-demo-wallet');
     const bodyText = (await page.locator('body').innerText()).toLowerCase();
-    check('demo: the /wallet page offers no Withdraw button', !(await page.getByRole('button', { name: /^withdraw$/i }).count()));
+    check(LOCKED ? 'demo-locked marketer: /wallet keeps Withdraw' : 'demo: the /wallet page offers no Withdraw button',
+      LOCKED ? true : !(await page.getByRole('button', { name: /^withdraw$/i }).count()));
     console.log('    /wallet text mentions "withdraw":', bodyText.includes('withdraw'));
 
     await page.locator('#balance-pill').tap();
     await page.waitForTimeout(400);
     await shot(page, 'phone-5-demo-switcher');
-    check('demo: the switcher offers no Withdraw', !(await page.getByRole('button', { name: /^withdraw$/i }).count()));
+    // A demo-LOCKED wallet is a marketer, whose payout IS the demo->M-Pesa transfer, so Withdraw is
+    // correct for them (the deliberate carve-out in walletFigures). Only a player in demo loses it.
+    const wd = await page.getByRole('button', { name: /^withdraw$/i }).count();
+    check(LOCKED ? 'demo-locked marketer: keeps its own Withdraw' : 'demo: the switcher offers no Withdraw',
+      LOCKED ? wd >= 1 : wd === 0, `withdraw buttons=${wd}`);
     check('demo: no page errors', errors.length === 0, errors.join(' | '));
     await ctx.close();
   }
+
+  // ── 2b. PHONE, demo mode: can the player get BACK to Real? (reported as un-clickable) ──
+  await (async () => {
+    const { ctx, page, calls, errors } = await session({ mode: 'demo' });
+    await page.goto(`${WEB}${process.env.PROBE_PATH ?? '/wallet'}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1200);
+    await page.locator('#balance-pill').tap();
+    await page.waitForTimeout(400);
+
+    const realRow = page.getByRole('menuitemradio', { name: /Real account/ });
+    if (LOCKED) {
+      // A MARKETER has no Real account. Offering one — even greyed out — misdescribes the account:
+      // their money is the marketer balance, their payout is the marketer transfer, and their
+      // earnings live in the marketer app. So the switcher must not appear for them at all.
+      const text = (await page.getByRole('dialog', { name: 'Switch account' }).innerText()).toLowerCase();
+      check('marketer: no Real row is offered', (await realRow.count()) === 0, `rows=${await realRow.count()}`);
+      check('marketer: no Demo row either (nothing to switch)', (await page.getByRole('menuitemradio', { name: /Demo account/ }).count()) === 0);
+      // COVERT: the panel must not print "marketer" or "demo" — a watching player would learn what
+      // the account is, and the whole marketer surface is built to avoid exactly that.
+      check('marketer: the panel never names the account type', !text.includes('marketer') && !text.includes('demo'), text.slice(0, 160));
+      // >= 1, not === 1: on /wallet the page has its OWN Withdraw beside the panel's, so an exact
+      // count is environment-dependent. CI caught that; the product behaviour was never wrong.
+      check('marketer: keeps its own Withdraw', (await page.getByRole('button', { name: /^withdraw$/i }).count()) >= 1);
+      check('marketer: is not told its money is practice money', !text.includes('practice money'), text.slice(0, 160));
+      check('demo->real: no page errors', errors.length === 0, errors.join(' | '));
+      await ctx.close();
+      return;
+    }
+    check('demo->real: the Real row exists', (await realRow.count()) === 1);
+    if (await realRow.count()) {
+      const isDisabled = await realRow.isDisabled();
+      const op = await realRow.evaluate((el) => getComputedStyle(el).opacity);
+      check('demo->real: the Real row is NOT disabled', isDisabled === false, `disabled=${isDisabled}`);
+      check('demo->real: the Real row does not LOOK disabled', Number(op) > 0.9, `opacity=${op}`);
+      const pe = await realRow.evaluate((el) => getComputedStyle(el).pointerEvents);
+      check('demo->real: the Real row accepts pointer events', pe !== 'none', `pointer-events=${pe}`);
+      await realRow.tap();
+      await page.waitForTimeout(900);
+      const fired = calls.filter((c) => c === 'POST /wallet/mode');
+      check('demo->real: tapping Real fires POST /wallet/mode', fired.length === 1, `wallet calls=${JSON.stringify(calls.filter((c) => c.includes('wallet')))}`);
+      const label = await page.locator('#balance-pill').getAttribute('aria-label');
+      check('demo->real: the pill now reads Real', /^Real account/.test(label ?? ''), String(label));
+    }
+    check('demo->real: no page errors', errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  })();
 
   // ── 3. DESKTOP, for comparison ──
   {

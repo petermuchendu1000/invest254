@@ -87,3 +87,40 @@ withdrawal may be offered, and is never the demo balance.
 
 The server halves stay covered by `app.demo1.test.ts` ("a player in demo mode cannot withdraw; a
 demo-locked marketer still can") and the `0169` lock-held check.
+
+
+## 7. Marketers are a THIRD kind of account, not a locked player (DEMO-4)
+
+A marketer is not "a player who cannot reach Real". They are a separate account type:
+
+- their game money is `wallets.demo_balance` — **never** real (`0084`, docs/27);
+- `fn_create_withdrawal` refuses them outright (`MARKETER_NO_REAL_WITHDRAWAL`);
+- they **can** withdraw — via the instant game→marketer-wallet transfer, and their earnings live in
+  `marketer_wallets` / the marketer app at `/dashboard`.
+
+So the account panel must not offer them a Real account at all — not even greyed out, which
+misdescribes what they have. They get their balance and their actions, and no switcher.
+
+### The client was the last layer trusting the JWT role claim
+
+`requireMarketer` resolves the marketer from the **database** — "the DB is the source of truth for
+access (NOT the JWT role claim)". `MarketerHUD` and `/dashboard` still gated on `user.role`, so a
+marketer whose profile reads `player` was locked out of their own app. Three accounts on `madolar`
+are exactly that: `role='player'`, a `marketers` row on their brand, a funded `marketer_wallets`
+balance (KES 13,700 / 30,000 / 8,000) and `demo_balance = real_balance = 0`.
+
+`useIsMarketer()` now gates the client on `wallet.modeLocked` — the server's own
+`fn_is_marketer_account`, the same predicate that routes their stakes to the demo bucket. It is a
+ROUTING hint only: every marketer endpoint is still gated by `requireMarketer`, so a false positive
+lands on a page whose calls 403.
+
+### Covert by design
+
+The dashboard entry is an invisible hotspot so that "NO visible button a watching player could
+notice". The panel therefore names **no account type** — not "Marketer", not "Demo". A marketer shows
+their phone to players as social proof; printing what the account is would defeat the entire surface.
+It shows `Balance` and the figure, nothing more.
+
+> **Still leaking, NOT changed here:** the top-bar pill itself reads `DEMO` for a marketer, because
+> `mode === 'demo'` is true for them. That predates this work and changing it alters what every
+> marketer sees on the trade screen, so it is raised rather than silently altered.
