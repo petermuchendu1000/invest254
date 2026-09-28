@@ -9,6 +9,7 @@ import { useBrand } from '@/lib/brand/BrandProvider';
 import { useSession } from '@/lib/auth/session';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useWallet, useSetAccountMode, useTopupDemo } from '@/lib/wallet/hooks';
+import { walletFigures } from '@/lib/wallet/figures';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useAmountText } from '@/lib/game/useAmountText';
 import { useDigitSession } from '@/lib/game/digitSession';
@@ -60,6 +61,7 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   if (!data) return null;
+  const figures = walletFigures(data);
   const demo = data.mode === 'demo';
   const spend = (data.real ?? 0) + (data.bonus ?? 0);
   const realB = data.realBalance ?? (demo ? 0 : data.real ?? 0);
@@ -134,9 +136,13 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
             className="mt-2 flex w-full items-center justify-center gap-2 border-t border-border pt-2.5 text-[12px] font-medium text-muted hover:text-fg disabled:opacity-50">
             <DIcon name="refresh" className="h-3.5 w-3.5" />Refresh demo balance
           </button>
-          <div className="mt-2 grid grid-cols-2 gap-2">
+          {/* DEMO-3: on the Demo account there is no way out — Deposit is the only money action, and
+              Withdraw is absent rather than disabled. Play money must never look cashable. */}
+          <div className={cn('mt-2 grid gap-2', figures.canWithdraw ? 'grid-cols-2' : 'grid-cols-1')}>
             <button type="button" onClick={() => { setOpen(false); openDeposit(); }} className="rounded-lg bg-accent py-2 text-[12px] font-bold text-accent-fg">Deposit</button>
-            <button type="button" onClick={() => { setOpen(false); openWithdraw(); }} className="rounded-lg border border-border py-2 text-[12px] font-semibold text-fg hover:border-accent/50">Withdraw</button>
+            {figures.canWithdraw ? (
+              <button type="button" onClick={() => { setOpen(false); openWithdraw(); }} className="rounded-lg border border-border py-2 text-[12px] font-semibold text-fg hover:border-accent/50">Withdraw</button>
+            ) : null}
           </div>
         </div>
       ) : null}
