@@ -1,7 +1,7 @@
 import type { Cents } from "@invest254/shared";
 
 /**
- * PayHero (Lipwa API, payhero.africa) provider abstraction — a third deposit rail alongside Daraja + Mega Pay.
+ * PayHero (Lipwa API, payhero.co.ke) provider abstraction — a third deposit rail alongside Daraja + Mega Pay.
  *
  * Same shape as megapay.ts/daraja.ts: the service depends only on the `PayHeroClient` interface; money
  * correctness lives in the DB RPCs (fn_complete_deposit), not here. `StubPayHeroClient` is deterministic
@@ -117,7 +117,7 @@ export class StubPayHeroClient implements PayHeroClient {
 }
 
 export interface PayHeroConfig {
-  /** API base (no trailing slash). Default backend.payhero.africa/api/v2 (continental); override via env/DB. */
+  /** API base (no trailing slash). Default backend.payhero.co.ke/api/v2; override via env/DB. */
   baseUrl: string;
   /** Ready-to-use Basic Auth token (base64 of apiUsername:apiPassword), WITHOUT the leading "Basic ". */
   basicAuthToken: string;
@@ -145,9 +145,12 @@ export function buildLipwaUrl(lipwaUrl: string, opts: { amountKes?: number; refe
   return s ? `${base}?${s}` : base;
 }
 
-// Pay Hero Africa (continental) is the default endpoint. The legacy Kenya host
-// (https://backend.payhero.co.ke/api/v2) still works and can be set explicitly per brand if needed.
-const DEFAULT_BASE = "https://backend.payhero.africa/api/v2";
+// Kenya host is the default. NOTE: backend.payhero.africa/api/v2 shares the same account/token and
+// serves reads (GET /transactions) identically, but its POST /payments (STK push) REJECTS our request
+// with HTTP 400 — it is NOT a drop-in for the STK rail (prod incident 2026-09-29). Continental payments
+// need the separate Pay Hero Africa v1 API (api.payhero.africa), not a base-URL swap. Do not default to
+// backend.payhero.africa here.
+const DEFAULT_BASE = "https://backend.payhero.co.ke/api/v2";
 
 /**
  * Real PayHero client. Basic-auth (token in the Authorization header). Network errors propagate to the
