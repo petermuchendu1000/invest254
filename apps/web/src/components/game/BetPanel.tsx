@@ -293,7 +293,9 @@ export function BetPanel() {
           variant="up"
           size="md"
           fullWidth
-          className="!h-11 flex-col !gap-0 !text-sm"
+          // MARKETER: drop the finance green/red pair — the "up" action keeps the brand accent, the
+          // "down" action goes neutral; direction is conveyed by the arrow icon alone.
+          className={cn('!h-11 flex-col !gap-0 !text-sm', isMarketer && '!bg-accent !text-accent-fg')}
           disabled={connecting}
           onClick={() => handleDirection('buy')}
         >
@@ -309,7 +311,7 @@ export function BetPanel() {
           variant="down"
           size="md"
           fullWidth
-          className="!h-11 flex-col !gap-0 !text-sm"
+          className={cn('!h-11 flex-col !gap-0 !text-sm', isMarketer && '!bg-surface-2 !text-fg !border !border-border')}
           disabled={connecting}
           onClick={() => handleDirection('sell')}
         >

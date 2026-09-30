@@ -38,7 +38,8 @@ export function LivePnl({ pos }: { pos: ActivePosition }) {
         <span
           className={cn(
             'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
-            isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
+            // MARKETER: direction is shown by the arrow only — one neutral accent, no green/red.
+            isMarketer ? 'bg-accent/15 text-accent' : isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
           )}
         >
           {/* MARKETER: wordless arrow instead of BUY/SELL. */}
@@ -72,7 +73,7 @@ export function LivePnl({ pos }: { pos: ActivePosition }) {
         <div
           className={cn(
             'h-full rounded-full transition-[width] duration-100 ease-linear',
-            isBuy ? 'bg-up' : 'bg-down',
+            isMarketer ? 'bg-accent' : isBuy ? 'bg-up' : 'bg-down',
           )}
           style={{ width: `${progress * 100}%` }}
         />

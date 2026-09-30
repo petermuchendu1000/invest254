@@ -139,7 +139,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
         // ── Open position (server-acked) ──────────────────────────────────────────────────────────
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-2 p-3.5">
           <div className="flex items-center justify-between">
-            <span className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-bold text-white', position.dir === 'up' ? 'bg-up' : 'bg-down')}>
+            <span className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-bold text-white', isMarketer ? 'bg-accent' : position.dir === 'up' ? 'bg-up' : 'bg-down')}>
               {isMarketer ? (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-3.5 w-3.5" role="img" aria-label={position.dir === 'up' ? 'Up' : 'Down'}>
                   <path d={position.dir === 'up' ? 'M12 19V5M5 12l7-7 7 7' : 'M12 5v14M5 12l7 7 7-7'} strokeLinecap="round" strokeLinejoin="round" />
@@ -248,7 +248,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
           {/* Up / Down */}
           <div className="grid grid-cols-2 gap-2">
             <button type="button" disabled={pendingDir !== null} onClick={() => open('up')} aria-label={isMarketer ? 'Up' : undefined}
-              className="flex flex-col items-start gap-0.5 rounded-xl bg-up px-3.5 py-2.5 text-left text-white transition hover:opacity-90 disabled:opacity-50">
+              className={cn('flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-2.5 text-left text-white transition hover:opacity-90 disabled:opacity-50', isMarketer ? 'bg-accent' : 'bg-up')}>
               <span className="flex items-center gap-1 text-sm font-extrabold">
                 {isMarketer && pendingDir !== 'up' ? (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-4 w-4" aria-hidden><path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -257,7 +257,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
               <span className="text-[10px] font-semibold tabular-nums text-white/85">x{multiplier}</span>
             </button>
             <button type="button" disabled={pendingDir !== null} onClick={() => open('down')} aria-label={isMarketer ? 'Down' : undefined}
-              className="flex flex-col items-start gap-0.5 rounded-xl bg-down px-3.5 py-2.5 text-left text-white transition hover:opacity-90 disabled:opacity-50">
+              className={cn('flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-2.5 text-left text-white transition hover:opacity-90 disabled:opacity-50', isMarketer ? 'bg-fg/25 border border-border' : 'bg-down')}>
               <span className="flex items-center gap-1 text-sm font-extrabold">
                 {isMarketer && pendingDir !== 'down' ? (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-4 w-4" aria-hidden><path d="M12 5v14M5 12l7 7 7-7" strokeLinecap="round" strokeLinejoin="round" /></svg>

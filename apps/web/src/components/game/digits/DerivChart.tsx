@@ -33,7 +33,7 @@ type Marker = { time: number; kind: 'entry' | 'win' | 'loss'; text?: string };
 
 /** Map our semantic entry/settle markers to lightweight-charts series markers, resolving brand
  *  colours from CSS vars. Sorted ascending by time (the library requires it). */
-function buildLcMarkers(markers: Marker[]): any[] {
+function buildLcMarkers(markers: Marker[], marketer = false): any[] {
   const cs = getComputedStyle(document.documentElement);
   const accent = readVar(cs, '--pp-accent', '#3B82F6');
   const up = readVar(cs, '--pp-up', '#22C55E');
@@ -41,7 +41,8 @@ function buildLcMarkers(markers: Marker[]): any[] {
   return [...markers]
     .sort((a, b) => a.time - b.time)
     .map((m) => {
-      const color = m.kind === 'entry' ? accent : m.kind === 'win' ? up : down;
+      // MARKETER: neutral single accent for every marker (no green-win / red-loss finance tell).
+      const color = marketer ? accent : m.kind === 'entry' ? accent : m.kind === 'win' ? up : down;
       return {
         time: m.time as unknown as import('lightweight-charts').UTCTimestamp,
         position: m.kind === 'entry' ? 'belowBar' : 'aboveBar',
@@ -82,6 +83,9 @@ interface DerivChartProps {
   /** When true, a click on the chart drops a horizontal price line at that price. */
   drawMode?: boolean;
   onLineDrawn?: () => void;
+  /** MARKETER: hide the price axis, time axis, grid and numeric live-price tag, and force a neutral
+   *  accent area — so the chart reads as a game visual, not a trading chart (TikTok Phase 2). */
+  marketer?: boolean;
 }
 
 /**
@@ -92,7 +96,7 @@ interface DerivChartProps {
  * the imperative handle. Purely presentational.
  */
 export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function DerivChart(
-  { getTicks, getLastTick, resetKey, precision = 2, paused = false, barSpacing, markers = [], variant = 'line', drawMode = false, onLineDrawn },
+  { getTicks, getLastTick, resetKey, precision = 2, paused = false, barSpacing, markers = [], variant = 'line', drawMode = false, onLineDrawn, marketer = false },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -116,7 +120,8 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
     const cs = getComputedStyle(document.documentElement);
     const accent = readVar(cs, '--pp-accent', '#3B82F6');
     const fg = readVar(cs, '--pp-fg', '#E6EDF3');
-    return v === 'area'
+    // MARKETER: always the soft accent area fill — the thin price-line variant reads as a trading tick line.
+    return v === 'area' || marketer
       ? { lineColor: accent, topColor: `${accent}40`, bottomColor: `${accent}04`, lineWidth: 2 as const }
       : { lineColor: fg, topColor: 'rgba(0,0,0,0)', bottomColor: 'rgba(0,0,0,0)', lineWidth: 1 as const };
   };
@@ -126,6 +131,8 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
     const s = seriesRef.current; const c = chartRef.current;
     const tag = tagRef.current; const dot = dotRef.current;
     const rate = lastRateRef.current;
+    // MARKETER: never show the numeric live-price tag/dot (it reads as a price).
+    if (marketer) { if (tag) tag.style.opacity = '0'; if (dot) dot.style.opacity = '0'; return; }
     if (!s || !c || !tag || !dot || rate == null) return;
     const y = s.priceToCoordinate(rate);
     if (y == null) { tag.style.opacity = '0'; dot.style.opacity = '0'; return; }
@@ -176,9 +183,12 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
         autoSize: true,
         localization: { locale: safeChartLocale() },
         layout: { background: { type: ColorType.Solid, color: bg }, textColor: text, fontSize: 9, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', attributionLogo: false },
-        grid: { vertLines: { color: `${border}88`, style: LineStyle.Solid }, horzLines: { color: `${border}88`, style: LineStyle.Solid } },
-        rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.12, bottom: 0.12 } },
-        timeScale: { borderVisible: false, timeVisible: true, secondsVisible: true, rightOffset: 6, barSpacing: barSpacing ?? 7 },
+        // MARKETER: no grid, no price axis, no time axis — the numeric scales are the trading tell.
+        grid: marketer
+          ? { vertLines: { visible: false }, horzLines: { visible: false } }
+          : { vertLines: { color: `${border}88`, style: LineStyle.Solid }, horzLines: { color: `${border}88`, style: LineStyle.Solid } },
+        rightPriceScale: { visible: !marketer, borderVisible: false, scaleMargins: { top: 0.12, bottom: 0.12 } },
+        timeScale: { visible: !marketer, borderVisible: false, timeVisible: true, secondsVisible: true, rightOffset: 6, barSpacing: barSpacing ?? 7 },
         crosshair: { mode: CrosshairMode.Normal },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
         handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: false } },
@@ -187,7 +197,7 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
 
       const series = chart.addSeries(AreaSeries, {
         ...seriesStyle(variantRef.current),
-        priceLineVisible: true,
+        priceLineVisible: !marketer,   // MARKETER: no dashed live-price guide line
         priceLineStyle: LineStyle.Dashed,
         priceLineWidth: 1,
         priceLineColor: text,
@@ -198,7 +208,7 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
 
       const markersApi = createSeriesMarkers(series, []);
       markersApiRef.current = markersApi as unknown as { setMarkers: (m: unknown[]) => void };
-      markersApi.setMarkers(buildLcMarkers(markersPropRef.current) as never);
+      markersApi.setMarkers(buildLcMarkers(markersPropRef.current, marketer) as never);
 
       // Click-to-draw a horizontal price line (pencil tool).
       chart.subscribeClick((p) => {
@@ -268,7 +278,8 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
   useEffect(() => { seriesRef.current?.applyOptions(seriesStyle(variant)); }, [variant]);
 
   useEffect(() => {
-    if (markersApiRef.current) markersApiRef.current.setMarkers(buildLcMarkers(markers) as never);
+    if (markersApiRef.current) markersApiRef.current.setMarkers(buildLcMarkers(markers, marketer) as never);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markers]);
 
   useEffect(() => {
