@@ -11,6 +11,7 @@ interface Colors {
   muted: string;
   axis: string;
   accent: string;
+  secondary: string;
 }
 
 function readColors(): Colors {
@@ -23,6 +24,10 @@ function readColors(): Colors {
     muted: g('--pp-muted', '#8B97A7'),
     axis: g('--pp-muted', '#8B97A7'),
     accent: g('--pp-accent', '#00D395'),
+    // MARKETER "below the divider" tone: an explicit per-brand token (--pp-secondary) when set, else a
+    // neutral slate-indigo. Deliberately NOT signal red, so the divider stays legible without the
+    // trading green/red colour tell. (--pp-info is avoided: some brands set it equal to the accent.)
+    secondary: g('--pp-secondary', '#8A93C2'),
   };
 }
 
@@ -129,6 +134,21 @@ export function CurveCanvas({
       return { Y, y0: PAD_Y + usableH * 0.5 };
     };
 
+    // MARKETER: a single centre DIVIDER — the reference line the wave rises above (accent) or dips
+    // below (neutral). No numeric labels, no calibration grid: a game guide line, not a price axis.
+    const drawDivider = (Y: (v: number) => number) => {
+      const y = Y(0);
+      ctx.save();
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = hexA(colors.muted, 0.45);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(PAD_LEFT, y);
+      ctx.lineTo(cssW, y);
+      ctx.stroke();
+      ctx.restore();
+    };
+
     // y-axis calibration grid (0.2 steps) + labels; the 0-axis is emphasised.
     const drawAxis = (Y: (v: number) => number) => {
       ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
@@ -152,7 +172,7 @@ export function CurveCanvas({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
       const { Y, y0 } = geom();
-      if (!marketerRef.current) drawAxis(Y);   // MARKETER: no price-axis grid/labels
+      if (marketerRef.current) drawDivider(Y); else drawAxis(Y);   // MARKETER: just the centre divider
       ctx.fillStyle = colors.muted;
       ctx.font = '12px ui-sans-serif, system-ui, sans-serif';
       ctx.textAlign = 'center';
@@ -192,10 +212,11 @@ export function CurveCanvas({
 
       const { Y, y0 } = geom();
       const X = (t: number) => PAD_LEFT + ((t - start) / w) * (cssW - PAD_LEFT);
-      // MARKETER: one neutral accent colour for the whole wave (no green-up / red-down finance split).
+      // MARKETER: two-tone around the centre divider — brand accent above, a contrasting neutral below.
+      // Keeps the "above vs below" legibility a viewer needs, without the trading green/red colour pair.
       const mk = marketerRef.current;
       const upC = mk ? colors.accent : colors.up;
-      const dnC = mk ? colors.accent : colors.down;
+      const dnC = mk ? colors.secondary : colors.down;
 
       const last2 = pts[pts.length - 1]!;
       const coords: Pt[] = pts.map((p) => [X(p.t), Y(toValue(p.rate))]);
@@ -207,8 +228,8 @@ export function CurveCanvas({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
 
-      // Calibration grid behind the curve (MARKETER: hidden — the numeric levels read as price).
-      if (!mk) drawAxis(Y);
+      // Behind the curve: the calibration grid for players, just the centre divider for marketers.
+      if (mk) drawDivider(Y); else drawAxis(Y);
 
       // Closed area between the curve and the 0-axis (filled twice, clipped per side).
       const buildArea = () => {
@@ -265,15 +286,15 @@ export function CurveCanvas({
       ctx.shadowBlur = 0;
       ctx.restore();
 
-      // 0-axis + labels on top of the fill (MARKETER: hidden).
-      if (!mk) drawAxis(Y);
+      // 0-axis + labels on top of the fill (MARKETER: just the divider, redrawn so the wave doesn't bury it).
+      if (mk) drawDivider(Y); else drawAxis(Y);
 
-      // Live dot, coloured by the current side (MARKETER: always the neutral accent).
+      // Live dot, coloured by the current side (accent above the divider, neutral below for marketers).
       const lastV = toValue(last2.rate);
       const ly = Y(lastV);
       ctx.beginPath();
       ctx.arc(cssW - 2, ly, 3, 0, Math.PI * 2);
-      ctx.fillStyle = mk ? colors.accent : lastV >= 0 ? colors.up : colors.down;
+      ctx.fillStyle = lastV >= 0 ? upC : dnC;
       ctx.fill();
     };
 
