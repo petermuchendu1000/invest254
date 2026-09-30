@@ -7,6 +7,8 @@ export interface SiteConfig {
   houseEdge: number; maxMultiplier: number; minStakeCents: number; maxStakeCents: number; minWithdrawalCents: number;
   /** Currency-native minimum withdrawal in the brand's display currency major units (docs/25 §16). */
   minWithdrawalNative?: number | null;
+  /** Currency-native minimum deposit in the brand's display currency major units, e.g. 1 => $1. */
+  minDepositNative?: number | null;
   defaultDurationS: number; tickRateMs: number; driftBias: number; volatility: number; targetWinRate: number; version: number;
 }
 export interface SiteRow {

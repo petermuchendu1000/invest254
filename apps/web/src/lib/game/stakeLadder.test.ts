@@ -22,16 +22,22 @@ test('native admin values win when the enforced cents agree', () => {
   assert.deepEqual(resolveStakeUnits({ nativeMin: 5, nativeMax: 1000, minDisplay: 4.5, maxDisplay: 1100, floor: 5 }), { min: 5, max: 1000, ladder: [5, 10, 20, 25, 50, 100] });
 });
 
-test('never below what the server enforces (stale rate / global override)', () => {
-  assert.equal(resolveStakeUnits({ nativeMin: 5, minDisplay: 7.75, floor: 5 }).min, 10);
+test('never below what the server enforces (stale rate / global override), rounded to a whole unit', () => {
+  assert.equal(resolveStakeUnits({ nativeMin: 5, minDisplay: 7.75, floor: 5 }).min, 8);  // whole unit, not 10
   assert.equal(resolveStakeUnits({ minDisplay: 250 }).min, 250);           // KES brand, no native value
   assert.equal(resolveStakeUnits({ minDisplay: 1.94, floor: 5 }).min, 5);   // USD brand on KES 250
 });
 
-test('max never above the enforced max, never below min; junk native values ignored', () => {
-  assert.equal(resolveStakeUnits({ nativeMax: 5000, minDisplay: 5, maxDisplay: 387.4 }).max, 385);
+test('max never above the enforced max, never below min; any positive native value applies', () => {
+  assert.equal(resolveStakeUnits({ nativeMax: 5000, minDisplay: 5, maxDisplay: 387.4 }).max, 387); // whole unit, not 385
   assert.equal(resolveStakeUnits({ nativeMin: 50, nativeMax: 20, minDisplay: 5 }).max, 50);
-  assert.equal(resolveStakeUnits({ nativeMin: 7, minDisplay: 5 }).min, 5);
+  assert.equal(resolveStakeUnits({ nativeMin: 7, minDisplay: 5 }).min, 7);  // non-multiple-of-5 native now honoured
+});
+
+test('sub-$5 minimums: a $1 floor yields a 1·2·4·5·10·20 ladder', () => {
+  assert.deepEqual(stakeLadder(1, null), [1, 2, 4, 5, 10, 20]);
+  assert.equal(resolveStakeUnits({ nativeMin: 1, minDisplay: 0.9, floor: 1 }).min, 1);
+  assert.deepEqual(resolveStakeUnits({ nativeMin: 1, minDisplay: 0.9, floor: 1 }).ladder, [1, 2, 4, 5, 10, 20]);
 });
 
 test('labels', () => {

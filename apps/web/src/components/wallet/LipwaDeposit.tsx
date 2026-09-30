@@ -39,7 +39,12 @@ export function LipwaDeposit() {
   });
   const { fmt, both, symbol, isForeign, toKesCents, toDisplay, limit, currency } = useDisplayMoney();
 
-  const minDepositCents = limit(USD_LIMITS.minDeposit, config?.minDepositCents ?? MIN_DEPOSIT_CENTS);
+  // A foreign brand with an operator-set native floor (min_deposit_native) enforces it directly at the
+  // live rate, matching the server; otherwise the site KES floor, USD-limit-guarded. Mirrors DepositForm.
+  const nativeMinDeposit = config?.minDepositNative ?? null;
+  const minDepositCents = (isForeign && nativeMinDeposit != null && nativeMinDeposit > 0)
+    ? toKesCents(nativeMinDeposit)
+    : limit(USD_LIMITS.minDeposit, config?.minDepositCents ?? MIN_DEPOSIT_CENTS);
   const maxDepositCents = config?.maxDepositCents ?? null;
   const minEntry = isForeign ? toDisplay(minDepositCents) : centsToKes(minDepositCents);
   const chipBase = Math.max(1, isForeign ? Math.round(minEntry * 100) / 100 : Math.ceil(minEntry));

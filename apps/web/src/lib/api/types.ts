@@ -105,6 +105,9 @@ export interface GameConfigDto {
   maxStakeNative?: number | null;
   /** Smallest deposit accepted — effective value (global economy over the static default). */
   minDepositCents: Cents;
+  /** Currency-native minimum deposit in the brand's display currency major units, e.g. 1 => $1.
+   *  null => use minDepositCents. Foreign brands enforce this exactly (mirrors minWithdrawalNative). */
+  minDepositNative?: number | null;
   /** Largest single deposit accepted, or null for no cap (global economy). */
   maxDepositCents: Cents | null;
   maxMultiplier: number;

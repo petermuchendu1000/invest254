@@ -18,7 +18,7 @@ import { ThemeGallery } from '@/components/platform/ThemeGallery';
 import { useGameConfig } from '@/lib/admin/hooks';
 import { formatNumber } from '@/lib/format';
 import { formatKes } from '@invest254/shared/money';
-import { isMultipleOf5, pillLabel, stakeLadder } from '@/lib/game/stakeLadder';
+import { pillLabel, stakeLadder } from '@/lib/game/stakeLadder';
 import { PageTabs, useTabParam } from '@/components/admin/Tabs';
 
 /** Expandable section (accordion) — remembers its own open state; the spine of Client Detail. */
@@ -153,8 +153,9 @@ const toField = (c: SiteConfig, f: (typeof EFIELDS)[number]): string => {
 };
 
 /**
- * STAKE-1 (BUGLOG #87): min / max stake in the brand's own currency, multiples of 5. The player's
- * pills are min ×1 2 4 5 10 20 up to max (previewed live). The API writes the engine's KES-cents limits.
+ * STAKE-1 (BUGLOG #87): min / max stake in the brand's own currency, whole units ≥ 1 (the old
+ * multiples-of-5, ≥5 rule was relaxed so a brand can offer e.g. a $1 minimum). The player's pills are
+ * min ×1 2 4 5 10 20 up to max (previewed live). The API writes the engine's KES-cents limits.
  */
 function StakeLimitsCard({ siteId, currency }: { siteId: string; currency: string }) {
   const { data } = useStakeLimitsAdmin(siteId);
@@ -173,9 +174,10 @@ function StakeLimitsCard({ siteId, currency }: { siteId: string; currency: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, touched]);
   const a = Number(min), b = Number(max);
+  const whole = (v: number) => Number.isFinite(v) && Number.isInteger(v);
   const err = min === '' || max === '' ? null
-    : !isMultipleOf5(a) || a < 5 ? 'Min: multiple of 5'
-    : !isMultipleOf5(b) || b < a ? 'Max: multiple of 5, ≥ min'
+    : !whole(a) || a < 1 ? 'Min: whole number ≥ 1'
+    : !whole(b) || b < a ? 'Max: whole number ≥ min'
     : null;
   const dirty = data ? String(data.min ?? '') !== min || String(data.max ?? '') !== max : false;
   const pills = !err && min !== '' && max !== '' ? stakeLadder(a, b) : [];
@@ -187,8 +189,8 @@ function StakeLimitsCard({ siteId, currency }: { siteId: string; currency: strin
         <span className="text-xs text-muted">{currency}</span>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Input type="number" inputMode="numeric" step="5" min="5" label={`Min (${currency})`} value={min} disabled={!data} onChange={(e) => { setTouched(true); setMin(e.target.value); }} />
-        <Input type="number" inputMode="numeric" step="5" min="5" label={`Max (${currency})`} value={max} disabled={!data} onChange={(e) => { setTouched(true); setMax(e.target.value); }} />
+        <Input type="number" inputMode="numeric" step="1" min="1" label={`Min (${currency})`} value={min} disabled={!data} onChange={(e) => { setTouched(true); setMin(e.target.value); }} />
+        <Input type="number" inputMode="numeric" step="1" min="1" label={`Max (${currency})`} value={max} disabled={!data} onChange={(e) => { setTouched(true); setMax(e.target.value); }} />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label="Player stake pills">
         {pills.map((p) => <span key={p} className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-semibold tabular-nums text-fg">{sym}{pillLabel(p)}</span>)}
@@ -227,6 +229,18 @@ function EconomySection({ site }: { site: SiteWithConfig }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [c.minWithdrawalNative]);
 
+  // Min DEPOSIT is likewise currency-native: entered in the brand's own currency (e.g. 1 => $1). The
+  // API converts it to KES cents at the live rate and enforces it server-side; it may be BELOW the
+  // platform default (it IS the operator's intended minimum). Mirrors the min-withdrawal field above.
+  const [minDep, setMinDep] = useState<string>(c.minDepositNative != null ? String(c.minDepositNative) : '');
+  const minDepPrev = useRef(minDep);
+  useEffect(() => {
+    const next = c.minDepositNative != null ? String(c.minDepositNative) : '';
+    setMinDep((cur) => (cur === minDepPrev.current ? next : cur));   // keep an unsaved edit
+    minDepPrev.current = next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.minDepositNative]);
+
   const patch = useMemo(() => {
     const out: Record<string, number> = {};
     const snake: Record<EK, string> = {
@@ -241,8 +255,10 @@ function EconomySection({ site }: { site: SiteWithConfig }) {
     }
     const mw = Number(minWd);
     if (minWd !== '' && Number.isFinite(mw) && mw > 0 && mw !== (c.minWithdrawalNative ?? null)) out['min_withdrawal_native'] = mw;
+    const md = Number(minDep);
+    if (minDep !== '' && Number.isFinite(md) && md > 0 && md !== (c.minDepositNative ?? null)) out['min_deposit_native'] = md;
     return out;
-  }, [form, c, minWd]);
+  }, [form, c, minWd, minDep]);
   const dirty = Object.keys(patch).length;
 
   const merged: SiteConfig = useMemo(() => {
@@ -286,6 +302,10 @@ function EconomySection({ site }: { site: SiteWithConfig }) {
           label={`Min withdrawal (${currency})`}
           hint={`Reject requests below this, in ${currency}. Enforced at the live FX rate (e.g. 100 = $100 on a USD brand).`}
           value={minWd} onChange={(e) => setMinWd(e.target.value)} />
+        <Input key="minDepositNative" type="number" inputMode="decimal" step="0.01"
+          label={`Min deposit (${currency})`}
+          hint={`Reject deposits below this, in ${currency}. Enforced at the live FX rate (e.g. 1 = $1 on a USD brand).`}
+          value={minDep} onChange={(e) => setMinDep(e.target.value)} />
       </div>
       {dirty > 0 ? (
         <div className={blocked ? 'rounded-brand border border-down/40 bg-down/10 p-3 text-xs text-down' : 'rounded-brand border border-border bg-surface-2 p-3 text-xs text-muted'} role={blocked ? 'alert' : undefined}>

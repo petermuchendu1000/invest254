@@ -47,6 +47,15 @@ export interface PaymentServiceOptions {
    */
   minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   /**
+   * Site-aware live minimum-DEPOSIT source (multi-tenant). The mirror of `minWithdrawalForSite`:
+   * consulted per-request with the depositing brand's `siteId` so the server enforces the SAME floor
+   * the player's client validated against (each brand's `site_game_config.min_deposit_native`, e.g.
+   * $1 on a USD brand). A brand may set this BELOW the platform default (it IS the operator's intended
+   * minimum), so a valid positive integer is used as-is. A non-positive / non-integer result (or a
+   * throw) defers to the static constant. The platform GLOBAL enforce still wins over it.
+   */
+  minDepositForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
+  /**
    * Platform-wide GLOBAL economy overrides (migration 0099 — the platform_superadmin global console).
    * When the platform owner ENFORCES a value it OVERRIDES every brand (decision: global wins), so these
    * are consulted with the HIGHEST precedence:
@@ -114,6 +123,7 @@ export class PaymentService {
   private readonly minWithdrawal: Cents;
   private readonly minWithdrawalProvider?: () => Cents;
   private readonly minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
+  private readonly minDepositForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   private readonly minDepositForGlobal?: () => Cents | Promise<Cents>;
   private readonly maxDepositForGlobal?: () => Cents | null | Promise<Cents | null>;
   private readonly minWithdrawalForGlobal?: () => Cents | Promise<Cents>;
@@ -132,6 +142,7 @@ export class PaymentService {
     this.minWithdrawal = opts.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
     if (opts.minWithdrawalProvider) this.minWithdrawalProvider = opts.minWithdrawalProvider;
     if (opts.minWithdrawalForSite) this.minWithdrawalForSite = opts.minWithdrawalForSite;
+    if (opts.minDepositForSite) this.minDepositForSite = opts.minDepositForSite;
     if (opts.minDepositForGlobal) this.minDepositForGlobal = opts.minDepositForGlobal;
     if (opts.maxDepositForGlobal) this.maxDepositForGlobal = opts.maxDepositForGlobal;
     if (opts.minWithdrawalForGlobal) this.minWithdrawalForGlobal = opts.minWithdrawalForGlobal;
@@ -216,7 +227,7 @@ export class PaymentService {
 
   async initiateDeposit(userId: string, amountCents: number, phoneRaw: string, siteId?: string): Promise<{ txId: string; checkoutRequestId: string }> {
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
-    const minDep = await this.currentMinDeposit();
+    const minDep = await this.currentMinDeposit(siteId);
     if (amountCents < minDep) throw new Error("BELOW_MIN");
     const maxDep = await this.currentMaxDeposit();
     if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
@@ -249,7 +260,7 @@ export class PaymentService {
     const owner = await this.ownerOf(siteId);
     if (owner.scope === "global" && !this.megapay) throw new Error("MEGAPAY_NOT_CONFIGURED");
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
-    const minDep = await this.currentMinDeposit();
+    const minDep = await this.currentMinDeposit(siteId);
     if (amountCents < minDep) throw new Error("BELOW_MIN");
     const maxDep = await this.currentMaxDeposit();
     if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
@@ -324,7 +335,7 @@ export class PaymentService {
     const owner = await this.ownerOf(siteId);
     if (owner.scope === "global" && !this.payhero) throw new Error("PAYHERO_NOT_CONFIGURED");
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
-    const minDep = await this.currentMinDeposit();
+    const minDep = await this.currentMinDeposit(siteId);
     if (amountCents < minDep) throw new Error("BELOW_MIN");
     const maxDep = await this.currentMaxDeposit();
     if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
@@ -352,7 +363,7 @@ export class PaymentService {
     const owner = await this.ownerOf(siteId);
     if (owner.scope === "global" && !this.payhero) throw new Error("PAYHERO_NOT_CONFIGURED");
     if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
-    const minDep = await this.currentMinDeposit();
+    const minDep = await this.currentMinDeposit(siteId);
     if (amountCents < minDep) throw new Error("BELOW_MIN");
     const maxDep = await this.currentMaxDeposit();
     if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
@@ -739,16 +750,28 @@ export class PaymentService {
   }
 
   /**
-   * The minimum deposit in force for THIS request. The platform GLOBAL enforced value (0099) wins over
-   * the static default; a non-positive/non-integer/throwing global result defers to the static default,
-   * so a config glitch can never open the floor below the safe minimum.
+   * The minimum deposit in force for THIS request. Resolution order:
+   *   0. `minDepositForGlobal` — the platform GLOBAL enforced value (0099) wins over everything.
+   *   1. `minDepositForSite(siteId)` — the depositing brand's own `min_deposit_native` converted to
+   *      KES cents at the live rate, i.e. exactly the floor the player's client validated against.
+   *      Unlike the withdrawal chain this may legitimately be BELOW the static default (it IS the
+   *      operator's intended minimum, e.g. $1), so a valid positive integer is used as-is.
+   *   2. the static default constant.
+   * Any source that is absent, throws, or yields a non-positive/non-integer value is skipped, so a
+   * transient bad config can never open the floor below `this.minDeposit`.
    */
-  private async currentMinDeposit(): Promise<Cents> {
+  private async currentMinDeposit(siteId?: string): Promise<Cents> {
     if (this.minDepositForGlobal) {
       try {
         const g = await this.minDepositForGlobal();
         if (Number.isInteger(g) && (g as number) > 0) return g as Cents;
-      } catch { /* fail-open to the static default */ }
+      } catch { /* fail-open to the per-site / static chain */ }
+    }
+    if (this.minDepositForSite) {
+      try {
+        const perSite = await this.minDepositForSite(siteId);
+        if (Number.isInteger(perSite) && (perSite as number) > 0) return perSite as Cents;
+      } catch { /* fall through to the static default */ }
     }
     return this.minDeposit;
   }
