@@ -23,4 +23,15 @@ export const MK = {
   /** Single-letter balance badges (were "R" / "D"). */
   realBadge: 'C',
   practiceBadge: 'P',
+  /** Nav / chrome (Phase 3) — were "TRADE" / "Trader's Hub" / "How to Trade" / "Trade types". */
+  navPlay: 'Play',
+  navHome: 'Home',
+  howToPlay: 'How to Play',
+  gameModes: 'Game modes',
+  /** A binary-options contract family label (was "Options"). */
+  optionsGroup: 'Quick',
 } as const;
+
+/** MARKETER: a neutral play/controller glyph in place of the up-trending "trade" chart icon.
+ *  Returns SVG path data for a 24×24 viewBox (a rounded play triangle). */
+export const MK_PLAY_PATH = 'M8 5v14l11-7z';
