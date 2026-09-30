@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { DIcon } from '@/components/game/digits/icons';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
 
 type IconProps = { className?: string };
 
@@ -15,6 +16,14 @@ function TradeIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden>
       <path d="M3 12l4-4 4 4 6-6" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M17 6h4v4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+/** MARKETER: a neutral play glyph in place of the up-trending "trade" chart icon. */
+function PlayIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M8 5v14l11-7z" />
     </svg>
   );
 }
@@ -50,15 +59,23 @@ const items = [
   { href: '/history', label: 'HISTORY', Icon: HistoryIcon },
   { href: '/account', label: 'PROFILE', Icon: ProfileIcon },
 ] as const;
+// MARKETER: "TRADE" + up-trend chart icon → "PLAY" + play glyph; "DEPOSIT" → neutral "WALLET".
+const marketerItems = [
+  { href: '/', label: 'PLAY', Icon: PlayIcon },
+  { href: '/wallet', label: 'WALLET', Icon: DepositIcon },
+  { href: '/history', label: 'HISTORY', Icon: HistoryIcon },
+  { href: '/account', label: 'PROFILE', Icon: ProfileIcon },
+] as const;
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { isMarketer } = useIsMarketer();
   const setChat = useLiveChat((s) => s.setOpen);
   const unread = useLiveChatUnread();
   return (
     <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface md:hidden">
       <ul className="mx-auto flex w-full max-w-app items-stretch px-2 py-1.5">
-        {items.map(({ href, label, Icon }) => {
+        {(isMarketer ? marketerItems : items).map(({ href, label, Icon }) => {
           const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
           return (
             <li key={href} className="flex-1">
