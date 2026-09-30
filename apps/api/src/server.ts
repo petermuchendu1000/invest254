@@ -290,17 +290,16 @@ async function buildDeps(): Promise<ApiDeps> {
     return fallback;
   };
 
-  // Site-aware minimum DEPOSIT (multi-tenant). The mirror of `siteMinWithdrawalCents`: GET /game/config
-  // serves each brand its own `min_deposit_native` (via gameConfigForSite), so the browser validates
-  // against the brand's floor. This resolver reads that SAME per-brand row — keyed by the depositing
-  // request's `siteId` — and converts the native value to KES cents at the live FX rate, so the server
-  // enforces the identical floor and never rejects a client-valid amount as BELOW_MIN. Unlike the
-  // withdrawal floor this may be BELOW the platform default (it IS the operator's intended minimum,
-  // e.g. $1). Falls back to the static `MIN_DEPOSIT_CENTS` when the site has no native value or FX is
-  // unavailable, so a missing/bad per-brand value can never open the floor below the safe default.
+  // EXPLICIT per-brand native minimum DEPOSIT (multi-tenant). GET /game/config serves each brand its own
+  // `min_deposit_native` (via gameConfigForSite), so the browser validates against the brand's floor.
+  // This resolver reads that SAME per-brand row — keyed by the depositing request's `siteId` — and
+  // converts the native value to KES cents at the live FX rate. It returns a 0 SENTINEL when the brand
+  // has set no native value (or FX is unavailable), so the PaymentService chain falls through to the
+  // platform GLOBAL enforce / static default for those brands. When a brand HAS set a native floor it is
+  // the operator's stated intent and overrides the global enforce (may sit below the platform default,
+  // e.g. $1) — the server then enforces exactly the floor the client validated against.
   const siteMinDepositCents = async (siteId: string | undefined): Promise<Cents> => {
-    const fallback = MIN_DEPOSIT_CENTS;
-    if (!siteId) return fallback;
+    if (!siteId) return 0 as Cents;
     try {
       const r = await q.query(
         `select c.min_deposit_native, coalesce(s.currency, 'KES') as currency
@@ -310,18 +309,56 @@ async function buildDeps(): Promise<ApiDeps> {
       );
       if (r.rows.length) {
         const row = r.rows[0] as Record<string, unknown>;
-        const nativeMajor = row.min_deposit_native == null ? null : Number(row.min_deposit_native);
         const currency = String(row.currency ?? "KES");
-        // effectiveMinWithdrawalCents is a pure native-major → KES-cents resolver (despite the name):
-        // it converts at the live rate, or returns the legacy fallback when the native value is unset.
-        const fxRateFromKes = currency === "KES" ? 1 : await kesToCurrencyRate(currency);
-        const eff = effectiveMinWithdrawalCents({ nativeMajor, legacyKesCents: fallback, currency, fxRateFromKes });
-        if (Number.isInteger(eff) && eff > 0) return eff as Cents;
+        // FOREIGN brands only: a KES brand is already denominated in KES, so the platform GLOBAL KES
+        // floor is directly meaningful to it and stays authoritative — its native value (a KES figure
+        // duplicating min_deposit) must NOT silently override the global. The override exists for
+        // display-currency brands the global KES floor cannot express (e.g. a USD brand's $1).
+        if (currency !== "KES" && row.min_deposit_native != null) {
+          const nativeMajor = Number(row.min_deposit_native);
+          // effectiveMinWithdrawalCents is a pure native-major → KES-cents resolver (despite the name):
+          // it converts at the live rate, or returns the fallback when FX is unavailable. Passing 0 as
+          // the fallback means "no usable floor" so the caller drops to the global/static chain.
+          const fxRateFromKes = await kesToCurrencyRate(currency);
+          const eff = effectiveMinWithdrawalCents({ nativeMajor, legacyKesCents: 0 as Cents, currency, fxRateFromKes });
+          if (Number.isInteger(eff) && eff > 0) return eff as Cents;
+        }
       }
     } catch (err) {
       console.error(`[api] site min_deposit lookup failed for ${siteId}:`, (err as Error).message);
     }
-    return fallback;
+    return 0 as Cents;   // no explicit native floor → defer to the global enforce / static default
+  };
+
+  // EXPLICIT per-brand native minimum WITHDRAWAL (multi-tenant). Mirror of siteMinDepositCents: converts
+  // `min_withdrawal_native` to KES cents at the live rate, or returns a 0 SENTINEL when the brand has set
+  // none. When set it is the operator's intent and overrides the platform GLOBAL withdrawal enforce; the
+  // legacy per-brand KES-cents floor (siteMinWithdrawalCents) keeps its lower-priority slot for the rest.
+  const siteMinWithdrawalNativeCents = async (siteId: string | undefined): Promise<Cents> => {
+    if (!siteId) return 0 as Cents;
+    try {
+      const r = await q.query(
+        `select c.min_withdrawal_native, coalesce(s.currency, 'KES') as currency
+           from site_game_config c join sites s on s.id = c.site_id
+          where c.site_id = $1::uuid limit 1`,
+        [siteId],
+      );
+      if (r.rows.length) {
+        const row = r.rows[0] as Record<string, unknown>;
+        const currency = String(row.currency ?? "KES");
+        // FOREIGN brands only (see siteMinDepositCents): a KES brand keeps the global KES withdrawal
+        // floor; only a display-currency brand's native value (e.g. a USD brand's $5) overrides it.
+        if (currency !== "KES" && row.min_withdrawal_native != null) {
+          const nativeMajor = Number(row.min_withdrawal_native);
+          const fxRateFromKes = await kesToCurrencyRate(currency);
+          const eff = effectiveMinWithdrawalCents({ nativeMajor, legacyKesCents: 0 as Cents, currency, fxRateFromKes });
+          if (Number.isInteger(eff) && eff > 0) return eff as Cents;
+        }
+      }
+    } catch (err) {
+      console.error(`[api] site min_withdrawal_native lookup failed for ${siteId}:`, (err as Error).message);
+    }
+    return 0 as Cents;   // no explicit native floor → defer to the global enforce / legacy / static
   };
 
   // Per-brand withdrawal kill switch (0067). Read live from `sites.withdrawals_enabled` so an
@@ -602,8 +639,12 @@ async function buildDeps(): Promise<ApiDeps> {
     },
     // Per-brand withdrawal floor: enforce the withdrawing site's own min so client and server agree.
     minWithdrawalForSite: (siteId) => siteMinWithdrawalCents(siteId),
-    // Per-brand deposit floor: enforce the depositing site's own native min (e.g. $1) so client and
-    // server agree — may be below the platform default (it IS the operator's intended minimum).
+    // EXPLICIT per-brand native withdrawal floor on a FOREIGN brand (e.g. a USD brand's $5): overrides
+    // the platform GLOBAL enforce so the operator's per-brand intent wins. KES brands and brands with no
+    // native value return 0 here and keep the global floor (see siteMinWithdrawalNativeCents).
+    minWithdrawalNativeForSite: (siteId) => siteMinWithdrawalNativeCents(siteId),
+    // EXPLICIT per-brand native deposit floor on a FOREIGN brand (e.g. a USD brand's $1): overrides the
+    // platform GLOBAL enforce and may sit below the platform default. KES brands / no native → 0 → global.
     minDepositForSite: (siteId) => siteMinDepositCents(siteId),
     // Per-brand withdrawal kill switch: refuse ALL withdrawal initiations for a site when disabled.
     withdrawalsEnabledForSite: (siteId) => siteWithdrawalsEnabled(siteId),
