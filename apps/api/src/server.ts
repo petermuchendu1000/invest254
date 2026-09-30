@@ -20,7 +20,7 @@ import { makePgStakeNativeStore } from "./stakelimits.js";
 import { makePgLiveChatStore } from "./livechat.pg.js";
 import { makePgKycStore } from "./kyc.pg.js";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
-import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, type VersionedGameConfig, type Cents } from "@invest254/shared";
+import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, MIN_DEPOSIT_CENTS, type VersionedGameConfig, type Cents } from "@invest254/shared";
 import { BrandOriginAllowlist } from "./cors.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgReferralRepo } from "./referral.pg.js";
@@ -286,6 +286,40 @@ async function buildDeps(): Promise<ApiDeps> {
       }
     } catch (err) {
       console.error(`[api] site min_withdrawal lookup failed for ${siteId}:`, (err as Error).message);
+    }
+    return fallback;
+  };
+
+  // Site-aware minimum DEPOSIT (multi-tenant). The mirror of `siteMinWithdrawalCents`: GET /game/config
+  // serves each brand its own `min_deposit_native` (via gameConfigForSite), so the browser validates
+  // against the brand's floor. This resolver reads that SAME per-brand row — keyed by the depositing
+  // request's `siteId` — and converts the native value to KES cents at the live FX rate, so the server
+  // enforces the identical floor and never rejects a client-valid amount as BELOW_MIN. Unlike the
+  // withdrawal floor this may be BELOW the platform default (it IS the operator's intended minimum,
+  // e.g. $1). Falls back to the static `MIN_DEPOSIT_CENTS` when the site has no native value or FX is
+  // unavailable, so a missing/bad per-brand value can never open the floor below the safe default.
+  const siteMinDepositCents = async (siteId: string | undefined): Promise<Cents> => {
+    const fallback = MIN_DEPOSIT_CENTS;
+    if (!siteId) return fallback;
+    try {
+      const r = await q.query(
+        `select c.min_deposit_native, coalesce(s.currency, 'KES') as currency
+           from site_game_config c join sites s on s.id = c.site_id
+          where c.site_id = $1::uuid limit 1`,
+        [siteId],
+      );
+      if (r.rows.length) {
+        const row = r.rows[0] as Record<string, unknown>;
+        const nativeMajor = row.min_deposit_native == null ? null : Number(row.min_deposit_native);
+        const currency = String(row.currency ?? "KES");
+        // effectiveMinWithdrawalCents is a pure native-major → KES-cents resolver (despite the name):
+        // it converts at the live rate, or returns the legacy fallback when the native value is unset.
+        const fxRateFromKes = currency === "KES" ? 1 : await kesToCurrencyRate(currency);
+        const eff = effectiveMinWithdrawalCents({ nativeMajor, legacyKesCents: fallback, currency, fxRateFromKes });
+        if (Number.isInteger(eff) && eff > 0) return eff as Cents;
+      }
+    } catch (err) {
+      console.error(`[api] site min_deposit lookup failed for ${siteId}:`, (err as Error).message);
     }
     return fallback;
   };
@@ -568,6 +602,9 @@ async function buildDeps(): Promise<ApiDeps> {
     },
     // Per-brand withdrawal floor: enforce the withdrawing site's own min so client and server agree.
     minWithdrawalForSite: (siteId) => siteMinWithdrawalCents(siteId),
+    // Per-brand deposit floor: enforce the depositing site's own native min (e.g. $1) so client and
+    // server agree — may be below the platform default (it IS the operator's intended minimum).
+    minDepositForSite: (siteId) => siteMinDepositCents(siteId),
     // Per-brand withdrawal kill switch: refuse ALL withdrawal initiations for a site when disabled.
     withdrawalsEnabledForSite: (siteId) => siteWithdrawalsEnabled(siteId),
     // Process-wide fallback (single-tenant / default brand, and if the per-site lookup yields nothing):
@@ -866,7 +903,7 @@ async function buildDeps(): Promise<ApiDeps> {
       const h = normalizeHost(ref);
       if (!h) return null;
       const r = await q.query(
-        `select c.house_edge, c.max_multiplier, c.min_stake, c.max_stake, c.min_withdrawal, c.min_withdrawal_native,
+        `select c.house_edge, c.max_multiplier, c.min_stake, c.max_stake, c.min_withdrawal, c.min_withdrawal_native, c.min_deposit_native,
                 c.default_duration_s, c.tick_rate_ms, c.drift_bias, c.volatility, c.target_win_rate, c.version,
                 n.min_native as min_stake_native, n.max_native as max_stake_native
            from site_game_config c join sites s on s.id = c.site_id

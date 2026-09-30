@@ -29,6 +29,12 @@ export interface GameConfig {
    * a USD brand's line is $200-in-KES, not the legacy KES value. Absent ⇒ use `minWithdrawalCents`.
    */
   minWithdrawalEffectiveCents?: number;
+  /**
+   * Currency-native minimum DEPOSIT in the brand's DISPLAY currency major units, e.g. 1 => $1 on a
+   * USD brand. Optional: when unset the API/UI use the global KES-cents floor (`MIN_DEPOSIT_CENTS`).
+   * Mirrors `minWithdrawalNative`; enforced by converting to KES cents at the live FX rate.
+   */
+  minDepositNative?: number | null;
   defaultDurationS: number; // 10
   tickRateMs: number;       // 150
   driftBias: number;        // visual green bias (does NOT affect fairness; see settlement)

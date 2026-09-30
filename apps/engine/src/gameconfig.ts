@@ -32,9 +32,10 @@ import type { Querier } from "./wallet.js";
 
 const CONFIG_COLUMNS =
   "house_edge, max_multiplier, min_stake, max_stake, min_withdrawal, default_duration_s, tick_rate_ms, drift_bias, volatility, target_win_rate, version";
-// The per-brand current row also carries the currency-native withdrawal minimum (migration 0120);
-// the legacy game_config singleton + *_versions tables do not, so only the site current query adds it.
-const SITE_CONFIG_COLUMNS = CONFIG_COLUMNS + ", min_withdrawal_native";
+// The per-brand current row also carries the currency-native withdrawal/deposit minimums (migrations
+// 0120 / 0178); the legacy game_config singleton + *_versions tables do not, so only the site current
+// query adds them.
+const SITE_CONFIG_COLUMNS = CONFIG_COLUMNS + ", min_withdrawal_native, min_deposit_native";
 
 export const CONFIG_CHANNEL = "game_config_changed";
 
@@ -73,6 +74,7 @@ export function mapConfigRow(x: Record<string, unknown>): VersionedGameConfig {
     maxStakeCents: Math.round(toNum(x.max_stake)),
     minWithdrawalCents: Math.round(toNum(x.min_withdrawal)),
     minWithdrawalNative: x.min_withdrawal_native == null ? null : toNum(x.min_withdrawal_native),
+    minDepositNative: x.min_deposit_native == null ? null : toNum(x.min_deposit_native),
     defaultDurationS: Math.round(toNum(x.default_duration_s)),
     tickRateMs: Math.round(toNum(x.tick_rate_ms)),
     driftBias: toNum(x.drift_bias),

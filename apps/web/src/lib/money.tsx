@@ -26,11 +26,12 @@ function currencySymbol(currency: string, locale: string): string {
 }
 
 /**
- * USD-native limits for foreign (display-currency) brands. These are the SOURCE values — we convert
- * USD → KES for enforcement, never the other way round — so a USD brand's minimums read as round
- * dollars ($15, not $15.46). See `limit()` for how the site's KES floor is honoured.
+ * Absolute SAFETY floors for foreign (display-currency) brands — the lowest a minimum may ever be,
+ * NOT the operator's intended minimum. Each per-brand minimum is operator-driven (stake via
+ * site_stake_native, deposit via min_deposit_native, withdrawal via min_withdrawal_native) and used
+ * directly; these only guard the fallback path when a brand has set no native value. See `limit()`.
  */
-export const USD_LIMITS = { minStake: 5, minDeposit: 5, minWithdrawal: 15 } as const;
+export const USD_LIMITS = { minStake: 1, minDeposit: 1, minWithdrawal: 5 } as const;
 
 export function useDisplayMoney() {
   const brand = useBrand();
@@ -68,15 +69,15 @@ export function useDisplayMoney() {
       toKesCents: (amount: number) => displayToKesCents(amount, foreign ? fxRateFromKes : 1),
       /**
        * Effective minimum in KES cents for a limit that is USD-native on foreign brands.
-       * Foreign: start from the round USD floor, never go below the site's KES floor, and if the KES
-       * floor wins, round UP to the next whole dollar so the displayed minimum is still a round
-       * figure AND always accepted by the server (e.g. site min KES 2,000 → "$16 (KES 2,070)").
-       * KES brands: the site's KES floor unchanged.
+       * Foreign: the larger of (a) the round USD floor used AS-IS, and (b) the site's KES floor rounded
+       * UP to the next whole dollar. The USD floor is NEVER round-tripped through FX, so a clean $5 floor
+       * stays $5 (the old code ceiled $5.000029 → $6). The KES-floor value is snapped to whole cents
+       * before rounding up so FX residue can't push it a dollar higher either. KES brands: unchanged.
        */
       limit: (usdFloor: number, kesFloorCents: Cents): Cents => {
         if (!foreign) return kesFloorCents;
-        const eff = Math.max(displayToKesCents(usdFloor, fxRateFromKes), kesFloorCents);
-        const wholeUsd = Math.ceil(kesCentsToDisplay(eff, fxRateFromKes) - 1e-6);
+        const kesFloorUsd = Math.ceil(Math.round(kesCentsToDisplay(kesFloorCents, fxRateFromKes) * 100) / 100 - 1e-9);
+        const wholeUsd = Math.max(usdFloor, kesFloorUsd);
         return displayToKesCents(wholeUsd, fxRateFromKes);
       },
     } as const;

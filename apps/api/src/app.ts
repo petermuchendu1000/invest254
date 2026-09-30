@@ -351,6 +351,9 @@ function gameConfigDto(cfg: GameConfig | VersionedGameConfig, economy: PlatformE
     minStakeNative: (cfg as { minStakeNative?: number | null }).minStakeNative ?? null,
     maxStakeNative: (cfg as { maxStakeNative?: number | null }).maxStakeNative ?? null,
     minDepositCents: effectiveMinDeposit(MIN_DEPOSIT_CENTS, p),
+    // Currency-native minimum deposit: the brand's DISPLAY-currency floor (e.g. 1 => $1). The player
+    // app enforces this directly for foreign brands; null => use minDepositCents. Mirrors withdrawal.
+    minDepositNative: (cfg as GameConfig).minDepositNative ?? null,
     maxDepositCents: effectiveMaxDeposit(null, p),
     maxMultiplier: eff.maxMultiplier,
     defaultDurationS: eff.defaultDurationS,

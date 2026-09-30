@@ -32,6 +32,8 @@ export interface SiteConfigRow {
   houseEdge: number; maxMultiplier: number; minStakeCents: number; maxStakeCents: number; minWithdrawalCents: number;
   /** Currency-native minimum withdrawal in the brand's display currency major units (docs/25 §16). */
   minWithdrawalNative?: number | null;
+  /** Currency-native minimum deposit in the brand's display currency major units, e.g. 1 => $1. */
+  minDepositNative?: number | null;
   defaultDurationS: number; tickRateMs: number; driftBias: number; volatility: number; targetWinRate: number; version: number;
 }
 export interface SiteWithConfig extends SiteRow { config: SiteConfigRow }
@@ -273,6 +275,7 @@ function mapConfigRow(x: Record<string, unknown>): SiteConfigRow {
     houseEdge: num(x.house_edge), maxMultiplier: num(x.max_multiplier), minStakeCents: num(x.min_stake), maxStakeCents: num(x.max_stake),
     minWithdrawalCents: num(x.min_withdrawal),
     minWithdrawalNative: x.min_withdrawal_native == null ? null : num(x.min_withdrawal_native),
+    minDepositNative: x.min_deposit_native == null ? null : num(x.min_deposit_native),
     defaultDurationS: num(x.default_duration_s), tickRateMs: num(x.tick_rate_ms),
     driftBias: num(x.drift_bias), volatility: num(x.volatility), targetWinRate: num(x.target_win_rate), version: num(x.version),
   };
@@ -299,7 +302,7 @@ export class PgPlatformRepository implements PlatformRepository {
 
   async listSites(platformScope?: string | null): Promise<SiteWithConfig[]> {
     const r = await this.q.query(
-      `select s.*, c.house_edge, c.max_multiplier, c.min_stake, c.max_stake, c.min_withdrawal, c.min_withdrawal_native,
+      `select s.*, c.house_edge, c.max_multiplier, c.min_stake, c.max_stake, c.min_withdrawal, c.min_withdrawal_native, c.min_deposit_native,
               c.default_duration_s, c.tick_rate_ms, c.drift_bias, c.volatility, c.target_win_rate, c.version
          from sites s left join site_game_config c on c.site_id = s.id
         where ($1::uuid is null or s.platform_id = $1)
@@ -784,7 +787,8 @@ export class InMemoryPlatformRepository implements PlatformRepository {
     if (!s) throw new Error("SITE_NOT_FOUND");
     const map: Record<string, keyof SiteConfigRow> = {
       house_edge: "houseEdge", max_multiplier: "maxMultiplier", min_stake: "minStakeCents", max_stake: "maxStakeCents",
-      min_withdrawal: "minWithdrawalCents", default_duration_s: "defaultDurationS", tick_rate_ms: "tickRateMs",
+      min_withdrawal: "minWithdrawalCents", min_withdrawal_native: "minWithdrawalNative", min_deposit_native: "minDepositNative",
+      default_duration_s: "defaultDurationS", tick_rate_ms: "tickRateMs",
       drift_bias: "driftBias", volatility: "volatility", target_win_rate: "targetWinRate",
     };
     for (const [k, prop] of Object.entries(map)) if (k in patch) (s.config[prop] as number) = Number(patch[k]);
