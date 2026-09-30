@@ -5,6 +5,13 @@ import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { type Instrument } from '@/lib/game/instruments';
 import { MarketsPanel, IndexBadge } from '@/components/game/digits/MarketsPicker';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
+
+/** MARKETER: a neutral game name for a volatility index — "Volatility 25 (1s) Index" → "Zone 25". */
+function gameName(inst: Instrument): string {
+  const n = inst.label.match(/\d+/)?.[0];
+  return n ? `Zone ${n}` : 'Zone';
+}
 
 function BarsGlyph({ className }: { className?: string }) {
   return (
@@ -46,6 +53,7 @@ export function VolatilitySelector({
   /** Wide toolbar trigger (icon · bold full label · live price+change · edit affordance). */
   wide?: boolean;
 }) {
+  const { isMarketer } = useIsMarketer();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -83,7 +91,7 @@ export function VolatilitySelector({
           onClick={toggle}
           aria-haspopup="dialog"
           aria-expanded={open}
-          title={instrument.label}
+          title={isMarketer ? gameName(instrument) : instrument.label}
           className={cn(
             'flex h-9 min-w-0 max-w-full items-center gap-2 rounded-lg border bg-surface-2 pl-1.5 pr-2 text-left transition',
             open ? 'border-accent' : 'border-border hover:border-accent/60',
@@ -92,14 +100,17 @@ export function VolatilitySelector({
           <IndexBadge inst={instrument} size="sm" />
           <span className="flex min-w-0 flex-col leading-tight">
             <span className="truncate text-[12.5px] font-bold text-fg">
-              <IndexLabel inst={instrument} />
+              {isMarketer ? gameName(instrument) : <IndexLabel inst={instrument} />}
             </span>
-            <span className="truncate text-[10px] font-medium tabular-nums text-muted">
-              {price != null ? price.toFixed(2) : '—'}
-              <span className={cn('ml-1 font-semibold', chgPos ? 'text-up' : 'text-down')}>
-                {chgPos ? '+' : ''}{changePct.toFixed(2)}%
+            {/* MARKETER: no live price / change % (the trading numbers). */}
+            {isMarketer ? null : (
+              <span className="truncate text-[10px] font-medium tabular-nums text-muted">
+                {price != null ? price.toFixed(2) : '—'}
+                <span className={cn('ml-1 font-semibold', chgPos ? 'text-up' : 'text-down')}>
+                  {chgPos ? '+' : ''}{changePct.toFixed(2)}%
+                </span>
               </span>
-            </span>
+            )}
           </span>
           {/* dropdown chevron (rotates when open) */}
           <svg viewBox="0 0 24 24" className={cn('h-3.5 w-3.5 shrink-0 text-muted transition-transform', open ? 'rotate-180' : '')} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -112,21 +123,23 @@ export function VolatilitySelector({
         onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={price != null ? `${instrument.label} · ${price.toFixed(2)}` : instrument.label}
+        title={isMarketer ? gameName(instrument) : price != null ? `${instrument.label} · ${price.toFixed(2)}` : instrument.label}
         className={cn(
           'flex items-center gap-1.5 rounded-lg border bg-surface-2/85 px-2 py-1 text-left backdrop-blur transition',
           open ? 'border-accent' : 'border-border hover:border-accent/60',
         )}
       >
         <BarsGlyph className="h-3.5 w-3.5 shrink-0 text-accent" />
-        <span className="text-[11px] font-medium text-muted">Volatility</span>
+        <span className="text-[11px] font-medium text-muted">{isMarketer ? 'Zone' : 'Volatility'}</span>
         <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden>
           <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <span className="text-[13px] font-bold text-fg">{leaf}</span>
-        <span className={cn('ml-0.5 text-[10px] font-semibold tabular-nums', chgPos ? 'text-up' : 'text-down')}>
-          {chgPos ? '+' : ''}{changePct.toFixed(2)}%
-        </span>
+        <span className="text-[13px] font-bold text-fg">{isMarketer ? (instrument.label.match(/\d+/)?.[0] ?? '') : leaf}</span>
+        {isMarketer ? null : (
+          <span className={cn('ml-0.5 text-[10px] font-semibold tabular-nums', chgPos ? 'text-up' : 'text-down')}>
+            {chgPos ? '+' : ''}{changePct.toFixed(2)}%
+          </span>
+        )}
         <svg viewBox="0 0 24 24" className={cn('h-3.5 w-3.5 shrink-0 text-muted transition-transform', open ? 'rotate-180' : '')} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
           <path d="M6 15l6-6 6 6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

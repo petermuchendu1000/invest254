@@ -4,6 +4,7 @@ import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas } from '@/components/game/CurveCanvas';
 import { CandleChart } from '@/components/game/CandleChart';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 
 const WINDOW_MS = 60_000;
@@ -17,14 +18,17 @@ const WINDOW_MS = 60_000;
 export function GameCurve() {
   const { getTicks, getLastTick } = useGameSocketApi();
   const brand = useBrand();
+  const { isMarketer } = useIsMarketer();
   const tvType = tradingViewTypeOf(chartStyleOf(brand.chartStyle));
 
   return (
     <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface">
-      {tvType ? (
+      {/* MARKETER: never the TradingView candlestick/bars view — always the neutral single-colour wave
+          (no price axis, grid, labels or red/green), so the chart doesn't read as a trading terminal. */}
+      {tvType && !isMarketer ? (
         <CandleChart key={tvType} initialType={tvType} getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} symbol={`BTC/${brand.currency || 'KES'}`} />
       ) : (
-        <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} />
+        <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} />
       )}
     </div>
   );

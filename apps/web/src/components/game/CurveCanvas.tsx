@@ -10,6 +10,7 @@ interface Colors {
   border: string;
   muted: string;
   axis: string;
+  accent: string;
 }
 
 function readColors(): Colors {
@@ -21,6 +22,7 @@ function readColors(): Colors {
     border: g('--pp-border', '#2A323D'),
     muted: g('--pp-muted', '#8B97A7'),
     axis: g('--pp-muted', '#8B97A7'),
+    accent: g('--pp-accent', '#00D395'),
   };
 }
 
@@ -66,14 +68,20 @@ export function CurveCanvas({
   getTicks,
   getLastTick,
   windowMs,
+  marketer = false,
 }: {
   getTicks: () => Tick[];
   getLastTick: () => Tick | null;
   windowMs: number;
+  /** MARKETER: render a neutral single-colour wave — no price axis/grid/labels and no red/green
+   *  up-down split — so the motion reads as a game visual, not a trading chart (TikTok Phase 2). */
+  marketer?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const windowRef = useRef(windowMs);
   windowRef.current = windowMs;
+  const marketerRef = useRef(marketer);
+  marketerRef.current = marketer;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -108,7 +116,8 @@ export function CurveCanvas({
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const PAD_Y = 12;
-    const PAD_LEFT = 30; // gutter so the curve never paints over the y-axis labels
+    // gutter so the curve never paints over the y-axis labels; marketers have no axis, so no gutter.
+    const PAD_LEFT = marketer ? 8 : 30;
 
     // Vertical geometry for the fixed ±Y_MAX scale; 0 sits dead-centre.
     const geom = () => {
@@ -143,12 +152,12 @@ export function CurveCanvas({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
       const { Y, y0 } = geom();
-      drawAxis(Y);
+      if (!marketerRef.current) drawAxis(Y);   // MARKETER: no price-axis grid/labels
       ctx.fillStyle = colors.muted;
       ctx.font = '12px ui-sans-serif, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
-      ctx.fillText('Waiting for live ticks…', cssW / 2, y0 - 8);
+      ctx.fillText(marketerRef.current ? 'Loading…' : 'Waiting for live ticks…', cssW / 2, y0 - 8);
     };
 
     const render = () => {
@@ -183,6 +192,10 @@ export function CurveCanvas({
 
       const { Y, y0 } = geom();
       const X = (t: number) => PAD_LEFT + ((t - start) / w) * (cssW - PAD_LEFT);
+      // MARKETER: one neutral accent colour for the whole wave (no green-up / red-down finance split).
+      const mk = marketerRef.current;
+      const upC = mk ? colors.accent : colors.up;
+      const dnC = mk ? colors.accent : colors.down;
 
       const last2 = pts[pts.length - 1]!;
       const coords: Pt[] = pts.map((p) => [X(p.t), Y(toValue(p.rate))]);
@@ -194,8 +207,8 @@ export function CurveCanvas({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
 
-      // Calibration grid behind the curve.
-      drawAxis(Y);
+      // Calibration grid behind the curve (MARKETER: hidden — the numeric levels read as price).
+      if (!mk) drawAxis(Y);
 
       // Closed area between the curve and the 0-axis (filled twice, clipped per side).
       const buildArea = () => {
@@ -213,8 +226,8 @@ export function CurveCanvas({
       ctx.clip();
       buildArea();
       const gUp = ctx.createLinearGradient(0, PAD_Y, 0, y0);
-      gUp.addColorStop(0, hexA(colors.up, 0.34));
-      gUp.addColorStop(1, hexA(colors.up, 0));
+      gUp.addColorStop(0, hexA(upC, 0.34));
+      gUp.addColorStop(1, hexA(upC, 0));
       ctx.fillStyle = gUp;
       ctx.fill();
       ctx.beginPath();
@@ -222,8 +235,8 @@ export function CurveCanvas({
       ctx.lineWidth = 2;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.strokeStyle = colors.up;
-      ctx.shadowColor = colors.up;
+      ctx.strokeStyle = upC;
+      ctx.shadowColor = upC;
       ctx.shadowBlur = 12;
       ctx.stroke();
       ctx.shadowBlur = 0;
@@ -236,8 +249,8 @@ export function CurveCanvas({
       ctx.clip();
       buildArea();
       const gDn = ctx.createLinearGradient(0, y0, 0, cssH - PAD_Y);
-      gDn.addColorStop(0, hexA(colors.down, 0));
-      gDn.addColorStop(1, hexA(colors.down, 0.34));
+      gDn.addColorStop(0, hexA(dnC, 0));
+      gDn.addColorStop(1, hexA(dnC, 0.34));
       ctx.fillStyle = gDn;
       ctx.fill();
       ctx.beginPath();
@@ -245,22 +258,22 @@ export function CurveCanvas({
       ctx.lineWidth = 2;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.strokeStyle = colors.down;
-      ctx.shadowColor = colors.down;
+      ctx.strokeStyle = dnC;
+      ctx.shadowColor = dnC;
       ctx.shadowBlur = 12;
       ctx.stroke();
       ctx.shadowBlur = 0;
       ctx.restore();
 
-      // 0-axis + labels on top of the fill.
-      drawAxis(Y);
+      // 0-axis + labels on top of the fill (MARKETER: hidden).
+      if (!mk) drawAxis(Y);
 
-      // Live dot, coloured by the current side.
+      // Live dot, coloured by the current side (MARKETER: always the neutral accent).
       const lastV = toValue(last2.rate);
       const ly = Y(lastV);
       ctx.beginPath();
       ctx.arc(cssW - 2, ly, 3, 0, Math.PI * 2);
-      ctx.fillStyle = lastV >= 0 ? colors.up : colors.down;
+      ctx.fillStyle = mk ? colors.accent : lastV >= 0 ? colors.up : colors.down;
       ctx.fill();
     };
 
@@ -285,5 +298,5 @@ export function CurveCanvas({
     };
   }, [getTicks, getLastTick]);
 
-  return <canvas ref={canvasRef} className="h-full w-full" aria-label="Live price curve" role="img" />;
+  return <canvas ref={canvasRef} className="h-full w-full" aria-label={marketer ? 'Live game motion' : 'Live price curve'} role="img" />;
 }

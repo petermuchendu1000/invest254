@@ -648,6 +648,7 @@ export function DigitsTradeScreen() {
               variant={chartVariant}
               drawMode={drawMode}
               onLineDrawn={() => setDrawMode(false)}
+              marketer={isMarketer}
             />
             {/* drawing tools (desktop) */}
             <div className="absolute left-2 top-14 z-10 hidden flex-col gap-1 lg:flex">
@@ -826,16 +827,19 @@ export function DigitsTradeScreen() {
                 onClick={() => onCta(outcome)}
                 className={cn(
                   'group rounded-2xl border-[1.5px] text-left transition disabled:opacity-40',
-                  isUp ? 'border-up bg-up/10 hover:bg-up/15' : 'border-down bg-down/10 hover:bg-down/15',
+                  // MARKETER: no green/red pair — accent for one side, neutral for the other.
+                  isMarketer
+                    ? (isUp ? 'border-accent bg-accent/10 hover:bg-accent/15' : 'border-border bg-surface-2 hover:bg-surface-2/70')
+                    : (isUp ? 'border-up bg-up/10 hover:bg-up/15' : 'border-down bg-down/10 hover:bg-down/15'),
                   loadedOutcome === outcome ? 'ring-2 ring-accent ring-offset-2 ring-offset-bg' : '',
                   i === 0 && running ? '' : '',
                 )}>
                 {/* desktop card */}
                 <span className="hidden items-center gap-3 px-4 py-4 lg:flex">
-                  <span className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-xl', isUp ? 'bg-up/20 text-up' : 'bg-down/20 text-down')}>
+                  <span className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-xl', isMarketer ? (isUp ? 'bg-accent/20 text-accent' : 'bg-fg/10 text-fg') : isUp ? 'bg-up/20 text-up' : 'bg-down/20 text-down')}>
                     <DIcon name={isUp ? 'grid' : 'triangle'} className="h-5 w-5" />
                   </span>
-                  <span className={cn('shrink-0 text-[19px] font-bold', isUp ? 'text-up' : 'text-down')}>{o.label}</span>
+                  <span className={cn('shrink-0 text-[19px] font-bold', isMarketer ? (isUp ? 'text-accent' : 'text-fg') : isUp ? 'text-up' : 'text-down')}>{o.label}</span>
                   <span className="min-w-0 flex-1 text-right">
                     <FitText minPx={10} className="font-mono text-[13px] font-semibold tabular-nums text-fg">{amt.text(meta.ret)}</FitText>
                     {/* MARKETER: hide the profit % (reads as odds to an OCR classifier). */}
@@ -845,7 +849,7 @@ export function DigitsTradeScreen() {
                 {/* phone card */}
                 <span className="flex items-center justify-between gap-2 px-3.5 py-3 lg:hidden">
                   <span className="shrink-0">
-                    <span className={cn('block text-[17px] font-bold leading-tight', isUp ? 'text-up' : 'text-down')}>{o.label}</span>
+                    <span className={cn('block text-[17px] font-bold leading-tight', isMarketer ? (isUp ? 'text-accent' : 'text-fg') : isUp ? 'text-up' : 'text-down')}>{o.label}</span>
                     {isMarketer ? null : <span className="block text-[11px] font-medium tabular-nums text-muted">{meta.profitPct.toFixed(2)}%</span>}
                   </span>
                   <span className="min-w-0 flex-1 text-right">
