@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDisplayMoney } from '@/lib/money';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { MK } from '@/lib/marketer/labels';
 import { cn } from '@/lib/cn';
 import { useCountUp } from '@/lib/useCountUp';
 import { useOutcomeFx, BALANCE_BUMP_EVENT, type OutcomeHeadline } from '@/lib/game/outcomeFx';
@@ -79,6 +81,7 @@ function prefersReducedMotion(): boolean {
  */
 export function OutcomeOverlay() {
   const { fmt } = useDisplayMoney();
+  const { isMarketer } = useIsMarketer();
   const current = useOutcomeFx((s) => s.current);
   const clear = useOutcomeFx((s) => s.clear);
   const [visible, setVisible] = useState(false);
@@ -89,6 +92,8 @@ export function OutcomeOverlay() {
 
   const theme = current ? THEMES[current.headline] : THEMES.loss;
   const won = current?.result === 'win';
+  // MARKETER: neutralise the outcome wording — no "WIN"/"YOU WON"/"NO WIN" headline, no "Payout/stake".
+  const title = isMarketer ? (theme.celebratory ? MK.winHeadline : MK.loseHeadline) : theme.title;
 
   // Count-up the headline amount: the NET result (BUGLOG #106: "+" on the gross payout overstated a
   // win by the stake). The payout is on the line below.
@@ -249,8 +254,8 @@ export function OutcomeOverlay() {
 
   const netLine = useMemo(() => {
     if (!current) return null;
-    if (won) return `Payout ${fmt(current.payoutCents)} · stake ${fmt(current.stakeCents)}`;
-    return `−${fmt(Math.abs(current.pnlCents))} · stake ${fmt(current.stakeCents)}`;
+    if (won) return `${isMarketer ? MK.reward : 'Payout'} ${fmt(current.payoutCents)} · ${isMarketer ? MK.cost.toLowerCase() : 'stake'} ${fmt(current.stakeCents)}`;
+    return `−${fmt(Math.abs(current.pnlCents))} · ${isMarketer ? MK.cost.toLowerCase() : 'stake'} ${fmt(current.stakeCents)}`;
   }, [current, won, fmt]);
 
   if (!current) return null;
@@ -259,7 +264,7 @@ export function OutcomeOverlay() {
     <div
       role="dialog"
       aria-live="assertive"
-      aria-label={`${theme.title} ${fmt(targetAmount)}`}
+      aria-label={`${title} ${fmt(targetAmount)}`}
       onClick={() => setVisible(false)}
       className={cn(
         'fixed inset-0 z-[70] flex items-center justify-center px-6 transition-opacity duration-200',
@@ -287,7 +292,7 @@ export function OutcomeOverlay() {
       >
         <div className="flex items-center justify-center gap-2">
           <span className={cn('text-xs font-bold uppercase tracking-[0.2em]', theme.chipText)}>
-            {theme.title}
+            {title}
           </span>
         </div>
 

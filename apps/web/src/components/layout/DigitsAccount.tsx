@@ -20,6 +20,7 @@ import { useAccountUi, useMyKyc, PLAYER_TWO_FACTOR } from '@/lib/account/account
 import { useToast } from '@/lib/toast/ToastProvider';
 import { passwordError } from '@/lib/auth/validation';
 import { DIcon, type IconName } from '@/components/game/digits/icons';
+import { MK } from '@/lib/marketer/labels';
 
 /** Close a popover on outside click / Escape. */
 function useDismiss(open: boolean, close: () => void) {
@@ -71,6 +72,9 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
   const marketer = data.modeLocked === true;
   const demo = marketer ? data.marketerPractice === true : data.mode === 'demo';
   const spend = (data.real ?? 0) + (data.bonus ?? 0);
+  // MARKETER: neutralise the Real/Demo money vocabulary to game labels (Coins/Practice, C/P).
+  const tabLabel = demo ? (marketer ? MK.practiceTab : 'Demo') : (marketer ? MK.realTab : 'Real');
+  const tabBadge = demo ? (marketer ? MK.practiceBadge : 'D') : (marketer ? MK.realBadge : 'R');
 
   // A marketer's active tab is their practice flag (account_mode stays 'demo'), so guard against the
   // PRESENTED tab, not data.mode — otherwise tapping "Demo" (always === data.mode) would no-op.
@@ -91,17 +95,17 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`${demo ? 'Demo' : 'Real'} account, ${amt.text(spend)}. Switch account`}
+        aria-label={`${tabLabel} account, ${amt.text(spend)}. Switch account`}
         className={cn('flex items-center rounded-xl border bg-surface/70 py-1 pl-1 transition hover:border-accent/50', demo ? 'border-warn/50' : 'border-border', compact ? 'h-10 gap-1.5 pr-1.5' : 'h-11 gap-2 pr-2')}
       >
-        <span className={cn('grid shrink-0 place-items-center rounded-full font-bold', demo ? 'bg-warn/15 text-warn' : 'bg-accent/15 text-accent', compact ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-[11px]')}>{demo ? 'D' : 'R'}</span>
+        <span className={cn('grid shrink-0 place-items-center rounded-full font-bold', demo ? 'bg-warn/15 text-warn' : 'bg-accent/15 text-accent', compact ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-[11px]')}>{tabBadge}</span>
         {auto && compact ? (
           <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-bg px-2.5 py-1 text-[11px] font-semibold text-fg">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />Auto · {auto.side.toUpperCase()}
           </span>
         ) : (
           <span className="flex flex-col items-start leading-none">
-            <span className={cn('text-[9px] font-semibold uppercase tracking-wider', demo ? 'text-warn' : 'text-muted')}>{demo ? 'Demo' : 'Real'}</span>
+            <span className={cn('text-[9px] font-semibold uppercase tracking-wider', demo ? 'text-warn' : 'text-muted')}>{tabLabel}</span>
             {/* The full balance, never cut off: long figures step down a size so the phone header
                 (menu, pill, Deposit, bell) still fits at 320px (BUGLOG #80). */}
             <span className={cn('mt-0.5 whitespace-nowrap font-mono font-bold tabular-nums text-fg', balanceSize(`${amt.prefix}${amt.num(spend)}`, compact))}>{amt.prefix}{amt.num(spend)}</span>
