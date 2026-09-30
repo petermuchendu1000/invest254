@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
 import { PriceHeader } from '@/components/game/PriceHeader';
 import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
@@ -19,6 +20,7 @@ import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
  */
 export function TradeSurface() {
   const brand = useBrand();
+  const { isMarketer } = useIsMarketer();
   const [override, setOverride] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,9 +39,13 @@ export function TradeSurface() {
 
   return (
     <section className="flex h-full min-h-0 flex-col gap-2 md:gap-3">
-      <PriceHeader />
-      {/* short phones (SE): the decorative marquee gives its row to the chart */}
-      <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
+      {/* MARKETER: the BTC/KES price strip and the scrolling crypto ticker are the two loudest
+          "this is a trading terminal" signals — both are removed for marketers (Phase 1). */}
+      {isMarketer ? null : <PriceHeader />}
+      {isMarketer ? null : (
+        // short phones (SE): the decorative marquee gives its row to the chart
+        <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
+      )}
       <div className="min-h-[160px] flex-1">
         <GameCurve />
       </div>

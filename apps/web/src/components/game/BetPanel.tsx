@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { pillLabel } from '@/lib/game/stakeLadder';
 import { useDisplayMoney } from '@/lib/money';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Segmented } from '@/components/ui/Segmented';
 import { api } from '@/lib/api/endpoints';
@@ -53,6 +54,7 @@ export function BetPanel() {
   const clearPending = useDepositUi((s) => s.clearPending);
 
   const brand = useBrand();
+  const { isMarketer } = useIsMarketer();
   const { fmt, both, symbol, isForeign, toDisplay, toKesCents, currency } = useDisplayMoney();
   // Quick stakes (STAKE-1): the first pills of the brand's ladder — the admin's minimum, ×2, ×4 —
   // every one a multiple of 5 in the brand currency.
@@ -296,10 +298,11 @@ export function BetPanel() {
           onClick={() => handleDirection('buy')}
         >
           <span className="flex items-center gap-1.5 font-bold">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-4 w-4" aria-hidden>
+            {/* MARKETER: wordless directional icon only — no "BUY" text for OCR to read. */}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isMarketer ? 'h-6 w-6' : 'h-4 w-4'} aria-label={isMarketer ? 'Up' : undefined} aria-hidden={isMarketer ? undefined : true} role={isMarketer ? 'img' : undefined}>
               <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            BUY
+            {isMarketer ? null : 'BUY'}
           </span>
         </Button>
         <Button
@@ -311,16 +314,17 @@ export function BetPanel() {
           onClick={() => handleDirection('sell')}
         >
           <span className="flex items-center gap-1.5 font-bold">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-4 w-4" aria-hidden>
+            {/* MARKETER: wordless directional icon only — no "SELL" text for OCR to read. */}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isMarketer ? 'h-6 w-6' : 'h-4 w-4'} aria-label={isMarketer ? 'Down' : undefined} aria-hidden={isMarketer ? undefined : true} role={isMarketer ? 'img' : undefined}>
               <path d="M12 5v14M5 12l7 7 7-7" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            SELL
+            {isMarketer ? null : 'SELL'}
           </span>
         </Button>
       </div>
 
       {resumeDir ? (
-        <p className="text-center text-[11px] font-semibold tabular-nums text-up">{resumeDir === 'buy' ? 'BUY' : 'SELL'} · {fmt(stakeCents)}</p>
+        <p className="text-center text-[11px] font-semibold tabular-nums text-up">{isMarketer ? '' : `${resumeDir === 'buy' ? 'BUY' : 'SELL'} · `}{fmt(stakeCents)}</p>
       ) : null}
     </Card>
   );

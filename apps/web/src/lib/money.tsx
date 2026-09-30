@@ -3,6 +3,8 @@
 import { useMemo } from 'react';
 import { formatMoney, formatKes, isForeignDisplay, displayToKesCents, kesCentsToDisplay, type Cents } from '@invest254/shared/money';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { POINTS_UNIT, formatPoints } from '@/lib/marketer/points';
 import { cn } from '@/lib/cn';
 
 /**
@@ -35,6 +37,7 @@ export const USD_LIMITS = { minStake: 1, minDeposit: 1, minWithdrawal: 5 } as co
 
 export function useDisplayMoney() {
   const brand = useBrand();
+  const { isMarketer } = useIsMarketer();
   const currency = brand.currency || 'KES';
   const locale = brand.locale || 'en-KE';
   const fxRateFromKes = brand.fxRateFromKes ?? 1;
@@ -43,6 +46,28 @@ export function useDisplayMoney() {
   return useMemo(() => {
     const opts = { currency, locale, fxRateFromKes };
     const foreign = isForeignDisplay(opts);
+    // MARKETER: neutral game POINTS, no currency identity. The stake maths (toDisplay/toKesCents) and
+    // `isForeign` stay REAL so amount entry/conversion is unchanged — only the visible text is points.
+    const pts = (cents: Cents) => `${formatPoints(kesCentsToDisplay(cents, foreign ? fxRateFromKes : 1), locale)} ${POINTS_UNIT}`;
+    if (isMarketer) {
+      return {
+        fmt: pts,
+        currency,
+        locale,
+        fxRateFromKes,
+        isForeign: foreign,
+        symbol: '',                                            // no currency symbol on a marketer screen
+        both: pts,                                             // never expose the KES equivalent
+        parts: (cents: Cents) => ({ display: pts(cents), kes: '', foreign: false }),
+        toDisplay: (cents: Cents) => kesCentsToDisplay(cents, foreign ? fxRateFromKes : 1),
+        toKesCents: (amount: number) => displayToKesCents(amount, foreign ? fxRateFromKes : 1),
+        limit: (usdFloor: number, kesFloorCents: Cents): Cents => {
+          if (!foreign) return kesFloorCents;
+          const kesFloorUsd = Math.ceil(Math.round(kesCentsToDisplay(kesFloorCents, fxRateFromKes) * 100) / 100 - 1e-9);
+          return displayToKesCents(Math.max(usdFloor, kesFloorUsd), fxRateFromKes);
+        },
+      } as const;
+    }
     return {
       /** Format KES cents in the brand's display currency (KES fallback when no FX). */
       fmt: (cents: Cents) => formatMoney(cents, opts),
@@ -81,7 +106,7 @@ export function useDisplayMoney() {
         return displayToKesCents(wholeUsd, fxRateFromKes);
       },
     } as const;
-  }, [currency, locale, fxRateFromKes]);
+  }, [currency, locale, fxRateFromKes, isMarketer]);
 }
 
 /** Inline amount in the brand's display currency (player app). Mirrors `<Money>` but currency-aware. */

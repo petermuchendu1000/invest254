@@ -16,6 +16,8 @@ import { DIcon } from '@/components/game/digits/icons';
 import type { DerivChartHandle } from '@/components/game/digits/DerivChart';
 import { useDigitSession } from '@/lib/game/digitSession';
 import { useAmountText } from '@/lib/game/useAmountText';
+import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { MK } from '@/lib/marketer/labels';
 import { play } from '@/lib/sound/sound';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
 import { useGameSocketApi, useInstrumentResetKey, type DigitSettledData } from '@/lib/game/GameSocketProvider';
@@ -114,6 +116,7 @@ export function DigitsTradeScreen() {
   const topupDemo = useTopupDemo();
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
   const amt = useAmountText();
+  const { isMarketer } = useIsMarketer();
   // DIGITS-UI: publish the live session to the shell (positions rail/sheet, auto pill, history).
   const publishOpen = useDigitSession((s) => s.setOpenContract);
   const publishClosed = useDigitSession((s) => s.addClosed);
@@ -676,7 +679,7 @@ export function DigitsTradeScreen() {
             ) : null}
             {flash ? (
               <div className={cn('pointer-events-none absolute inset-x-0 top-14 mx-auto w-fit rounded-full px-3.5 py-1 text-[13px] font-bold shadow-lg', flash.won ? 'bg-up text-white' : 'bg-down text-white')}>
-                {flash.won ? 'WON ' : 'LOST '}{amt.signed(flash.delta)}
+                {isMarketer ? (flash.won ? `${MK.winHeadline} ` : `${MK.loseHeadline} `) : (flash.won ? 'WON ' : 'LOST ')}{amt.signed(flash.delta)}
               </div>
             ) : null}
           </div>
@@ -739,7 +742,7 @@ export function DigitsTradeScreen() {
         ) : null}
 
         {/* Stake / Payout — one segmented control on every size (the phone caption toggle was a 15 pt target) */}
-        <Segmented label="Amount" value={amountMode} options={[{ id: 'stake', label: 'Stake' }, { id: 'payout', label: 'Payout' }] as const}
+        <Segmented label="Amount" value={amountMode} options={[{ id: 'stake' as const, label: isMarketer ? MK.cost : 'Stake' }, { id: 'payout' as const, label: isMarketer ? MK.reward : 'Payout' }]}
           onChange={(mm) => {
             if (mm === amountMode) return;
             if (mm === 'payout') setPayoutInput(toAmountStr(payoutForStake(stakeCents, primaryProb, PAYOUT_FACTOR)));
@@ -772,7 +775,7 @@ export function DigitsTradeScreen() {
           {presets.map((q) => {
             const active = Number(amountMode === 'payout' ? payoutInput : stake) === q;
             return (
-              <button key={q} type="button" aria-pressed={active} aria-label={`${amountMode === 'payout' ? 'Payout' : 'Stake'} ${q}`} data-compact
+              <button key={q} type="button" aria-pressed={active} aria-label={`${amountMode === 'payout' ? (isMarketer ? MK.reward : 'Payout') : (isMarketer ? MK.cost : 'Stake')} ${q}`} data-compact
                 onClick={() => (amountMode === 'payout' ? setPayoutInput(String(q)) : setStake(String(q)))}
                 className={cn('h-11 min-w-0 rounded-lg border text-[clamp(11px,3.4vw,13px)] font-semibold tabular-nums transition lg:h-8 lg:text-[12px]',
                   active ? 'border-accent bg-accent/15 text-fg' : 'border-border bg-bg/40 text-muted hover:text-fg')}>
@@ -784,7 +787,7 @@ export function DigitsTradeScreen() {
 
         {/* resolved readout (desktop) */}
         <div className="hidden items-center justify-between rounded-xl border border-border bg-bg/40 px-4 py-3.5 lg:flex">
-          <span className="text-[13px] text-muted">{amountMode === 'payout' ? 'Stake' : 'Payout'}</span>
+          <span className="text-[13px] text-muted">{amountMode === 'payout' ? (isMarketer ? MK.cost : 'Stake') : (isMarketer ? MK.reward : 'Payout')}</span>
           <span className="font-mono text-[18px] font-bold tabular-nums text-fg">{amt.num(readout)} <span className="text-[11px] font-medium text-muted">{amt.code}</span></span>
         </div>
 
@@ -818,7 +821,7 @@ export function DigitsTradeScreen() {
             const isUp = outcome === primary.key;
             return (
               <button key={outcome} type="button"
-                aria-label={`Buy ${o.label}: pays ${amt.text(meta.ret)} (${meta.profitPct.toFixed(2)}%)`}
+                aria-label={isMarketer ? `${o.label}: ${amt.text(meta.ret)}` : `Buy ${o.label}: pays ${amt.text(meta.ret)} (${meta.profitPct.toFixed(2)}%)`}
                 disabled={meta.disabled || running}
                 onClick={() => onCta(outcome)}
                 className={cn(
@@ -835,18 +838,19 @@ export function DigitsTradeScreen() {
                   <span className={cn('shrink-0 text-[19px] font-bold', isUp ? 'text-up' : 'text-down')}>{o.label}</span>
                   <span className="min-w-0 flex-1 text-right">
                     <FitText minPx={10} className="font-mono text-[13px] font-semibold tabular-nums text-fg">{amt.text(meta.ret)}</FitText>
-                    <span className={cn('block font-mono text-[15px] font-bold tabular-nums', isUp ? 'text-up' : 'text-down')}>{meta.profitPct.toFixed(2)}%</span>
+                    {/* MARKETER: hide the profit % (reads as odds to an OCR classifier). */}
+                    {isMarketer ? null : <span className={cn('block font-mono text-[15px] font-bold tabular-nums', isUp ? 'text-up' : 'text-down')}>{meta.profitPct.toFixed(2)}%</span>}
                   </span>
                 </span>
                 {/* phone card */}
                 <span className="flex items-center justify-between gap-2 px-3.5 py-3 lg:hidden">
                   <span className="shrink-0">
                     <span className={cn('block text-[17px] font-bold leading-tight', isUp ? 'text-up' : 'text-down')}>{o.label}</span>
-                    <span className="block text-[11px] font-medium tabular-nums text-muted">{meta.profitPct.toFixed(2)}%</span>
+                    {isMarketer ? null : <span className="block text-[11px] font-medium tabular-nums text-muted">{meta.profitPct.toFixed(2)}%</span>}
                   </span>
                   <span className="min-w-0 flex-1 text-right">
                     <FitText minPx={10} className="font-mono text-[15px] font-bold tabular-nums text-fg">{`${amt.prefix}${amt.num(meta.ret)}`}</FitText>
-                    <span className="block text-[11px] text-muted">Payout</span>
+                    <span className="block text-[11px] text-muted">{isMarketer ? MK.reward : 'Payout'}</span>
                   </span>
                 </span>
               </button>
