@@ -47,12 +47,20 @@ export interface PaymentServiceOptions {
    */
   minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   /**
-   * Site-aware live minimum-DEPOSIT source (multi-tenant). The mirror of `minWithdrawalForSite`:
-   * consulted per-request with the depositing brand's `siteId` so the server enforces the SAME floor
-   * the player's client validated against (each brand's `site_game_config.min_deposit_native`, e.g.
-   * $1 on a USD brand). A brand may set this BELOW the platform default (it IS the operator's intended
-   * minimum), so a valid positive integer is used as-is. A non-positive / non-integer result (or a
-   * throw) defers to the static constant. The platform GLOBAL enforce still wins over it.
+   * EXPLICIT per-brand native minimum withdrawal (site_game_config.min_withdrawal_native), converted to
+   * KES cents at the live rate, or a non-positive sentinel when the brand has set none. This is the
+   * operator's stated intent in the brand's own currency (e.g. $5), so — unlike `minWithdrawalForSite`
+   * — it OVERRIDES the platform GLOBAL enforce: a brand that has set its own native floor is not clamped
+   * up to the global one. Brands with no native value fall through to the global → legacy → static chain.
+   */
+  minWithdrawalNativeForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
+  /**
+   * EXPLICIT per-brand native minimum DEPOSIT (site_game_config.min_deposit_native), converted to KES
+   * cents at the live rate, or a non-positive sentinel when the brand has set none. This is the
+   * operator's stated intent in the brand's own currency (e.g. $1 on a USD brand), so it OVERRIDES the
+   * platform GLOBAL enforce and may sit BELOW the static default — a brand that has set its own native
+   * floor is not clamped up to the global one. Brands with no native value fall through to the global →
+   * static chain, so the platform floor still protects everyone who hasn't opted out of it.
    */
   minDepositForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   /**
@@ -123,6 +131,7 @@ export class PaymentService {
   private readonly minWithdrawal: Cents;
   private readonly minWithdrawalProvider?: () => Cents;
   private readonly minWithdrawalForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
+  private readonly minWithdrawalNativeForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   private readonly minDepositForSite?: (siteId: string | undefined) => Cents | Promise<Cents>;
   private readonly minDepositForGlobal?: () => Cents | Promise<Cents>;
   private readonly maxDepositForGlobal?: () => Cents | null | Promise<Cents | null>;
@@ -142,6 +151,7 @@ export class PaymentService {
     this.minWithdrawal = opts.minWithdrawalCents ?? MIN_WITHDRAWAL_CENTS;
     if (opts.minWithdrawalProvider) this.minWithdrawalProvider = opts.minWithdrawalProvider;
     if (opts.minWithdrawalForSite) this.minWithdrawalForSite = opts.minWithdrawalForSite;
+    if (opts.minWithdrawalNativeForSite) this.minWithdrawalNativeForSite = opts.minWithdrawalNativeForSite;
     if (opts.minDepositForSite) this.minDepositForSite = opts.minDepositForSite;
     if (opts.minDepositForGlobal) this.minDepositForGlobal = opts.minDepositForGlobal;
     if (opts.maxDepositForGlobal) this.maxDepositForGlobal = opts.maxDepositForGlobal;
@@ -721,16 +731,27 @@ export class PaymentService {
 
   /**
    * The minimum withdrawal in force for THIS request. Resolution order (multi-tenant safe):
-   *   1. `minWithdrawalForSite(siteId)` — the withdrawing brand's own `site_game_config.min_withdrawal`,
+   *   0. `minWithdrawalNativeForSite(siteId)` — the brand's EXPLICIT native floor (min_withdrawal_native,
+   *      e.g. $5). This is the operator's stated per-brand intent, so it OVERRIDES the platform GLOBAL
+   *      enforce; a brand that opted into its own floor is not clamped up to the global one.
+   *   1. `minWithdrawalForGlobal()` — the platform GLOBAL enforced value (0099), for brands with no native.
+   *   2. `minWithdrawalForSite(siteId)` — the withdrawing brand's own `site_game_config.min_withdrawal`,
    *      i.e. exactly the floor the player's client validated against (kills the client/server BELOW_MIN
    *      divergence for brands whose minimum differs from the platform default);
-   *   2. `minWithdrawalProvider()` — the process-wide live default (admin-editable `game_config.min_withdrawal`);
-   *   3. the boot-time constant.
+   *   3. `minWithdrawalProvider()` — the process-wide live default (admin-editable `game_config.min_withdrawal`);
+   *   4. the boot-time constant.
    * Any source that is absent, throws, or yields a non-positive / non-integer value is skipped, so a
    * transient bad config can never open the floor below the safe default.
    */
   private async currentMinWithdrawal(siteId?: string): Promise<Cents> {
-    // 0. Platform GLOBAL enforce wins over everything (decision: global overrides all clients).
+    // 0. An EXPLICIT per-brand native floor is the operator's intent and wins over the global enforce.
+    if (this.minWithdrawalNativeForSite) {
+      try {
+        const nat = await this.minWithdrawalNativeForSite(siteId);
+        if (Number.isInteger(nat) && (nat as number) > 0) return nat as Cents;
+      } catch { /* fall through to the global / per-site / provider / static chain */ }
+    }
+    // 1. Platform GLOBAL enforce wins over per-site legacy + provider + static (for brands w/o a native floor).
     if (this.minWithdrawalForGlobal) {
       try {
         const g = await this.minWithdrawalForGlobal();
@@ -751,27 +772,28 @@ export class PaymentService {
 
   /**
    * The minimum deposit in force for THIS request. Resolution order:
-   *   0. `minDepositForGlobal` — the platform GLOBAL enforced value (0099) wins over everything.
-   *   1. `minDepositForSite(siteId)` — the depositing brand's own `min_deposit_native` converted to
-   *      KES cents at the live rate, i.e. exactly the floor the player's client validated against.
-   *      Unlike the withdrawal chain this may legitimately be BELOW the static default (it IS the
-   *      operator's intended minimum, e.g. $1), so a valid positive integer is used as-is.
+   *   0. `minDepositForSite(siteId)` — the brand's EXPLICIT native floor (min_deposit_native, e.g. $1)
+   *      converted to KES cents at the live rate. This is the operator's stated per-brand intent, so it
+   *      OVERRIDES the platform GLOBAL enforce and may sit BELOW the static default; a valid positive
+   *      integer is used as-is. Brands with no native value return a non-positive sentinel and fall through.
+   *   1. `minDepositForGlobal` — the platform GLOBAL enforced value (0099), for brands with no native floor.
    *   2. the static default constant.
    * Any source that is absent, throws, or yields a non-positive/non-integer value is skipped, so a
-   * transient bad config can never open the floor below `this.minDeposit`.
+   * transient bad config can never open the floor below `this.minDeposit` for a brand that hasn't opted out.
    */
   private async currentMinDeposit(siteId?: string): Promise<Cents> {
-    if (this.minDepositForGlobal) {
-      try {
-        const g = await this.minDepositForGlobal();
-        if (Number.isInteger(g) && (g as number) > 0) return g as Cents;
-      } catch { /* fail-open to the per-site / static chain */ }
-    }
+    // 0. An EXPLICIT per-brand native floor is the operator's intent and wins over the global enforce.
     if (this.minDepositForSite) {
       try {
         const perSite = await this.minDepositForSite(siteId);
         if (Number.isInteger(perSite) && (perSite as number) > 0) return perSite as Cents;
-      } catch { /* fall through to the static default */ }
+      } catch { /* fall through to the global / static chain */ }
+    }
+    if (this.minDepositForGlobal) {
+      try {
+        const g = await this.minDepositForGlobal();
+        if (Number.isInteger(g) && (g as number) > 0) return g as Cents;
+      } catch { /* fail-open to the static default */ }
     }
     return this.minDeposit;
   }
