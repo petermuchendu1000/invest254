@@ -123,11 +123,6 @@ export function CurveCanvas({
     const PAD_Y = 12;
     // gutter so the curve never paints over the y-axis labels; marketers have no axis, so no gutter.
     const PAD_LEFT = marketer ? 8 : 30;
-    // MARKETER: reserve a slim right gutter for the "energy gauge" (the y-axis replacement — a game
-    // power meter, not a numbered scale). Players keep the full width.
-    const GAUGE_W = 5;
-    const PAD_RIGHT = marketer ? 16 : 0;
-    const plotRight = () => cssW - PAD_RIGHT;
 
     // Vertical geometry for the fixed ±Y_MAX scale; 0 sits dead-centre.
     const geom = () => {
@@ -149,15 +144,14 @@ export function CurveCanvas({
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(PAD_LEFT, y);
-      ctx.lineTo(plotRight(), y);
+      ctx.lineTo(cssW, y);
       ctx.stroke();
       ctx.restore();
     };
 
-    // MARKETER "y-axis" replacement, part 1 — ALTITUDE ZONE TINT. A soft vertical wash behind the wave:
-    // accent glow toward the top, neutral glow toward the bottom, clear at the divider. Height is read
-    // from colour intensity, so there are no numbers or gridlines for a classifier to parse as a price
-    // axis — it reads as an arcade background.
+    // MARKETER: ALTITUDE ZONE TINT behind the wave — a soft vertical wash, accent glow toward the top,
+    // neutral toward the bottom, clear at the divider. Height reads from colour intensity, so there are
+    // no numbers or gridlines for a classifier to parse as a price axis — it reads as an arcade background.
     const drawZones = (y0: number) => {
       const g = ctx.createLinearGradient(0, PAD_Y, 0, cssH - PAD_Y);
       g.addColorStop(0, hexA(colors.accent, 0.12));
@@ -165,40 +159,7 @@ export function CurveCanvas({
       g.addColorStop(Math.min(1, (y0 - PAD_Y) / Math.max(1, cssH - 2 * PAD_Y) + 0.02), hexA(colors.secondary, 0));
       g.addColorStop(1, hexA(colors.secondary, 0.12));
       ctx.fillStyle = g;
-      ctx.fillRect(PAD_LEFT, PAD_Y, plotRight() - PAD_LEFT, cssH - 2 * PAD_Y);
-    };
-
-    // MARKETER "y-axis" replacement, part 2 — ENERGY GAUGE. A slim vertical power meter in the right
-    // gutter that fills up from the centre when the wave rides high (accent) and drains down when it
-    // dips low (neutral), with a few faint notches. A game HUD element — never a numbered price scale.
-    const drawGauge = (Y: (v: number) => number, value: number, y0: number) => {
-      const gx = cssW - PAD_RIGHT + (PAD_RIGHT - GAUGE_W) / 2;
-      const top = PAD_Y;
-      const bot = cssH - PAD_Y;
-      const r = GAUGE_W / 2;
-      const rounded = (x: number, yTop: number, yBot: number) => {
-        const h = Math.max(0.0001, yBot - yTop);
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(x, yTop, GAUGE_W, h, r) : ctx.rect(x, yTop, GAUGE_W, h);
-        ctx.closePath();
-      };
-      // track
-      rounded(gx, top, bot); ctx.fillStyle = hexA(colors.muted, 0.14); ctx.fill();
-      // notch marks (neutral ticks — a scale's rhythm without any numbers)
-      ctx.strokeStyle = hexA(colors.muted, 0.35); ctx.lineWidth = 1;
-      for (const v of [0.6, 0.3, -0.3, -0.6]) {
-        const ny = Y(v);
-        ctx.beginPath(); ctx.moveTo(gx - 2, ny); ctx.lineTo(gx + GAUGE_W + 2, ny); ctx.stroke();
-      }
-      // fill from the centre to the live level
-      const ly = Math.max(top, Math.min(bot, Y(value)));
-      const fillCol = value >= 0 ? colors.accent : colors.secondary;
-      ctx.save();
-      rounded(gx, Math.min(y0, ly), Math.max(y0, ly)); ctx.clip();
-      ctx.fillStyle = hexA(fillCol, 0.9);
-      ctx.shadowColor = fillCol; ctx.shadowBlur = 8;
-      ctx.fillRect(gx - 2, top, GAUGE_W + 4, bot - top);
-      ctx.restore();
+      ctx.fillRect(PAD_LEFT, PAD_Y, cssW - PAD_LEFT, cssH - 2 * PAD_Y);
     };
 
     // y-axis calibration grid (0.2 steps) + labels; the 0-axis is emphasised.
@@ -263,7 +224,7 @@ export function CurveCanvas({
       }
 
       const { Y, y0 } = geom();
-      const X = (t: number) => PAD_LEFT + ((t - start) / w) * (plotRight() - PAD_LEFT);
+      const X = (t: number) => PAD_LEFT + ((t - start) / w) * (cssW - PAD_LEFT);
       // MARKETER: two-tone around the centre divider — brand accent above, a contrasting neutral below.
       // Keeps the "above vs below" legibility a viewer needs, without the trading green/red colour pair.
       const mk = marketerRef.current;
@@ -272,7 +233,7 @@ export function CurveCanvas({
 
       const last2 = pts[pts.length - 1]!;
       const coords: Pt[] = pts.map((p) => [X(p.t), Y(toValue(p.rate))]);
-      coords.push([plotRight(), Y(toValue(last2.rate))]); // hold the line to the live right edge
+      coords.push([cssW, Y(toValue(last2.rate))]); // hold the line to the live right edge
 
       const firstX = coords[0]![0];
       const lastX = coords[coords.length - 1]![0];
@@ -346,12 +307,9 @@ export function CurveCanvas({
       const lastV = toValue(last2.rate);
       const ly = Y(lastV);
       ctx.beginPath();
-      ctx.arc(plotRight() - 2, ly, 3, 0, Math.PI * 2);
+      ctx.arc(cssW - 2, ly, 3, 0, Math.PI * 2);
       ctx.fillStyle = lastV >= 0 ? upC : dnC;
       ctx.fill();
-
-      // MARKETER: the energy gauge in the right gutter — the wave's height as a game power meter.
-      if (mk) drawGauge(Y, lastV, y0);
     };
 
     let raf = 0;
