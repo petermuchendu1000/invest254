@@ -139,6 +139,9 @@ export function CurveCanvas({
     const PAD_Y = 12;
     // gutter so the curve never paints over the y-axis labels; marketers have no axis, so no gutter.
     const PAD_LEFT = marketer ? 8 : 30;
+    // MARKETER: a right gutter so the wave stops short of the edge (breathing room) AND the live-point
+    // beacon can sit AT the wave tip inside it, instead of detaching. Players keep the full-bleed edge.
+    const PAD_RIGHT = marketer ? 20 : 0;
 
     // Vertical geometry for the fixed ±Y_MAX scale; 0 sits dead-centre.
     const geom = () => {
@@ -250,7 +253,7 @@ export function CurveCanvas({
       const rings = p < 0.4 ? 1 : p < 0.72 ? 2 : 3;
       const breathe = reduce ? 0 : 0.5 + 0.5 * Math.sin(performance.now() / 180);
       for (let k = rings - 1; k >= 0; k--) {
-        const r = 5 + k * 8 * (0.5 + p) + breathe * 2 * p;
+        const r = 5 + k * 6 * (0.5 + p) + breathe * 2 * p;
         const a = Math.max(0, (0.32 + 0.5 * p) * (1 - k * 0.28));
         ctx.save();
         ctx.strokeStyle = hexA(sideC, a);
@@ -364,7 +367,8 @@ export function CurveCanvas({
       }
 
       const { Y, y0 } = geom();
-      const X = (t: number) => PAD_LEFT + ((t - start) / w) * (cssW - PAD_LEFT);
+      const plotRight = cssW - PAD_RIGHT; // wave's right extent (marketer gutter; = cssW for players)
+      const X = (t: number) => PAD_LEFT + ((t - start) / w) * (plotRight - PAD_LEFT);
       // MARKETER: two-tone around the centre divider — brand accent above, a contrasting neutral below.
       // Keeps the "above vs below" legibility a viewer needs, without the trading green/red colour pair.
       const mk = marketerRef.current;
@@ -373,7 +377,7 @@ export function CurveCanvas({
 
       const last2 = pts[pts.length - 1]!;
       const coords: Pt[] = pts.map((p) => [X(p.t), Y(toValue(p.rate))]);
-      coords.push([cssW, Y(toValue(last2.rate))]); // hold the line to the live right edge
+      coords.push([plotRight, Y(toValue(last2.rate))]); // hold the line to the live tip (inside the marketer gutter)
 
       const firstX = coords[0]![0];
       const lastX = coords[coords.length - 1]![0];
@@ -447,9 +451,9 @@ export function CurveCanvas({
       const lastV = toValue(last2.rate);
       const ly = Y(lastV);
       const sideC = lastV >= 0 ? upC : dnC;
-      // MARKETER: inset the live dot so its pulse/burst beacon clears the perimeter charge-meter rail
-      // and isn't half-clipped by the board edge; the wave still runs to the edge behind it.
-      const dotX = mk ? cssW - 14 : cssW - 2;
+      // MARKETER: the live dot sits AT the wave tip (inside the right gutter), so the pulse/burst
+      // beacon reads as emanating from the end of the wave and isn't clipped by the board edge.
+      const dotX = mk ? plotRight : cssW - 2;
       ctx.beginPath();
       ctx.arc(dotX, ly, 3, 0, Math.PI * 2);
       ctx.fillStyle = sideC;
