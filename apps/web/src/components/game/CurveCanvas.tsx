@@ -139,9 +139,9 @@ export function CurveCanvas({
     const PAD_Y = 12;
     // gutter so the curve never paints over the y-axis labels; marketers have no axis, so no gutter.
     const PAD_LEFT = marketer ? 8 : 30;
-    // MARKETER: a right gutter so the wave stops short of the edge (breathing room) AND the live-point
-    // beacon can sit AT the wave tip inside it, instead of detaching. Players keep the full-bleed edge.
-    const PAD_RIGHT = marketer ? 20 : 0;
+    // MARKETER: a right gutter leaving a clear GAP between the wave tip (+ its live-point beacon) and
+    // the board edge — the wave never runs into the edge. Players keep the full-bleed right edge.
+    const PAD_RIGHT = marketer ? 28 : 0;
 
     // Vertical geometry for the fixed ±Y_MAX scale; 0 sits dead-centre.
     const geom = () => {
@@ -206,50 +206,7 @@ export function CurveCanvas({
     let burstStart = 0;
     let burstWon = false;
 
-    const rrPath = (x: number, y: number, w: number, h: number, rad: number) => {
-      const r = Math.min(rad, w / 2, h / 2);
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-    };
-
-    // (B) PERIMETER CHARGE METER — the board frame fills like a loading ring as the round elapses; a
-    // full loop = resolve. Pure UI chrome (no chart semantics), instantly legible as "charging to land".
-    const drawPerimeter = (p: number) => {
-      // Inset well off the board edge so the charge-meter rails read as a floating progress frame
-      // with clear breathing room, not a bright line jammed against the right/side edges.
-      const ins = 10;
-      const rad = 14;
-      const w = cssW - 2 * ins;
-      const h = cssH - 2 * ins;
-      if (w <= 0 || h <= 0) return;
-      // faint inactive track
-      rrPath(ins, ins, w, h, rad);
-      ctx.save();
-      ctx.strokeStyle = hexA(colors.muted, 0.16);
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-      ctx.restore();
-      // accent fill proportional to elapsed progress
-      const per = 2 * (w - 2 * rad) + 2 * (h - 2 * rad) + 2 * Math.PI * rad;
-      rrPath(ins, ins, w, h, rad);
-      ctx.save();
-      ctx.strokeStyle = colors.accent;
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.shadowColor = colors.accent;
-      ctx.shadowBlur = reduce ? 0 : 6 + 10 * p;
-      ctx.setLineDash([Math.max(0.001, per * Math.min(1, p)), per]);
-      ctx.lineDashOffset = per * 0.125; // start the fill near the top-left corner
-      ctx.stroke();
-      ctx.restore();
-    };
-
-    // (C) LIVE-POINT PULSE — a beacon at the live edge that grows/brightens as resolve nears, so the
+    // LIVE-POINT PULSE — a beacon at the live edge that grows/brightens as resolve nears, so the
     // eye is parked exactly where the reveal happens. Side-coloured (accent up / neutral down).
     const drawPulse = (x: number, y: number, p: number, sideC: string) => {
       const rings = p < 0.4 ? 1 : p < 0.72 ? 2 : 3;
@@ -301,14 +258,14 @@ export function CurveCanvas({
       }
     };
 
-    // Draw the whole beat for marketers: perimeter meter while a round is live, a pulse at the live
-    // point, and a one-shot burst when a settlement arrives. `ly` is the live-dot y; `sideC` its colour.
+    // Draw the whole beat for marketers: a pulse at the live point that intensifies as the round nears
+    // resolve, and a one-shot burst when a settlement arrives. `ly` is the live-dot y; `sideC` its colour.
+    // (No edge frame/meter — the right side stays a clean gap; the pulse alone carries the countdown.)
     const drawBeat = (lx: number, ly: number, sideC: string) => {
       const b = beatRef.current;
       if (!b) return;
       const p = b.getProgress();
       if (p != null) {
-        drawPerimeter(p);
         drawPulse(lx, ly, Math.min(1, Math.max(0, p)), sideC);
       }
       const rs = b.resolve;
