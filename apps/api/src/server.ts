@@ -310,11 +310,12 @@ async function buildDeps(): Promise<ApiDeps> {
       if (r.rows.length) {
         const row = r.rows[0] as Record<string, unknown>;
         const currency = String(row.currency ?? "KES");
-        // FOREIGN brands only: a KES brand is already denominated in KES, so the platform GLOBAL KES
-        // floor is directly meaningful to it and stays authoritative — its native value (a KES figure
-        // duplicating min_deposit) must NOT silently override the global. The override exists for
-        // display-currency brands the global KES floor cannot express (e.g. a USD brand's $1).
-        if (currency !== "KES" && row.min_deposit_native != null) {
+        // An EXPLICITLY-set per-brand native min deposit is the operator's intent and overrides the
+        // platform GLOBAL floor — for EVERY currency, KES included. (A KES brand can now set e.g. a
+        // KES 2 floor and have it apply; `effectiveMinWithdrawalCents` returns nativeMajor*100 for KES.)
+        // Brands that set NONE keep `min_deposit_native` null, so the `!= null` guard still defers them
+        // to the global floor — nothing changes for the brands that never set a native value.
+        if (row.min_deposit_native != null) {
           const nativeMajor = Number(row.min_deposit_native);
           // effectiveMinWithdrawalCents is a pure native-major → KES-cents resolver (despite the name):
           // it converts at the live rate, or returns the fallback when FX is unavailable. Passing 0 as
