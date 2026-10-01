@@ -69,11 +69,22 @@ const Y_MAX = 0.9;
 // y-axis calibration lines/labels at 0.2 intervals.
 const AXIS_TICKS = [-0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8];
 
+/** MARKETER anticipation beat: the live round's elapsed progress (0→1) and the latest settled
+ *  outcome, so the board can show a "round is about to resolve" meter + payoff — all driven by the
+ *  REAL contract timer and REAL settlement (never faked). Both are optional; players never pass them. */
+export interface MarketerBeat {
+  /** Active contract: elapsed fraction (0 at open → 1 at expiry), or null when nothing is live. */
+  getProgress: () => number | null;
+  /** Monotonic id of the last settled outcome + whether it won; null until the first settle. */
+  resolve: { id: number; won: boolean } | null;
+}
+
 export function CurveCanvas({
   getTicks,
   getLastTick,
   windowMs,
   marketer = false,
+  beat,
 }: {
   getTicks: () => Tick[];
   getLastTick: () => Tick | null;
@@ -81,12 +92,17 @@ export function CurveCanvas({
   /** MARKETER: render a neutral single-colour wave — no price axis/grid/labels and no red/green
    *  up-down split — so the motion reads as a game visual, not a trading chart (TikTok Phase 2). */
   marketer?: boolean;
+  /** MARKETER: live round progress + settlement, for the anticipation beat (perimeter charge meter
+   *  + live-point pulse + payoff burst). Ignored unless `marketer` is set. */
+  beat?: MarketerBeat;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const windowRef = useRef(windowMs);
   windowRef.current = windowMs;
   const marketerRef = useRef(marketer);
   marketerRef.current = marketer;
+  const beatRef = useRef(beat);
+  beatRef.current = beat;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -178,6 +194,130 @@ export function CurveCanvas({
         ctx.stroke();
         ctx.fillStyle = hexA(colors.muted, zero ? 0.95 : 0.55);
         ctx.fillText(v.toFixed(1), PAD_LEFT - 5, y);
+      }
+    };
+
+    // ── MARKETER anticipation beat ────────────────────────────────────────────────────────────────
+    // Tracks the last settled outcome so a new settlement plays a short payoff burst once.
+    let lastResolveId: number | null = null;
+    let burstStart = 0;
+    let burstWon = false;
+
+    const rrPath = (x: number, y: number, w: number, h: number, rad: number) => {
+      const r = Math.min(rad, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    };
+
+    // (B) PERIMETER CHARGE METER — the board frame fills like a loading ring as the round elapses; a
+    // full loop = resolve. Pure UI chrome (no chart semantics), instantly legible as "charging to land".
+    const drawPerimeter = (p: number) => {
+      const ins = 3;
+      const rad = 12;
+      const w = cssW - 2 * ins;
+      const h = cssH - 2 * ins;
+      if (w <= 0 || h <= 0) return;
+      // faint inactive track
+      rrPath(ins, ins, w, h, rad);
+      ctx.save();
+      ctx.strokeStyle = hexA(colors.muted, 0.16);
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.restore();
+      // accent fill proportional to elapsed progress
+      const per = 2 * (w - 2 * rad) + 2 * (h - 2 * rad) + 2 * Math.PI * rad;
+      rrPath(ins, ins, w, h, rad);
+      ctx.save();
+      ctx.strokeStyle = colors.accent;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = colors.accent;
+      ctx.shadowBlur = reduce ? 0 : 6 + 10 * p;
+      ctx.setLineDash([Math.max(0.001, per * Math.min(1, p)), per]);
+      ctx.lineDashOffset = per * 0.125; // start the fill near the top-left corner
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    // (C) LIVE-POINT PULSE — a beacon at the live edge that grows/brightens as resolve nears, so the
+    // eye is parked exactly where the reveal happens. Side-coloured (accent up / neutral down).
+    const drawPulse = (x: number, y: number, p: number, sideC: string) => {
+      const rings = p < 0.4 ? 1 : p < 0.72 ? 2 : 3;
+      const breathe = reduce ? 0 : 0.5 + 0.5 * Math.sin(performance.now() / 180);
+      for (let k = rings - 1; k >= 0; k--) {
+        const r = 5 + k * 8 * (0.5 + p) + breathe * 2 * p;
+        const a = Math.max(0, (0.32 + 0.5 * p) * (1 - k * 0.28));
+        ctx.save();
+        ctx.strokeStyle = hexA(sideC, a);
+        ctx.lineWidth = 1.8;
+        ctx.shadowColor = sideC;
+        ctx.shadowBlur = reduce ? 0 : 8 * p;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    // Payoff burst at the live point on a real settlement — win = brighter/bigger accent, loss = a
+    // softer neutral pulse (honest: a loss never flashes like a win; no red/green either way).
+    const drawBurst = (x: number, y: number, t: number, won: boolean) => {
+      const C = won ? colors.accent : colors.secondary;
+      const ease = 1 - (1 - t) * (1 - t);
+      const r = 6 + ease * (won ? 40 : 26);
+      const swell = ctx.createRadialGradient(x, y, 2, x, y, Math.max(40, r * 1.7));
+      swell.addColorStop(0, hexA(C, (won ? 0.24 : 0.16) * (1 - t)));
+      swell.addColorStop(1, hexA(C, 0));
+      ctx.save();
+      ctx.fillStyle = swell;
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = hexA(C, (won ? 0.7 : 0.5) * (1 - t));
+      ctx.lineWidth = 3 * (1 - t) + 1;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      if (t < 0.5) {
+        ctx.save();
+        ctx.fillStyle = C;
+        ctx.shadowColor = C;
+        ctx.shadowBlur = reduce ? 0 : 18 * (1 - t * 2);
+        ctx.beginPath();
+        ctx.arc(x, y, 6 * (1 - t * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    };
+
+    // Draw the whole beat for marketers: perimeter meter while a round is live, a pulse at the live
+    // point, and a one-shot burst when a settlement arrives. `ly` is the live-dot y; `sideC` its colour.
+    const drawBeat = (lx: number, ly: number, sideC: string) => {
+      const b = beatRef.current;
+      if (!b) return;
+      const p = b.getProgress();
+      if (p != null) {
+        drawPerimeter(p);
+        drawPulse(lx, ly, Math.min(1, Math.max(0, p)), sideC);
+      }
+      const rs = b.resolve;
+      if (rs && rs.id !== lastResolveId) {
+        lastResolveId = rs.id;
+        burstStart = performance.now();
+        burstWon = rs.won;
+      }
+      if (burstStart) {
+        const dt = performance.now() - burstStart;
+        const DUR = 800;
+        if (dt <= DUR && !reduce) drawBurst(lx, ly, dt / DUR, burstWon);
+        else if (dt <= 220 && reduce) drawBurst(lx, ly, dt / 220, burstWon); // single static-ish frame
+        else burstStart = 0;
       }
     };
 
@@ -306,10 +446,17 @@ export function CurveCanvas({
       // Live dot, coloured by the current side (accent above the divider, neutral below for marketers).
       const lastV = toValue(last2.rate);
       const ly = Y(lastV);
+      const sideC = lastV >= 0 ? upC : dnC;
+      // MARKETER: inset the live dot so its pulse/burst beacon clears the perimeter charge-meter rail
+      // and isn't half-clipped by the board edge; the wave still runs to the edge behind it.
+      const dotX = mk ? cssW - 14 : cssW - 2;
       ctx.beginPath();
-      ctx.arc(cssW - 2, ly, 3, 0, Math.PI * 2);
-      ctx.fillStyle = lastV >= 0 ? upC : dnC;
+      ctx.arc(dotX, ly, 3, 0, Math.PI * 2);
+      ctx.fillStyle = sideC;
       ctx.fill();
+
+      // MARKETER: the anticipation beat sits on top of the wave (charge meter + live-point pulse + burst).
+      if (mk) drawBeat(dotX, ly, sideC);
     };
 
     let raf = 0;
