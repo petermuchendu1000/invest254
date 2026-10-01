@@ -1129,6 +1129,27 @@ if (Number.isFinite(RECONCILE_MS) && RECONCILE_MS > 0) {
   }, RECONCILE_MS);
   megaTimer.unref();
 
+  // FAST re-verify lane (Mega Pay). The 5-minute sweep above is the safety net; but a deposit whose
+  // callback raced AHEAD of Mega Pay's status endpoint (our verify saw "processing", so we refused to
+  // credit an unverified callback) would otherwise wait up to RECONCILE_MS to settle. Re-query FRESH
+  // pending deposits far more often so they credit within seconds of Mega Pay marking them Completed.
+  // This is still an authoritative server-to-server status check (the callback body is never trusted) —
+  // it only shortens DETECTION latency, never how a credit is authorised, so there is no money-safety
+  // change and `completeDeposit` stays idempotent across the fast + slow sweeps. 0 disables; it also
+  // self-disables unless it is genuinely faster than the main sweep.
+  const FAST_RECONCILE_MS = Number(process.env.DEPOSIT_FAST_RECONCILE_INTERVAL_MS ?? 15_000);
+  const FAST_RECONCILE_MIN_AGE_MS = Number(process.env.DEPOSIT_FAST_RECONCILE_MIN_AGE_MS ?? 8_000);
+  if (Number.isFinite(FAST_RECONCILE_MS) && FAST_RECONCILE_MS > 0 && FAST_RECONCILE_MS < RECONCILE_MS) {
+    const fastTimer = setInterval(() => {
+      void deps.payments
+        .reconcileMegaPayDeposits({ olderThanMs: FAST_RECONCILE_MIN_AGE_MS, limit: 25 })
+        .then((r) => { if (r.settled || r.errors) recLog.info("megapay fast re-verify", { provider: "megapay", fast: true, ...r }); })
+        .catch((err: unknown) => recLog.error("megapay fast re-verify failed", err as Error));
+    }, FAST_RECONCILE_MS);
+    fastTimer.unref();
+    log.info("fast deposit re-verify armed", { everySeconds: Math.round(FAST_RECONCILE_MS / 1000), minAgeMs: FAST_RECONCILE_MIN_AGE_MS });
+  }
+
   // PayHero rail: the SAME sweep for provider='payhero', using PayHero's authoritative transaction-status
   // query. Isolated per-provider; a no-op when PayHero isn't configured.
   const payheroTimer = setInterval(() => {
