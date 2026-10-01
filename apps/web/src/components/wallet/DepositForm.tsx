@@ -59,12 +59,12 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
   const sanitizeAmount = (v: string) => (isForeign ? v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : digitsOnly(v));
 
   // Effective deposit limits (live global/brand economy over the static default). Computed FIRST so
-  // the quick-amount chips can derive from the MIN. A foreign brand with an operator-set native floor
-  // (min_deposit_native, e.g. $1) enforces it directly — converted to KES cents at the SAME live rate
-  // the entered amount uses — so the client floor matches the server exactly; otherwise fall back to
-  // the site KES floor, USD-limit-guarded.
+  // the quick-amount chips can derive from the MIN. An operator-set native floor (min_deposit_native)
+  // enforces it directly for ANY currency — a foreign brand's $1 OR a KES brand's e.g. KES 2 — via
+  // toKesCents at the SAME live rate the entered amount uses, so the client floor matches the server
+  // exactly (API siteMinDepositCents). Unset (null) → fall back to the site KES floor, USD-limit-guarded.
   const nativeMinDeposit = config?.minDepositNative ?? null;
-  const minDepositCents = (isForeign && nativeMinDeposit != null && nativeMinDeposit > 0)
+  const minDepositCents = (nativeMinDeposit != null && nativeMinDeposit > 0)
     ? toKesCents(nativeMinDeposit)
     : limit(USD_LIMITS.minDeposit, config?.minDepositCents ?? MIN_DEPOSIT_CENTS);
   const maxDepositCents = config?.maxDepositCents ?? null;
