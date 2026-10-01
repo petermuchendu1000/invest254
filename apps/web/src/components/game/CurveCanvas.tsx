@@ -220,8 +220,10 @@ export function CurveCanvas({
     // (B) PERIMETER CHARGE METER — the board frame fills like a loading ring as the round elapses; a
     // full loop = resolve. Pure UI chrome (no chart semantics), instantly legible as "charging to land".
     const drawPerimeter = (p: number) => {
-      const ins = 3;
-      const rad = 12;
+      // Inset well off the board edge so the charge-meter rails read as a floating progress frame
+      // with clear breathing room, not a bright line jammed against the right/side edges.
+      const ins = 10;
+      const rad = 14;
       const w = cssW - 2 * ins;
       const h = cssH - 2 * ins;
       if (w <= 0 || h <= 0) return;
