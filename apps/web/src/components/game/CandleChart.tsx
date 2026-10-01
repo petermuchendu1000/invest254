@@ -44,7 +44,13 @@ const MIN_BARS = 8, MAX_BARS = 600, ZOOM_STEP = 0.7, RIGHT_OFFSET_BARS = 3;
 const RESUME_MS = 3000; // auto-return to the live edge after this idle time following manual pan/zoom
 const MA = { fast: 7, mid: 25, slow: 99 }, BB_PERIOD = 20, BB_MULT = 2, PRICE_PRECISION = 4;
 
-const readVar = (cs: CSSStyleDeclaration, n: string, f: string) => cs.getPropertyValue(n).trim() || f;
+/** TradingView Supercharts dark palette — the look the candlestick/OHLC view is styled to. */
+const TV = {
+  bg: '#131722', surface: '#1b2029', rail: '#171b24', border: '#2a2e39', grid: 'rgba(42,46,57,0.5)',
+  text: '#d1d4dc', muted: '#787b86', up: '#089981', down: '#f23645', accent: '#2962ff', info: '#2962ff',
+  cross: '#9598a1', crossLabel: '#363a45',
+} as const;
+
 const pad = (n: number) => String(n).padStart(2, '0');
 const localTime = (t: number) => { const d = new Date(t * 1000); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 const asLine = (candles: Candle[], vals: Array<number | null>): LineData[] => {
@@ -148,23 +154,26 @@ export function CandleChart({
       const lc = await import('lightweight-charts');
       const { createChart, CandlestickSeries, BarSeries, LineSeries, AreaSeries, BaselineSeries, ColorType, CrosshairMode, LineStyle } = lc;
       if (disposed) return;
-      const cs = getComputedStyle(document.documentElement);
-      const up = readVar(cs, '--pp-up', '#16C784'), down = readVar(cs, '--pp-down', '#EA3943');
-      const bg = readVar(cs, '--pp-surface', readVar(cs, '--pp-bg', '#0B0E11'));
-      const text = readVar(cs, '--pp-muted', '#8B97A7'), border = readVar(cs, '--pp-border', '#2A323D');
-      const accent = readVar(cs, '--pp-accent', '#67E997'), info = readVar(cs, '--pp-info', '#3B82F6');
+      // TradingView Supercharts palette — fixed (not brand-themed) so candlestick/OHLC read as a
+      // genuine TV terminal: dark navy canvas, teal/red bodies, faint grid, TV blue overlays.
+      const up = TV.up, down = TV.down, bg = TV.bg, text = TV.text, border = TV.border;
+      const accent = TV.accent, info = TV.info;
 
       const chart = createChart(host, {
         autoSize: true,
-        layout: { background: { type: ColorType.Solid, color: bg }, textColor: text, fontSize: 10, attributionLogo: true },
-        grid: { vertLines: { color: border }, horzLines: { color: border } },
+        layout: { background: { type: ColorType.Solid, color: bg }, textColor: text, fontSize: 11, attributionLogo: true },
+        grid: { vertLines: { color: TV.grid }, horzLines: { color: TV.grid } },
         rightPriceScale: { borderColor: border, scaleMargins: { top: 0.08, bottom: 0.08 }, mode: scaleMode === 'log' ? 1 : scaleMode === 'percent' ? 2 : 0 },
         timeScale: {
           borderColor: border, timeVisible: true, secondsVisible: true, rightOffset: RIGHT_OFFSET_BARS, barSpacing: 6,
           tickMarkFormatter: (t: Time) => localTime(t as number),
         },
         localization: { timeFormatter: (t: Time) => localTime(t as number) },
-        crosshair: { mode: CrosshairMode.Normal },
+        crosshair: {
+          mode: CrosshairMode.Normal,
+          vertLine: { color: TV.cross, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TV.crossLabel },
+          horzLine: { color: TV.cross, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TV.crossLabel },
+        },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
         handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: false } },
       });
@@ -251,26 +260,31 @@ export function CandleChart({
     };
   }, [getTicks, getLastTick, intervalMs, chartType, windowMs, setFollow, snapToLive, refreshIndicators, scaleMode]);
 
-  const pill = 'h-6 min-w-[1.75rem] [@media(pointer:coarse)]:min-w-11 rounded-md border px-1.5 text-[10px] font-semibold leading-none transition backdrop-blur';
-  const idle = 'border-border bg-surface/80 text-muted hover:text-fg';
-  const active = 'border-accent bg-accent/15 text-accent';
+  // TradingView Supercharts chrome — fixed palette so the whole view reads as a TV terminal.
+  const pill = 'h-6 min-w-[1.75rem] [@media(pointer:coarse)]:min-w-11 rounded px-1.5 text-[11px] font-semibold leading-none transition';
+  const idle = 'text-[#787b86] hover:text-white';
+  const active = 'bg-[#2a2e39] text-white';
   const up = (legend?.changePct ?? 0) >= 0;
-  const row = 'flex items-center gap-1';
+  const row = 'flex items-center gap-0.5';
+  const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2a2e39]" aria-hidden />;
 
   return (
-    <div className="flex h-full w-full flex-col">
-      {/* Toolbar header strip — sits ABOVE the plot (TradingView-style) so it never covers candles. */}
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-1 pb-1">
+    <div className="flex h-full w-full flex-col bg-[#131722] text-[#d1d4dc]">
+      {/* Top toolbar — symbol + timeframe pills + tools (TradingView-style, above the plot). */}
+      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[#2a2e39] px-2 text-[12px]">
+        <span className="shrink-0 pr-1 text-[13px] font-bold text-white">{symbol}</span>
+        {sep}
         <div className={cn('flex-wrap', row)}>
           {INTERVALS.map((iv) => (
             <button key={iv.ms} type="button" onClick={() => setIntervalMs(iv.ms)} aria-pressed={intervalMs === iv.ms} className={cn(pill, intervalMs === iv.ms ? active : idle)}>{iv.label}</button>
           ))}
         </div>
+        <div className="flex-1" />
         <div className={row} ref={menuWrapRef}>
           <div className="relative">
             <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} className={cn(pill, menuOpen ? active : idle, 'px-2')} title="Chart features">⚙ Tools</button>
             {menuOpen ? (
-              <div className="absolute right-0 top-7 z-30 w-52 rounded-lg border border-border bg-surface/95 p-2 text-left shadow-xl backdrop-blur">
+              <div className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-[#2a2e39] bg-[#1b2029] p-2 text-left shadow-xl">
                 <Section title="Chart type">
                   <div className="grid grid-cols-3 gap-1">
                     {CHART_TYPES.map((c) => (
@@ -301,23 +315,65 @@ export function CandleChart({
         </div>
       </div>
 
-      {/* Plot area — fills the remaining height; only the faint watermark + compact legend overlay it. */}
-      <div className="relative min-h-0 flex-1">
-        <div ref={hostRef} className="h-full w-full" aria-label="Live price chart" role="img" />
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <span className="select-none text-4xl font-black uppercase tracking-widest text-fg/[0.04]">{symbol}</span>
-        </div>
-        {legend ? (
-          <div className="pointer-events-none absolute left-1 top-1 z-20 flex flex-wrap gap-x-2 rounded-md bg-surface/70 px-1.5 py-0.5 font-mono text-[10px] tabular-nums backdrop-blur">
-            <span className="text-muted">{symbol}</span>
-            <span className="text-muted">O <span className="text-fg">{legend.o.toFixed(4)}</span></span>
-            <span className="text-muted">H <span className="text-fg">{legend.h.toFixed(4)}</span></span>
-            <span className="text-muted">L <span className="text-fg">{legend.l.toFixed(4)}</span></span>
-            <span className="text-muted">C <span className="text-fg">{legend.c.toFixed(4)}</span></span>
-            <span className={cn('font-semibold', up ? 'text-up' : 'text-down')}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span>
+      {/* Body = left drawing rail + plot (TradingView layout). */}
+      <div className="flex min-h-0 flex-1">
+        <DrawRail />
+        {/* Plot area — fills the remaining width/height; watermark + OHLC legend overlay it. */}
+        <div className="relative min-h-0 flex-1">
+          <div ref={hostRef} className="h-full w-full" aria-label="Live price chart" role="img" />
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+            <span className="select-none text-4xl font-black uppercase tracking-widest text-white/[0.04]">{symbol}</span>
           </div>
-        ) : null}
+          {legend ? (
+            <div className="pointer-events-none absolute left-2 top-1.5 z-20 flex flex-wrap items-baseline gap-x-2 font-mono text-[11px] tabular-nums">
+              <span className="font-semibold text-white">{symbol}</span>
+              <span className="text-[#787b86]">O <span className="text-[#d1d4dc]">{legend.o.toFixed(4)}</span></span>
+              <span className="text-[#787b86]">H <span className="text-[#d1d4dc]">{legend.h.toFixed(4)}</span></span>
+              <span className="text-[#787b86]">L <span className="text-[#d1d4dc]">{legend.l.toFixed(4)}</span></span>
+              <span className="text-[#787b86]">C <span className="text-[#d1d4dc]">{legend.c.toFixed(4)}</span></span>
+              <span className={cn('font-semibold', up ? 'text-[#089981]' : 'text-[#f23645]')}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span>
+            </div>
+          ) : null}
+        </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Left drawing rail — the TradingView Supercharts tool column (cursor, crosshair, trend/horizontal
+ * lines, Fibonacci, text, measure, …). Cosmetic chrome that completes the terminal look; the chart's
+ * own pointer tools (pan/zoom/crosshair) remain active in the plot to its right.
+ */
+function DrawRail() {
+  const tools: { d: string; label: string }[] = [
+    { d: 'M5 3l6 14 2-6 6-2z', label: 'Cursor' },
+    { d: 'M12 3v18M3 12h18', label: 'Crosshair' },
+    { d: 'M4 20L20 4', label: 'Trend line' },
+    { d: 'M3 12h18', label: 'Horizontal line' },
+    { d: 'M5 19l4-9 3 5 3-8 4 12', label: 'Pitchfork' },
+    { d: 'M6 4v16M18 4v16M3 9h18M3 15h18', label: 'Fibonacci' },
+    { d: 'M4 7h16M4 12h10M4 17h16', label: 'Text' },
+    { d: 'M7 4h10l-5 16z', label: 'Measure' },
+  ];
+  return (
+    <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2a2e39] bg-[#171b24] py-1.5" aria-hidden>
+      {tools.map((t, i) => (
+        <span
+          key={t.label}
+          title={t.label}
+          className={cn('grid h-8 w-8 place-items-center rounded-md', i === 0 ? 'bg-[#2a2e39] text-white' : 'text-[#b2b5be]')}
+        >
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d={t.d} />
+          </svg>
+        </span>
+      ))}
+      <span className="mt-auto grid h-8 w-8 place-items-center rounded-md text-[#b2b5be]" title="Trash" aria-hidden>
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13" />
+        </svg>
+      </span>
     </div>
   );
 }
