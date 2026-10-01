@@ -53,9 +53,10 @@ export function GameCurve() {
 
   return (
     <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface">
-      {/* MARKETER: never the TradingView candlestick/bars view — always the neutral single-colour wave
-          (no price axis, grid, labels or red/green), so the chart doesn't read as a trading terminal. */}
-      {tvType && !isMarketer ? (
+      {/* Candlestick/OHLC brands render the TradingView view for everyone (marketers included): neutral-
+          ization applies to the LINE wave (`CurveCanvas`) only. Line brands keep the single-colour wave,
+          which for marketers is the neutralized version (no price axis, labels or red/green). */}
+      {tvType ? (
         <CandleChart key={tvType} initialType={tvType} getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} symbol={`BTC/${brand.currency || 'KES'}`} />
       ) : (
         <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} />
