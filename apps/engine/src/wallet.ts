@@ -102,6 +102,16 @@ export interface GameRepository {
   revealSeed(tradeDate: string, serverSeed: string, siteId?: string): Promise<boolean>;
   /** Durable seed version for a day (0 unless a superadmin forced a rotation; see `seed_overrides`, J5). `siteId` scopes it per brand. */
   getSeedVersion(tradeDate: string, siteId?: string): Promise<number>;
+  /**
+   * EVERY forced seed rotation, as tradeDate -> version.
+   *
+   * The candle chart reconstructs hundreds of past days at once, and each one must be derived under
+   * the version it was actually traded at or the chart would show a history that never happened.
+   * Fetching them one day at a time would be hundreds of round trips; `seed_overrides` only gains a
+   * row when a superadmin forces a rotation, so reading the whole table is cheaper than one of those
+   * queries. Optional so existing repository fakes keep compiling — absent means "no rotations".
+   */
+  listSeedVersions?(siteId?: string): Promise<Map<string, number>>;
   /** All positions still open — the crash-recovery work list. */
   listOpenPositions(): Promise<OpenPositionRow[]>;
   /** Public fairness record for a day, or null if the day is unknown. */
@@ -266,6 +276,15 @@ export class InMemoryGameRepository implements GameRepository {
 
   async getSeedVersion(tradeDate: string, siteId?: string): Promise<number> {
     return this.seedVersions.get(dayKey(tradeDate, siteId)) ?? 0;
+  }
+
+  async listSeedVersions(siteId?: string): Promise<Map<string, number>> {
+    const prefix = `${siteId ?? ""}:`;
+    const out = new Map<string, number>();
+    for (const [key, version] of this.seedVersions) {
+      if (key.startsWith(prefix)) out.set(key.slice(prefix.length), version);
+    }
+    return out;
   }
 
   /** Test/dev seam: force a day's seed version (mirrors the `seed_overrides` upsert, J5). */
@@ -443,6 +462,15 @@ export class PgGameRepository implements GameRepository {
     // seed_overrides is not yet site-scoped (see docs/22 Task B); forced rotation is superadmin-rare.
     const r = await this.q.query("select version from seed_overrides where trade_date = $1", [_tradeDate]);
     return r.rows.length ? Number(r.rows[0].version) : 0;
+  }
+
+  async listSeedVersions(_siteId?: string): Promise<Map<string, number>> {
+    // Not site-scoped yet, matching getSeedVersion above. The table holds one row per forced
+    // rotation, so it stays small enough to read whole.
+    const r = await this.q.query("select trade_date, version from seed_overrides", []);
+    const out = new Map<string, number>();
+    for (const row of r.rows) out.set(String(row.trade_date).slice(0, 10), Number(row.version));
+    return out;
   }
   async listOpenPositions(): Promise<OpenPositionRow[]> {
     const r = await this.q.query(

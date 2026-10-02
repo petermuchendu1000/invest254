@@ -1,4 +1,4 @@
-import { SeededRng } from "./prng.js";
+import { SeededRng, SeedKeystream } from "./prng.js";
 import { type GameConfig, CURVE_AMPLITUDE, CURVE_BASE_RATE } from "./config.js";
 import type { Tick } from "./types.js";
 
@@ -142,9 +142,12 @@ export class CurveGenerator {
   private readonly walk: Float64Array | null;
 
   constructor(serverSeed: string, private readonly cfg: GameConfig, readonly profile: CurveProfile = "market") {
-    const rng = new SeededRng(serverSeed, "curve");
     if (profile === "market") {
       // Martingale: independent increments ⇒ no past-price strategy beats the base rate.
+      // A day needs ~260k draws, so this uses the bulk keystream rather than the per-draw HMAC: same
+      // uniforms, same unpredictability, ~170x faster — which is what makes reconstructing a year of
+      // history for the candle chart practical (0.3s instead of 59s). See SeedKeystream.
+      const rng = new SeedKeystream(serverSeed, "curve", 1 + 3 * WALK_POINTS);
       const w = new Float64Array(WALK_POINTS);
       w[0] = rng.range(-WALK_START_SPREAD, WALK_START_SPREAD);
       for (let i = 1; i < WALK_POINTS; i++) {
@@ -162,6 +165,9 @@ export class CurveGenerator {
       this.driftScale = 1;
       return;
     }
+    // `wave` draws only a few dozen values, so the per-draw HMAC stream costs nothing here and the
+    // line brands' approved look stays byte-for-byte identical.
+    const rng = new SeededRng(serverSeed, "curve");
     // `wave`: a dense, non-harmonic spectrum of pink-noise sinusoids. Each component's frequency is
     // jittered off the geometric ladder with an independent seed-derived phase, so no single period
     // dominates and the pattern never visibly repeats; the band stays well under ~2.5 Hz so the sum

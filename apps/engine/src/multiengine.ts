@@ -1,6 +1,6 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
-import { type Direction, instrumentById, isKnownInstrument, type DigitKind, type MultDir } from "@invest254/shared";
+import { type Direction, instrumentById, isKnownInstrument, isTimeframe, type DigitKind, type MultDir } from "@invest254/shared";
 import type { SiteRegistry } from "./siteregistry.js";
 import type { GameRepository } from "./wallet.js";
 import type { Verifier } from "./auth.js";
@@ -397,6 +397,28 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               send(ws, "mult_closed", { positionId: r.positionId, reason: r.reason, pnlCents: r.pnlCents, payoutCents: r.payoutCents, balance: r.balance });
               const after = await opts.repo.getWalletSnapshot(userId);
               return send(ws, "balance", { real: after.real, bonus: after.bonus, currency: after.currency });
+            }
+            case "candles": {
+              // Chart history. Unauthenticated on purpose: the price series is public (every player
+              // watches the same curve), it reveals nothing about any account, and the chart draws
+              // before a token arrives. Settlement is untouched — these are display bars.
+              if (!rt.history) return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles" });
+              const tf = String(msg.data?.tf ?? "");
+              if (!isTimeframe(tf)) return send(ws, "error", { code: "BAD_TIMEFRAME", message: tf });
+              const count = Number(msg.data?.count ?? 500);
+              if (!Number.isFinite(count) || count <= 0) return send(ws, "error", { code: "BAD_COUNT" });
+              // `to` lets the client page backwards: ask again for bars ending at the oldest it holds.
+              const rawTo = msg.data?.to;
+              const to = rawTo === undefined || rawTo === null ? undefined : Number(rawTo);
+              if (to !== undefined && !Number.isFinite(to)) return send(ws, "error", { code: "BAD_TO" });
+              const anchor = rt.history.liveAnchor();
+              return send(ws, "candles", {
+                tf, instrument: anchor.instrument,
+                bars: rt.history.candles(tf, count, to),
+                // How to place live ticks on the same axis: price = base + scale*(value - openValue),
+                // where value = (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE.
+                anchor: { tradeDate: anchor.dateKey, base: anchor.base, openValue: anchor.openValue },
+              });
             }
             case "ping": return send(ws, "pong", {});
             default: return send(ws, "error", { code: "UNKNOWN_TYPE", message: msg.type });

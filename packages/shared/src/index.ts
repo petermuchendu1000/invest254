@@ -11,6 +11,7 @@ export * from "./totp.js";
 export * from "./config.js";
 export * from "./types.js";
 export * from "./curve.js";
+export * from "./candles.js";
 export * from "./chart.js";
 export * from "./contracts.js";
 export * from "./instruments.js";
