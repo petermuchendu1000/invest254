@@ -54,21 +54,21 @@ export function useIsMarketer(): { isMarketer: boolean; resolved: boolean } {
 }
 
 /**
- * OWNER POLICY (2026-10): marketer neutralisation is scoped to the LINE-GRAPH wave ONLY.
+ * OWNER POLICY: the marketer app must be TikTok-safe — it must NOT read as a binary-options / trading
+ * terminal. So the full P1–P3 neutral skin is ON: money shown as game points, Buy/Sell as wordless
+ * arrows, neutral nav, neutral trade-type/instrument names, and the 18+/licence/responsible-gaming
+ * footer hidden. `useMarketerSkin()` reports a marketer to every shared player surface.
  *
- * Every shared player surface — money/points, Buy/Sell controls, the digits tick chart, trade-type
- * and instrument names, nav chrome, the 18+/licence footer — shows the REAL trading terminal to
- * marketers, exactly as a player sees it. The one exception is the classic line wave (`CurveCanvas`),
- * which `GameCurve` keeps neutral by reading `useIsMarketer()` directly.
- *
- * So `NEUTRALISE_SHARED_UI` is false and `useMarketerSkin()` never reports a marketer to those shared
- * surfaces. The P1–P3 neutralisation code stays in place behind this one switch: flip the flag to
- * `true` to bring the full neutral skin back without reworking any call site.
+ * What is NOT neutralised (handled elsewhere, by design): the candlestick/bars/area CHART, which
+ * `GameCurve` renders as a real TradingView view for candle brands (TikTok should not read a candle
+ * chart as binary). The classic line wave stays the neutral game wave (GameCurve passes the real
+ * marketer flag to `CurveCanvas`). So "chart neutralisation = the line wave only"; every OTHER
+ * gambling/trading tell is still neutralised here.
  *
  * This is a presentation policy only. Marketer ROLE (routing, the marketer HUD, referral earnings,
- * admin) still uses `useIsMarketer()`, and every marketer endpoint stays gated server-side.
+ * admin) uses `useIsMarketer()`, and every marketer endpoint stays gated server-side.
  */
-const NEUTRALISE_SHARED_UI: boolean = false;
+const NEUTRALISE_SHARED_UI: boolean = true;
 
 export function useMarketerSkin(): { isMarketer: boolean; resolved: boolean } {
   const { isMarketer, resolved } = useIsMarketer();

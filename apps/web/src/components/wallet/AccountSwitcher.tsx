@@ -12,6 +12,8 @@ import { BALANCE_BUMP_EVENT } from '@/lib/game/outcomeFx';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { ApiError } from '@/lib/api/client';
 import { AccountMenu } from '@/components/wallet/AccountMenu';
+import { MK } from '@/lib/marketer/labels';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 /**
  * Top-bar balance + Real/Demo account switcher for the standard shell.
@@ -77,6 +79,7 @@ export function AccountSwitcher() {
     prevRef.current = total;
   }, [total]);
 
+  const { isMarketer: skin } = useMarketerSkin();
   if (!hydrated || !token || !data) return null;
 
   // A MARKETER is a normal player with a Real account (funny money) and a separate Demo practice bucket
@@ -88,8 +91,9 @@ export function AccountSwitcher() {
   // A marketer's active tab is their practice flag (account_mode stays 'demo'), so guard against the
   // PRESENTED tab, not data.mode — otherwise tapping "Demo" (always === data.mode) would no-op.
   const current: 'real' | 'demo' = marketer ? (data.marketerPractice ? 'demo' : 'real') : (data.mode === 'demo' ? 'demo' : 'real');
-  const tabLabel = demo ? 'Demo' : 'Real';
-  const tabBadge = demo ? 'D' : 'R';
+  // MARKETER: neutralise the Real/Demo money vocabulary to game labels (Coins/Practice, C/P).
+  const tabLabel = demo ? (skin ? MK.practiceTab : 'Demo') : (skin ? MK.realTab : 'Real');
+  const tabBadge = demo ? (skin ? MK.practiceBadge : 'D') : (skin ? MK.realBadge : 'R');
   const switchTo = (mode: 'real' | 'demo') => {
     if (mode === current || setMode.isPending) return;
     setMode.mutate(mode, {
