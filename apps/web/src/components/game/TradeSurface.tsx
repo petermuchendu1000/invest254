@@ -9,6 +9,7 @@ import { GameCurve } from '@/components/game/GameCurve';
 import { BetPanel } from '@/components/game/BetPanel';
 import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
+import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 
 /**
  * Chooses the trade layout for the current brand:
@@ -39,6 +40,9 @@ export function TradeSurface() {
   }, []);
 
   const ui = override ?? brand.tradeUi ?? 'classic';
+  // Candlestick brands carry the gear in the chart's own toolbar, where MT5 and TradingView put
+  // chart settings. Only the line brands need the standalone row.
+  const gearInChart = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
 
   if (ui === 'digits') return <DigitsTradeScreen />;
 
@@ -46,7 +50,7 @@ export function TradeSurface() {
     <section className="flex h-full min-h-0 flex-col gap-2 md:gap-3">
       {/* Interface gear — players switch Classic ↔ Basic here. Stays visible in both modes so a
           Basic-mode player can switch back; hidden for real marketers (always disguised). */}
-      {isMarketerRole ? null : (
+      {isMarketerRole || gearInChart ? null : (
         <div className="flex items-center justify-end">
           <InterfaceModeToggle />
         </div>

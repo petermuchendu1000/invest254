@@ -402,18 +402,26 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               // Chart history. Unauthenticated on purpose: the price series is public (every player
               // watches the same curve), it reveals nothing about any account, and the chart draws
               // before a token arrives. Settlement is untouched — these are display bars.
-              if (!rt.history) return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles" });
+              // The chart pages backwards while the live edge keeps updating, so several requests can
+              // be in flight at once. Echoing the caller's id is what lets it match each reply —
+              // including a failure — to the request that caused it instead of guessing by timeframe.
+              const reqId = msg.data?.reqId === undefined ? undefined : String(msg.data.reqId);
+              const rid = reqId === undefined ? {} : { reqId };
+              const fail = (code: string, message?: string) =>
+                send(ws, "error", { code, ...(message === undefined ? {} : { message }), ...rid });
+
+              if (!rt.history) return fail("NO_CANDLES", "this brand draws a line chart, not candles");
               const tf = String(msg.data?.tf ?? "");
-              if (!isTimeframe(tf)) return send(ws, "error", { code: "BAD_TIMEFRAME", message: tf });
+              if (!isTimeframe(tf)) return fail("BAD_TIMEFRAME", tf);
               const count = Number(msg.data?.count ?? 500);
-              if (!Number.isFinite(count) || count <= 0) return send(ws, "error", { code: "BAD_COUNT" });
+              if (!Number.isFinite(count) || count <= 0) return fail("BAD_COUNT");
               // `to` lets the client page backwards: ask again for bars ending at the oldest it holds.
               const rawTo = msg.data?.to;
               const to = rawTo === undefined || rawTo === null ? undefined : Number(rawTo);
-              if (to !== undefined && !Number.isFinite(to)) return send(ws, "error", { code: "BAD_TO" });
+              if (to !== undefined && !Number.isFinite(to)) return fail("BAD_TO");
               const anchor = rt.history.liveAnchor();
               return send(ws, "candles", {
-                tf, instrument: anchor.instrument,
+                ...rid, tf, instrument: anchor.instrument,
                 bars: rt.history.candles(tf, count, to),
                 // How to place live ticks on the same axis: price = base + scale*(value - openValue),
                 // where value = (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE.

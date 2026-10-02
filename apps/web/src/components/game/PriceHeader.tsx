@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
+import { valueOfRate } from '@invest254/shared/candles';
 import { cn } from '@/lib/cn';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { useSession } from '@/lib/auth/session';
@@ -19,7 +20,7 @@ const signed = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
  * The number is the game's synthetic curve value, not a real BTC price.
  */
 export function PriceHeader() {
-  const { getTicks, getLastTick, online, status } = useGameSocket();
+  const { getTicks, getLastTick, online, status, getMarket } = useGameSocket();
   const role = useSession((s) => s.user?.role);
   // Staff see the real concurrency; everyone else sees a believable, gently
   // fluctuating crowd figure (social proof) — never the raw dev/low value.
@@ -34,7 +35,14 @@ export function PriceHeader() {
   }, [getLastTick]);
 
   const last = getLastTick();
-  const value = last ? toValue(last.rate) : null;
+  // Candlestick brands quote a real instrument. Once the chart's first history reply has landed, the
+  // strip speaks the same language as the chart below it — symbol, price and the day's change — so
+  // the two cannot disagree. Until then (and on line brands) it keeps the raw curve value.
+  const market = getMarket();
+  const priceOfTick = (rate: number) =>
+    market!.anchor.base + market!.instrument.scale * (valueOfRate(rate) - market!.anchor.openValue);
+
+  const value = last ? (market ? priceOfTick(last.rate) : toValue(last.rate)) : null;
 
   let hi: number | null = null;
   let lo: number | null = null;
@@ -43,7 +51,7 @@ export function PriceHeader() {
     let mx = -Infinity;
     let mn = Infinity;
     for (const t of ticks) {
-      const v = toValue(t.rate);
+      const v = market ? priceOfTick(t.rate) : toValue(t.rate);
       if (v > mx) mx = v;
       if (v < mn) mn = v;
     }
@@ -51,7 +59,13 @@ export function PriceHeader() {
     lo = mn;
   }
 
-  const up = (value ?? 0) >= 0;
+  const pair = market ? market.instrument.symbol : `BTC/${quote}`;
+  // On a real instrument "change" is against the day's OPEN, which is exactly the anchor base.
+  const changePct = market && value !== null && market.anchor.base
+    ? ((value - market.anchor.base) / market.anchor.base) * 100
+    : (value ?? 0) * 100;
+  const show = (v: number) => (market ? v.toFixed(market.instrument.digits) : fmt(v));
+  const up = changePct >= 0;
   const statusDot = status === 'open' ? 'bg-up' : status === 'connecting' ? 'bg-warn' : 'bg-down';
 
   return (
@@ -60,9 +74,9 @@ export function PriceHeader() {
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
           <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} aria-label={status} />
-          <span className="text-xs font-semibold text-fg">BTC/{quote}</span>
+          <span className="text-xs font-semibold text-fg">{pair}</span>
           <span className={cn('ml-1 font-mono text-lg font-bold leading-none tabular-nums', up ? 'text-up' : 'text-down')}>
-            {value !== null ? fmt(value) : '\u2014'}
+            {value !== null ? show(value) : '\u2014'}
           </span>
           {value !== null ? (
             <span
@@ -71,13 +85,13 @@ export function PriceHeader() {
                 up ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
               )}
             >
-              {signed(value * 100)}%
+              {signed(changePct)}%
             </span>
           ) : null}
         </div>
         <div className="flex min-w-0 items-center gap-3 text-right">
-          <Stat className="hidden sm:flex" label="H" value={hi !== null ? fmt(hi) : '\u2014'} />
-          <Stat className="hidden sm:flex" label="L" value={lo !== null ? fmt(lo) : '\u2014'} />
+          <Stat className="hidden sm:flex" label="H" value={hi !== null ? show(hi) : '\u2014'} />
+          <Stat className="hidden sm:flex" label="L" value={lo !== null ? show(lo) : '\u2014'} />
           <Stat
             label="Online"
             valueClassName="text-up"
