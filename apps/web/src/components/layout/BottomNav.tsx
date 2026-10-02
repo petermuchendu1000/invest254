@@ -7,7 +7,7 @@ import { cn } from '@/lib/cn';
 import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { DIcon } from '@/components/game/digits/icons';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 type IconProps = { className?: string };
 
@@ -69,7 +69,7 @@ const marketerItems = [
 
 export function BottomNav() {
   const pathname = usePathname();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const setChat = useLiveChat((s) => s.setOpen);
   const unread = useLiveChatUnread();
   return (

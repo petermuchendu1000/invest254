@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDisplayMoney } from '@/lib/money';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 import { cn } from '@/lib/cn';
 import { useCountUp } from '@/lib/useCountUp';
@@ -81,7 +81,7 @@ function prefersReducedMotion(): boolean {
  */
 export function OutcomeOverlay() {
   const { fmt } = useDisplayMoney();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const current = useOutcomeFx((s) => s.current);
   const clear = useOutcomeFx((s) => s.clear);
   const [visible, setVisible] = useState(false);

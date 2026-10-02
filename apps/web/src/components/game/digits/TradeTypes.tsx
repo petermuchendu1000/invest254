@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { DIcon } from '@/components/game/digits/icons';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 
 /**
@@ -53,7 +53,7 @@ const CHIPS = [
 export function TradeTypesSheet({ value, onPick, onClose, demo }: {
   value: TradeTypeId; onPick: (id: TradeTypeId) => void; onClose: () => void; demo: boolean;
 }) {
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   // MARKETER: "Options" is a binary-options tell → "Quick".
   const chipLabel = (id: (typeof CHIPS)[number]['id'], label: string) => (isMarketer && id === 'options' ? MK.optionsGroup : label);
   const [chip, setChip] = useState<(typeof CHIPS)[number]['id']>('all');

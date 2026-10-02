@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { formatMoney, formatKes, isForeignDisplay, displayToKesCents, kesCentsToDisplay, type Cents } from '@invest254/shared/money';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { POINTS_UNIT, formatPoints } from '@/lib/marketer/points';
 import { cn } from '@/lib/cn';
 
@@ -37,7 +37,7 @@ export const USD_LIMITS = { minStake: 1, minDeposit: 1, minWithdrawal: 5 } as co
 
 export function useDisplayMoney() {
   const brand = useBrand();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const currency = brand.currency || 'KES';
   const locale = brand.locale || 'en-KE';
   const fxRateFromKes = brand.fxRateFromKes ?? 1;

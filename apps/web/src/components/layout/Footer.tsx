@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { CurrencySwitcher } from '@/components/layout/CurrencySwitcher';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 // Global footer: responsible-gaming messaging, 18+ badge and legal links.
 // Required by FE7 (responsible gaming is first-class, not an afterthought).
@@ -11,7 +11,7 @@ import { useIsMarketer } from '@/lib/marketer/isMarketer';
 // exactly what flags a TikTok Live — it is hidden for marketers, leaving only Terms/Privacy/Support.
 export function Footer() {
   const brand = useBrand();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const year = new Date().getFullYear();
   return (
     <footer className="mt-8 border-t border-border bg-surface/60">

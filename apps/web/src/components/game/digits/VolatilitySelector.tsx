@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { type Instrument } from '@/lib/game/instruments';
 import { MarketsPanel, IndexBadge } from '@/components/game/digits/MarketsPicker';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 /** MARKETER: a neutral game name for a volatility index — "Volatility 25 (1s) Index" → "Zone 25". */
 function gameName(inst: Instrument): string {
@@ -53,7 +53,7 @@ export function VolatilitySelector({
   /** Wide toolbar trigger (icon · bold full label · live price+change · edit affordance). */
   wide?: boolean;
 }) {
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);

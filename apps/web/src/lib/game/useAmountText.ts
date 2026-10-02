@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { useDisplayMoney } from '@/lib/money';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { POINTS_UNIT, formatPoints } from '@/lib/marketer/points';
 
 /**
@@ -15,7 +15,7 @@ import { POINTS_UNIT, formatPoints } from '@/lib/marketer/points';
  */
 export function useAmountText() {
   const { toDisplay, isForeign, currency, locale, symbol } = useDisplayMoney();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   return useMemo(() => {
     if (isMarketer) {
       const num = (cents: number) => formatPoints(toDisplay(Math.abs(cents)), locale);

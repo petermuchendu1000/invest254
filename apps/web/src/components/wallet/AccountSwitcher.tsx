@@ -11,7 +11,6 @@ import { useCountUp } from '@/lib/useCountUp';
 import { BALANCE_BUMP_EVENT } from '@/lib/game/outcomeFx';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { ApiError } from '@/lib/api/client';
-import { MK } from '@/lib/marketer/labels';
 import { AccountMenu } from '@/components/wallet/AccountMenu';
 
 /**
@@ -89,9 +88,8 @@ export function AccountSwitcher() {
   // A marketer's active tab is their practice flag (account_mode stays 'demo'), so guard against the
   // PRESENTED tab, not data.mode — otherwise tapping "Demo" (always === data.mode) would no-op.
   const current: 'real' | 'demo' = marketer ? (data.marketerPractice ? 'demo' : 'real') : (data.mode === 'demo' ? 'demo' : 'real');
-  // MARKETER: neutralise the Real/Demo money vocabulary to game labels (Coins/Practice, C/P).
-  const tabLabel = demo ? (marketer ? MK.practiceTab : 'Demo') : (marketer ? MK.realTab : 'Real');
-  const tabBadge = demo ? (marketer ? MK.practiceBadge : 'D') : (marketer ? MK.realBadge : 'R');
+  const tabLabel = demo ? 'Demo' : 'Real';
+  const tabBadge = demo ? 'D' : 'R';
   const switchTo = (mode: 'real' | 'demo') => {
     if (mode === current || setMode.isPending) return;
     setMode.mutate(mode, {

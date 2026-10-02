@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { pillLabel } from '@/lib/game/stakeLadder';
 import { useDisplayMoney } from '@/lib/money';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Segmented } from '@/components/ui/Segmented';
 import { api } from '@/lib/api/endpoints';
@@ -54,7 +54,7 @@ export function BetPanel() {
   const clearPending = useDepositUi((s) => s.clearPending);
 
   const brand = useBrand();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const { fmt, both, symbol, isForeign, toDisplay, toKesCents, currency } = useDisplayMoney();
   // Quick stakes (STAKE-1): the first pills of the brand's ladder — the admin's minimum, ×2, ×4 —
   // every one a multiple of 5 in the brand currency.

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { DisplayMoney as Money } from '@/lib/money';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 import type { ActivePosition } from '@/lib/game/betting';
 
@@ -13,7 +13,7 @@ import type { ActivePosition } from '@/lib/game/betting';
  * rate); `liveMultiplier`/`livePnlCents` come from `position_update`.
  */
 export function LivePnl({ pos }: { pos: ActivePosition }) {
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);

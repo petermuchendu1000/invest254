@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useDigitSession } from '@/lib/game/digitSession';
 import { DIcon } from '@/components/game/digits/icons';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 const SECTIONS: { title: string; body: string }[] = [
   { title: 'How a contract works', body: 'Choose a contract type and a side, then tap it. When the contract settles it shows a result digit (0-9), and it wins if that digit meets the condition of the side you chose. The chart shows the index price; the row of circles under it shows how often each last digit appeared over the recent ticks.' },
@@ -28,7 +28,7 @@ const MARKETER_SECTIONS: { title: string; body: string }[] = [
 
 /** How to Trade (digits broker mock): plain rules for each contract, stake/payout and Auto. */
 export function HowToTradeModal() {
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const sections = isMarketer ? MARKETER_SECTIONS : SECTIONS;
   const open = useDigitSession((s) => s.howToOpen);
   const setOpen = useDigitSession((s) => s.setHowToOpen);

@@ -52,3 +52,25 @@ export function useIsMarketer(): { isMarketer: boolean; resolved: boolean } {
   if (isPending || !wallet) return { isMarketer: false, resolved: false };
   return { isMarketer: wallet.modeLocked === true, resolved: true };
 }
+
+/**
+ * OWNER POLICY (2026-10): marketer neutralisation is scoped to the LINE-GRAPH wave ONLY.
+ *
+ * Every shared player surface — money/points, Buy/Sell controls, the digits tick chart, trade-type
+ * and instrument names, nav chrome, the 18+/licence footer — shows the REAL trading terminal to
+ * marketers, exactly as a player sees it. The one exception is the classic line wave (`CurveCanvas`),
+ * which `GameCurve` keeps neutral by reading `useIsMarketer()` directly.
+ *
+ * So `NEUTRALISE_SHARED_UI` is false and `useMarketerSkin()` never reports a marketer to those shared
+ * surfaces. The P1–P3 neutralisation code stays in place behind this one switch: flip the flag to
+ * `true` to bring the full neutral skin back without reworking any call site.
+ *
+ * This is a presentation policy only. Marketer ROLE (routing, the marketer HUD, referral earnings,
+ * admin) still uses `useIsMarketer()`, and every marketer endpoint stays gated server-side.
+ */
+const NEUTRALISE_SHARED_UI: boolean = false;
+
+export function useMarketerSkin(): { isMarketer: boolean; resolved: boolean } {
+  const { isMarketer, resolved } = useIsMarketer();
+  return { isMarketer: NEUTRALISE_SHARED_UI && isMarketer, resolved };
+}

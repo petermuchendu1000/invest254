@@ -21,7 +21,7 @@ import { AccountMenu, AccountPill, ChangePasswordModal } from '@/components/layo
 import { useAccountUi } from '@/lib/account/accountUi';
 import { SoundToggle } from '@/components/layout/SoundToggle';
 import { useSound } from '@/lib/sound/sound';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 
 /** Brand wordmark in two tones (first word light, the rest in the accent), e.g. "Tamu" + "Traders". */
@@ -125,7 +125,7 @@ function Bell() {
  */
 export function DigitsTopBar() {
   const brand = useBrand();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const wordmark = brandWordmark(brand);
   const hydrated = useHydrated();
   const token = useSession((s) => s.token);
