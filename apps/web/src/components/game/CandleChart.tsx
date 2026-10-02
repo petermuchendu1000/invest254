@@ -42,7 +42,13 @@ const SCALES: ReadonlyArray<{ id: ScaleMode; label: string }> = [
 const DEFAULT_INTERVAL_MS = 2000;
 const MIN_BARS = 8, MAX_BARS = 600, ZOOM_STEP = 0.7, RIGHT_OFFSET_BARS = 3;
 const RESUME_MS = 3000; // auto-return to the live edge after this idle time following manual pan/zoom
-const MA = { fast: 7, mid: 25, slow: 99 }, BB_PERIOD = 20, BB_MULT = 2, PRICE_PRECISION = 4;
+const MA = { fast: 7, mid: 25, slow: 99 }, BB_PERIOD = 20, BB_MULT = 2;
+/**
+ * 6, not 4. The market curve is a random walk, so a round's move is inevitably ~1% of the day's
+ * range (sqrt(roundS / 86400)) — at 4 decimals that is a handful of ticks and the chart looks
+ * frozen mid-round. At 6 it is hundreds. See the WALK notes in packages/shared/src/curve.ts.
+ */
+const PRICE_PRECISION = 6;
 
 /** TradingView Supercharts dark palette — the look the candlestick/OHLC view is styled to. */
 const TV = {

@@ -4,8 +4,16 @@ import { CurveGenerator } from "./curve.js";
 import { SettlementEngine } from "./settle.js";
 import { SeededRng } from "./prng.js";
 import { DEFAULT_CONFIG, rtp } from "./config.js";
+import { CALIBRATION_WINDOW_S } from "./settle.js";
 
-function measureRtp(eng: SettlementEngine, dir: "buy" | "sell" | "both", seed: string, n: number, windowS = 3600) {
+/**
+ * Entry times are drawn from a FULL day, matching both the calibrator and production (players trade
+ * around the clock). A 1-hour window is not a smaller version of the same measurement on the
+ * `market` process: a random walk's 10 s increments are independent, so an hour holds only ~360 of
+ * them and the realized RTP has a standard error of ~0.035 — wider than any tolerance worth
+ * asserting. Over a day it is ~0.0025. See CALIBRATION_WINDOW_S.
+ */
+function measureRtp(eng: SettlementEngine, dir: "buy" | "sell" | "both", seed: string, n: number, windowS = CALIBRATION_WINDOW_S) {
   const rng = new SeededRng(seed, "measure");
   let stakeSum = 0, payoutSum = 0, wins = 0;
   const stake = 20000; // KES 200
@@ -77,10 +85,8 @@ test("REGRESSION: settleVariable wins are not all x1.00 when tau <= 0 (targetWin
   const curve = new CurveGenerator(seed, cfg);
   const eng = new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, 3600, 30_000);
 
-  // tau must be negative here — that's the trigger for the old bug. Thresholds are now conditional
-  // on the entry's slope bucket, so assert it holds in EVERY market state.
-  const taus = eng.params.buy.buckets.map((b) => b.tau);
-  assert.ok(taus.every((t) => t <= 0), `expected tau <= 0 in every bucket, got ${taus.map((t) => t.toFixed(4)).join(', ')}`);
+  // tau must be negative here — that's the trigger for the old bug.
+  assert.ok(eng.params.buy.tau <= 0, `expected tau <= 0, got ${eng.params.buy.tau}`);
 
   const N = 8000, stake = 20000;
   let wins = 0, payout = 0, sumMult = 0, atOne = 0;
