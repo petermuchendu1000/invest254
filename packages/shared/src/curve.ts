@@ -40,8 +40,20 @@ interface ProfileParams {
 }
 
 const PROFILES: Record<CurveProfile, ProfileParams> = {
-  // ~0.006 Hz (160 s) slowest swell up to ~1.7 Hz; pink (1/f^0.85) ⇒ trends dominate.
-  market: { K: 16, baseFreq: 0.006, ratio: 1.42, ampExp: 0.85, freqJitter: [0.82, 1.2], ampJitter: [0.8, 1.2], driftScale: 1 },
+  // MULTI-SCALE ladder: slowest component ~1 DAY (1/86400 Hz) up to ~2 Hz, 30 components.
+  //
+  // The previous market profile bottomed out at 0.006 Hz (a ~167 s period), so the curve carried no
+  // energy beyond ~3 minutes: aggregated to M15/H1/D1 it just re-sampled the same fast oscillation,
+  // and one HOUR spanned 82% of a whole DAY's range (real gold ≈ 15–25%). That made believable
+  // multi-timeframe candles impossible. Spanning a full day of periods fixes the scaling:
+  //   H1/D1 range 0.821 → 0.212, M15/H1 1.029 → 0.458, body/range 0.23 → ~0.55 (real-candle-like).
+  //
+  // ampExp 0.60 is tuned (not guessed): it maximises per-round motion while hitting those ratios.
+  // Per-round (60 s) moves are ~26× smaller in absolute terms, which is CORRECT for a gold-scale
+  // instrument and does not affect fairness — SettlementEngine picks tau as a QUANTILE of the move
+  // distribution and rescales gain, so win-rate == targetWinRate and RTP == 1-houseEdge still hold.
+  // The digits game is unaffected: it runs on InstrumentFeed, not this curve.
+  market: { K: 30, baseFreq: 1 / 86_400, ratio: 1.515646, ampExp: 0.6, freqJitter: [0.85, 1.18], ampJitter: [0.8, 1.2], driftScale: 1 },
   // Higher, flatter band (~0.022 Hz up to ~2.3 Hz; 1/f^0.5) with wider jitter ⇒ irregular, no trend
   // dominance. driftScale 0.18 keeps only a slight green lean so crossings stay roughly even.
   wave: { K: 14, baseFreq: 0.022, ratio: 1.4, ampExp: 0.5, freqJitter: [0.7, 1.35], ampJitter: [0.65, 1.4], driftScale: 0.18 },
