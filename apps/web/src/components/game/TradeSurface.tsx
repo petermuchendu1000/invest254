@@ -10,6 +10,7 @@ import { BetPanel } from '@/components/game/BetPanel';
 import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { MT5Toolbox } from '@/components/game/MT5Toolbox';
 import { MarketWatch } from '@/components/game/MarketWatch';
+import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
@@ -74,12 +75,15 @@ export function TradeSurface() {
           </div>
         )}
         {/* MARKETER: the BTC/KES price strip and the scrolling crypto ticker are the two loudest
-            "this is a trading terminal" signals — both are removed for marketers (Phase 1). */}
-        {isMarketer ? null : <PriceHeader />}
-        {isMarketer ? null : (
-          // short phones (SE): the decorative marquee gives its row to the chart. On a terminal
-          // desktop it goes entirely — MetaTrader has no scrolling crypto marquee.
-          <div className={cn('[@media(max-height:640px)]:hidden', terminal && 'lg:hidden')}><TickerStrip /></div>
+            "this is a trading terminal" signals — both are removed for marketers (Phase 1).
+            TERMINAL: both go too, for the opposite reason. MetaTrader has no scrolling crypto
+            marquee and no separate quote strip above the chart — the chart's own toolbar carries the
+            symbol, the period and the price, and Market Watch carries the quote on a desktop. Two
+            rows of chrome the real thing does not have were the least MT5 part of this screen. */}
+        {isMarketer || terminal ? null : <PriceHeader />}
+        {isMarketer || terminal ? null : (
+          // short phones (SE): the decorative marquee gives its row to the chart
+          <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
         )}
         <div className="min-h-[160px] flex-1">
           <GameCurve />
@@ -92,7 +96,8 @@ export function TradeSurface() {
       </div>
 
       <div className={cn(terminal && 'lg:w-72 lg:shrink-0 lg:overflow-y-auto xl:w-80')}>
-        <BetPanel />
+        {/* A terminal brand gets MetaTrader's ticket; every other shell keeps the classic panel. */}
+        {terminal ? <MT5OrderTicket /> : <BetPanel />}
       </div>
     </section>
   );
