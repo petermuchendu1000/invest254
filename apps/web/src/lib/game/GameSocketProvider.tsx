@@ -14,6 +14,7 @@ import { formatKes } from '@invest254/shared/money';
 import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
 import { env } from '@/lib/env';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { curveProfileForChartStyle, chartStyleOf } from '@invest254/shared/chart';
 import { wsUrlForSite } from '@/lib/brand/brand';
 import { useSession } from '@/lib/auth/session';
 import { useToast } from '@/lib/toast/ToastProvider';
@@ -113,21 +114,29 @@ const SYNTH_VOL = 1.0;     // amplitude scaler — mirrors DEFAULT_CONFIG.volati
 
 const synthRate = (value: number) => CURVE_BASE_RATE + CURVE_AMPLITUDE * value;
 
+// The two shapes the engine curve uses (packages/shared/curve.ts), mirrored here so the placeholder
+// matches the brand it is standing in for: `wave` for line brands (irregular rise/fall waves),
+// `market` for the trending candlestick/bars/area brands.
+const SYNTH_PROFILES = {
+  market: { K: 16, baseFreq: 0.006, ratio: 1.42, ampExp: 0.85, fj: 0.38, fj0: 0.82, aj: 0.4, aj0: 0.8, driftScale: 1 },
+  wave: { K: 14, baseFreq: 0.022, ratio: 1.4, ampExp: 0.5, fj: 0.65, fj0: 0.7, aj: 0.75, aj0: 0.65, driftScale: 0.18 },
+} as const;
+
 /** Build a closed-form fBm-like curve value(t) (seconds) in (-1,1), matching the engine's shape. */
-function makeSynthCurve(): (t: number) => number {
-  const K = 16, baseFreq = 0.006, ratio = 1.42;
+function makeSynthCurve(profile: 'market' | 'wave'): (t: number) => number {
+  const p = SYNTH_PROFILES[profile];
   const comps: { freq: number; amp: number; phase: number }[] = [];
   let ampSum = 0;
-  for (let k = 0; k < K; k++) {
-    const freq = baseFreq * ratio ** k * (0.82 + Math.random() * 0.38); // jitter off the ladder
-    const amp = (1 / freq ** 0.85) * (0.8 + Math.random() * 0.4);        // pink-ish spectrum
+  for (let k = 0; k < p.K; k++) {
+    const freq = p.baseFreq * p.ratio ** k * (p.fj0 + Math.random() * p.fj); // jitter off the ladder
+    const amp = (1 / freq ** p.ampExp) * (p.aj0 + Math.random() * p.aj);      // pink-ish spectrum
     ampSum += amp;
     comps.push({ freq, amp, phase: Math.random() * 2 * Math.PI });
   }
   return (t: number) => {
     let s = 0;
     for (const c of comps) s += c.amp * Math.sin(2 * Math.PI * c.freq * t + c.phase);
-    return Math.tanh((s / ampSum) * SYNTH_VOL + SYNTH_DRIFT);
+    return Math.tanh((s / ampSum) * SYNTH_VOL + SYNTH_DRIFT * p.driftScale);
   };
 }
 
@@ -210,6 +219,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const realSeenRef = useRef(false);
   const synthCurveRef = useRef<((t: number) => number) | null>(null);
   const synthOriginRef = useRef(0);
+  // Placeholder tape shape for this brand: `wave` for line brands, `market` for candlestick/bars/area.
+  const synthProfileRef = useRef<'market' | 'wave'>(curveProfileForChartStyle(chartStyleOf(brand.chartStyle)));
+  synthProfileRef.current = curveProfileForChartStyle(chartStyleOf(brand.chartStyle));
 
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [online, setOnline] = useState(0);
@@ -428,7 +440,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   // already full on load (never "fills in" from the right). Keeps emitting until
   // the first real tick arrives, then stands down so live data takes over.
   useEffect(() => {
-    const curve = synthCurveRef.current ?? (synthCurveRef.current = makeSynthCurve());
+    const curve = synthCurveRef.current ?? (synthCurveRef.current = makeSynthCurve(synthProfileRef.current));
     if (ticksRef.current.length === 0) {
       const now = Date.now();
       const origin = now - SYNTH_SPAN_MS;              // curve t=0 at the left edge of the seed window

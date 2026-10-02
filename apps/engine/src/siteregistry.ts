@@ -4,6 +4,7 @@ import { RecoveryService, type RecoveryReport } from "./recovery.js";
 import type { GameRepository } from "./wallet.js";
 import { affectsPricing, type ConfigProvider } from "./gameconfig.js";
 import type { PoolController } from "./poolcontroller.js";
+import type { CurveProfile } from "@invest254/shared";
 
 /**
  * SiteRegistry — the multiplexed engine's per-brand runtime manager.
@@ -37,6 +38,10 @@ export interface SiteRegistryOptions {
   /** Optional per-brand master seed (from sites.master_seed_ref); falls back to `masterSeed`. */
   masterSeedFor?: (siteId: string) => string | undefined;
   seedManagerOpts?: SeedManagerOptions;
+  /** Price-curve SHAPE for a brand (from its sites.chart_style): `wave` for line brands, `market`
+   *  for TradingView candlestick/bars/area brands. Resolved once when the brand's runtime is built.
+   *  Omitted (or a resolver error) = `market`. */
+  curveProfileFor?: (siteId: string) => CurveProfile | Promise<CurveProfile>;
   /** docs/25: shared pool controller (stateless bar its repo; site passed per-call). When set, a
    *  brand whose poolModeFor(siteId) is true has its non-marketer trades governed by the controller. */
   poolController?: PoolController;
@@ -69,7 +74,14 @@ export class SiteRegistry {
     const p = (async (): Promise<SiteRuntime> => {
       const config = await this.opts.configFor(siteId);
       const master = this.opts.masterSeedFor?.(siteId) || this.opts.masterSeed;
-      const seeds = new SeedManager(master, config, this.opts.repo, this.opts.now, this.opts.seedManagerOpts, siteId);
+      // Price shape from the brand's chart style (line ⇒ irregular waves, else trending market).
+      // A resolver error must never block the brand's runtime, so fall back to `market`.
+      let curveProfile: CurveProfile = "market";
+      if (this.opts.curveProfileFor) {
+        try { curveProfile = await this.opts.curveProfileFor(siteId); }
+        catch (err) { this.report(err as Error, `curve-profile ${siteId}`); }
+      }
+      const seeds = new SeedManager(master, config, this.opts.repo, this.opts.now, this.opts.seedManagerOpts, siteId, curveProfile);
       await seeds.init();
       const game = new GameServer(
         () => seeds.getActive(),

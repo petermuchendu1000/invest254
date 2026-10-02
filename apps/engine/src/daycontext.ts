@@ -1,5 +1,5 @@
 import {
-  CurveGenerator, SettlementEngine, type VersionedGameConfig,
+  CurveGenerator, SettlementEngine, type VersionedGameConfig, type CurveProfile,
   dateKeyUTC, dayStartMs as dayStartMsForKey, deriveDaySeed, deriveSiteDaySeed, commitment,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
@@ -68,6 +68,14 @@ export class SeedManager {
      * row is committed/revealed under this brand. Omitted = single-tenant (legacy) behaviour.
      */
     private readonly siteId?: string,
+    /**
+     * Price-curve SHAPE for this brand (see CurveGenerator): `wave` for line brands (irregular
+     * rise/fall waves), `market` for the TradingView candlestick/bars/area brands. Fixed for the
+     * life of this manager, so every (day, config) context it builds — and every recovery against
+     * them — prices under the same shape. Omitted = `market`. It does NOT feed the seed, so the
+     * published fairness commitment is unchanged; the SettlementEngine recalibrates to the shape.
+     */
+    private readonly curveProfile: CurveProfile = "market",
   ) {
     if (!masterSeed) throw new Error("masterSeed is required");
   }
@@ -82,7 +90,7 @@ export class SeedManager {
       ? deriveSiteDaySeed(this.masterSeed, this.siteId, dateKey, seedVersion)
       : deriveDaySeed(this.masterSeed, dateKey, seedVersion);
     const seedHash = commitment(seed);
-    const curve = new CurveGenerator(seed, cfg);
+    const curve = new CurveGenerator(seed, cfg, this.curveProfile);
     const settlement = this.opts.calibrationSamples
       ? new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, 3600, this.opts.calibrationSamples)
       : new SettlementEngine(curve, cfg);

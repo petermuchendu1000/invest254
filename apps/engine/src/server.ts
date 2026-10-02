@@ -18,7 +18,7 @@ import { PoolRealtimeDistributor } from "./poolrealtime.js";
 import { makeVerifier } from "./auth.js";
 import { makeSystemLogPersister } from "./systemlog.js";
 import { SharedSiteConfigListener } from "./siteconfiglisten.js";
-import { DEFAULT_VERSIONED_CONFIG, PlatformGate } from "@invest254/shared";
+import { DEFAULT_VERSIONED_CONFIG, PlatformGate, chartStyleOf, curveProfileForChartStyle, type CurveProfile } from "@invest254/shared";
 
 /**
  * Multiplexed engine entrypoint (multi-tenant).
@@ -51,6 +51,8 @@ let platformGate: PlatformGate | undefined;
 let overridesRepo: UserOverridesRepository | undefined;
 let configFor: (siteId: string) => ConfigProvider | Promise<ConfigProvider>;
 let masterSeedFor: ((siteId: string) => string | undefined) | undefined;
+// Price-curve shape per brand from sites.chart_style (line ⇒ irregular waves, else trending market).
+let curveProfileFor: ((siteId: string) => Promise<CurveProfile>) | undefined;
 // docs/25: pool controller (shared; site passed per-call) + per-brand pool_mode flag. Only in DB mode.
 let poolController: PoolController | undefined;
 // docs/25 + migration 0088: pool_mode is kept LIVE via SitesStore (LISTEN sites_changed + poll), so a
@@ -89,16 +91,28 @@ if (usingDb) {
   // Resolve aliases (slug + primary_domain -> id) for active brands so a connection can name its
   // site by slug or host, not just uuid.
   const rows = (await q.query(
-    "select id, slug, primary_domain, master_seed_ref, pool_mode from sites where status = 'active'", [])).rows;
+    "select id, slug, primary_domain, master_seed_ref, pool_mode, chart_style from sites where status = 'active'", [])).rows;
   const masterRefBySite = new Map<string, string>();
+  // Price shape per brand, derived from chart_style. Seeded at boot; a brand onboarded AFTER boot
+  // (GAP 2) is looked up live and cached on first use, so it prices under its own shape too.
+  const curveProfileBySite = new Map<string, CurveProfile>();
   for (const r of rows) {
     const id = String(r.id);
     siteAliases.set(id, id);
     if (r.slug) siteAliases.set(String(r.slug), id);
     if (r.primary_domain) siteAliases.set(String(r.primary_domain), id);
     if (r.master_seed_ref && process.env[String(r.master_seed_ref)]) masterRefBySite.set(id, process.env[String(r.master_seed_ref)]!);
+    curveProfileBySite.set(id, curveProfileForChartStyle(chartStyleOf(r.chart_style)));
   }
   masterSeedFor = (siteId) => masterRefBySite.get(siteId);
+  curveProfileFor = async (siteId) => {
+    const cached = curveProfileBySite.get(siteId);
+    if (cached) return cached;
+    const r = (await q.query("select chart_style from sites where id = $1 limit 1", [siteId])).rows[0] as { chart_style?: unknown } | undefined;
+    const profile = curveProfileForChartStyle(chartStyleOf(r?.chart_style));
+    curveProfileBySite.set(siteId, profile);
+    return profile;
+  };
   poolController = new PoolController(new PgPoolRepo(q));
   // Live pool_mode: LISTEN sites_changed (migration 0088) + poll fallback, so toggles / new brands
   // apply without a redeploy. Uses the session pooler for LISTEN, like the per-brand config stores.
@@ -187,6 +201,7 @@ const registry = new SiteRegistry({
   repo,
   configFor,
   ...(masterSeedFor ? { masterSeedFor } : {}),
+  ...(curveProfileFor ? { curveProfileFor } : {}),
   // loadOverride: per-user overrides, COMPOSED with the platform-global cohort economy (0099) when the
   // gate + marketer classifier are present (DB mode). Global-enforced fields win over per-user; the
   // same composed loader is handed to the RecoveryService by SiteRegistry, so open + recovery agree.
