@@ -425,7 +425,7 @@ export function CandleChart({
   }, [getLastTick, chartType, setFollow, snapToLive, refreshIndicators, paint, loadOlder, scaleMode]);
 
   // TradingView Supercharts chrome — fixed palette so the whole view reads as a TV/MT5 terminal.
-  const pill = 'h-6 min-w-[1.75rem] [@media(pointer:coarse)]:min-h-8 shrink-0 rounded px-1.5 text-[11px] font-semibold leading-none transition';
+  const pill = 'h-6 min-w-[1.6rem] [@media(pointer:coarse)]:min-h-8 shrink-0 rounded px-1 text-[11px] font-semibold leading-none transition sm:px-1.5';
   const idle = 'text-[#787b86] hover:text-white';
   const active = 'bg-[#2a2e39] text-white';
   const up = (legend?.changePct ?? 0) >= 0;
