@@ -17,29 +17,54 @@ import type { Tick } from "./types.js";
  */
 export interface CurveComponent { freq: number; amp: number; phase: number; }
 
+/**
+ * Two spectral SHAPES for the same authoritative curve, chosen per brand by chart style:
+ *
+ *  - `market` — candlestick/bars/area/baseline brands. A dense, low-frequency-weighted pink-noise
+ *    spectrum ⇒ fractional-Brownian-motion texture with clear trends/pullbacks. Reads like a real
+ *    market tape and aggregates into clean candle bodies + wicks.
+ *  - `wave` — line brands (the classic rise/fall "waves"). A flatter, more irregular spectrum at a
+ *    higher base frequency ⇒ the line crosses the centre line both ways with NO readable cadence,
+ *    while staying smooth (no jitter-noise, no cusps). `driftScale` trims the green bias so the
+ *    wave crosses up and down more evenly (the suspenseful rise/fall look).
+ *
+ * Both are C-infinity (sum of sines through tanh), deterministic from (serverSeed, t), and bounded
+ * in (-1,1). The SettlementEngine calibrates tau/gain by sampling whichever curve it is given, so
+ * win-rate == targetWinRate and RTP == 1-houseEdge hold for EITHER profile.
+ */
+export type CurveProfile = "market" | "wave";
+
+interface ProfileParams {
+  K: number; baseFreq: number; ratio: number; ampExp: number;
+  freqJitter: readonly [number, number]; ampJitter: readonly [number, number]; driftScale: number;
+}
+
+const PROFILES: Record<CurveProfile, ProfileParams> = {
+  // ~0.006 Hz (160 s) slowest swell up to ~1.7 Hz; pink (1/f^0.85) ⇒ trends dominate.
+  market: { K: 16, baseFreq: 0.006, ratio: 1.42, ampExp: 0.85, freqJitter: [0.82, 1.2], ampJitter: [0.8, 1.2], driftScale: 1 },
+  // Higher, flatter band (~0.022 Hz up to ~2.3 Hz; 1/f^0.5) with wider jitter ⇒ irregular, no trend
+  // dominance. driftScale 0.18 keeps only a slight green lean so crossings stay roughly even.
+  wave: { K: 14, baseFreq: 0.022, ratio: 1.4, ampExp: 0.5, freqJitter: [0.7, 1.35], ampJitter: [0.65, 1.4], driftScale: 0.18 },
+};
+
 export class CurveGenerator {
   readonly components: CurveComponent[];
   private readonly ampNorm: number;
+  private readonly driftScale: number;
 
-  constructor(serverSeed: string, private readonly cfg: GameConfig, private readonly K = 16) {
+  constructor(serverSeed: string, private readonly cfg: GameConfig, readonly profile: CurveProfile = "market") {
+    const p = PROFILES[profile];
+    this.driftScale = p.driftScale;
     const rng = new SeededRng(serverSeed, "curve");
-    // A DENSE, NON-HARMONIC spectrum of pink-noise sinusoids ⇒ fractional-Brownian-motion
-    // texture that reads like a real market tape, NOT a repeating wave. The previous curve used
-    // only 6 sinusoids on a clean geometric ladder, so the eye locked onto the dominant ~17s beat
-    // and the chart looked predictable. Here many more components, each with its frequency jittered
-    // off the ladder (×[0.82,1.2]) and an independent seed-derived phase, fill the band so no single
-    // period dominates and the pattern never visibly repeats.
-    //
-    // The band is bounded: the slowest component (~0.006 Hz, ~160 s) gives slow trends/ranging; the
-    // fastest stays well under ~2 Hz so the sum is still clearly C2-smooth (no cusps — see curve.test).
-    const baseFreq = 0.006;  // Hz — slowest swell (~160 s period) for drifting trends
-    const ratio = 1.42;      // geometric spread; max freq ≈ 0.006 · 1.42^15 ≈ 1.7 Hz
+    // A DENSE, NON-HARMONIC spectrum of pink-noise sinusoids. Each component's frequency is jittered
+    // off the geometric ladder and given an independent seed-derived phase, so no single period
+    // dominates and the pattern never visibly repeats. The band is bounded (slowest ~160 s / ~45 s,
+    // fastest well under ~2.5 Hz) so the sum stays clearly C2-smooth (no cusps — see curve.test).
     const comps: CurveComponent[] = [];
     let ampSum = 0;
-    for (let k = 0; k < K; k++) {
-      const freq = baseFreq * ratio ** k * rng.range(0.82, 1.2);
-      // pink-ish 1/f^0.85 amplitude with per-component jitter (reddish spectrum ⇒ market-like wander)
-      const amp = (1 / freq ** 0.85) * rng.range(0.8, 1.2);
+    for (let k = 0; k < p.K; k++) {
+      const freq = p.baseFreq * p.ratio ** k * rng.range(p.freqJitter[0], p.freqJitter[1]);
+      const amp = (1 / freq ** p.ampExp) * rng.range(p.ampJitter[0], p.ampJitter[1]);
       ampSum += amp;
       comps.push({ freq, amp, phase: rng.range(0, 2 * Math.PI) });
     }
@@ -52,8 +77,8 @@ export class CurveGenerator {
     let s = 0;
     for (const c of this.components) s += c.amp * Math.sin(2 * Math.PI * c.freq * t + c.phase);
     s /= this.ampNorm;
-    // green dominance: small positive additive bias before the smooth squash
-    const biased = s * this.cfg.volatility + this.cfg.driftBias;
+    // green dominance: a positive additive bias before the smooth squash (trimmed on the wave profile).
+    const biased = s * this.cfg.volatility + this.cfg.driftBias * this.driftScale;
     return Math.tanh(biased);
   }
 

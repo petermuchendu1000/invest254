@@ -137,3 +137,12 @@ export function chartStyleOf(v: unknown): ChartStyle {
 export function tradingViewTypeOf(style: ChartStyle): "candles" | "bars" | "area" | "baseline" | null {
   return style === "candlestick" ? "candles" : style === "line" ? null : style;
 }
+/**
+ * The price-curve SHAPE a chart system is priced with (see CurveGenerator). The `line` brands render
+ * the canvas wave, which reads best as an irregular, unpredictable `wave`; every TradingView system
+ * (candles/bars/area/baseline) reads best as trending `market` fBm. Returned as a string so callers
+ * that don't import the curve module (API/engine wiring) stay decoupled from it.
+ */
+export function curveProfileForChartStyle(style: ChartStyle): "market" | "wave" {
+  return style === "line" ? "wave" : "market";
+}
