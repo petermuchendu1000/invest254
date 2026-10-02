@@ -123,7 +123,7 @@ export function MT5Toolbox() {
   const alerts = useAlertsStore((s) => s.alerts);
 
   return (
-    <div className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-[#2a2e39] bg-[#1b2029] text-[#d1d4dc]">
+    <div className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] text-[#ffffff]">
       {/* The account line is the toggle, and the only place these figures appear. Collapsed it is a
           single scrolling row so the chart keeps its height on a phone; open, it wraps to
           MetaTrader's full five. The chevron sits outside the scrolling area, or it rides off. */}
@@ -149,8 +149,8 @@ export function MT5Toolbox() {
           <Figure label="Margin level" value={marginLevelPct === null ? '—' : `${marginLevelPct.toFixed(2)}%`} />
         </span>
         <span className="flex shrink-0 items-center gap-2 pl-1">
-          {live ? <span className="rounded bg-[#2962ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#2962ff]">1 open</span> : null}
-          <span className={cn('text-[#787b86] transition', open && 'rotate-180')} aria-hidden>▾</span>
+          {live ? <span className="rounded bg-[#3183ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#3183ff]">1 open</span> : null}
+          <span className={cn('text-[#8fa2b8] transition', open && 'rotate-180')} aria-hidden>▾</span>
         </span>
       </button>
 
@@ -166,8 +166,8 @@ export function MT5Toolbox() {
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-30 bg-black/60 sm:hidden"
           />
-          <div className="fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 flex max-h-[62vh] flex-col overflow-hidden rounded-xl border border-[#2a2e39] bg-[#1b2029] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none">
-          <div className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2a2e39]" style={{ maxHeight: 'min(46vh, 22rem)' }}>
+          <div className="fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 flex max-h-[62vh] flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none">
+          <div className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2b3543]" style={{ maxHeight: 'min(46vh, 22rem)' }}>
             {/* MetaTrader shows a position as a two-line entry on a phone and as a wide table on a
                 desktop, because ten columns cannot be read on a 430px screen. Both are rendered from
                 the same values and swapped at `sm`, rather than the table being squeezed. */}
@@ -187,11 +187,11 @@ export function MT5Toolbox() {
                   />
                   <div className="hidden sm:block">
                     <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
-                      <tr className="border-t border-[#2a2e39]/60">
+                      <tr className="border-t border-[#2b3543]/60">
                         <Td>{symbol}</Td>
                         <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
                         <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '—'}</Td>
-                        <Td className={live.direction === 'buy' ? 'text-[#2962ff]' : 'text-[#f23645]'}>{live.direction}</Td>
+                        <Td className={live.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{live.direction}</Td>
                         <Td>{lotsOfStake(live.stakeCents)}</Td>
                         <Td>{px(live.entryRate)}</Td>
                         <Td>
@@ -199,7 +199,7 @@ export function MT5Toolbox() {
                               losing contract early, so a stop is not implementable; the most this
                               contract can lose is its stake, always. */}
                           <span
-                            className="cursor-not-allowed text-[#5a5e6a]"
+                            className="cursor-not-allowed text-[#8fa2b8]/50"
                             title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
                           >
                             —
@@ -208,13 +208,13 @@ export function MT5Toolbox() {
                         <Td>
                           {/* MetaTrader's "− value +", the same control the ticket carries. */}
                           <span className="flex items-center gap-1">
-                            <button type="button" onClick={() => setTp(tpTarget === null ? null : Math.max(0, tpTarget - 10_000) || null)} disabled={tpTarget === null} className="px-1 text-[#787b86] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
+                            <button type="button" onClick={() => setTp(tpTarget === null ? null : Math.max(0, tpTarget - 10_000) || null)} disabled={tpTarget === null} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
                             <span className="min-w-14 text-center">{tpTarget === null ? 'none' : money.fmt(tpTarget)}</span>
-                            <button type="button" onClick={() => setTp((tpTarget ?? 0) + 10_000)} className="px-1 text-[#787b86] hover:text-white" aria-label="Raise take profit">+</button>
+                            <button type="button" onClick={() => setTp((tpTarget ?? 0) + 10_000)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
                           </span>
                         </Td>
                         <Td>{px(getLastTick()?.rate ?? null)}</Td>
-                        <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#2962ff]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
+                        <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#3183ff]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
                           {money.fmt(live.livePnlCents)}
                         </Td>
                       </tr>
@@ -247,15 +247,15 @@ export function MT5Toolbox() {
                 <div className="hidden sm:block">
                 <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'Close', 'Profit']}>
                   {rows.map((p: PositionDto) => (
-                    <tr key={p.id} className="border-t border-[#2a2e39]/60">
+                    <tr key={p.id} className="border-t border-[#2b3543]/60">
                       <Td>{symbol}</Td>
                       <Td>{p.id.slice(0, 8)}</Td>
                       <Td>{clock(p.openedAt)}</Td>
-                      <Td className={p.direction === 'buy' ? 'text-[#2962ff]' : 'text-[#f23645]'}>{p.direction}</Td>
+                      <Td className={p.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{p.direction}</Td>
                       <Td>{lotsOfStake(p.stakeCents)}</Td>
                       <Td>{px(p.entryRate)}</Td>
                       <Td>{px(p.exitRate)}</Td>
-                      <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#2962ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
+                      <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#3183ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
                         {p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
                       </Td>
                     </tr>
@@ -274,15 +274,15 @@ export function MT5Toolbox() {
               !token ? (
                 <Empty>Sign in to read your messages.</Empty>
               ) : (notifications.data?.items.length ?? 0) > 0 ? (
-                <ul className="divide-y divide-[#2a2e39]/60">
+                <ul className="divide-y divide-[#2b3543]/60">
                   {notifications.data!.items.map((n) => (
                     <li key={n.id} className="px-3 py-2">
                       <div className="flex items-baseline gap-2">
-                        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', n.level === 'error' ? 'bg-[#f23645]' : n.level === 'warning' ? 'bg-[#f0b90b]' : n.level === 'success' ? 'bg-[#089981]' : 'bg-[#2962ff]')} />
+                        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', n.level === 'error' ? 'bg-[#f23645]' : n.level === 'warning' ? 'bg-[#f0b90b]' : n.level === 'success' ? 'bg-[#41be56]' : 'bg-[#3183ff]')} />
                         <span className="text-[11px] font-semibold text-white">{n.title}</span>
-                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#787b86]">{clock(n.createdAtMs)}</span>
+                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#8fa2b8]">{clock(n.createdAtMs)}</span>
                       </div>
-                      <p className="mt-0.5 pl-3.5 text-[11px] leading-snug text-[#b2b5be]">{n.body}</p>
+                      <p className="mt-0.5 pl-3.5 text-[11px] leading-snug text-[#8fa2b8]">{n.body}</p>
                     </li>
                   ))}
                 </ul>
@@ -295,12 +295,12 @@ export function MT5Toolbox() {
 
             {tab === 'journal' ? (
               journal.length > 0 ? (
-                <ul className="divide-y divide-[#2a2e39]/40 font-mono text-[11px]">
+                <ul className="divide-y divide-[#2b3543]/40 font-mono text-[11px]">
                   {journal.slice().reverse().map((e) => (
                     <li key={e.id} className="flex gap-2 px-3 py-1">
-                      <span className="shrink-0 text-[#787b86]">{clock(e.atMs)}</span>
-                      <span className="w-14 shrink-0 text-[#5a5e6a]">{e.tag}</span>
-                      <span className={cn(e.level === 'error' ? 'text-[#f23645]' : e.level === 'warn' ? 'text-[#f0b90b]' : e.level === 'ok' ? 'text-[#089981]' : 'text-[#b2b5be]')}>{e.text}</span>
+                      <span className="shrink-0 text-[#8fa2b8]">{clock(e.atMs)}</span>
+                      <span className="w-14 shrink-0 text-[#8fa2b8]/50">{e.tag}</span>
+                      <span className={cn(e.level === 'error' ? 'text-[#f23645]' : e.level === 'warn' ? 'text-[#f0b90b]' : e.level === 'ok' ? 'text-[#41be56]' : 'text-[#8fa2b8]')}>{e.text}</span>
                     </li>
                   ))}
                 </ul>
@@ -311,7 +311,7 @@ export function MT5Toolbox() {
           </div>
 
           {/* MetaTrader puts the Toolbox tabs along the BOTTOM edge of the panel. */}
-          <div className="flex items-center gap-0.5 overflow-x-auto border-t border-[#2a2e39] bg-[#171b24] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex items-center gap-0.5 overflow-x-auto border-t border-[#2b3543] bg-[#202933] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -320,17 +320,17 @@ export function MT5Toolbox() {
                 aria-pressed={tab === t.id}
                 className={cn(
                   'shrink-0 rounded px-2.5 py-1 text-[11px] font-semibold transition',
-                  tab === t.id ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white',
+                  tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
                 )}
               >
                 {t.label}
                 {t.id === 'mailbox' && (notifications.data?.items.length ?? 0) > 0
-                  ? <span className="ml-1 text-[#2962ff]">({notifications.data!.items.length})</span>
+                  ? <span className="ml-1 text-[#3183ff]">({notifications.data!.items.length})</span>
                   : null}
-                {t.id === 'alerts' && alerts.length > 0 ? <span className="ml-1 text-[#787b86]">({alerts.length})</span> : null}
+                {t.id === 'alerts' && alerts.length > 0 ? <span className="ml-1 text-[#8fa2b8]">({alerts.length})</span> : null}
               </button>
             ))}
-            <span className="ml-auto shrink-0 pr-1 text-[10px] text-[#787b86]">
+            <span className="ml-auto shrink-0 pr-1 text-[10px] text-[#8fa2b8]">
               {status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
             </span>
           </div>
@@ -367,18 +367,18 @@ function NewsTab({ active }: { active: boolean }) {
   if (!items) return <Empty>Loading news…</Empty>;
   if (items.length === 0) return <Empty>No news.</Empty>;
   return (
-    <ul className="divide-y divide-[#2a2e39]/60">
+    <ul className="divide-y divide-[#2b3543]/60">
       {items.map((n) => (
         <li key={n.id}>
           {/* Opened in a new tab, and `noreferrer` so a third-party page is not told where the
               player came from. The text itself is rendered as text — never as markup. */}
-          <a href={n.url} target="_blank" rel="noopener noreferrer" className="block px-3 py-2 hover:bg-[#2a2e39]/40">
+          <a href={n.url} target="_blank" rel="noopener noreferrer" className="block px-3 py-2 hover:bg-[#2b3543]/40">
             <div className="flex items-baseline gap-2">
-              <span className="shrink-0 font-mono text-[10px] text-[#787b86]">{clock(n.publishedAtMs)}</span>
-              <span className="shrink-0 rounded bg-[#2a2e39] px-1 text-[10px] text-[#b2b5be]">{n.source}</span>
+              <span className="shrink-0 font-mono text-[10px] text-[#8fa2b8]">{clock(n.publishedAtMs)}</span>
+              <span className="shrink-0 rounded bg-[#2b3543] px-1 text-[10px] text-[#8fa2b8]">{n.source}</span>
               <span className="min-w-0 text-[11px] font-semibold leading-snug text-white">{n.title}</span>
             </div>
-            {n.summary ? <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-[#787b86]">{n.summary}</p> : null}
+            {n.summary ? <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-[#8fa2b8]">{n.summary}</p> : null}
           </a>
         </li>
       ))}
@@ -405,12 +405,12 @@ function AlertsTab({
   const now = livePrice();
   return (
     <div>
-      <form onSubmit={submit} className="flex flex-wrap items-center gap-1.5 border-b border-[#2a2e39] px-3 py-2">
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-1.5 border-b border-[#2b3543] px-3 py-2">
         <span className="text-[11px] font-semibold text-white">{symbol}</span>
         <button
           type="button"
           onClick={() => setAbove((v) => !v)}
-          className="rounded border border-[#2a2e39] bg-[#131722] px-2 py-0.5 text-[11px] font-semibold text-[#d1d4dc]"
+          className="rounded border border-[#2b3543] bg-[#0f1720] px-2 py-0.5 text-[11px] font-semibold text-[#ffffff]"
           title="Fire when the price rises above, or falls below, the level"
         >
           {above ? 'Bid ≥' : 'Bid ≤'}
@@ -420,31 +420,31 @@ function AlertsTab({
           onChange={(e) => setPrice(e.target.value)}
           inputMode="decimal"
           placeholder={now === null ? 'price' : now.toFixed(digits)}
-          className="w-24 rounded border border-[#2a2e39] bg-[#131722] px-1.5 py-0.5 text-[11px] text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+          className="w-24 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-0.5 text-[11px] text-[#ffffff] outline-none focus:border-[#3183ff]"
         />
-        <button type="submit" className="rounded bg-[#2962ff] px-2 py-0.5 text-[11px] font-semibold text-white">Add</button>
+        <button type="submit" className="rounded bg-[#3183ff] px-2 py-0.5 text-[11px] font-semibold text-white">Add</button>
         {/* MetaTrader runs alerts on its server, so they fire with the app closed. These live in this
             browser, so they can only fire while the terminal is open — said plainly. */}
-        <span className="basis-full text-[10px] text-[#787b86]">Alerts fire while this terminal is open.</span>
+        <span className="basis-full text-[10px] text-[#8fa2b8]">Alerts fire while this terminal is open.</span>
       </form>
       {alerts.length === 0 ? (
         <Empty>No alerts set.</Empty>
       ) : (
         <Table head={['Symbol', 'Condition', 'Price', 'Status', '']}>
           {alerts.map((a) => (
-            <tr key={a.id} className="border-t border-[#2a2e39]/60">
+            <tr key={a.id} className="border-t border-[#2b3543]/60">
               <Td>{a.symbol}</Td>
               <Td>{a.above ? 'Bid ≥' : 'Bid ≤'}</Td>
               <Td>{a.price.toFixed(digits)}</Td>
-              <Td className={a.triggeredAtMs ? 'text-[#f0b90b]' : 'text-[#089981]'}>
+              <Td className={a.triggeredAtMs ? 'text-[#f0b90b]' : 'text-[#41be56]'}>
                 {a.triggeredAtMs ? `fired ${clock(a.triggeredAtMs)}` : 'armed'}
               </Td>
               <Td>
                 <span className="flex gap-2">
                   {a.triggeredAtMs ? (
-                    <button type="button" onClick={() => rearm(a.id)} className="text-[#2962ff] hover:underline">re-arm</button>
+                    <button type="button" onClick={() => rearm(a.id)} className="text-[#3183ff] hover:underline">re-arm</button>
                   ) : null}
-                  <button type="button" onClick={() => remove(a.id)} className="text-[#787b86] hover:text-[#f23645]">delete</button>
+                  <button type="button" onClick={() => remove(a.id)} className="text-[#8fa2b8] hover:text-[#f23645]">delete</button>
                 </span>
               </Td>
             </tr>
@@ -468,17 +468,17 @@ function PositionRow({
 }) {
   const buy = direction === 'buy';
   return (
-    <div className={cn('flex items-start justify-between gap-2 border-b border-[#2a2e39]/60 px-3 py-2', className)}>
+    <div className={cn('flex items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2', className)}>
       <div className="min-w-0">
         <div className="text-[12px] font-semibold text-white">
           {symbol},{' '}
-          <span className={buy ? 'text-[#2962ff]' : 'text-[#f23645]'}>{direction} {lots}</span>
+          <span className={buy ? 'text-[#3183ff]' : 'text-[#f23645]'}>{direction} {lots}</span>
         </div>
-        <div className="font-mono text-[11px] text-[#787b86]">{from} → {to}</div>
+        <div className="font-mono text-[11px] text-[#8fa2b8]">{from} → {to}</div>
       </div>
       <div className="shrink-0 text-right">
-        <div className={cn('font-mono text-[12px] font-semibold tabular-nums', profitCents > 0 ? 'text-[#2962ff]' : profitCents < 0 ? 'text-[#f23645]' : 'text-[#d1d4dc]')}>{profit}</div>
-        {note ? <div className="font-mono text-[10px] text-[#787b86]">{note}</div> : null}
+        <div className={cn('font-mono text-[12px] font-semibold tabular-nums', profitCents > 0 ? 'text-[#3183ff]' : profitCents < 0 ? 'text-[#f23645]' : 'text-[#ffffff]')}>{profit}</div>
+        {note ? <div className="font-mono text-[10px] text-[#8fa2b8]">{note}</div> : null}
       </div>
     </div>
   );
@@ -493,8 +493,8 @@ const clock = (ms: number): string => {
 function Figure({ label, value, tone, className }: { label: string; value: string; tone?: 'up' | 'down' | undefined; className?: string | undefined }) {
   return (
     <span className={cn('flex shrink-0 items-baseline gap-1.5 whitespace-nowrap', className)}>
-      <span className="text-[10px] uppercase tracking-wide text-[#787b86]">{label}</span>
-      <span className={cn('font-mono text-[12px] font-semibold tabular-nums', tone === 'up' ? 'text-[#089981]' : tone === 'down' ? 'text-[#f23645]' : 'text-[#d1d4dc]')}>{value}</span>
+      <span className="text-[10px] uppercase tracking-wide text-[#8fa2b8]">{label}</span>
+      <span className={cn('font-mono text-[12px] font-semibold tabular-nums', tone === 'up' ? 'text-[#41be56]' : tone === 'down' ? 'text-[#f23645]' : 'text-[#ffffff]')}>{value}</span>
     </span>
   );
 }
@@ -503,7 +503,7 @@ function Table({ head, children }: { head: string[]; children: React.ReactNode }
   return (
     <table className="w-full border-collapse text-left font-mono text-[11px] tabular-nums">
       <thead>
-        <tr className="text-[#787b86]">
+        <tr className="text-[#8fa2b8]">
           {head.map((h, i) => (
             <th key={`${h}:${i}`} className="whitespace-nowrap px-2 py-1 font-normal">{h}</th>
           ))}
@@ -519,5 +519,5 @@ function Td({ children, className }: { children: React.ReactNode; className?: st
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 py-4 text-center text-[11px] text-[#787b86]">{children}</div>;
+  return <div className="px-3 py-4 text-center text-[11px] text-[#8fa2b8]">{children}</div>;
 }

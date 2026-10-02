@@ -59,11 +59,18 @@ const MIN_BARS = 8, MAX_BARS = 600, ZOOM_STEP = 0.7, RIGHT_OFFSET_BARS = 3;
 const RESUME_MS = 3000; // auto-return to the live edge after this idle time following manual pan/zoom
 const MA = { fast: 7, mid: 25, slow: 99 }, BB_PERIOD = 20, BB_MULT = 2;
 
-/** TradingView Supercharts dark palette — the look the candlestick/OHLC view is styled to. */
+/**
+ * MetaTrader 5's dark theme, sampled from the product (see lib/ui/mt5.ts for the counts).
+ *
+ * This used to be TradingView's Supercharts palette — close enough to look deliberate, wrong enough
+ * to not be MetaTrader (#131722 against #0f1720, #2962ff against #3183ff). Those near-misses are
+ * what stop a copy reading as the real thing. Kept inline because the chart library wants plain
+ * strings at construction, not Tailwind classes.
+ */
 const TV = {
-  bg: '#131722', surface: '#1b2029', rail: '#171b24', border: '#2a2e39', grid: 'rgba(42,46,57,0.5)',
-  text: '#d1d4dc', muted: '#787b86', up: '#089981', down: '#f23645', accent: '#2962ff', info: '#2962ff',
-  cross: '#9598a1', crossLabel: '#363a45',
+  bg: '#0f1720', surface: '#0f1720', rail: '#202933', border: '#2b3543', grid: 'rgba(43,53,67,0.5)',
+  text: '#ffffff', muted: '#8fa2b8', up: '#41be56', down: '#f23645', accent: '#3183ff', info: '#3183ff',
+  cross: '#8fa2b8', crossLabel: '#2b3543',
 } as const;
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -426,17 +433,17 @@ export function CandleChart({
 
   // TradingView Supercharts chrome — fixed palette so the whole view reads as a TV/MT5 terminal.
   const pill = 'h-6 min-w-[1.6rem] [@media(pointer:coarse)]:min-h-8 shrink-0 rounded px-1 text-[11px] font-semibold leading-none transition sm:px-1.5';
-  const idle = 'text-[#787b86] hover:text-white';
-  const active = 'bg-[#2a2e39] text-white';
+  const idle = 'text-[#8fa2b8] hover:text-white';
+  const active = 'bg-[#2b3543] text-white';
   const up = (legend?.changePct ?? 0) >= 0;
   const row = 'flex items-center gap-0.5';
-  const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2a2e39]" aria-hidden />;
+  const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" aria-hidden />;
   const dp = instrument.digits;
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#131722] text-[#d1d4dc]">
+    <div className="flex h-full w-full flex-col bg-[#0f1720] text-[#ffffff]">
       {/* Toolbar — symbol, the full MT5 period set, tools, and the interface gear. */}
-      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[#2a2e39] px-2 text-[12px]">
+      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[#2b3543] px-2 text-[12px]">
         <span className="shrink-0 pr-1 text-[13px] font-bold text-white">{instrument.symbol}</span>
         {sep}
         {/* All 21 MT5 periods. The row scrolls rather than wrapping, so the toolbar keeps one height
@@ -450,7 +457,7 @@ export function CandleChart({
           <div className="relative">
             <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} className={cn(pill, menuOpen ? active : idle, 'px-2')} title="Chart features">⚙ Tools</button>
             {menuOpen ? (
-              <div className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-[#2a2e39] bg-[#1b2029] p-2 text-left shadow-xl">
+              <div className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
                 <Section title="Chart type">
                   <div className="grid grid-cols-3 gap-1">
                     {CHART_TYPES.map((c) => (
@@ -496,19 +503,19 @@ export function CandleChart({
             // is what MetaTrader's own mobile chart shows.
             <div className="pointer-events-none absolute left-2 top-1.5 z-20 flex items-baseline gap-x-2 overflow-hidden whitespace-nowrap font-mono text-[11px] tabular-nums">
               <span className="font-semibold text-white">{instrument.symbol}</span>
-              <span className="text-[#787b86]">{tf}</span>
-              <span className="hidden text-[#787b86] sm:inline">O <span className="text-[#d1d4dc]">{legend.o.toFixed(dp)}</span></span>
-              <span className="hidden text-[#787b86] sm:inline">H <span className="text-[#d1d4dc]">{legend.h.toFixed(dp)}</span></span>
-              <span className="hidden text-[#787b86] sm:inline">L <span className="text-[#d1d4dc]">{legend.l.toFixed(dp)}</span></span>
-              <span className="text-[#787b86]">C <span className="text-[#d1d4dc]">{legend.c.toFixed(dp)}</span></span>
-              <span className={cn('font-semibold', up ? 'text-[#089981]' : 'text-[#f23645]')}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span>
+              <span className="text-[#8fa2b8]">{tf}</span>
+              <span className="hidden text-[#8fa2b8] sm:inline">O <span className="text-[#ffffff]">{legend.o.toFixed(dp)}</span></span>
+              <span className="hidden text-[#8fa2b8] sm:inline">H <span className="text-[#ffffff]">{legend.h.toFixed(dp)}</span></span>
+              <span className="hidden text-[#8fa2b8] sm:inline">L <span className="text-[#ffffff]">{legend.l.toFixed(dp)}</span></span>
+              <span className="text-[#8fa2b8]">C <span className="text-[#ffffff]">{legend.c.toFixed(dp)}</span></span>
+              <span className={cn('font-semibold', up ? 'text-[#41be56]' : 'text-[#f23645]')}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span>
             </div>
           ) : null}
           {loading ? (
-            <div className="absolute inset-0 z-20 grid place-items-center bg-[#131722]/70 text-[11px] font-semibold text-[#787b86]">Loading {tf} history…</div>
+            <div className="absolute inset-0 z-20 grid place-items-center bg-[#0f1720]/70 text-[11px] font-semibold text-[#8fa2b8]">Loading {tf} history…</div>
           ) : null}
           {loadError ? (
-            <div className="absolute inset-x-0 top-8 z-20 mx-auto w-fit rounded-md border border-[#2a2e39] bg-[#1b2029] px-3 py-1.5 text-[11px] text-[#787b86]">
+            <div className="absolute inset-x-0 top-8 z-20 mx-auto w-fit rounded-md border border-[#2b3543] bg-[#0f1720] px-3 py-1.5 text-[11px] text-[#8fa2b8]">
               History unavailable ({loadError}) — the live bar is still updating.
             </div>
           ) : null}
@@ -535,19 +542,19 @@ function DrawRail() {
     { d: 'M7 4h10l-5 16z', label: 'Measure' },
   ];
   return (
-    <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2a2e39] bg-[#171b24] py-1.5" aria-hidden>
+    <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2b3543] bg-[#202933] py-1.5" aria-hidden>
       {tools.map((t, i) => (
         <span
           key={t.label}
           title={t.label}
-          className={cn('grid h-8 w-8 place-items-center rounded-md', i === 0 ? 'bg-[#2a2e39] text-white' : 'text-[#b2b5be]')}
+          className={cn('grid h-8 w-8 place-items-center rounded-md', i === 0 ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8]')}
         >
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d={t.d} />
           </svg>
         </span>
       ))}
-      <span className="mt-auto grid h-8 w-8 place-items-center rounded-md text-[#b2b5be]" title="Trash" aria-hidden>
+      <span className="mt-auto grid h-8 w-8 place-items-center rounded-md text-[#8fa2b8]" title="Trash" aria-hidden>
         <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13" />
         </svg>

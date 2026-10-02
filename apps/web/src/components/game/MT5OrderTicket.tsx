@@ -133,34 +133,34 @@ export function MT5OrderTicket() {
   }
 
   if (!hydrated) {
-    return <div className="h-40 animate-pulse rounded-xl border border-[#2a2e39] bg-[#1b2029]" />;
+    return <div className="h-40 animate-pulse rounded-xl border border-[#2b3543] bg-[#0f1720]" />;
   }
 
   if (activePosition) {
     return (
-      <div className="flex flex-col gap-2 rounded-xl border border-[#2a2e39] bg-[#1b2029] p-3 text-[#d1d4dc]">
+      <div className="flex flex-col gap-2 rounded-xl border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
         <LivePnl pos={activePosition} />
-        <p className="text-center text-[11px] text-[#787b86]">Settles automatically when the timer ends</p>
+        <p className="text-center text-[11px] text-[#8fa2b8]">Settles automatically when the timer ends</p>
       </div>
     );
   }
 
-  const rowLabel = 'w-16 shrink-0 text-[11px] uppercase tracking-wide text-[#787b86] lg:w-auto lg:basis-full';
-  const stepBtn = 'h-8 min-w-11 lg:min-w-0 shrink-0 rounded border border-[#2a2e39] bg-[#131722] px-2 font-mono text-[12px] font-semibold text-[#d1d4dc] transition hover:border-[#2962ff] disabled:opacity-40';
+  const rowLabel = 'w-16 shrink-0 text-[11px] uppercase tracking-wide text-[#8fa2b8] lg:w-auto lg:basis-full';
+  const stepBtn = 'h-8 min-w-11 lg:min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-2 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-[#2a2e39] bg-[#1b2029] p-3 text-[#d1d4dc]">
+    <div className="flex flex-col gap-2 rounded-xl border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
       <div className="flex items-baseline gap-2">
         <span className="text-[13px] font-bold text-white">{symbol}</span>
         {/* MetaTrader states the execution mode on the ticket. Ours fills at the next engine tick. */}
-        <span className="text-[11px] text-[#787b86]">Market Execution</span>
+        <span className="text-[11px] text-[#8fa2b8]">Market Execution</span>
       </div>
 
       {/* Volume — MetaTrader's stepper row. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>Volume</span>
         <button type="button" onClick={() => bump(-VOLUME_STEPS[0])} disabled={lots <= minLots} className={stepBtn} aria-label="Decrease volume">−0.01</button>
-        <span className="flex h-8 min-w-[4rem] flex-1 basis-16 items-center justify-center rounded border border-[#2a2e39] bg-[#131722] font-mono text-[14px] font-bold text-white tabular-nums">
+        <span className="flex h-8 min-w-[4rem] flex-1 basis-16 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-bold text-white tabular-nums">
           {lots.toFixed(volDigits)}
         </span>
         {VOLUME_STEPS.map((s) => (
@@ -169,7 +169,7 @@ export function MT5OrderTicket() {
           </button>
         ))}
       </div>
-      <div className="flex items-baseline gap-2 pl-[4.25rem] text-[11px] text-[#787b86] lg:pl-0">
+      <div className="flex items-baseline gap-2 pl-[4.25rem] text-[11px] text-[#8fa2b8] lg:pl-0">
         <span>= {money.fmt(stakeCents)}</span>
         <span className="ml-auto">min {minLots.toFixed(volDigits)}{limits.maxCents === undefined ? '' : ` / max ${maxLots.toFixed(volDigits)}`}</span>
       </div>
@@ -182,7 +182,7 @@ export function MT5OrderTicket() {
             this contract can lose is its stake, always. A control that silently did nothing would
             be worse than one that explains itself. */}
         <span
-          className="flex h-8 flex-1 cursor-not-allowed items-center justify-center rounded border border-[#2a2e39] bg-[#131722]/60 text-[11px] text-[#5a5e6a]"
+          className="flex h-8 flex-1 cursor-not-allowed items-center justify-center rounded border border-[#2b3543] bg-[#0f1720]/60 text-[11px] text-[#8fa2b8]/50"
           title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
         >
           not available — max loss is the stake
@@ -191,12 +191,12 @@ export function MT5OrderTicket() {
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>T / P</span>
         <button type="button" onClick={() => bumpTp(-1)} disabled={tpTarget === null} className={stepBtn} aria-label="Lower take profit">−</button>
-        <span className="flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2a2e39] bg-[#131722] font-mono text-[12px] font-semibold text-[#d1d4dc] tabular-nums">
+        <span className="flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[12px] font-semibold text-[#ffffff] tabular-nums">
           {tpTarget === null ? 'none' : money.fmt(tpTarget)}
         </span>
         <button type="button" onClick={() => bumpTp(1)} className={stepBtn} aria-label="Raise take profit">+</button>
       </div>
-      <p className="pl-[4.25rem] text-[11px] text-[#787b86] lg:pl-0">
+      <p className="pl-[4.25rem] text-[11px] text-[#8fa2b8] lg:pl-0">
         Closes on PROFIT reaching this amount — not a price, because an open contract&apos;s payout rises with time.
       </p>
 
@@ -212,7 +212,7 @@ export function MT5OrderTicket() {
               aria-pressed={durationS === d}
               className={cn(
                 'h-8 flex-1 rounded border text-[12px] font-semibold transition',
-                durationS === d ? 'border-[#2962ff] bg-[#2962ff]/15 text-white' : 'border-[#2a2e39] bg-[#131722] text-[#787b86] hover:text-white',
+                durationS === d ? 'border-[#3183ff] bg-[#3183ff]/15 text-white' : 'border-[#2b3543] bg-[#0f1720] text-[#8fa2b8] hover:text-white',
               )}
             >
               {d < 60 ? `${d}s` : `${d / 60}m`}
@@ -236,14 +236,14 @@ export function MT5OrderTicket() {
           type="button"
           onClick={() => place('buy')}
           disabled={connecting}
-          className="flex h-16 flex-col items-center justify-center rounded-md bg-[#2962ff] text-white transition active:brightness-90 disabled:opacity-50"
+          className="flex h-16 flex-col items-center justify-center rounded-md bg-[#3183ff] text-white transition active:brightness-90 disabled:opacity-50"
         >
           <span className="text-[11px] font-semibold uppercase tracking-wider opacity-90">Buy</span>
           <MT5Price value={price} digits={digits} tone="buy" className="text-[13px]" />
         </button>
       </div>
 
-      {connecting ? <p className="text-center text-[11px] text-[#787b86]">Connecting…</p> : null}
+      {connecting ? <p className="text-center text-[11px] text-[#8fa2b8]">Connecting…</p> : null}
       {overBalance && token ? (
         <p className="text-center text-[11px] text-[#f0b90b]">Not enough free margin — tap a side to top up.</p>
       ) : null}

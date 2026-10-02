@@ -86,7 +86,7 @@ export function MarketWatch({ className }: { className?: string }) {
   }
   const tickUp = tickUpRef.current;
   // MetaTrader's quote colours: blue up, red down — the same pairing as its buy and sell sides.
-  const quoteTone = tickUp === null ? 'text-[#d1d4dc]' : tickUp ? 'text-[#2962ff]' : 'text-[#f23645]';
+  const quoteTone = tickUp === null ? 'text-[#ffffff]' : tickUp ? 'text-[#3183ff]' : 'text-[#f23645]';
   // Change against the session open, which is what a terminal's change column means.
   const open = market?.anchor.base ?? null;
   const changePct = last !== null && open ? ((last - open) / open) * 100 : null;
@@ -94,11 +94,11 @@ export function MarketWatch({ className }: { className?: string }) {
   const show = (n: number | null | undefined) => (n === null || n === undefined ? '—' : n.toFixed(digits));
 
   return (
-    <aside className={cn('flex flex-col overflow-hidden rounded-xl border border-[#2a2e39] bg-[#1b2029] text-[#d1d4dc]', className)}>
-      <div className="flex items-center gap-2 border-b border-[#2a2e39] px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">Market Watch</span>
+    <aside className={cn('flex flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] text-[#ffffff]', className)}>
+      <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8fa2b8]">Market Watch</span>
         <span
-          className={cn('ml-auto h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#089981]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
+          className={cn('ml-auto h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
           title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
         />
       </div>
@@ -112,23 +112,23 @@ export function MarketWatch({ className }: { className?: string }) {
              settles on one seeded price — so one quote is printed rather than two numbers implying
              the player buys at one and sells at the other. For the same reason the Spread column
              MetaTrader puts under the symbol is absent instead of showing a made-up figure. */
-          <div className="border-b border-[#2a2e39]/60 px-2 py-2">
+          <div className="border-b border-[#2b3543]/60 px-2 py-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-[12px] font-bold text-white">{symbol}</div>
-                <div className="font-mono text-[10px] text-[#787b86]">
+                <div className="font-mono text-[10px] text-[#8fa2b8]">
                   {changePct === null ? '—' : `${up ? '+' : ''}${changePct.toFixed(2)}%`} today
                 </div>
               </div>
               <MT5Price value={last} digits={digits} className={cn('text-[12px]', quoteTone)} />
             </div>
-            <div className="mt-1 flex gap-3 font-mono text-[10px] text-[#787b86]">
-              <span>Low: <span className="text-[#b2b5be]">{show(day?.low ?? null)}</span></span>
-              <span>High: <span className="text-[#b2b5be]">{show(day?.high ?? null)}</span></span>
+            <div className="mt-1 flex gap-3 font-mono text-[10px] text-[#8fa2b8]">
+              <span>Low: <span className="text-[#8fa2b8]">{show(day?.low ?? null)}</span></span>
+              <span>High: <span className="text-[#8fa2b8]">{show(day?.high ?? null)}</span></span>
             </div>
           </div>
         ) : (
-          <dl className="divide-y divide-[#2a2e39]/50 text-[11px]">
+          <dl className="divide-y divide-[#2b3543]/50 text-[11px]">
             <Detail label="Symbol" value={symbol} />
             <Detail label="Last" value={show(last)} />
             <Detail label="Session open" value={show(day?.open ?? null)} />
@@ -143,14 +143,14 @@ export function MarketWatch({ className }: { className?: string }) {
       </div>
 
       {/* MetaTrader's Market Watch tabs sit along the bottom of the panel, as the Toolbox's do. */}
-      <div className="flex gap-0.5 border-t border-[#2a2e39] bg-[#171b24] px-1 py-1">
+      <div className="flex gap-0.5 border-t border-[#2b3543] bg-[#202933] px-1 py-1">
         {(['symbols', 'details'] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
             aria-pressed={tab === t}
-            className={cn('rounded px-2 py-0.5 text-[11px] font-semibold capitalize transition', tab === t ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white')}
+            className={cn('rounded px-2 py-0.5 text-[11px] font-semibold capitalize transition', tab === t ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white')}
           >
             {t}
           </button>
@@ -163,8 +163,8 @@ export function MarketWatch({ className }: { className?: string }) {
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-2 px-3 py-1.5">
-      <dt className="text-[#787b86]">{label}</dt>
-      <dd className="font-mono tabular-nums text-[#d1d4dc]">{value}</dd>
+      <dt className="text-[#8fa2b8]">{label}</dt>
+      <dd className="font-mono tabular-nums text-[#ffffff]">{value}</dd>
     </div>
   );
 }
