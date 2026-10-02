@@ -21,16 +21,25 @@ export class CurveGenerator {
   readonly components: CurveComponent[];
   private readonly ampNorm: number;
 
-  constructor(serverSeed: string, private readonly cfg: GameConfig, private readonly K = 6) {
+  constructor(serverSeed: string, private readonly cfg: GameConfig, private readonly K = 16) {
     const rng = new SeededRng(serverSeed, "curve");
-    const baseFreq = 0.06;  // Hz — base swell (~17s period); higher = faster wave
-    const ratio = 1.9;      // geometric spread across octaves
+    // A DENSE, NON-HARMONIC spectrum of pink-noise sinusoids ⇒ fractional-Brownian-motion
+    // texture that reads like a real market tape, NOT a repeating wave. The previous curve used
+    // only 6 sinusoids on a clean geometric ladder, so the eye locked onto the dominant ~17s beat
+    // and the chart looked predictable. Here many more components, each with its frequency jittered
+    // off the ladder (×[0.82,1.2]) and an independent seed-derived phase, fill the band so no single
+    // period dominates and the pattern never visibly repeats.
+    //
+    // The band is bounded: the slowest component (~0.006 Hz, ~160 s) gives slow trends/ranging; the
+    // fastest stays well under ~2 Hz so the sum is still clearly C2-smooth (no cusps — see curve.test).
+    const baseFreq = 0.006;  // Hz — slowest swell (~160 s period) for drifting trends
+    const ratio = 1.42;      // geometric spread; max freq ≈ 0.006 · 1.42^15 ≈ 1.7 Hz
     const comps: CurveComponent[] = [];
     let ampSum = 0;
     for (let k = 0; k < K; k++) {
-      const freq = baseFreq * ratio ** k;
-      // pink-ish 1/f^0.9 amplitude with mild per-component jitter
-      const amp = (1 / freq ** 0.9) * rng.range(0.85, 1.15);
+      const freq = baseFreq * ratio ** k * rng.range(0.82, 1.2);
+      // pink-ish 1/f^0.85 amplitude with per-component jitter (reddish spectrum ⇒ market-like wander)
+      const amp = (1 / freq ** 0.85) * rng.range(0.8, 1.2);
       ampSum += amp;
       comps.push({ freq, amp, phase: rng.range(0, 2 * Math.PI) });
     }
