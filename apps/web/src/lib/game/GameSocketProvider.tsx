@@ -103,30 +103,33 @@ const InstKeyCtx = createContext<string>('');
 const SYNTH_SPACING_MS = 150;
 const SYNTH_SPAN_MS = 60_000;
 
-// Mean-reverting random walk (Ornstein–Uhlenbeck) → an organic, price-chart-like
-// curve: broad green hills with occasional red dips. Reverts to a positive mean so
-// it stays mostly green (~80%) like the live server feed.
-const SYNTH_MU = 0.32;
-const SYNTH_THETA = 0.035;
-const SYNTH_SIGMA = 0.11;
-// Occasional volatility burst so seeded candles vary (bodies + wicks) like a real market tape.
-const SYNTH_JUMP_P = 0.06;
-const SYNTH_JUMP_K = 3;
-
-/** Approx. standard normal from three uniforms (mean 0, std 1). */
-function gaussian(): number {
-  return (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
-}
-
-/** Next signed curve value ∈ [-0.9, 0.9] given the previous one. */
-function nextSynth(prev: number): number {
-  const burst = Math.random() < SYNTH_JUMP_P ? SYNTH_SIGMA * SYNTH_JUMP_K * gaussian() : 0;
-  const v = prev + SYNTH_THETA * (SYNTH_MU - prev) + SYNTH_SIGMA * gaussian() + burst;
-  return Math.max(-0.9, Math.min(0.9, v));
-}
+// CLIENT-ONLY placeholder tape, shown until the first real engine tick arrives (or while offline).
+// It mirrors the engine's price curve (packages/shared/curve.ts): a dense, non-harmonic spectrum of
+// pink-noise sinusoids ⇒ fractional-Brownian-motion texture (trends, pullbacks, varied candles) that
+// reads like a market, NOT a repeating wave. It is NOT seeded/deterministic and never decides any
+// outcome — purely cosmetic, so live data overwrites it the moment it arrives.
+const SYNTH_DRIFT = 0.30;  // green bias — mirrors DEFAULT_CONFIG.driftBias
+const SYNTH_VOL = 1.0;     // amplitude scaler — mirrors DEFAULT_CONFIG.volatility
 
 const synthRate = (value: number) => CURVE_BASE_RATE + CURVE_AMPLITUDE * value;
-const rateToValue = (rate: number) => (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE;
+
+/** Build a closed-form fBm-like curve value(t) (seconds) in (-1,1), matching the engine's shape. */
+function makeSynthCurve(): (t: number) => number {
+  const K = 16, baseFreq = 0.006, ratio = 1.42;
+  const comps: { freq: number; amp: number; phase: number }[] = [];
+  let ampSum = 0;
+  for (let k = 0; k < K; k++) {
+    const freq = baseFreq * ratio ** k * (0.82 + Math.random() * 0.38); // jitter off the ladder
+    const amp = (1 / freq ** 0.85) * (0.8 + Math.random() * 0.4);        // pink-ish spectrum
+    ampSum += amp;
+    comps.push({ freq, amp, phase: Math.random() * 2 * Math.PI });
+  }
+  return (t: number) => {
+    let s = 0;
+    for (const c of comps) s += c.amp * Math.sin(2 * Math.PI * c.freq * t + c.phase);
+    return Math.tanh((s / ampSum) * SYNTH_VOL + SYNTH_DRIFT);
+  };
+}
 
 function isTick(v: unknown): v is Tick {
   return (
@@ -205,6 +208,8 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const heartbeat = useRef<ReturnType<typeof setInterval> | null>(null);
   const clientSeq = useRef(0);
   const realSeenRef = useRef(false);
+  const synthCurveRef = useRef<((t: number) => number) | null>(null);
+  const synthOriginRef = useRef(0);
 
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [online, setOnline] = useState(0);
@@ -423,16 +428,17 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   // already full on load (never "fills in" from the right). Keeps emitting until
   // the first real tick arrives, then stands down so live data takes over.
   useEffect(() => {
+    const curve = synthCurveRef.current ?? (synthCurveRef.current = makeSynthCurve());
     if (ticksRef.current.length === 0) {
       const now = Date.now();
+      const origin = now - SYNTH_SPAN_MS;              // curve t=0 at the left edge of the seed window
+      synthOriginRef.current = origin;
       const count = Math.floor(SYNTH_SPAN_MS / SYNTH_SPACING_MS);
       const seed: Tick[] = [];
-      let val = SYNTH_MU;
-      let prevRate = synthRate(val);
+      let prevRate = synthRate(curve(0));
       for (let i = count; i > 0; i--) {
         const t = now - i * SYNTH_SPACING_MS;
-        val = nextSynth(val);
-        const rate = synthRate(val);
+        const rate = synthRate(curve((t - origin) / 1000));
         seed.push({ t, rate, delta: rate - prevRate });
         prevRate = rate;
       }
@@ -445,8 +451,8 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       }
       const buf = ticksRef.current;
       const t = Date.now();
-      const prevRate = buf.length > 0 ? buf[buf.length - 1]!.rate : synthRate(SYNTH_MU);
-      const rate = synthRate(nextSynth(rateToValue(prevRate)));
+      const prevRate = buf.length > 0 ? buf[buf.length - 1]!.rate : synthRate(curve(0));
+      const rate = synthRate(curve((t - synthOriginRef.current) / 1000));
       buf.push({ t, rate, delta: rate - prevRate });
       if (buf.length > MAX_TICKS) buf.splice(0, buf.length - MAX_TICKS);
     }, SYNTH_SPACING_MS);
