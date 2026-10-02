@@ -8,6 +8,8 @@ import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { DIcon } from '@/components/game/digits/icons';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
+import { useBrand } from '@/lib/brand/BrandProvider';
+import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 
 type IconProps = { className?: string };
 
@@ -70,11 +72,25 @@ const marketerItems = [
 export function BottomNav() {
   const pathname = usePathname();
   const { isMarketer } = useMarketerSkin();
+  /**
+   * MetaTrader's bottom bar is flat: plain icons, the active one BLUE, the rest grey, and no filled
+   * pill anywhere. The green pill this app uses is the single loudest non-MT5 element left on the
+   * terminal's trade screen, so a candlestick brand gets MetaTrader's treatment.
+   *
+   * The LABELS stay, which MetaTrader's bar does not have. These destinations are Deposit, History,
+   * Profile and Chat rather than MetaTrader's own tabs, and an unlabelled wallet icon is a worse
+   * screen for the people actually using this.
+   */
+  const brand = useBrand();
+  const mt5 = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null && !isMarketer;
   const setChat = useLiveChat((s) => s.setOpen);
   const unread = useLiveChatUnread();
   return (
-    <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface md:hidden">
-      <ul className="mx-auto flex w-full max-w-app items-stretch px-2 py-1.5">
+    <nav className={cn(
+      'pb-safe fixed inset-x-0 bottom-0 z-30 border-t md:hidden',
+      mt5 ? 'border-[#2a2e39] bg-[#1b2029]' : 'border-border bg-surface',
+    )}>
+      <ul className={cn('mx-auto flex w-full items-stretch px-2 py-1.5', mt5 ? '' : 'max-w-app')}>
         {(isMarketer ? marketerItems : items).map(({ href, label, Icon }) => {
           const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
           return (
@@ -84,9 +100,9 @@ export function BottomNav() {
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   'mx-auto flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-semibold tracking-wide transition',
-                  active
-                    ? 'bg-accent text-accent-fg shadow-md shadow-accent/40'
-                    : 'text-muted hover:text-fg',
+                  mt5
+                    ? (active ? 'text-[#2962ff]' : 'text-[#787b86] hover:text-[#d1d4dc]')
+                    : (active ? 'bg-accent text-accent-fg shadow-md shadow-accent/40' : 'text-muted hover:text-fg'),
                 )}
               >
                 <Icon className="h-5 w-5" />
@@ -98,7 +114,10 @@ export function BottomNav() {
         {/* Chat lives in the bar on phones (BUGLOG #100: the floating button covered SELL). */}
         <li className="flex-1">
           <button type="button" onClick={() => setChat(true)} aria-label={`Chat${unread ? ` (${unread} new)` : ''}`}
-            className="relative mx-auto flex w-full flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-semibold tracking-wide text-muted transition hover:text-fg">
+            className={cn(
+              'relative mx-auto flex w-full flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-semibold tracking-wide transition',
+              mt5 ? 'text-[#787b86] hover:text-[#d1d4dc]' : 'text-muted hover:text-fg',
+            )}>
             <DIcon name="chat" className="h-5 w-5" />
             CHAT
             {unread ? <span className="absolute right-[22%] top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-down px-1 text-[9px] font-bold text-white">{unread}</span> : null}

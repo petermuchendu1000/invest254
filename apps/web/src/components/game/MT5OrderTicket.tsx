@@ -15,6 +15,7 @@ import { useHydrated } from '@/lib/useHydrated';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { api } from '@/lib/api/endpoints';
 import { LivePnl } from '@/components/game/LivePnl';
+import { useTakeProfitStore } from '@/lib/game/takeprofit';
 import { MT5Price } from '@/components/game/MT5Price';
 import { cn } from '@/lib/cn';
 
@@ -105,6 +106,16 @@ export function MT5OrderTicket() {
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
   const overBalance = !!token && stakeCents > spendable;
   const connecting = status !== 'open';
+  // S/L and T/P sit on the ticket in MetaTrader, so they sit here. The target is shared with the
+  // Toolbox row, which modifies it on an open contract exactly as MetaTrader does.
+  const tpTarget = useTakeProfitStore((st) => st.targetCents);
+  const setTp = useTakeProfitStore((st) => st.set);
+  const tpStepCents = Math.max(10_000, Math.round(limits.minCents / 2)); // half the minimum stake
+  const bumpTp = (dir: 1 | -1) => {
+    const next = (tpTarget ?? 0) + dir * tpStepCents;
+    setTp(next <= 0 ? null : next);
+  };
+
   const durations = useMemo(
     () => Array.from(new Set([...DURATION_OPTIONS, defaultDurationS])).sort((a, b) => a - b),
     [defaultDurationS],
@@ -134,8 +145,8 @@ export function MT5OrderTicket() {
     );
   }
 
-  const rowLabel = 'w-16 shrink-0 text-[11px] uppercase tracking-wide text-[#787b86]';
-  const stepBtn = 'h-8 min-w-11 shrink-0 rounded border border-[#2a2e39] bg-[#131722] px-2 font-mono text-[12px] font-semibold text-[#d1d4dc] transition hover:border-[#2962ff] disabled:opacity-40';
+  const rowLabel = 'w-16 shrink-0 text-[11px] uppercase tracking-wide text-[#787b86] lg:w-auto lg:basis-full';
+  const stepBtn = 'h-8 min-w-11 lg:min-w-0 shrink-0 rounded border border-[#2a2e39] bg-[#131722] px-2 font-mono text-[12px] font-semibold text-[#d1d4dc] transition hover:border-[#2962ff] disabled:opacity-40';
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-[#2a2e39] bg-[#1b2029] p-3 text-[#d1d4dc]">
@@ -146,10 +157,10 @@ export function MT5OrderTicket() {
       </div>
 
       {/* Volume — MetaTrader's stepper row. */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>Volume</span>
         <button type="button" onClick={() => bump(-VOLUME_STEPS[0])} disabled={lots <= minLots} className={stepBtn} aria-label="Decrease volume">−0.01</button>
-        <span className="flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2a2e39] bg-[#131722] font-mono text-[14px] font-bold text-white tabular-nums">
+        <span className="flex h-8 min-w-[4rem] flex-1 basis-16 items-center justify-center rounded border border-[#2a2e39] bg-[#131722] font-mono text-[14px] font-bold text-white tabular-nums">
           {lots.toFixed(volDigits)}
         </span>
         {VOLUME_STEPS.map((s) => (
@@ -158,13 +169,39 @@ export function MT5OrderTicket() {
           </button>
         ))}
       </div>
-      <div className="flex items-baseline gap-2 pl-[4.25rem] text-[11px] text-[#787b86]">
+      <div className="flex items-baseline gap-2 pl-[4.25rem] text-[11px] text-[#787b86] lg:pl-0">
         <span>= {money.fmt(stakeCents)}</span>
         <span className="ml-auto">min {minLots.toFixed(volDigits)}{limits.maxCents === undefined ? '' : ` / max ${maxLots.toFixed(volDigits)}`}</span>
       </div>
 
+      {/* S/L and T/P, as MetaTrader's "− value +" rows rather than free-text fields. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={rowLabel}>S / L</span>
+        {/* Present and visibly disabled. The engine refuses to close a losing contract early by
+            design, so a stop is not implementable without changing the money path — and the most
+            this contract can lose is its stake, always. A control that silently did nothing would
+            be worse than one that explains itself. */}
+        <span
+          className="flex h-8 flex-1 cursor-not-allowed items-center justify-center rounded border border-[#2a2e39] bg-[#131722]/60 text-[11px] text-[#5a5e6a]"
+          title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
+        >
+          not available — max loss is the stake
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={rowLabel}>T / P</span>
+        <button type="button" onClick={() => bumpTp(-1)} disabled={tpTarget === null} className={stepBtn} aria-label="Lower take profit">−</button>
+        <span className="flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2a2e39] bg-[#131722] font-mono text-[12px] font-semibold text-[#d1d4dc] tabular-nums">
+          {tpTarget === null ? 'none' : money.fmt(tpTarget)}
+        </span>
+        <button type="button" onClick={() => bumpTp(1)} className={stepBtn} aria-label="Raise take profit">+</button>
+      </div>
+      <p className="pl-[4.25rem] text-[11px] text-[#787b86] lg:pl-0">
+        Closes on PROFIT reaching this amount — not a price, because an open contract&apos;s payout rises with time.
+      </p>
+
       {/* Expiry — not a MetaTrader control, because a MetaTrader position has no expiry. Ours does. */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>Expiry</span>
         <div className="flex flex-1 gap-1">
           {durations.map((d) => (

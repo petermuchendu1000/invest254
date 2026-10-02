@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { valueOfRate, type Candle } from '@invest254/shared/candles';
 import { LOT_STAKE_CENTS } from '@invest254/shared/account';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { useDisplayMoney } from '@/lib/money';
+import { MT5Price } from '@/components/game/MT5Price';
+import { logJournal } from '@/lib/game/journal';
 import { cn } from '@/lib/cn';
 
 /**
@@ -28,6 +30,13 @@ export function MarketWatch({ className }: { className?: string }) {
   const [tab, setTab] = useState<Tab>('symbols');
   const [day, setDay] = useState<Candle | null>(null);
   const [, force] = useState(0);
+  /**
+   * Direction of the last price CHANGE, which is what colours a MetaTrader quote row: blue when the
+   * quote last ticked up, red when it last ticked down. It holds its colour between changes — a row
+   * is never uncoloured — so `null` only ever means "no quote yet".
+   */
+  const tickUpRef = useRef<boolean | null>(null);
+  const lastSeenRef = useRef<number | null>(null);
 
   // Quote updates come off the tick stream, which does not re-render React on its own.
   useEffect(() => {
@@ -35,18 +44,28 @@ export function MarketWatch({ className }: { className?: string }) {
     return () => clearInterval(id);
   }, []);
 
-  // The session figures are the current D1 bar — the same bar the chart's D1 period shows.
+  /**
+   * The session figures are the latest closed D1 bar — the same bar the chart's D1 period shows.
+   *
+   * Refetched whenever the connection comes back, not only on a timer: a request made while the
+   * socket is down is rejected, and waiting out the interval left the panel showing dashes for a
+   * minute after every reconnect. (Found by reading this app's own Journal tab, which logged
+   * "session figures unavailable (NOT_CONNECTED)" right after a reconnect.)
+   */
   useEffect(() => {
+    if (status !== 'open') return;
     let cancelled = false;
     const load = () => {
       requestCandles('D1', 1)
         .then((r) => { if (!cancelled && r.bars.length) setDay(r.bars[r.bars.length - 1]!); })
-        .catch(() => { /* the panel shows dashes until a reply lands */ });
+        // A failure is worth seeing rather than swallowing: the session line simply shows dashes,
+        // and the Journal says why.
+        .catch((e: Error) => { if (!cancelled) logJournal('warn', 'Quotes', `session figures unavailable (${e.message})`); });
     };
     load();
     const id = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [requestCandles]);
+  }, [requestCandles, status]);
 
   const market = getMarket();
   const digits = market?.instrument.digits ?? 2;
@@ -60,6 +79,14 @@ export function MarketWatch({ className }: { className?: string }) {
   }, [getLastTick, getMarket]);
 
   const last = priceNow();
+  if (last !== null) {
+    const prev = lastSeenRef.current;
+    if (prev !== null && last !== prev) tickUpRef.current = last > prev;
+    lastSeenRef.current = last;
+  }
+  const tickUp = tickUpRef.current;
+  // MetaTrader's quote colours: blue up, red down — the same pairing as its buy and sell sides.
+  const quoteTone = tickUp === null ? 'text-[#d1d4dc]' : tickUp ? 'text-[#2962ff]' : 'text-[#f23645]';
   // Change against the session open, which is what a terminal's change column means.
   const open = market?.anchor.base ?? null;
   const changePct = last !== null && open ? ((last - open) / open) * 100 : null;
@@ -78,24 +105,28 @@ export function MarketWatch({ className }: { className?: string }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'symbols' ? (
-          <table className="w-full border-collapse text-left font-mono text-[11px] tabular-nums">
-            <thead>
-              <tr className="text-[#787b86]">
-                <th className="px-2 py-1 font-normal">Symbol</th>
-                <th className="px-2 py-1 text-right font-normal">Last</th>
-                <th className="px-2 py-1 text-right font-normal">Chg %</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-t border-[#2a2e39]/60">
-                <td className="px-2 py-1 font-semibold text-white">{symbol}</td>
-                <td className={cn('px-2 py-1 text-right font-semibold', up ? 'text-[#089981]' : 'text-[#f23645]')}>{show(last)}</td>
-                <td className={cn('px-2 py-1 text-right', up ? 'text-[#089981]' : 'text-[#f23645]')}>
-                  {changePct === null ? '—' : `${up ? '+' : ''}${changePct.toFixed(2)}`}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          /* MetaTrader's Quotes row: the symbol and its session line on the left, the quote on the
+             right in its own typography, coloured by the last tick's direction.
+
+             MetaTrader shows BID and ASK here. There is no spread on this instrument — a contract
+             settles on one seeded price — so one quote is printed rather than two numbers implying
+             the player buys at one and sells at the other. For the same reason the Spread column
+             MetaTrader puts under the symbol is absent instead of showing a made-up figure. */
+          <div className="border-b border-[#2a2e39]/60 px-2 py-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[12px] font-bold text-white">{symbol}</div>
+                <div className="font-mono text-[10px] text-[#787b86]">
+                  {changePct === null ? '—' : `${up ? '+' : ''}${changePct.toFixed(2)}%`} today
+                </div>
+              </div>
+              <MT5Price value={last} digits={digits} className={cn('text-[12px]', quoteTone)} />
+            </div>
+            <div className="mt-1 flex gap-3 font-mono text-[10px] text-[#787b86]">
+              <span>Low: <span className="text-[#b2b5be]">{show(day?.low ?? null)}</span></span>
+              <span>High: <span className="text-[#b2b5be]">{show(day?.high ?? null)}</span></span>
+            </div>
+          </div>
         ) : (
           <dl className="divide-y divide-[#2a2e39]/50 text-[11px]">
             <Detail label="Symbol" value={symbol} />

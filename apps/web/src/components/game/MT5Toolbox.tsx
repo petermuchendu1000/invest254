@@ -11,6 +11,7 @@ import { useSession } from '@/lib/auth/session';
 import { useMyNotifications } from '@/lib/notifications/hooks';
 import { useJournal, logJournal } from '@/lib/game/journal';
 import { useAlertsStore, usePriceAlertWatch, type PriceAlert } from '@/lib/game/alerts';
+import { useTakeProfitStore, useTakeProfitWatch } from '@/lib/game/takeprofit';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
@@ -102,37 +103,11 @@ export function MT5Toolbox() {
   });
 
   // ── Take profit ────────────────────────────────────────────────────────────────────────────────
-  // MT5's T/P is a PRICE. It cannot be one here: once a contract is open its payout rises with
-  // elapsed TIME, not with price (see `liveWinMultiplier`), so closing at a price level would pay an
-  // amount unrelated to that level. A profit target is the same idea expressed in the terms this
-  // contract actually has, so that is what this is — and the column says so.
-  const [tpInput, setTpInput] = useState('');
-  const tpTargetRef = useRef<{ positionId: string; cents: number } | null>(null);
-  const tpFiredRef = useRef<string | null>(null);
-
-  const armTakeProfit = () => {
-    if (!live?.positionId) return;
-    const amount = Number(tpInput);
-    if (!Number.isFinite(amount) || amount <= 0) { tpTargetRef.current = null; return; }
-    const cents = money.toKesCents(amount);
-    tpTargetRef.current = { positionId: live.positionId, cents };
-    logJournal('info', 'Trade', `#${live.positionId.slice(0, 8)} take-profit set at ${money.fmt(cents)}`);
-  };
-
-  useEffect(() => {
-    const target = tpTargetRef.current;
-    if (!live?.positionId || !target || target.positionId !== live.positionId) return;
-    if (!live.sellable || live.livePnlCents < target.cents) return;
-    if (tpFiredRef.current === live.positionId) return; // one close per position, never a loop
-    tpFiredRef.current = live.positionId;
-    logJournal('ok', 'Trade', `#${live.positionId.slice(0, 8)} take-profit hit at ${money.fmt(live.livePnlCents)} — closing`);
-    sell();
-  }, [live?.positionId, live?.livePnlCents, live?.sellable, live, sell, money]);
-
-  // Clear the ticket's target once the contract is gone, so it cannot apply to the next one.
-  useEffect(() => {
-    if (!live) { tpTargetRef.current = null; setTpInput(''); }
-  }, [live]);
+  // The target lives in the shared store because MetaTrader carries T/P on the ticket AND lets you
+  // modify it on an open position; both surfaces read and write the one value.
+  const tpTarget = useTakeProfitStore((st) => st.targetCents);
+  const setTp = useTakeProfitStore((st) => st.set);
+  useTakeProfitWatch(live, sell, money.fmt);
 
   // ── Tab data ───────────────────────────────────────────────────────────────────────────────────
   const { data: history } = useQuery({
@@ -193,45 +168,59 @@ export function MT5Toolbox() {
           />
           <div className="fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 flex max-h-[62vh] flex-col overflow-hidden rounded-xl border border-[#2a2e39] bg-[#1b2029] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none">
           <div className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2a2e39]" style={{ maxHeight: 'min(46vh, 22rem)' }}>
+            {/* MetaTrader shows a position as a two-line entry on a phone and as a wide table on a
+                desktop, because ten columns cannot be read on a 430px screen. Both are rendered from
+                the same values and swapped at `sm`, rather than the table being squeezed. */}
             {tab === 'trade' ? (
               live ? (
-                <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
-                  <tr className="border-t border-[#2a2e39]/60">
-                    <Td>{symbol}</Td>
-                    <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
-                    <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '—'}</Td>
-                    <Td className={live.direction === 'buy' ? 'text-[#089981]' : 'text-[#f23645]'}>{live.direction}</Td>
-                    <Td>{lotsOfStake(live.stakeCents)}</Td>
-                    <Td>{px(live.entryRate)}</Td>
-                    <Td>
-                      {/* Present, disabled, and honest about why. A losing contract cannot be closed
-                          early — the engine refuses it — so the most this contract can lose is always
-                          its stake. A stop that silently did nothing would be the worst option. */}
-                      <span
-                        className="cursor-not-allowed text-[#5a5e6a]"
-                        title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
-                      >
-                        —
-                      </span>
-                    </Td>
-                    <Td>
-                      <input
-                        value={tpInput}
-                        onChange={(e) => setTpInput(e.target.value)}
-                        onBlur={armTakeProfit}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { armTakeProfit(); (e.target as HTMLInputElement).blur(); } }}
-                        inputMode="decimal"
-                        placeholder="profit"
-                        title="Take profit: closes the contract once its floating profit reaches this amount. It is an amount, not a price — an open contract's payout rises with time, not with price."
-                        className="w-16 rounded border border-[#2a2e39] bg-[#131722] px-1 py-0.5 text-[11px] text-[#d1d4dc] outline-none focus:border-[#2962ff]"
-                      />
-                    </Td>
-                    <Td>{px(getLastTick()?.rate ?? null)}</Td>
-                    <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#089981]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
-                      {money.fmt(live.livePnlCents)}
-                    </Td>
-                  </tr>
-                </Table>
+                <>
+                  <PositionRow
+                    className="sm:hidden"
+                    symbol={symbol}
+                    direction={live.direction}
+                    lots={lotsOfStake(live.stakeCents)}
+                    from={px(live.entryRate)}
+                    to={px(getLastTick()?.rate ?? null)}
+                    profit={money.fmt(live.livePnlCents)}
+                    profitCents={live.livePnlCents}
+                    note={tpTarget === null ? null : `T/P ${money.fmt(tpTarget)}`}
+                  />
+                  <div className="hidden sm:block">
+                    <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
+                      <tr className="border-t border-[#2a2e39]/60">
+                        <Td>{symbol}</Td>
+                        <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
+                        <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '—'}</Td>
+                        <Td className={live.direction === 'buy' ? 'text-[#2962ff]' : 'text-[#f23645]'}>{live.direction}</Td>
+                        <Td>{lotsOfStake(live.stakeCents)}</Td>
+                        <Td>{px(live.entryRate)}</Td>
+                        <Td>
+                          {/* Present, disabled, and honest about why. The engine refuses to close a
+                              losing contract early, so a stop is not implementable; the most this
+                              contract can lose is its stake, always. */}
+                          <span
+                            className="cursor-not-allowed text-[#5a5e6a]"
+                            title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
+                          >
+                            —
+                          </span>
+                        </Td>
+                        <Td>
+                          {/* MetaTrader's "− value +", the same control the ticket carries. */}
+                          <span className="flex items-center gap-1">
+                            <button type="button" onClick={() => setTp(tpTarget === null ? null : Math.max(0, tpTarget - 10_000) || null)} disabled={tpTarget === null} className="px-1 text-[#787b86] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
+                            <span className="min-w-14 text-center">{tpTarget === null ? 'none' : money.fmt(tpTarget)}</span>
+                            <button type="button" onClick={() => setTp((tpTarget ?? 0) + 10_000)} className="px-1 text-[#787b86] hover:text-white" aria-label="Raise take profit">+</button>
+                          </span>
+                        </Td>
+                        <Td>{px(getLastTick()?.rate ?? null)}</Td>
+                        <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#2962ff]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
+                          {money.fmt(live.livePnlCents)}
+                        </Td>
+                      </tr>
+                    </Table>
+                  </div>
+                </>
               ) : (
                 <Empty>No open positions.</Empty>
               )
@@ -239,22 +228,41 @@ export function MT5Toolbox() {
 
             {tab === 'history' ? (
               rows.length > 0 ? (
+                <>
+                <div className="sm:hidden">
+                  {rows.map((p: PositionDto) => (
+                    <PositionRow
+                      key={p.id}
+                      symbol={symbol}
+                      direction={p.direction}
+                      lots={lotsOfStake(p.stakeCents)}
+                      from={px(p.entryRate)}
+                      to={px(p.exitRate)}
+                      profit={p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
+                      profitCents={p.pnlCents ?? 0}
+                      note={clock(p.openedAt)}
+                    />
+                  ))}
+                </div>
+                <div className="hidden sm:block">
                 <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'Close', 'Profit']}>
                   {rows.map((p: PositionDto) => (
                     <tr key={p.id} className="border-t border-[#2a2e39]/60">
                       <Td>{symbol}</Td>
                       <Td>{p.id.slice(0, 8)}</Td>
                       <Td>{clock(p.openedAt)}</Td>
-                      <Td className={p.direction === 'buy' ? 'text-[#089981]' : 'text-[#f23645]'}>{p.direction}</Td>
+                      <Td className={p.direction === 'buy' ? 'text-[#2962ff]' : 'text-[#f23645]'}>{p.direction}</Td>
                       <Td>{lotsOfStake(p.stakeCents)}</Td>
                       <Td>{px(p.entryRate)}</Td>
                       <Td>{px(p.exitRate)}</Td>
-                      <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#089981]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
+                      <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#2962ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
                         {p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
                       </Td>
                     </tr>
                   ))}
                 </Table>
+                </div>
+                </>
               ) : (
                 <Empty>{token ? 'No closed trades yet.' : 'Sign in to see your trade history.'}</Empty>
               )
@@ -336,11 +344,14 @@ export function MT5Toolbox() {
 /** Live newswire. Fetched when the tab is first shown, then refreshed on a slow timer. */
 function NewsTab({ active }: { active: boolean }) {
   const { requestNews } = useGameSocketApi();
+  const { status } = useGameSocket();
   const [items, setItems] = useState<NewsItemDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Keyed on the connection as well as the tab: a request raised while the socket is down is
+  // rejected, and without this the tab would sit on its error until the next two-minute tick.
   useEffect(() => {
-    if (!active) return;
+    if (!active || status !== 'open') return;
     let cancelled = false;
     const load = () => {
       requestNews(40)
@@ -350,7 +361,7 @@ function NewsTab({ active }: { active: boolean }) {
     load();
     const id = setInterval(load, 120_000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [active, requestNews]);
+  }, [active, status, requestNews]);
 
   if (error && !items) return <Empty>Newswire unavailable ({error}).</Empty>;
   if (!items) return <Empty>Loading news…</Empty>;
@@ -440,6 +451,35 @@ function AlertsTab({
           ))}
         </Table>
       )}
+    </div>
+  );
+}
+
+/**
+ * MetaTrader's mobile position entry: "SYMBOL, side volume" over "entry → current", with the result
+ * on the right. The side and the result carry the colour — blue for buy and for profit, red for sell
+ * and for loss — which is MetaTrader's pairing throughout.
+ */
+function PositionRow({
+  symbol, direction, lots, from, to, profit, profitCents, note, className,
+}: {
+  symbol: string; direction: string; lots: string; from: string; to: string;
+  profit: string; profitCents: number; note: string | null; className?: string;
+}) {
+  const buy = direction === 'buy';
+  return (
+    <div className={cn('flex items-start justify-between gap-2 border-b border-[#2a2e39]/60 px-3 py-2', className)}>
+      <div className="min-w-0">
+        <div className="text-[12px] font-semibold text-white">
+          {symbol},{' '}
+          <span className={buy ? 'text-[#2962ff]' : 'text-[#f23645]'}>{direction} {lots}</span>
+        </div>
+        <div className="font-mono text-[11px] text-[#787b86]">{from} → {to}</div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className={cn('font-mono text-[12px] font-semibold tabular-nums', profitCents > 0 ? 'text-[#2962ff]' : profitCents < 0 ? 'text-[#f23645]' : 'text-[#d1d4dc]')}>{profit}</div>
+        {note ? <div className="font-mono text-[10px] text-[#787b86]">{note}</div> : null}
+      </div>
     </div>
   );
 }
