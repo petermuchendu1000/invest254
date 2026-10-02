@@ -1,38 +1,60 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { valueOfRate } from '@invest254/shared/candles';
 import { accountSummary, lotsOfStake } from '@invest254/shared/account';
-import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
+import { useGameSocket, useGameSocketApi, type NewsItemDto } from '@/lib/game/GameSocketProvider';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
 import { useSession } from '@/lib/auth/session';
+import { useMyNotifications } from '@/lib/notifications/hooks';
+import { useJournal, logJournal } from '@/lib/game/journal';
+import { useAlertsStore, usePriceAlertWatch, type PriceAlert } from '@/lib/game/alerts';
+import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
 import { cn } from '@/lib/cn';
 
 /**
- * MetaTrader's Toolbox: the account summary strip, the open position, and closed trades.
+ * MetaTrader's Toolbox.
  *
- * The figures come from `accountSummary` in the shared package, which documents how MT5's
- * margin-broker vocabulary maps onto this game's fixed-stake contracts and is unit-tested there.
- * The floating result is the engine's own live P/L (`position_update`), the same number the engine
- * will settle on — it is not recomputed here, so the panel cannot disagree with the outcome.
+ * Every tab carries real data. Where MetaTrader shows something this product genuinely cannot do,
+ * the control is present and visibly disabled with the reason, rather than drawn as if it worked:
  *
- * Tabs are limited to the two that carry real data. MetaTrader also shows News, Mailbox, Alerts and
- * Journal; there is nothing behind those here, and an empty tab pretending otherwise would be worse
- * than its absence.
+ *   Trade    the open contract, its live P/L, and an editable take-profit
+ *   History  settled contracts from the account's own history
+ *   News     a live newswire the engine polls from public RSS feeds
+ *   Mailbox  the account's notifications, the same ones the banner system raises
+ *   Alerts   price alerts, armed against the live price and fired by the open terminal
+ *   Journal  this session's real socket events — connect, auth, orders, server errors
+ *
+ * The account figures come from `accountSummary` in the shared package, which documents how MT5's
+ * margin-broker vocabulary maps onto fixed-stake contracts and is unit-tested there. The floating
+ * result is the engine's own live P/L — the number it will settle on — so this panel is a read-only
+ * view that cannot disagree with an outcome.
+ *
+ * Tabs sit along the BOTTOM edge, where MetaTrader puts them.
  */
 
-type Tab = 'trade' | 'history';
+type Tab = 'trade' | 'history' | 'news' | 'mailbox' | 'alerts' | 'journal';
+
+const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
+  { id: 'trade', label: 'Trade' },
+  { id: 'history', label: 'History' },
+  { id: 'news', label: 'News' },
+  { id: 'mailbox', label: 'Mailbox' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'journal', label: 'Journal' },
+];
 
 export function MT5Toolbox() {
   const { activePosition, status } = useGameSocket();
-  const { getLastTick, getMarket } = useGameSocketApi();
+  const { getLastTick, getMarket, sell } = useGameSocketApi();
   const { data: wallet } = useWallet();
   const money = useDisplayMoney();
   const token = useSession((s) => s.token);
+  const toast = useToast();
 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('trade');
@@ -44,14 +66,31 @@ export function MT5Toolbox() {
   }, []);
 
   const market = getMarket();
-  const priceOf = (rate: number): number | null =>
-    market ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue) : null;
+  const symbol = market?.instrument.symbol ?? 'XAUUSD';
   const digits = market?.instrument.digits ?? 2;
+
+  const priceOfRate = useCallback((rate: number): number | null => {
+    const m = getMarket();
+    return m ? m.anchor.base + m.instrument.scale * (valueOfRate(rate) - m.anchor.openValue) : null;
+  }, [getMarket]);
+  const livePrice = useCallback((): number | null => {
+    const t = getLastTick();
+    return t ? priceOfRate(t.rate) : null;
+  }, [getLastTick, priceOfRate]);
   const px = (rate: number | null | undefined): string => {
     if (rate === null || rate === undefined) return '—';
-    const p = priceOf(rate);
+    const p = priceOfRate(rate);
     return p === null ? '—' : p.toFixed(digits);
   };
+
+  // Price alerts fire against the same price the chart draws.
+  usePriceAlertWatch(livePrice, symbol, (a, price) => {
+    toast.push({
+      tone: 'info',
+      title: `${a.symbol} alert`,
+      description: `${a.above ? 'rose to' : 'fell to'} ${a.price} — now ${price.toFixed(digits)}`,
+    });
+  });
 
   // An optimistic open has no engine id yet; its stake is already committed, so it counts.
   const live = activePosition && activePosition.phase !== 'settling' ? activePosition : null;
@@ -62,21 +101,57 @@ export function MT5Toolbox() {
     floatingPnlCents: floatingCents,
   });
 
+  // ── Take profit ────────────────────────────────────────────────────────────────────────────────
+  // MT5's T/P is a PRICE. It cannot be one here: once a contract is open its payout rises with
+  // elapsed TIME, not with price (see `liveWinMultiplier`), so closing at a price level would pay an
+  // amount unrelated to that level. A profit target is the same idea expressed in the terms this
+  // contract actually has, so that is what this is — and the column says so.
+  const [tpInput, setTpInput] = useState('');
+  const tpTargetRef = useRef<{ positionId: string; cents: number } | null>(null);
+  const tpFiredRef = useRef<string | null>(null);
+
+  const armTakeProfit = () => {
+    if (!live?.positionId) return;
+    const amount = Number(tpInput);
+    if (!Number.isFinite(amount) || amount <= 0) { tpTargetRef.current = null; return; }
+    const cents = money.toKesCents(amount);
+    tpTargetRef.current = { positionId: live.positionId, cents };
+    logJournal('info', 'Trade', `#${live.positionId.slice(0, 8)} take-profit set at ${money.fmt(cents)}`);
+  };
+
+  useEffect(() => {
+    const target = tpTargetRef.current;
+    if (!live?.positionId || !target || target.positionId !== live.positionId) return;
+    if (!live.sellable || live.livePnlCents < target.cents) return;
+    if (tpFiredRef.current === live.positionId) return; // one close per position, never a loop
+    tpFiredRef.current = live.positionId;
+    logJournal('ok', 'Trade', `#${live.positionId.slice(0, 8)} take-profit hit at ${money.fmt(live.livePnlCents)} — closing`);
+    sell();
+  }, [live?.positionId, live?.livePnlCents, live?.sellable, live, sell, money]);
+
+  // Clear the ticket's target once the contract is gone, so it cannot apply to the next one.
+  useEffect(() => {
+    if (!live) { tpTargetRef.current = null; setTpInput(''); }
+  }, [live]);
+
+  // ── Tab data ───────────────────────────────────────────────────────────────────────────────────
   const { data: history } = useQuery({
     queryKey: ['positions', 'toolbox'],
     queryFn: () => api.positions(token!, { limit: 25 }),
     enabled: Boolean(token) && open && tab === 'history',
     staleTime: 15_000,
   });
-
   const rows = useMemo(() => history?.items ?? [], [history]);
 
+  const notifications = useMyNotifications();
+  const journal = useJournal();
+  const alerts = useAlertsStore((s) => s.alerts);
+
   return (
-    <div className="shrink-0 overflow-hidden rounded-xl border border-[#2a2e39] bg-[#1b2029] text-[#d1d4dc]">
-      {/* The account line is the toggle, and it is the ONLY place these figures appear — rendering
-          them again inside the open panel just said the same thing twice. Collapsed it is a single
-          scrolling row so the chart keeps its height on a phone; open, it wraps to MetaTrader's
-          full five. The chevron sits outside the scrolling area, or it rides off the right edge. */}
+    <div className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-[#2a2e39] bg-[#1b2029] text-[#d1d4dc]">
+      {/* The account line is the toggle, and the only place these figures appear. Collapsed it is a
+          single scrolling row so the chart keeps its height on a phone; open, it wraps to
+          MetaTrader's full five. The chevron sits outside the scrolling area, or it rides off. */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -88,7 +163,7 @@ export function MT5Toolbox() {
           className={cn(
             'min-w-0 flex-1 gap-x-4 gap-y-1',
             open
-              ? 'grid grid-cols-2 sm:grid-cols-3'
+              ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5'
               : 'flex items-center gap-3 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
           )}
         >
@@ -105,65 +180,266 @@ export function MT5Toolbox() {
       </button>
 
       {open ? (
-        <div className="border-t border-[#2a2e39]">
-          <div className="flex items-center gap-1 border-b border-[#2a2e39] px-2 py-1">
-            <TabButton on={tab === 'trade'} onClick={() => setTab('trade')}>Trade</TabButton>
-            <TabButton on={tab === 'history'} onClick={() => setTab('history')}>History</TabButton>
-            <span className="ml-auto pr-1 text-[10px] text-[#787b86]">
-              {status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
-            </span>
-          </div>
-
-          <div className="max-h-56 overflow-y-auto">
+        <>
+          {/* On a phone the panel is a SHEET over the screen, not an inline block: docked inline it
+              squeezed the chart down to a sliver, which is the opposite of what a terminal should do
+              with its chart. From `sm` up there is room to dock it, so it docks, as MetaTrader does.
+              The backdrop is mobile-only and dismisses on tap. */}
+          <button
+            type="button"
+            aria-label="Close account details"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 bg-black/60 sm:hidden"
+          />
+          <div className="fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 flex max-h-[62vh] flex-col overflow-hidden rounded-xl border border-[#2a2e39] bg-[#1b2029] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none">
+          <div className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2a2e39]" style={{ maxHeight: 'min(46vh, 22rem)' }}>
             {tab === 'trade' ? (
               live ? (
                 <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
-                  <Row
-                    cells={[
-                      market?.instrument.symbol ?? '—',
-                      live.positionId ? live.positionId.slice(0, 8) : '…',
-                      live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '—',
-                      live.direction === 'buy' ? 'buy' : 'sell',
-                      lotsOfStake(live.stakeCents),
-                      px(live.entryRate),
-                      // Stops do not exist on a fixed-expiry contract. MetaTrader leaves them blank
-                      // when unset, so a dash is the faithful rendering, not a placeholder.
-                      '—',
-                      '—',
-                      px(getLastTick()?.rate ?? null),
-                      money.fmt(live.livePnlCents),
-                    ]}
-                    tone={live.livePnlCents > 0 ? 'up' : live.livePnlCents < 0 ? 'down' : undefined}
-                  />
+                  <tr className="border-t border-[#2a2e39]/60">
+                    <Td>{symbol}</Td>
+                    <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
+                    <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '—'}</Td>
+                    <Td className={live.direction === 'buy' ? 'text-[#089981]' : 'text-[#f23645]'}>{live.direction}</Td>
+                    <Td>{lotsOfStake(live.stakeCents)}</Td>
+                    <Td>{px(live.entryRate)}</Td>
+                    <Td>
+                      {/* Present, disabled, and honest about why. A losing contract cannot be closed
+                          early — the engine refuses it — so the most this contract can lose is always
+                          its stake. A stop that silently did nothing would be the worst option. */}
+                      <span
+                        className="cursor-not-allowed text-[#5a5e6a]"
+                        title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
+                      >
+                        —
+                      </span>
+                    </Td>
+                    <Td>
+                      <input
+                        value={tpInput}
+                        onChange={(e) => setTpInput(e.target.value)}
+                        onBlur={armTakeProfit}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { armTakeProfit(); (e.target as HTMLInputElement).blur(); } }}
+                        inputMode="decimal"
+                        placeholder="profit"
+                        title="Take profit: closes the contract once its floating profit reaches this amount. It is an amount, not a price — an open contract's payout rises with time, not with price."
+                        className="w-16 rounded border border-[#2a2e39] bg-[#131722] px-1 py-0.5 text-[11px] text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+                      />
+                    </Td>
+                    <Td>{px(getLastTick()?.rate ?? null)}</Td>
+                    <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#089981]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
+                      {money.fmt(live.livePnlCents)}
+                    </Td>
+                  </tr>
                 </Table>
               ) : (
                 <Empty>No open positions.</Empty>
               )
-            ) : rows.length > 0 ? (
-              <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'Close', 'Profit']}>
-                {rows.map((p: PositionDto) => (
-                  <Row
-                    key={p.id}
-                    cells={[
-                      market?.instrument.symbol ?? '—',
-                      p.id.slice(0, 8),
-                      clock(p.openedAt),
-                      p.direction,
-                      lotsOfStake(p.stakeCents),
-                      px(p.entryRate),
-                      px(p.exitRate),
-                      p.pnlCents === null ? '—' : money.fmt(p.pnlCents),
-                    ]}
-                    tone={p.pnlCents === null ? undefined : p.pnlCents > 0 ? 'up' : p.pnlCents < 0 ? 'down' : undefined}
-                  />
-                ))}
-              </Table>
-            ) : (
-              <Empty>{token ? 'No closed trades yet.' : 'Sign in to see your trade history.'}</Empty>
-            )}
+            ) : null}
+
+            {tab === 'history' ? (
+              rows.length > 0 ? (
+                <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'Close', 'Profit']}>
+                  {rows.map((p: PositionDto) => (
+                    <tr key={p.id} className="border-t border-[#2a2e39]/60">
+                      <Td>{symbol}</Td>
+                      <Td>{p.id.slice(0, 8)}</Td>
+                      <Td>{clock(p.openedAt)}</Td>
+                      <Td className={p.direction === 'buy' ? 'text-[#089981]' : 'text-[#f23645]'}>{p.direction}</Td>
+                      <Td>{lotsOfStake(p.stakeCents)}</Td>
+                      <Td>{px(p.entryRate)}</Td>
+                      <Td>{px(p.exitRate)}</Td>
+                      <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#089981]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
+                        {p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
+                      </Td>
+                    </tr>
+                  ))}
+                </Table>
+              ) : (
+                <Empty>{token ? 'No closed trades yet.' : 'Sign in to see your trade history.'}</Empty>
+              )
+            ) : null}
+
+            {tab === 'news' ? <NewsTab active={open} /> : null}
+
+            {tab === 'mailbox' ? (
+              !token ? (
+                <Empty>Sign in to read your messages.</Empty>
+              ) : (notifications.data?.items.length ?? 0) > 0 ? (
+                <ul className="divide-y divide-[#2a2e39]/60">
+                  {notifications.data!.items.map((n) => (
+                    <li key={n.id} className="px-3 py-2">
+                      <div className="flex items-baseline gap-2">
+                        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', n.level === 'error' ? 'bg-[#f23645]' : n.level === 'warning' ? 'bg-[#f0b90b]' : n.level === 'success' ? 'bg-[#089981]' : 'bg-[#2962ff]')} />
+                        <span className="text-[11px] font-semibold text-white">{n.title}</span>
+                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#787b86]">{clock(n.createdAtMs)}</span>
+                      </div>
+                      <p className="mt-0.5 pl-3.5 text-[11px] leading-snug text-[#b2b5be]">{n.body}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <Empty>No messages.</Empty>
+              )
+            ) : null}
+
+            {tab === 'alerts' ? <AlertsTab symbol={symbol} digits={digits} livePrice={livePrice} alerts={alerts} /> : null}
+
+            {tab === 'journal' ? (
+              journal.length > 0 ? (
+                <ul className="divide-y divide-[#2a2e39]/40 font-mono text-[11px]">
+                  {journal.slice().reverse().map((e) => (
+                    <li key={e.id} className="flex gap-2 px-3 py-1">
+                      <span className="shrink-0 text-[#787b86]">{clock(e.atMs)}</span>
+                      <span className="w-14 shrink-0 text-[#5a5e6a]">{e.tag}</span>
+                      <span className={cn(e.level === 'error' ? 'text-[#f23645]' : e.level === 'warn' ? 'text-[#f0b90b]' : e.level === 'ok' ? 'text-[#089981]' : 'text-[#b2b5be]')}>{e.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <Empty>Journal is empty.</Empty>
+              )
+            ) : null}
           </div>
-        </div>
+
+          {/* MetaTrader puts the Toolbox tabs along the BOTTOM edge of the panel. */}
+          <div className="flex items-center gap-0.5 overflow-x-auto border-t border-[#2a2e39] bg-[#171b24] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                aria-pressed={tab === t.id}
+                className={cn(
+                  'shrink-0 rounded px-2.5 py-1 text-[11px] font-semibold transition',
+                  tab === t.id ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white',
+                )}
+              >
+                {t.label}
+                {t.id === 'mailbox' && (notifications.data?.items.length ?? 0) > 0
+                  ? <span className="ml-1 text-[#2962ff]">({notifications.data!.items.length})</span>
+                  : null}
+                {t.id === 'alerts' && alerts.length > 0 ? <span className="ml-1 text-[#787b86]">({alerts.length})</span> : null}
+              </button>
+            ))}
+            <span className="ml-auto shrink-0 pr-1 text-[10px] text-[#787b86]">
+              {status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
+            </span>
+          </div>
+          </div>
+        </>
       ) : null}
+    </div>
+  );
+}
+
+/** Live newswire. Fetched when the tab is first shown, then refreshed on a slow timer. */
+function NewsTab({ active }: { active: boolean }) {
+  const { requestNews } = useGameSocketApi();
+  const [items, setItems] = useState<NewsItemDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    const load = () => {
+      requestNews(40)
+        .then((r) => { if (!cancelled) { setItems(r.items); setError(null); } })
+        .catch((e: Error) => { if (!cancelled) setError(e.message); });
+    };
+    load();
+    const id = setInterval(load, 120_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [active, requestNews]);
+
+  if (error && !items) return <Empty>Newswire unavailable ({error}).</Empty>;
+  if (!items) return <Empty>Loading news…</Empty>;
+  if (items.length === 0) return <Empty>No news.</Empty>;
+  return (
+    <ul className="divide-y divide-[#2a2e39]/60">
+      {items.map((n) => (
+        <li key={n.id}>
+          {/* Opened in a new tab, and `noreferrer` so a third-party page is not told where the
+              player came from. The text itself is rendered as text — never as markup. */}
+          <a href={n.url} target="_blank" rel="noopener noreferrer" className="block px-3 py-2 hover:bg-[#2a2e39]/40">
+            <div className="flex items-baseline gap-2">
+              <span className="shrink-0 font-mono text-[10px] text-[#787b86]">{clock(n.publishedAtMs)}</span>
+              <span className="shrink-0 rounded bg-[#2a2e39] px-1 text-[10px] text-[#b2b5be]">{n.source}</span>
+              <span className="min-w-0 text-[11px] font-semibold leading-snug text-white">{n.title}</span>
+            </div>
+            {n.summary ? <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-[#787b86]">{n.summary}</p> : null}
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AlertsTab({
+  symbol, digits, livePrice, alerts,
+}: { symbol: string; digits: number; livePrice: () => number | null; alerts: PriceAlert[] }) {
+  const { add, remove, rearm } = useAlertsStore();
+  const [above, setAbove] = useState(true);
+  const [price, setPrice] = useState('');
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const p = Number(price);
+    if (!Number.isFinite(p) || p <= 0) return;
+    add(symbol, above, p);
+    logJournal('info', 'Alert', `${symbol} alert set ${above ? '≥' : '≤'} ${p}`);
+    setPrice('');
+  };
+
+  const now = livePrice();
+  return (
+    <div>
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-1.5 border-b border-[#2a2e39] px-3 py-2">
+        <span className="text-[11px] font-semibold text-white">{symbol}</span>
+        <button
+          type="button"
+          onClick={() => setAbove((v) => !v)}
+          className="rounded border border-[#2a2e39] bg-[#131722] px-2 py-0.5 text-[11px] font-semibold text-[#d1d4dc]"
+          title="Fire when the price rises above, or falls below, the level"
+        >
+          {above ? 'Bid ≥' : 'Bid ≤'}
+        </button>
+        <input
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          inputMode="decimal"
+          placeholder={now === null ? 'price' : now.toFixed(digits)}
+          className="w-24 rounded border border-[#2a2e39] bg-[#131722] px-1.5 py-0.5 text-[11px] text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        />
+        <button type="submit" className="rounded bg-[#2962ff] px-2 py-0.5 text-[11px] font-semibold text-white">Add</button>
+        {/* MetaTrader runs alerts on its server, so they fire with the app closed. These live in this
+            browser, so they can only fire while the terminal is open — said plainly. */}
+        <span className="basis-full text-[10px] text-[#787b86]">Alerts fire while this terminal is open.</span>
+      </form>
+      {alerts.length === 0 ? (
+        <Empty>No alerts set.</Empty>
+      ) : (
+        <Table head={['Symbol', 'Condition', 'Price', 'Status', '']}>
+          {alerts.map((a) => (
+            <tr key={a.id} className="border-t border-[#2a2e39]/60">
+              <Td>{a.symbol}</Td>
+              <Td>{a.above ? 'Bid ≥' : 'Bid ≤'}</Td>
+              <Td>{a.price.toFixed(digits)}</Td>
+              <Td className={a.triggeredAtMs ? 'text-[#f0b90b]' : 'text-[#089981]'}>
+                {a.triggeredAtMs ? `fired ${clock(a.triggeredAtMs)}` : 'armed'}
+              </Td>
+              <Td>
+                <span className="flex gap-2">
+                  {a.triggeredAtMs ? (
+                    <button type="button" onClick={() => rearm(a.id)} className="text-[#2962ff] hover:underline">re-arm</button>
+                  ) : null}
+                  <button type="button" onClick={() => remove(a.id)} className="text-[#787b86] hover:text-[#f23645]">delete</button>
+                </span>
+              </Td>
+            </tr>
+          ))}
+        </Table>
+      )}
     </div>
   );
 }
@@ -183,26 +459,13 @@ function Figure({ label, value, tone, className }: { label: string; value: strin
   );
 }
 
-function TabButton({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={on}
-      className={cn('rounded px-2 py-1 text-[11px] font-semibold transition', on ? 'bg-[#2a2e39] text-white' : 'text-[#787b86] hover:text-white')}
-    >
-      {children}
-    </button>
-  );
-}
-
 function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
   return (
     <table className="w-full border-collapse text-left font-mono text-[11px] tabular-nums">
       <thead>
         <tr className="text-[#787b86]">
-          {head.map((h) => (
-            <th key={h} className="whitespace-nowrap px-2 py-1 font-normal">{h}</th>
+          {head.map((h, i) => (
+            <th key={`${h}:${i}`} className="whitespace-nowrap px-2 py-1 font-normal">{h}</th>
           ))}
         </tr>
       </thead>
@@ -211,24 +474,8 @@ function Table({ head, children }: { head: string[]; children: React.ReactNode }
   );
 }
 
-function Row({ cells, tone }: { cells: Array<string | number>; tone?: 'up' | 'down' | undefined }) {
-  return (
-    <tr className="border-t border-[#2a2e39]/60">
-      {cells.map((c, i) => (
-        <td
-          key={i}
-          className={cn(
-            'whitespace-nowrap px-2 py-1',
-            // The profit column is the last one, and is the only one that carries colour.
-            i === cells.length - 1 && tone === 'up' && 'font-semibold text-[#089981]',
-            i === cells.length - 1 && tone === 'down' && 'font-semibold text-[#f23645]',
-          )}
-        >
-          {c}
-        </td>
-      ))}
-    </tr>
-  );
+function Td({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <td className={cn('whitespace-nowrap px-2 py-1', className)}>{children}</td>;
 }
 
 function Empty({ children }: { children: React.ReactNode }) {

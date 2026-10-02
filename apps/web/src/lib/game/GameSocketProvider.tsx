@@ -21,6 +21,7 @@ import { useSession } from '@/lib/auth/session';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
+import { logJournal } from '@/lib/game/journal';
 import type { WalletDto } from '@/lib/api/types';
 import type {
   ConnStatus,
@@ -109,7 +110,19 @@ interface GameSocketValue {
    * the same symbol at the same price as the chart, instead of each deriving its own.
    */
   getMarket: () => { instrument: MarketSymbol; anchor: CandlesReply['anchor'] } | null;
+  /** Market newswire for the News tab. Public market copy; rejects on failure. */
+  requestNews: (limit?: number) => Promise<NewsReply>;
 }
+
+export interface NewsItemDto {
+  id: string;
+  title: string;
+  source: string;
+  url: string;
+  publishedAtMs: number;
+  summary: string;
+}
+export interface NewsReply { items: NewsItemDto[]; fetchedAtMs: number }
 
 export interface CandlesReply {
   tf: Timeframe;
@@ -344,6 +357,21 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     });
   }, [send, settleCandleWaiter]);
 
+  const newsWaitersRef = useRef<Array<{ resolve: (r: NewsReply) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
+  const newsOutboxRef = useRef<Array<{ limit: number }>>([]);
+  const requestNews = useCallback((limit = 40): Promise<NewsReply> => new Promise<NewsReply>((resolve, reject) => {
+    // The newswire carries no request id: there is one wire and one shape of answer, so the next
+    // `news` frame belongs to whoever is waiting. Everyone in the queue is served by it.
+    // Asked for before the socket is ready (the News tab can be opened immediately), the frame is
+    // held and flushed on open — failing outright would leave the tab permanently empty.
+    if (!send('news', { limit })) newsOutboxRef.current.push({ limit });
+    const timer = setTimeout(() => {
+      const i = newsWaitersRef.current.findIndex((w) => w.timer === timer);
+      if (i >= 0) newsWaitersRef.current.splice(i, 1)[0]!.reject(new Error('NEWS_TIMEOUT'));
+    }, 20_000);
+    newsWaitersRef.current.push({ resolve, reject, timer });
+  }), [send]);
+
   // BUGLOG #88: the engine verifies `auth` asynchronously, so a trade sent in the moments after a
   // (re)connect was refused AUTH_REQUIRED ("Log in to trade" while signed in). Trades wait for the
   // auth answer (the `balance` frame) — at most a few seconds — then go out in order.
@@ -560,6 +588,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       const data = env_.data;
       switch (env_.type) {
         case 'hello': {
+          {
+            const h = data as { tradeDate?: string; serverSeedHash?: string };
+            logJournal('info', 'Network', `server ready — trade date ${h.tradeDate ?? '?'}, seed ${(h.serverSeedHash ?? '').slice(0, 12)}`);
+          }
           const d = data as HelloData;
           if (d?.serverSeedHash) setFairness({ serverSeedHash: d.serverSeedHash, tradeDate: d.tradeDate });
           // Re-arm the instrument subscription after a (re)connect so the digits chart keeps streaming.
@@ -613,6 +645,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           break;
         }
         case 'position_opened': {
+          {
+            const o = data as { positionId?: string; direction?: string; stakeCents?: number; entryRate?: number };
+            logJournal('ok', 'Trade', `#${(o.positionId ?? '').slice(0, 8)} ${o.direction} accepted at ${o.entryRate?.toFixed?.(6) ?? '?'}`);
+          }
           const d = data as PositionOpenedData;
           setActive((cur) => ({
             positionId: d.positionId,
@@ -652,6 +688,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           break;
         }
         case 'position_settled': {
+          {
+            const d2 = data as { positionId?: string; result?: string; pnlCents?: number; mode?: string };
+            logJournal(d2.result === 'win' ? 'ok' : 'info', 'Trade',
+              `#${(d2.positionId ?? '').slice(0, 8)} closed ${d2.result} (${d2.mode}) p/l ${((d2.pnlCents ?? 0) / 100).toFixed(2)}`);
+          }
           const d = data as PositionSettledData;
           setActive((cur) => (cur && cur.positionId === d.positionId ? null : cur));
           if (typeof d.balance === 'number') setWalletReal(d.balance);
@@ -680,6 +721,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             stakeCents,
             mode: d.mode,
           });
+          break;
+        }
+        case 'news': {
+          const d = data as NewsReply;
+          for (const w of newsWaitersRef.current.splice(0)) { clearTimeout(w.timer); w.resolve(d); }
           break;
         }
         case 'candles': {
@@ -749,6 +795,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           // A candle request that failed (bad timeframe, a line brand with no candles) must reject
           // its own promise rather than surface as a toast meant for trading errors.
           if (d.reqId) { settleCandleWaiter(d.reqId, { err: new Error(d.code) }); break; }
+          logJournal('error', 'Server', `${d.code}${d.message ? `: ${d.message}` : ''}`);
           // Signed in but the socket forgot us (restart / race): authenticate again, quietly.
           if (d.code === 'AUTH_REQUIRED' && tokenRef.current) {
             authedRef.current = false;
@@ -806,8 +853,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         attemptRef.current = 0;
         authedRef.current = false;
         setStatus('open');
+        logJournal('ok', 'Network', 'connected to the trade server');
         // Chart history asked for before the socket was ready (see candleOutboxRef).
         for (const frame of candleOutboxRef.current.splice(0)) ws.send(JSON.stringify({ type: 'candles', data: frame }));
+        for (const frame of newsOutboxRef.current.splice(0)) ws.send(JSON.stringify({ type: 'news', data: frame }));
         if (tokenRef.current) { ws.send(JSON.stringify({ type: 'auth', data: { token: tokenRef.current } })); armAuthTimer(); }
         // Heartbeat + dead-socket check (BUGLOG #92): on a network switch a socket can stay "OPEN" for
         // minutes while nothing arrives. A ping every 6 s guarantees a frame (pong) even on a brand with a
@@ -845,10 +894,13 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         authAnswered();
         dropQueued('NOT_CONNECTED');
         candleOutboxRef.current.length = 0;
+        newsOutboxRef.current.length = 0;
+        for (const w of newsWaitersRef.current.splice(0)) { clearTimeout(w.timer); w.reject(new Error('NOT_CONNECTED')); }
         dropCandleWaiters('NOT_CONNECTED');
         digitAwaitingRef.current = 0;
         if (!closedRef.current) {
           setStatus('closed');
+          logJournal('warn', 'Network', 'disconnected — reconnecting');
           scheduleReconnect();
         }
       };
@@ -908,10 +960,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const apiValue = useMemo<GameSocketApi>(() => ({
     getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
-    requestCandles, getMarket,
+    requestCandles, getMarket, requestNews,
   }), [getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
-    requestCandles, getMarket]);
+    requestCandles, getMarket, requestNews]);
   const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition }), [status, online, fairness, activePosition]);
 
   return (
