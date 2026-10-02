@@ -20,6 +20,8 @@ import { useAccountUi, useMyKyc, PLAYER_TWO_FACTOR } from '@/lib/account/account
 import { useToast } from '@/lib/toast/ToastProvider';
 import { passwordError } from '@/lib/auth/validation';
 import { DIcon, type IconName } from '@/components/game/digits/icons';
+import { MK } from '@/lib/marketer/labels';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 /** Close a popover on outside click / Escape. */
 function useDismiss(open: boolean, close: () => void) {
@@ -63,6 +65,7 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
+  const { isMarketer: skin } = useMarketerSkin();
   if (!data) return null;
   // A MARKETER is a normal player with a Real account (their funny money) and a separate Demo practice
   // bucket (0176). Which tab is active is their `marketerPractice` flag — NOT account_mode, which stays
@@ -71,8 +74,9 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
   const marketer = data.modeLocked === true;
   const demo = marketer ? data.marketerPractice === true : data.mode === 'demo';
   const spend = (data.real ?? 0) + (data.bonus ?? 0);
-  const tabLabel = demo ? 'Demo' : 'Real';
-  const tabBadge = demo ? 'D' : 'R';
+  // MARKETER: neutralise the Real/Demo money vocabulary to game labels (Coins/Practice, C/P).
+  const tabLabel = demo ? (skin ? MK.practiceTab : 'Demo') : (skin ? MK.realTab : 'Real');
+  const tabBadge = demo ? (skin ? MK.practiceBadge : 'D') : (skin ? MK.realBadge : 'R');
 
   // A marketer's active tab is their practice flag (account_mode stays 'demo'), so guard against the
   // PRESENTED tab, not data.mode — otherwise tapping "Demo" (always === data.mode) would no-op.
