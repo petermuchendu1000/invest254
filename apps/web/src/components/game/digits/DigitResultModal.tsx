@@ -4,7 +4,7 @@ import { FitText } from '@/components/ui/FitText';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { useAmountText } from '@/lib/game/useAmountText';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 import { DIcon, type IconName } from '@/components/game/digits/icons';
 
@@ -37,7 +37,7 @@ function prefersReducedMotion(): boolean {
  */
 export function DigitResultModal({ result, onClose }: { result: DigitResult | null; onClose: () => void }) {
   const amt = useAmountText();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const cardRef = useRef<HTMLDivElement>(null);
   const [reduce, setReduce] = useState(false);
   const open = result !== null;

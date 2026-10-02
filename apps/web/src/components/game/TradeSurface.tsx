@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { PriceHeader } from '@/components/game/PriceHeader';
 import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
@@ -20,7 +20,7 @@ import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
  */
 export function TradeSurface() {
   const brand = useBrand();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const [override, setOverride] = useState<string | null>(null);
 
   useEffect(() => {

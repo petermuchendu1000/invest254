@@ -6,7 +6,7 @@ import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { useEntryScanner } from '@/lib/game/entryScannerUi';
 import { useDigitSession } from '@/lib/game/digitSession';
 import { DIcon } from '@/components/game/digits/icons';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 /**
  * Digits-brand bottom navigation (digits broker mock), phones only: Live Chat · AI · Positions.
@@ -14,7 +14,7 @@ import { useIsMarketer } from '@/lib/marketer/isMarketer';
  * History sheet.
  */
 export function DigitsBottomNav() {
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const setSupportOpen = useLiveChat((s) => s.setOpen);
   const chatUnread = useLiveChatUnread();
   const openScanner = useEntryScanner((s) => s.setOpen);

@@ -6,7 +6,7 @@ import type { InstrumentTick } from '@/lib/game/useInstrument';
 import { useGameSocketApi, type MultOpenedData } from '@/lib/game/GameSocketProvider';
 import { useMultSession } from '@/lib/game/multSession';
 import { useDisplayMoney } from '@/lib/money';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
@@ -36,7 +36,7 @@ const dcFeeCents = (stakeCents: number, min: number) => (min <= 0 ? 0 : Math.rou
 
 export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getLastTick: () => InstrumentTick | null; resetKey: string; instrumentId: string }) {
   const { fmt, symbol, isForeign, toKesCents } = useDisplayMoney();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   const token = useSession((s) => s.token);
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const { data: wallet } = useWallet();

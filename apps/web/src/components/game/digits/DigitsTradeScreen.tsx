@@ -16,7 +16,7 @@ import { DIcon } from '@/components/game/digits/icons';
 import type { DerivChartHandle } from '@/components/game/digits/DerivChart';
 import { useDigitSession } from '@/lib/game/digitSession';
 import { useAmountText } from '@/lib/game/useAmountText';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 import { play } from '@/lib/sound/sound';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
@@ -116,7 +116,7 @@ export function DigitsTradeScreen() {
   const topupDemo = useTopupDemo();
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
   const amt = useAmountText();
-  const { isMarketer } = useIsMarketer();
+  const { isMarketer } = useMarketerSkin();
   // DIGITS-UI: publish the live session to the shell (positions rail/sheet, auto pill, history).
   const publishOpen = useDigitSession((s) => s.setOpenContract);
   const publishClosed = useDigitSession((s) => s.addClosed);
