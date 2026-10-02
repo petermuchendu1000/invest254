@@ -77,8 +77,10 @@ test("REGRESSION: settleVariable wins are not all x1.00 when tau <= 0 (targetWin
   const curve = new CurveGenerator(seed, cfg);
   const eng = new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, 3600, 30_000);
 
-  // tau must be negative here — that's the trigger for the old bug.
-  assert.ok(eng.params.buy.tau <= 0, `expected tau <= 0, got ${eng.params.buy.tau}`);
+  // tau must be negative here — that's the trigger for the old bug. Thresholds are now conditional
+  // on the entry's slope bucket, so assert it holds in EVERY market state.
+  const taus = eng.params.buy.buckets.map((b) => b.tau);
+  assert.ok(taus.every((t) => t <= 0), `expected tau <= 0 in every bucket, got ${taus.map((t) => t.toFixed(4)).join(', ')}`);
 
   const N = 8000, stake = 20000;
   let wins = 0, payout = 0, sumMult = 0, atOne = 0;
