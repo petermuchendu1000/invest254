@@ -1,5 +1,5 @@
 import {
-  CurveGenerator, SettlementEngine, type VersionedGameConfig, type CurveProfile,
+  CurveGenerator, SettlementEngine, CALIBRATION_WINDOW_S, type VersionedGameConfig, type CurveProfile,
   dateKeyUTC, dayStartMs as dayStartMsForKey, deriveDaySeed, deriveSiteDaySeed, commitment,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
@@ -92,7 +92,7 @@ export class SeedManager {
     const seedHash = commitment(seed);
     const curve = new CurveGenerator(seed, cfg, this.curveProfile);
     const settlement = this.opts.calibrationSamples
-      ? new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, 3600, this.opts.calibrationSamples)
+      ? new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, CALIBRATION_WINDOW_S, this.opts.calibrationSamples)
       : new SettlementEngine(curve, cfg);
     return {
       gameDayId: null, dateKey, dayStartMs: dayStartMsForKey(dateKey), seedVersion, seed, seedHash,

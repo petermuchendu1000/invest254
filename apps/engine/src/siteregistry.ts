@@ -4,7 +4,8 @@ import { RecoveryService, type RecoveryReport } from "./recovery.js";
 import type { GameRepository } from "./wallet.js";
 import { affectsPricing, type ConfigProvider } from "./gameconfig.js";
 import type { PoolController } from "./poolcontroller.js";
-import type { CurveProfile } from "@invest254/shared";
+import { deriveSiteDaySeed, type CurveProfile } from "@invest254/shared";
+import { MarketHistory } from "./markethistory.js";
 
 /**
  * SiteRegistry — the multiplexed engine's per-brand runtime manager.
@@ -25,6 +26,13 @@ export interface SiteRuntime {
   seeds: SeedManager;
   game: GameServer;
   config: ConfigProvider;
+  /**
+   * Candle history for the chart — only on brands whose curve profile is `market`.
+   *
+   * Line brands draw the raw wave and have no candles, so asking for them is a client error rather
+   * than an empty result, which is why this is undefined rather than an empty history.
+   */
+  history?: MarketHistory;
 }
 
 export interface SiteRegistryOptions {
@@ -94,7 +102,23 @@ export class SiteRegistry {
           : undefined,
         this.opts.loadIsMarketer,
       );
-      const rt: SiteRuntime = { siteId, seeds, game, config };
+      // Candle history is display-only: it never settles anything, so it derives its own seeds
+      // rather than going through SeedManager (which caches per config version, commits game-day
+      // rows and holds only a few days — all wrong for reconstructing hundreds of past days).
+      // Forced rotations (J5) are read once here so a rotated day's chart shows the day that was
+      // actually traded, not the version-0 one that never existed.
+      let history: MarketHistory | undefined;
+      if (curveProfile === "market") {
+        let versions = new Map<string, number>();
+        try { versions = (await this.opts.repo.listSeedVersions?.(siteId)) ?? versions; }
+        catch (err) { this.report(err as Error, `seed-versions ${siteId}`); }
+        history = new MarketHistory(
+          (dateKey) => deriveSiteDaySeed(master, siteId, dateKey, versions.get(dateKey) ?? 0),
+          () => config.active(),
+          this.opts.now ? { now: this.opts.now } : {},
+        );
+      }
+      const rt: SiteRuntime = { siteId, seeds, game, config, ...(history ? { history } : {}) };
 
       // Live config hot-reload (docs/22 Task C). When this brand's economy is edited, price the
       // NEXT round under the new version by rebuilding the seed context, and re-arm the tick loop

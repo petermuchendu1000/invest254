@@ -1,7 +1,8 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
-import { type Direction, instrumentById, isKnownInstrument, type DigitKind, type MultDir } from "@invest254/shared";
+import { type Direction, instrumentById, isKnownInstrument, isTimeframe, type DigitKind, type MultDir } from "@invest254/shared";
 import type { SiteRegistry } from "./siteregistry.js";
+import { MarketNews } from "./marketnews.js";
 import type { GameRepository } from "./wallet.js";
 import type { Verifier } from "./auth.js";
 
@@ -39,6 +40,8 @@ export interface MultiEngineOptions {
   /** docs/42 UI-5: the brands of a platform, so a PLATFORM ADMIN's live console feed carries only its own
    *  platform's online counts and deposits. Omitted => platform admins are refused the live feed. */
   sitesOfPlatform?: (platformId: string) => Promise<string[]>;
+  /** Newswire for the News tab. Injectable so tests never reach the network. */
+  news?: MarketNews;
 }
 
 export interface MultiEngineHandle {
@@ -274,6 +277,12 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
     return rt;
   }
 
+  // One newswire for the whole process: the feeds are public market copy, identical for every
+  // brand, so polling them per brand would be the same request many times over.
+  const news = opts.news ?? new MarketNews({ onError: (e, c) => report(e, c) });
+  // Warm it at boot so the first player to open the tab is not the one who waits.
+  void news.refresh().catch(() => { /* reported by onError */ });
+
   const wss = new WebSocketServer({ host: opts.host ?? "0.0.0.0", port: opts.port });
 
   wss.on("connection", (ws, req) => {
@@ -397,6 +406,45 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               send(ws, "mult_closed", { positionId: r.positionId, reason: r.reason, pnlCents: r.pnlCents, payoutCents: r.payoutCents, balance: r.balance });
               const after = await opts.repo.getWalletSnapshot(userId);
               return send(ws, "balance", { real: after.real, bonus: after.bonus, currency: after.currency });
+            }
+            case "candles": {
+              // Chart history. Unauthenticated on purpose: the price series is public (every player
+              // watches the same curve), it reveals nothing about any account, and the chart draws
+              // before a token arrives. Settlement is untouched — these are display bars.
+              // The chart pages backwards while the live edge keeps updating, so several requests can
+              // be in flight at once. Echoing the caller's id is what lets it match each reply —
+              // including a failure — to the request that caused it instead of guessing by timeframe.
+              const reqId = msg.data?.reqId === undefined ? undefined : String(msg.data.reqId);
+              const rid = reqId === undefined ? {} : { reqId };
+              const fail = (code: string, message?: string) =>
+                send(ws, "error", { code, ...(message === undefined ? {} : { message }), ...rid });
+
+              if (!rt.history) return fail("NO_CANDLES", "this brand draws a line chart, not candles");
+              const tf = String(msg.data?.tf ?? "");
+              if (!isTimeframe(tf)) return fail("BAD_TIMEFRAME", tf);
+              const count = Number(msg.data?.count ?? 500);
+              if (!Number.isFinite(count) || count <= 0) return fail("BAD_COUNT");
+              // `to` lets the client page backwards: ask again for bars ending at the oldest it holds.
+              const rawTo = msg.data?.to;
+              const to = rawTo === undefined || rawTo === null ? undefined : Number(rawTo);
+              if (to !== undefined && !Number.isFinite(to)) return fail("BAD_TO");
+              const anchor = rt.history.liveAnchor();
+              return send(ws, "candles", {
+                ...rid, tf, instrument: anchor.instrument,
+                bars: rt.history.candles(tf, count, to),
+                // How to place live ticks on the same axis: price = base + scale*(value - openValue),
+                // where value = (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE.
+                anchor: { tradeDate: anchor.dateKey, base: anchor.base, openValue: anchor.openValue },
+              });
+            }
+            case "news": {
+              // The terminal's newswire. Public market copy, shared by every brand — one poll serves
+              // all of them — and unauthenticated for the same reason the candles are.
+              const limit = Number(msg.data?.limit ?? 40);
+              return send(ws, "news", {
+                items: news.list(Number.isFinite(limit) ? limit : 40),
+                fetchedAtMs: news.lastFetchedAtMs,
+              });
             }
             case "ping": return send(ws, "pong", {});
             default: return send(ws, "error", { code: "UNKNOWN_TYPE", message: msg.type });

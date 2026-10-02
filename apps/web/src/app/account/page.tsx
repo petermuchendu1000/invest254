@@ -12,6 +12,9 @@ import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useHydrated } from '@/lib/useHydrated';
 import { ReferralInviteCard } from '@/components/account/ReferralInviteCard';
 import { SecurityCard } from '@/components/account/SecurityCard';
+import { MT5AccountPanel } from '@/components/account/MT5AccountPanel';
+import { useBrand } from '@/lib/brand/BrandProvider';
+import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { useCan } from '@/lib/auth/can';
 
 export default function AccountPage() {
@@ -22,6 +25,9 @@ export default function AccountPage() {
   const { logout } = useAuthActions();
   // docs/42 UI-12: operators never get a referral code/link (the API refuses /me/referral for them).
   const mayEarn = useCan('earn.referrals');
+  // A terminal brand gets MetaTrader's account panel; every other shell keeps the plain username card.
+  const brand = useBrand();
+  const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
 
   if (!hydrated) return <Skeleton className="h-48 w-full" />;
 
@@ -45,9 +51,13 @@ export default function AccountPage() {
         </Button>
       </div>
 
-      <Card className="flex flex-col gap-3">
-        <Row label="Username" value={`@${user.username}`} />
-      </Card>
+      {terminal ? (
+        <MT5AccountPanel />
+      ) : (
+        <Card className="flex flex-col gap-3">
+          <Row label="Username" value={`@${user.username}`} />
+        </Card>
+      )}
 
       {/* Referral link + code, right under the username (item 3) — players and marketers only (UI-12) */}
       {mayEarn ? <ReferralInviteCard /> : null}

@@ -8,7 +8,12 @@ import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
 import { BetPanel } from '@/components/game/BetPanel';
 import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
+import { MT5Toolbox } from '@/components/game/MT5Toolbox';
+import { MarketWatch } from '@/components/game/MarketWatch';
+import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
+import { cn } from '@/lib/cn';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
+import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 
 /**
  * Chooses the trade layout for the current brand:
@@ -39,29 +44,61 @@ export function TradeSurface() {
   }, []);
 
   const ui = override ?? brand.tradeUi ?? 'classic';
+  // Candlestick brands carry the gear in the chart's own toolbar, where MT5 and TradingView put
+  // chart settings. Only the line brands need the standalone row.
+  const gearInChart = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
 
   if (ui === 'digits') return <DigitsTradeScreen />;
 
+  const terminal = gearInChart && !isMarketer;
+
   return (
-    <section className="flex h-full min-h-0 flex-col gap-2 md:gap-3">
-      {/* Interface gear — players switch Classic ↔ Basic here. Stays visible in both modes so a
-          Basic-mode player can switch back; hidden for real marketers (always disguised). */}
-      {isMarketerRole ? null : (
-        <div className="flex items-center justify-end">
-          <InterfaceModeToggle />
+    /**
+     * Mobile first: one column — quote, chart, toolbox, order ticket — and that is the whole
+     * layout below `lg`.
+     *
+     * From `lg` the same three pieces become MetaTrader's desktop arrangement without being
+     * duplicated: Market Watch docked left, chart with the Toolbox under it filling the middle, the
+     * order ticket docked right. Flex direction does the work, so there is exactly one BetPanel and
+     * one chart in the tree — rendering a second copy per breakpoint would mean two live sockets
+     * and two sets of state.
+     */
+    <section className={cn('flex h-full min-h-0 flex-col gap-2 md:gap-3', terminal && 'lg:flex-row lg:gap-3')}>
+      {terminal ? <MarketWatch className="hidden lg:flex lg:w-56 lg:shrink-0 xl:w-64" /> : null}
+
+      <div className="flex min-h-0 flex-1 flex-col gap-2 md:gap-3">
+        {/* Interface gear — players switch Classic ↔ Basic here. Stays visible in both modes so a
+            Basic-mode player can switch back; hidden for real marketers (always disguised). */}
+        {isMarketerRole || gearInChart ? null : (
+          <div className="flex items-center justify-end">
+            <InterfaceModeToggle />
+          </div>
+        )}
+        {/* MARKETER: the BTC/KES price strip and the scrolling crypto ticker are the two loudest
+            "this is a trading terminal" signals — both are removed for marketers (Phase 1).
+            TERMINAL: both go too, for the opposite reason. MetaTrader has no scrolling crypto
+            marquee and no separate quote strip above the chart — the chart's own toolbar carries the
+            symbol, the period and the price, and Market Watch carries the quote on a desktop. Two
+            rows of chrome the real thing does not have were the least MT5 part of this screen. */}
+        {isMarketer || terminal ? null : <PriceHeader />}
+        {isMarketer || terminal ? null : (
+          // short phones (SE): the decorative marquee gives its row to the chart
+          <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
+        )}
+        <div className="min-h-[160px] flex-1">
+          <GameCurve />
         </div>
-      )}
-      {/* MARKETER: the BTC/KES price strip and the scrolling crypto ticker are the two loudest
-          "this is a trading terminal" signals — both are removed for marketers (Phase 1). */}
-      {isMarketer ? null : <PriceHeader />}
-      {isMarketer ? null : (
-        // short phones (SE): the decorative marquee gives its row to the chart
-        <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
-      )}
-      <div className="min-h-[160px] flex-1">
-        <GameCurve />
+        {/* MetaTrader's Toolbox: account summary, the open position's live P/L, closed trades, the
+            newswire, messages, alerts and the journal. Candlestick brands only — the line shell is
+            the simple one — and never on a marketer screen, where an equity/margin table would be
+            the loudest possible "this is trading" tell. */}
+        {terminal ? <MT5Toolbox /> : null}
       </div>
-      <BetPanel />
+
+      <div className={cn(terminal && 'lg:w-72 lg:shrink-0 lg:overflow-y-auto xl:w-80')}>
+        {/* A terminal brand gets MetaTrader's ticket; every other shell keeps the classic panel. */}
+        {terminal ? <MT5OrderTicket /> : <BetPanel />}
+      </div>
     </section>
   );
 }

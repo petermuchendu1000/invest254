@@ -43,8 +43,8 @@ function useMarketerBeat(active: ActivePosition | null): MarketerBeat {
  * so brands paid for a chart their players never saw. Both views share the authoritative tick stream.
  */
 export function GameCurve() {
-  const { getTicks, getLastTick } = useGameSocketApi();
-  const { activePosition } = useGameSocket();
+  const { getTicks, getLastTick, requestCandles } = useGameSocketApi();
+  const { activePosition, status } = useGameSocket();
   const brand = useBrand();
   // The wave follows the effective "basic" skin: a real marketer OR a player who chose Basic.
   const { isMarketer } = useMarketerSkin();
@@ -58,7 +58,7 @@ export function GameCurve() {
           ization applies to the LINE wave (`CurveCanvas`) only. Line brands keep the single-colour wave,
           which for marketers is the neutralized version (no price axis, labels or red/green). */}
       {tvType ? (
-        <CandleChart key={tvType} initialType={tvType} getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} symbol={`BTC/${brand.currency || 'KES'}`} />
+        <CandleChart key={tvType} initialType={tvType} getLastTick={getLastTick} requestCandles={requestCandles} status={status} />
       ) : (
         <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} />
       )}

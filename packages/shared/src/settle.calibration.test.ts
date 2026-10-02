@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   CurveGenerator, SettlementEngine, SeededRng,
   winMultiplier, solveTruncExpBeta,
-  checkFeasible, rtp, requiredMeanWinMultiplier, DEFAULT_CONFIG,
+  checkFeasible, rtp, requiredMeanWinMultiplier, DEFAULT_CONFIG, CALIBRATION_WINDOW_S,
   type GameConfig,
 } from "@invest254/shared";
 
@@ -42,7 +42,7 @@ for (const lc of LIVE) {
     const cfg = cfgFor(lc.houseEdge, lc.targetWinRate);
     assert.equal(checkFeasible(cfg).ok, true, "config must be feasible to calibrate");
     for (const seed of SEEDS) {
-      const eng = new SettlementEngine(new CurveGenerator(seed, cfg), cfg, "calibration", cfg.defaultDurationS, 3600, CAL);
+      const eng = new SettlementEngine(new CurveGenerator(seed, cfg), cfg, "calibration", cfg.defaultDurationS, CALIBRATION_WINDOW_S, CAL);
       const rnd = new SeededRng(seed, "eval");
       let win = 0, winB = 0, winS = 0, nB = 0, nS = 0, payout = 0, stakeTot = 0;
       for (let i = 0; i < EVAL; i++) {
@@ -64,9 +64,9 @@ for (const lc of LIVE) {
 }
 
 // ── calibration window generalises to the WHOLE day (stationarity check) ──
-test("calibration on [0,3600] generalises to entryT across the full 24h day", () => {
+test("calibration generalises to entryT across the full 24h day", () => {
   const cfg = cfgFor(0.05, 0.65);
-  const eng = new SettlementEngine(new CurveGenerator(SEEDS[0]!, cfg), cfg, "calibration", cfg.defaultDurationS, 3600, CAL);
+  const eng = new SettlementEngine(new CurveGenerator(SEEDS[0]!, cfg), cfg, "calibration", cfg.defaultDurationS, CALIBRATION_WINDOW_S, CAL);
   const rnd = new SeededRng(SEEDS[0]!, "gen");
   const bucket = new Array(6).fill(0), cnt = new Array(6).fill(0);
   for (let i = 0; i < 60_000; i++) {
@@ -108,7 +108,7 @@ test("solveTruncExpBeta: recovering beta reproduces the requested mean on (a,b)"
 // ── liveWinMultiplier — monotone rise to the committed final, never above it ──
 test("liveWinMultiplier: monotone increasing, starts at 1, ends at final, <= final for g in [0,1]", () => {
   const cfg = cfgFor(0.05, 0.65);
-  const eng = new SettlementEngine(new CurveGenerator(SEEDS[0]!, cfg), cfg, "calibration", cfg.defaultDurationS, 3600, CAL);
+  const eng = new SettlementEngine(new CurveGenerator(SEEDS[0]!, cfg), cfg, "calibration", cfg.defaultDurationS, CALIBRATION_WINDOW_S, CAL);
   for (const final of [1.2, 2.5, 5]) {
     let prev = -Infinity;
     for (let g = 0; g <= 1.0001; g += 0.05) {

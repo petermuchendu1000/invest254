@@ -2,6 +2,8 @@
 
 import * as React from 'react';
 import { usePathname } from 'next/navigation';
+import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
+import { cn } from '@/lib/cn';
 import { TopBar } from '@/components/layout/TopBar';
 import { BottomNav } from '@/components/layout/BottomNav';
 import { DigitsTopBar } from '@/components/layout/DigitsTopBar';
@@ -71,11 +73,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   if (isTrade) {
+    // A candlestick brand is a TERMINAL: on a wide screen it fills the viewport the way MetaTrader
+    // does, rather than sitting in the centred reading column the rest of the site uses. Below `lg`
+    // both are the same single mobile-first column.
+    const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
     return (
       <div className="flex h-dvh flex-col overflow-hidden">
         <TopBar />
         <NotificationBanners />
-        <main className="relative mx-auto flex w-full min-h-0 max-w-app flex-1 flex-col px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-2 md:px-4 md:pb-4">
+        <main className={cn(
+          'relative flex w-full min-h-0 flex-1 flex-col px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-2 md:px-4 md:pb-4',
+          terminal ? 'lg:px-3 xl:px-4' : 'mx-auto max-w-app',
+        )}>
           {children}
         </main>
         <BottomNav />

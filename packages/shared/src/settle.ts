@@ -7,6 +7,19 @@ import type { Direction, Outcome } from "./types.js";
 
 interface DirParams { tau: number; gain: number; }
 
+/**
+ * Entry-time span the calibrator samples over. It MUST cover the curve's slowest timescale, or the
+ * sampled move distribution is not representative of the trading day and the realized win-rate/RTP
+ * drift off target.
+ *
+ * This is a full UTC day because the `market` curve profile carries structure all the way out to a
+ * ~1-day period. Measured on the day-scale curve with a 1-hour window the error was real — win-rate
+ * 0.668 vs 0.650 and RTP 0.977 vs 0.950; with a full-day window, 0.644 / 0.941 (both in tolerance).
+ * Widening the window costs nothing: `nSamples` is unchanged, only the range entry times are drawn
+ * from. See curve.ts PROFILES.market.
+ */
+export const CALIBRATION_WINDOW_S = 86_400;
+
 function quantile(sortedAsc: number[], p: number): number {
   if (sortedAsc.length === 0) throw new Error("empty");
   const idx = Math.min(sortedAsc.length - 1, Math.max(0, Math.floor(p * (sortedAsc.length - 1))));
@@ -35,7 +48,7 @@ export class SettlementEngine {
     private readonly cfg: GameConfig,
     calibrationSeed = "calibration",
     private readonly durationS = cfg.defaultDurationS,
-    sampleWindowS = 3600,
+    sampleWindowS = CALIBRATION_WINDOW_S,
     nSamples = 200_000,
   ) {
     assertFeasible(cfg);

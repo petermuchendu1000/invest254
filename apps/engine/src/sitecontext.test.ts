@@ -32,10 +32,26 @@ test("two brands get decorrelated curves from the same master + day", () => {
   const b = buildSiteContext({ masterSeed: MASTER, siteId: SITE_B, dateKey: DAY, cfg: cfgA, calibrationSamples: SAMPLES });
   assert.notEqual(a.seed, b.seed);
   assert.notEqual(a.seedHash, b.seedHash);
-  // Sample the curve at many points; the two brands must not track each other.
-  let diff = 0;
-  for (let t = 0; t < 600; t += 3) diff += Math.abs(a.curve.value(t) - b.curve.value(t));
-  assert.ok(diff / 200 > 0.05, `curves too similar (mean |Δ| ${(diff / 200).toFixed(4)})`);
+
+  // Sample across the whole day; the two brands must not track each other.
+  let diff = 0, n = 0;
+  for (let t = 0; t < 86_400; t += 60) { diff += Math.abs(a.curve.value(t) - b.curve.value(t)); n++; }
+  assert.ok(diff / n > 0.05, `curves too similar (mean |Δ| ${(diff / n).toFixed(4)})`);
+
+  // The separation above is the consequence; INDEPENDENCE is the property. The `market` curve is a
+  // random walk, so two independent brands start from independent levels and drift apart as sqrt(t)
+  // — in the first minutes of a day they can happen to sit close together, which says nothing about
+  // whether they share structure. Correlating the INCREMENTS tests the real thing, and it is the
+  // assertion that would actually catch a shared or derived seed: identical paths correlate at 1.
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, m = 0;
+  for (let t = 0; t + 10 < 86_400; t += 10) {
+    const x = a.curve.value(t + 10) - a.curve.value(t);
+    const y = b.curve.value(t + 10) - b.curve.value(t);
+    sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; m++;
+  }
+  const corr = (sxy / m - (sx / m) * (sy / m))
+    / Math.sqrt((sxx / m - (sx / m) ** 2) * (syy / m - (sy / m) ** 2));
+  assert.ok(Math.abs(corr) < 0.05, `brands' increments are correlated (r = ${corr.toFixed(4)})`);
 });
 
 test("each brand calibrates RTP to its OWN economy, independently", () => {
