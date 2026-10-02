@@ -5,7 +5,7 @@ import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas, type MarketerBeat } from '@/components/game/CurveCanvas';
 import { CandleChart } from '@/components/game/CandleChart';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { ActivePosition } from '@/lib/game/betting';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
@@ -46,9 +46,10 @@ export function GameCurve() {
   const { getTicks, getLastTick } = useGameSocketApi();
   const { activePosition } = useGameSocket();
   const brand = useBrand();
-  const { isMarketer } = useIsMarketer();
+  // The wave follows the effective "basic" skin: a real marketer OR a player who chose Basic.
+  const { isMarketer } = useMarketerSkin();
   const tvType = tradingViewTypeOf(chartStyleOf(brand.chartStyle));
-  // Only compute the beat for marketers; players never receive it.
+  // The anticipation beat rides on the neutral wave (basic skin only).
   const beat = useMarketerBeat(isMarketer ? activePosition : null);
 
   return (

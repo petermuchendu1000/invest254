@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSession } from '@/lib/auth/session';
 import { useWallet } from '@/lib/wallet/hooks';
+import { useInterfaceMode } from '@/lib/ui/interfaceMode';
 
 /**
  * PREVIEW override (presentation only). `?preview=marketer` forces the marketer SKIN on for anyone —
@@ -70,7 +71,16 @@ export function useIsMarketer(): { isMarketer: boolean; resolved: boolean } {
  */
 const NEUTRALISE_SHARED_UI: boolean = true;
 
+/**
+ * Does this screen wear the simplified "basic" skin (points, wordless arrows, neutral wave/chrome)?
+ *
+ * True when EITHER the account is a real marketer (always disguised — TikTok-safe) OR a player has
+ * opted into the Basic interface via the trade-screen gear (`useInterfaceMode`). This is presentation
+ * only: a player on Basic gets the LOOK, never marketer access — `useIsMarketer` (role/routing) is
+ * unchanged and every marketer endpoint stays gated server-side.
+ */
 export function useMarketerSkin(): { isMarketer: boolean; resolved: boolean } {
   const { isMarketer, resolved } = useIsMarketer();
-  return { isMarketer: NEUTRALISE_SHARED_UI && isMarketer, resolved };
+  const playerBasic = useInterfaceMode() === 'basic';
+  return { isMarketer: (NEUTRALISE_SHARED_UI && isMarketer) || playerBasic, resolved };
 }

@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useMarketerSkin } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin, useIsMarketer } from '@/lib/marketer/isMarketer';
 import { PriceHeader } from '@/components/game/PriceHeader';
 import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
 import { BetPanel } from '@/components/game/BetPanel';
+import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
 
 /**
@@ -21,6 +22,10 @@ import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
 export function TradeSurface() {
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
+  // Real role (not the skin): marketers are always disguised and must NOT see the interface toggle
+  // (a settings gear would itself be a TikTok tell). Players — including those currently on Basic —
+  // keep the gear so they can switch back.
+  const { isMarketer: isMarketerRole } = useIsMarketer();
   const [override, setOverride] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,6 +44,13 @@ export function TradeSurface() {
 
   return (
     <section className="flex h-full min-h-0 flex-col gap-2 md:gap-3">
+      {/* Interface gear — players switch Classic ↔ Basic here. Stays visible in both modes so a
+          Basic-mode player can switch back; hidden for real marketers (always disguised). */}
+      {isMarketerRole ? null : (
+        <div className="flex items-center justify-end">
+          <InterfaceModeToggle />
+        </div>
+      )}
       {/* MARKETER: the BTC/KES price strip and the scrolling crypto ticker are the two loudest
           "this is a trading terminal" signals — both are removed for marketers (Phase 1). */}
       {isMarketer ? null : <PriceHeader />}
