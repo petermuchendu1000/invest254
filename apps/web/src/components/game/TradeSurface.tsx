@@ -8,6 +8,7 @@ import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
 import { BetPanel } from '@/components/game/BetPanel';
 import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
+import { MT5Toolbox } from '@/components/game/MT5Toolbox';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 
@@ -65,6 +66,10 @@ export function TradeSurface() {
       <div className="min-h-[160px] flex-1">
         <GameCurve />
       </div>
+      {/* MetaTrader's Toolbox: account summary, the open position's live P/L, and closed trades.
+          Candlestick brands only — the line shell is the simple one — and never on a marketer
+          screen, where an equity/margin table would be the loudest possible "this is trading" tell. */}
+      {gearInChart && !isMarketer ? <MT5Toolbox /> : null}
       <BetPanel />
     </section>
   );
