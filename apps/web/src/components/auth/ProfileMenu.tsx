@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useWalletFigures } from '@/lib/wallet/hooks';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 
 /* ── icons (currentColor, inherit row colour) ─────────────────────────────── */
 const ic = 'h-[18px] w-[18px] shrink-0';
@@ -53,6 +54,10 @@ export function ProfileMenu({ user }: { user: MeDto }) {
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
   const figures = useWalletFigures();
+  // MARKETER: a TikTok recording must not show money words (Deposit/Withdraw) or trading terms.
+  // Drop the TEXT and keep the ICON — the glyphs carry the action; aria-labels keep it accessible.
+  const { isMarketer: skin } = useMarketerSkin();
+  const label = (text: string) => (skin ? null : text);
 
   useEffect(() => {
     if (!open) return;
@@ -102,23 +107,23 @@ export function ProfileMenu({ user }: { user: MeDto }) {
           <div className="my-1 h-px bg-border" />
 
           {/* Money actions — highest intent first */}
-          <button role="menuitem" className={itemCls} onClick={() => { setOpen(false); openDeposit(); }}>
-            <span className="text-accent"><DepositIcon /></span> Deposit
+          <button role="menuitem" aria-label="Deposit" className={itemCls} onClick={() => { setOpen(false); openDeposit(); }}>
+            <span className="text-accent"><DepositIcon /></span> {label('Deposit')}
           </button>
           {/* DEMO-3: the Demo account has no way out — the item is absent, not disabled. */}
           {figures.canWithdraw ? (
-            <button role="menuitem" className={itemCls} onClick={() => { setOpen(false); openWithdraw(); }}>
-              <span className="text-accent"><WithdrawIcon /></span> Withdraw
+            <button role="menuitem" aria-label="Withdraw" className={itemCls} onClick={() => { setOpen(false); openWithdraw(); }}>
+              <span className="text-accent"><WithdrawIcon /></span> {label('Withdraw')}
             </button>
           ) : null}
 
           <div className="my-1 h-px bg-border" />
 
-          <Link role="menuitem" href="/history" className={itemCls} onClick={() => setOpen(false)}>
-            <HistoryIcon /> History
+          <Link role="menuitem" aria-label="History" href="/history" className={itemCls} onClick={() => setOpen(false)}>
+            <HistoryIcon /> {label('History')}
           </Link>
-          <Link role="menuitem" href="/account" className={itemCls} onClick={() => setOpen(false)}>
-            <AccountIcon /> Account
+          <Link role="menuitem" aria-label="Account" href="/account" className={itemCls} onClick={() => setOpen(false)}>
+            <AccountIcon /> {label('Account')}
           </Link>
 
           {/* Theme toggle stays in the menu (doesn't close it) */}
@@ -126,10 +131,11 @@ export function ProfileMenu({ user }: { user: MeDto }) {
 
           <button
             role="menuitem"
+            aria-label="Log out"
             className={cn(itemCls, 'text-down hover:bg-down/10')}
             onClick={() => { setOpen(false); logout(); }}
           >
-            <LogoutIcon /> Log out
+            <LogoutIcon /> {label('Log out')}
           </button>
         </div>
       ) : null}
