@@ -3,6 +3,8 @@
 import { cn } from '@/lib/cn';
 import { walletFigures } from '@/lib/wallet/figures';
 import type { WalletDto } from '@/lib/api/types';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
+import { MK } from '@/lib/marketer/labels';
 
 /**
  * The Real/Demo account panel — ONE surface, shared by both shells (the classic `AccountSwitcher`
@@ -31,6 +33,19 @@ const Refresh = ({ className }: { className?: string }) => (
     <path d="M16.8 3v3.2h-3.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+// MARKETER: deposit/withdraw shown icon-only (no money words) — arrow into / out of a tray.
+const DepositGlyph = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+    <path d="M12 3v12M7 10l5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M4 20h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+);
+const WithdrawGlyph = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+    <path d="M12 21V9M7 14l5-5 5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M4 4h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+);
 
 export interface AccountMenuProps {
   wallet: WalletDto;
@@ -54,6 +69,7 @@ export interface AccountMenuProps {
 export function AccountMenu({
   wallet, fmt, onSwitch, onDeposit, onWithdraw, onTopupDemo, switching, toppingUp, align = 'right',
 }: AccountMenuProps) {
+  const { isMarketer: skin } = useMarketerSkin();
   const f = walletFigures(wallet);
   // A MARKETER's Real/Demo switch is `marketerPractice` (account_mode stays 'demo' server-side); a
   // player's is `mode`. Either way this is which tab is active.
@@ -121,9 +137,9 @@ export function AccountMenu({
             switch and rows are identical to a player's — indistinguishable — so nothing here names the
             account type. Their switch toggles the practice flag server-side; account_mode stays 'demo'. */}
         <div role="menu" aria-label="Accounts" className="flex flex-col">
-          <Row mode="real" label="Real" cents={f.realTotal} {...(bonus > 0 ? { sub: `${fmt(bonus)} bonus` } : {})} />
+          <Row mode="real" label={skin ? MK.realTab : 'Real'} cents={f.realTotal} {...(bonus > 0 ? { sub: `${fmt(bonus)} bonus` } : {})} />
           <div className="mx-3 h-px bg-border" />
-          <Row mode="demo" label="Demo" cents={f.demoBalance} />
+          <Row mode="demo" label={skin ? MK.practiceTab : 'Demo'} cents={f.demoBalance} />
         </div>
 
         {active === 'demo' ? (
@@ -136,7 +152,7 @@ export function AccountMenu({
               className="flex min-h-[2.75rem] w-full items-center gap-2 px-3 text-[12px] font-medium text-muted transition active:bg-surface-2/70 disabled:opacity-50 sm:hover:bg-surface-2/60 sm:hover:text-fg"
             >
               <Refresh className={cn('h-4 w-4', toppingUp && 'animate-spin')} />
-              {toppingUp ? 'Topping up…' : 'Top up demo balance'}
+              {toppingUp ? 'Topping up…' : (skin ? 'Top up practice' : 'Top up demo balance')}
             </button>
           </>
         ) : null}
@@ -148,23 +164,25 @@ export function AccountMenu({
             <button
               type="button"
               onClick={onDeposit}
-              className="h-11 rounded-xl bg-accent text-[13px] font-semibold text-accent-fg transition active:brightness-95 sm:hover:brightness-105"
+              aria-label="Deposit"
+              className="flex h-11 items-center justify-center gap-2 rounded-xl bg-accent text-[13px] font-semibold text-accent-fg transition active:brightness-95 sm:hover:brightness-105"
             >
-              Deposit
+              {skin ? <DepositGlyph className="h-5 w-5" /> : 'Deposit'}
             </button>
             {f.canWithdraw ? (
               <button
                 type="button"
                 onClick={onWithdraw}
-                className="h-11 rounded-xl border border-border text-[13px] font-semibold text-fg transition active:bg-surface-2 sm:hover:border-accent/50"
+                aria-label="Withdraw"
+                className="flex h-11 items-center justify-center gap-2 rounded-xl border border-border text-[13px] font-semibold text-fg transition active:bg-surface-2 sm:hover:border-accent/50"
               >
-                Withdraw
+                {skin ? <WithdrawGlyph className="h-5 w-5" /> : 'Withdraw'}
               </button>
             ) : null}
           </div>
           {active === 'demo' ? (
             <p className="px-1 pt-2 text-[11px] leading-snug text-muted">
-              Practice money — never withdrawable.
+              {skin ? 'Practice coins — just for play.' : 'Practice money — never withdrawable.'}
             </p>
           ) : null}
         </div>
