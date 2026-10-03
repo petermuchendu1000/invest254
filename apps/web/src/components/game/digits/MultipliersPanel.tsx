@@ -9,6 +9,8 @@ import { useDisplayMoney } from '@/lib/money';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
+import { shortfallAction } from '@/lib/wallet/figures';
+import { useMarketerDemoTopup } from '@/lib/affiliate/hooks';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { pillLabel } from '@/lib/game/stakeLadder';
 import { useAuthUi } from '@/lib/auth/ui';
@@ -43,6 +45,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
   const { openMultiplier, closeMultiplier } = useGameSocketApi();
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
   const topupDemo = useTopupDemo();
+  const topupMarketer = useMarketerDemoTopup();
   const openAuth = useAuthUi((s) => s.openAuth);
   const toast = useToast();
   const limits = useStakeLimits();
@@ -109,10 +112,18 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
       return;
     }
     if (stakeCents > spendable) {
-      // Multipliers are Demo-only: refill the demo account in place (never the real deposit sheet).
-      if (wallet?.mode === 'demo') topupDemo.mutate(undefined, { onSuccess: (r) => (r.demoBalance >= stakeCents
+      // Refill the bucket actually being SPENT — which for a marketer on their funny money is not
+      // the demo bucket, though `wallet.mode` says demo (see shortfallAction).
+      const action = shortfallAction(wallet);
+      if (action === 'refill-demo') topupDemo.mutate(undefined, { onSuccess: (r) => (r.demoBalance >= stakeCents
         ? toast.push({ tone: 'success', title: 'Demo refilled', description: fmt(r.demoBalance) })
         : toast.push({ tone: 'error', title: `Demo max ${fmt(r.demoBalance)}` })) });
+      else if (action === 'refill-marketer') topupMarketer.mutate(undefined, {
+        onSuccess: (r) => (r.balanceCents >= stakeCents
+          ? toast.push({ tone: 'success', title: 'Balance refilled', description: fmt(r.balanceCents) })
+          : toast.push({ tone: 'error', title: `Max ${fmt(r.balanceCents)}` })),
+        onError: () => toast.push({ tone: 'error', title: 'Could not refill', description: 'Try again.' }),
+      });
       else openDeposit({ amountCents: stakeCents });
       return;
     }

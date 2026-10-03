@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { walletFigures } from './figures.js';
+import { walletFigures, shortfallAction, type WalletLike } from './figures.js';
 
 test('real mode: withdrawable = real cash; total = cash + bonus', () => {
   const f = walletFigures({ real: 5000, bonus: 100, mode: 'real', realBalance: 5000, bonusBalance: 100, demoBalance: 1_000_000 });
@@ -102,5 +102,50 @@ test('canWithdraw never disagrees with withdrawable being spendable', () => {
     const f = walletFigures(w);
     if (!f.canWithdraw) assert.equal(f.withdrawable, 0, 'nothing is withdrawable when no withdrawal may be offered');
     if (f.demo) assert.equal(f.canWithdraw, false, 'a demo player is never offered a withdrawal');
+  }
+});
+
+// ── a shortfall must refill the bucket actually being played ─────────────────────────────────────
+
+test('shortfallAction: a player refills their demo, or deposits on real', () => {
+  assert.equal(shortfallAction({ real: 100, bonus: 0, mode: 'demo', demoBalance: 100 }), 'refill-demo');
+  assert.equal(shortfallAction({ real: 100, bonus: 0, mode: 'real', realBalance: 100 }), 'deposit');
+});
+
+test('shortfallAction: a marketer on funny money refills THAT, not the practice bucket', () => {
+  // The bug: wallet.mode is permanently 'demo' here, so the old condition refilled the practice
+  // bucket — one the player is not spending from — and reported success.
+  const onFunny = { real: 100, bonus: 0, mode: 'demo' as const, modeLocked: true, marketerPractice: false, demoBalance: 100, practiceBalance: 0 };
+  assert.equal(onFunny.mode, 'demo', 'the raw field really does say demo');
+  assert.equal(shortfallAction(onFunny), 'refill-marketer');
+});
+
+test('shortfallAction: a marketer on practice refills the demo bucket, like any demo', () => {
+  const onPractice = { real: 100, bonus: 0, mode: 'demo' as const, modeLocked: true, marketerPractice: true, demoBalance: 500, practiceBalance: 100 };
+  assert.equal(shortfallAction(onPractice), 'refill-demo');
+});
+
+test('shortfallAction: a marketer is never sent to the deposit sheet', () => {
+  // They have no real-money path at all, so offering one would be a dead end.
+  for (const practice of [false, true]) {
+    const w = { real: 100, bonus: 0, mode: 'demo' as const, modeLocked: true, marketerPractice: practice };
+    assert.notEqual(shortfallAction(w), 'deposit', `practice=${practice}`);
+  }
+});
+
+test('shortfallAction: an unknown wallet never offers to spend real money', () => {
+  assert.equal(shortfallAction(undefined), 'deposit');
+  // …and `deposit` is the safe default only because it ASKS; it moves nothing on its own.
+});
+
+test('shortfallAction: it always agrees with walletFigures about what a demo is', () => {
+  const wallets: WalletLike[] = [
+    { real: 1, bonus: 0, mode: 'real' },
+    { real: 1, bonus: 0, mode: 'demo' },
+    { real: 1, bonus: 0, mode: 'demo', modeLocked: true, marketerPractice: false },
+    { real: 1, bonus: 0, mode: 'demo', modeLocked: true, marketerPractice: true },
+  ];
+  for (const w of wallets) {
+    assert.equal(shortfallAction(w) === 'refill-demo', walletFigures(w).demo, JSON.stringify(w));
   }
 });
