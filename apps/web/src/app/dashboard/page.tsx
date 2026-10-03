@@ -7,6 +7,9 @@ import { useSession } from '@/lib/auth/session';
 import { useIsMarketer } from '@/lib/marketer/isMarketer';
 import { useHydrated } from '@/lib/useHydrated';
 import { MarketerDashboardView } from '@/components/marketer/MarketerDashboardView';
+import { MT5TitleBar } from '@/components/mt5/kit';
+import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
+import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 
 /**
  * Marketer dashboard route. This is the destination the covert top-left hotspot navigates to
@@ -20,6 +23,13 @@ export default function DashboardPage() {
   const user = useSession((s) => s.user);
   const router = useRouter();
   const { isMarketer, resolved } = useIsMarketer();
+  /**
+   * The dashboard is reached from inside the terminal, so on a candlestick brand it wears the
+   * terminal's clothes. Every figure, card and rule on the 547-line view below paints from the
+   * --pp-* tokens and not one hard-coded colour, so re-pointing them here repaints the whole page —
+   * MetaTrader's surfaces, its border, its blue, and square corners via --pp-radius.
+   */
+  const mt5 = useTerminalSkin();
 
   useEffect(() => {
     if (!hydrated) return;
@@ -30,7 +40,20 @@ export default function DashboardPage() {
   }, [hydrated, token, resolved, isMarketer, router]);
 
   // While hydrating, awaiting the profile, or redirecting a non-marketer, show a neutral skeleton.
-  if (!hydrated || !token || !user || !resolved || !isMarketer) return <Skeleton className="h-64 w-full" />;
+  if (!hydrated || !token || !user || !resolved || !isMarketer) {
+    return <div className={mt5 ? 'p-3' : ''}><Skeleton className="h-64 w-full" /></div>;
+  }
 
-  return <MarketerDashboardView />;
+  if (!mt5) return <MarketerDashboardView />;
+
+  return (
+    <div style={MT5_TOKENS} className="mt5-square flex min-h-0 flex-1 flex-col bg-[#0f1720] text-white">
+      {/* Named as MetaTrader names a screen, in the band it names it in — so arriving here reads as
+          another screen of the terminal rather than a different site. */}
+      <MT5TitleBar title="Dashboard" />
+      <div className="flex-1 p-3">
+        <MarketerDashboardView />
+      </div>
+    </div>
+  );
 }

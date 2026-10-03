@@ -71,6 +71,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <AuthModal />
         <WalletModal />
         <RegisterSW />
+        {/* The covert marketer entry as a corner hotspot. Only the digits shell needs it:
+            every other shell gets it overlaid on the logo by TopBar, which the digits
+            wordmark cannot carry because it is hidden outright on a narrow phone. */}
         <MarketerHUD />
         <MT5Drawer />
       </div>
@@ -104,7 +107,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <LiveChatLauncher />
         <LiveChatPanel />
         <AccountDialogs />
-        <MarketerHUD />
         <MT5Drawer />
       </div>
     );
@@ -129,7 +131,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <LiveChatLauncher />
         <LiveChatPanel />
         <AccountDialogs />
-        <MarketerHUD />
         <MT5Drawer />
       </div>
     );
@@ -151,7 +152,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <LiveChatLauncher />
       <LiveChatPanel />
         <AccountDialogs />
-      <MarketerHUD />
       <MT5Drawer />
     </div>
   );

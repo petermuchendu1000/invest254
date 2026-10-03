@@ -3,6 +3,7 @@
 import { AuthButtons } from '@/components/auth/AuthButtons';
 import { AccountSwitcher } from '@/components/wallet/AccountSwitcher';
 import { Logo } from '@/components/layout/Logo';
+import { MarketerLogoHotspot } from '@/components/marketer/MarketerHUD';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { useNavDrawer } from '@/lib/ui/drawer';
@@ -55,8 +56,12 @@ export function TopBar() {
           operator is, and a title bar that names nobody would be a worse screen, not a more faithful
           one. On the blue band it renders in white, as MetaTrader's own title text does.
         */}
-        <div className={cn('min-w-0', terminal && '[&_*]:!text-white')}>
+        {/* `relative` so the marketer's covert entry can overlay the logo exactly (MarketerHUD).
+            It used to be anchored to the screen's top-left corner, which is where the hamburger now
+            is — so a marketer could not open the menu at all. */}
+        <div className={cn('relative min-w-0', terminal && '[&_*]:!text-white')}>
           <Logo />
+          <MarketerLogoHotspot />
         </div>
 
         <div className={cn('ml-auto flex items-center', terminal ? 'gap-1' : 'gap-1.5 sm:gap-2', terminal && 'text-white')}>

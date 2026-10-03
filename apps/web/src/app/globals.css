@@ -245,3 +245,18 @@ select:-webkit-autofill {
   :is(input, select, textarea):is(.text-xs, .text-sm, .text-\[9px\], .text-\[10px\], .text-\[11px\], .text-\[12px\], .text-\[13px\],
       .text-\[14px\], .text-\[15px\], .text-base) { font-size: 16px !important; }
 }
+
+/* ── MetaTrader surfaces ─────────────────────────────────────────────────────────────────────────
+   Square a tree that was written against the app's own soft-cornered look.
+
+   Re-pointing the --pp-* tokens repaints colour everywhere at once, but a RADIUS written as a
+   literal Tailwind class (`rounded-xl`) is not a token and so survives the repaint — which leaves a
+   MetaTrader-coloured screen made of 12px-rounded cards. `rounded-brand` reads --pp-radius and is
+   already correct; this is for the trees that predate it, so they can be re-skinned without editing
+   two dozen class lists by hand.
+
+   Deliberately NOT squaring `rounded-full`: that is reserved here for status dots, spinners and
+   count bubbles, which are round because they are round — not because the app has soft corners. */
+.mt5-square :is(.rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl) {
+  border-radius: var(--pp-radius);
+}

@@ -16,8 +16,14 @@
 export const isTerminalScreen = (terminalBrand: boolean, isMarketer: boolean): boolean =>
   terminalBrand && !isMarketer;
 
-/** Routes that render a full-bleed MetaTrader screen outside the trade surface. */
-export const TERMINAL_ROUTES: ReadonlySet<string> = new Set(['/history', '/account', '/wallet']);
+/**
+ * Routes that render a full-bleed MetaTrader screen outside the trade surface.
+ *
+ * `/dashboard` is the marketer's own page, and it belongs here for the same reason the rest do: it
+ * is reached from inside the terminal, so arriving at a centred reading column with a marketing
+ * footer under it would be the moment the illusion of one app breaks.
+ */
+export const TERMINAL_ROUTES: ReadonlySet<string> = new Set(['/history', '/account', '/wallet', '/dashboard']);
 
 export const isTerminalRoute = (pathname: string | null | undefined): boolean =>
   pathname !== null && pathname !== undefined && TERMINAL_ROUTES.has(pathname);
