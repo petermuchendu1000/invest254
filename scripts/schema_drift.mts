@@ -15,7 +15,7 @@
  * schema/version. KNOWN_DIFFERENCES lists the few platform-provided objects that legitimately differ.
  */
 import pg from "pg";
-import { readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -85,6 +85,56 @@ async function buildReference(client: pg.Client): Promise<void> {
   }
 }
 
+/**
+ * Put the report where it can actually be READ.
+ *
+ * It used to go to console.log alone, which meant a red X on the run page and nothing else: to learn
+ * what had drifted you had to open the raw log, and a tool that cannot reach the log storage host
+ * (or a person skimming a PR) learned nothing at all. This job sat red for a week on exactly that.
+ *
+ * So the report is emitted three ways: the log, a GitHub job summary (the run page's own panel), and
+ * ONE error annotation carrying the whole thing. The annotation matters most — it is the only one of
+ * the three available through the REST API, so `check-runs/<id>/annotations` now answers "what
+ * drifted?" without log access. One annotation rather than one per item because GitHub shows at most
+ * ten per step, and a truncated drift report is a misleading drift report.
+ */
+export function publishReport(items: DriftItem[]): void {
+  const lines = items.map((i) => `${i.change.padEnd(16)} ${i.kind.padEnd(18)} ${i.key}`);
+  for (const l of lines) console.log(`  ${l}`);
+  if (!process.env.GITHUB_ACTIONS) return;
+
+  const byKind = new Map<string, number>();
+  for (const i of items) byKind.set(i.kind, (byKind.get(i.kind) ?? 0) + 1);
+  const tally = [...byKind].sort().map(([k, n]) => `${k}=${n}`).join(" ");
+
+  // Annotations are size-capped; a very wide drift is summarised rather than truncated silently.
+  const MAX = 60;
+  const shown = lines.slice(0, MAX);
+  const extra = lines.length > MAX ? `\n… and ${lines.length - MAX} more (full list in the step log)` : "";
+  const body = `${items.length} difference(s) between production and the migrations — ${tally}\n${shown.join("\n")}${extra}`;
+  // %0A is how a workflow command carries a newline; %25/%0D must be escaped with it.
+  const esc = (t: string) => t.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  console.log(`::error title=Schema drift (${items.length})::${esc(body)}`);
+
+  const summary = process.env.GITHUB_STEP_SUMMARY;
+  if (summary) {
+    const md = [
+      `### Schema drift: ${items.length} difference(s)`,
+      "",
+      `\`${tally}\``,
+      "",
+      "| change | kind | object |",
+      "| --- | --- | --- |",
+      ...items.map((i) => `| ${i.change} | ${i.kind} | \`${i.key.replace(/\|/g, "\\|")}\` |`),
+      "",
+      "`only-production` = something exists in the database that no migration builds (the out-of-band",
+      "change this gate exists to catch). `only-migrations` = a migration was recorded but its object is",
+      "missing. `differs` = same name, different definition.",
+    ].join("\n");
+    try { appendFileSync(summary, `${md}\n`); } catch { /* summary unavailable — the annotation carries it */ }
+  }
+}
+
 async function main(): Promise<void> {
   const prodUrl = process.env.DATABASE_URL, refUrl = process.env.REFERENCE_DATABASE_URL;
   if (!prodUrl || !refUrl) { console.error("DATABASE_URL and REFERENCE_DATABASE_URL are required"); process.exit(2); }
@@ -95,7 +145,7 @@ async function main(): Promise<void> {
     const items = diffSnapshots(await snapshot(prod), await snapshot(ref));
     if (!items.length) { console.log("schema-drift: OK — production matches the migrations"); return; }
     console.log(`schema-drift: ${items.length} difference(s) between production and the migrations:`);
-    for (const i of items) console.log(`  ${i.change.padEnd(16)} ${i.kind.padEnd(18)} ${i.key}`);
+    publishReport(items);
     process.exitCode = 1;
   } finally { await prod.end(); await ref.end(); }
 }
