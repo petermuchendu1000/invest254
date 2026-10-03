@@ -5,7 +5,7 @@ import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas, type MarketerBeat } from '@/components/game/CurveCanvas';
 import { CandleChart } from '@/components/game/CandleChart';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useMarketerSkin, useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { ActivePosition } from '@/lib/game/betting';
@@ -61,17 +61,19 @@ export function GameCurve() {
    * On a candlestick brand the same control is already in the chart toolbar (CandleChart), so this
    * is the line/wave half of one rule rather than a second placement.
    *
-   * Real ROLE, not the skin: a marketer is always disguised and must never see a settings gear, but a
-   * player who has switched to Basic still needs it to switch back.
+   * It used to be hidden from a marketer by ROLE, because a marketer was pinned to the basic skin and
+   * a settings gear would have given the disguise away. Marketers now get the player interface
+   * exactly (see the policy note in lib/marketer/isMarketer), so withholding the gear would be the
+   * one thing left making their screen a different screen — and CandleChart never withheld it in the
+   * first place, so the two halves of the rule disagreed.
    */
-  const { isMarketer: isMarketerRole } = useIsMarketer();
-  const gearHere = !tvType && !isMarketerRole;
+  const gearHere = !tvType;
 
   return (
     <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface">
-      {/* Candlestick/OHLC brands render the TradingView view for everyone (marketers included): neutral-
-          ization applies to the LINE wave (`CurveCanvas`) only. Line brands keep the single-colour wave,
-          which for marketers is the neutralized version (no price axis, labels or red/green). */}
+      {/* Candlestick/OHLC brands render the TradingView view; line brands render the wave. The wave's
+          neutralized form (no price axis, labels or red/green) is now reached only by a player who
+          chose Basic — a marketer sees the same wave a player does. */}
       {tvType ? (
         <CandleChart key={tvType} initialType={tvType} getLastTick={getLastTick} requestCandles={requestCandles} status={status} />
       ) : (

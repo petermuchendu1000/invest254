@@ -46,16 +46,16 @@ const wallet = (st) => (LOCKED
     });
 
 /**
- * The pill's aria-label is NEUTRALISED on a marketer's screen: "Real account" and "Demo account"
- * read "Coins account" and "Practice account", because a screen recording must not show money or
- * trading wording. The menu ROWS keep their own names — a recording never shows an aria-label, and
- * the rows are what the switch is driven by — so only the pill moves.
+ * ONE pair of labels, for every account.
  *
- * Assert whichever pair this run is actually in rather than relaxing the check: a marketer run that
- * read "Real account" would mean the neutralisation had regressed, and this still catches that.
+ * The pill's aria-label used to be neutralised on a marketer's screen — "Coins account" and
+ * "Practice account" in place of Real and Demo — because a marketer was pinned to the basic skin.
+ * Marketers now get the player interface exactly (see lib/marketer/skinPolicy), so a marketer run
+ * must read the SAME labels as a player run, and a run that read "Coins account" would mean the old
+ * two-products split had come back.
  */
-const PILL_REAL = LOCKED ? /^Coins account/ : /^Real account/;
-const PILL_DEMO = LOCKED ? /^Practice account/ : /^Demo account/;
+const PILL_REAL = /^Real account/;
+const PILL_DEMO = /^Demo account/;
 
 const results = [];
 const check = (n, ok, d = '') => { results.push({ n, ok }); console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${n}${!ok && d ? ` -- ${d}` : ''}`); };
