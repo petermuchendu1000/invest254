@@ -23,7 +23,7 @@ import { RegisterSW } from '@/components/RegisterSW';
 import { MarketerHUD } from '@/components/marketer/MarketerHUD';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
-import { isTerminalHistory, isTerminalRoute } from '@/lib/history/terminal';
+import { isTerminalScreen, isTerminalRoute } from '@/lib/ui/terminalScreen';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -106,7 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // A MetaTrader screen off the trade surface (History today) is still a terminal screen: it fills
   // the window edge to edge, draws its own blue title bar flush under the app bar, and ends at the
   // toolbar — so no centred reading column, no page padding, and no marketing footer under it.
-  if (isTerminalHistory(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer) && isTerminalRoute(pathname)) {
+  if (isTerminalScreen(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer) && isTerminalRoute(pathname)) {
     return (
       <div className="flex min-h-dvh flex-col">
         <TopBar />
