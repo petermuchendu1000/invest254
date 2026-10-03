@@ -15,6 +15,7 @@ import {
   type SortKey,
 } from '@/lib/history/mt5history';
 import type { PositionDto, TransactionDto } from '@/lib/api/types';
+import { MT5TitleBar, MT5Summary, MT5SummaryLine, MT5Entry, MT5Amount, MT5Empty } from '@/components/mt5/kit';
 import { cn } from '@/lib/cn';
 
 /**
@@ -104,17 +105,13 @@ export function MT5History() {
 
   return (
     <div className="flex flex-1 flex-col bg-[#0f1720] text-white">
-      {/* ── Title bar. MetaTrader keeps the screen name, the symbol filter and the tabs all inside
-             the one blue band, which is why this sits flush under the app bar with no gap. ── */}
-      <div className="sticky top-14 z-20 bg-[#3183ff]">
-        <div className="flex items-center gap-3 px-3 pb-1 pt-2">
-          <div className="min-w-0">
-            <div className="text-[11px] leading-tight text-white/75">History</div>
-            {/* One instrument is quoted, so "All symbols" is a statement of fact rather than a
-                picker that would open on a list of one. */}
-            <div className="truncate text-[15px] font-semibold leading-tight">All symbols</div>
-          </div>
-          <div className="relative ml-auto flex items-center gap-1">
+      {/* MetaTrader keeps the screen name, the symbol filter and the tabs all inside the one blue
+          band. One instrument is quoted, so "All symbols" is a statement of fact rather than a picker
+          that would open on a list of one. */}
+      <MT5TitleBar
+        title="History"
+        subtitle="All symbols"
+        actions={<>
             <IconButton
               label="Sort"
               active={menu === 'sort'}
@@ -160,9 +157,8 @@ export function MT5History() {
                 </div>
               </>
             ) : null}
-          </div>
-        </div>
-
+        </>}
+      >
         <div className="flex">
           {(['positions', 'orders', 'deals'] as const).map((t) => (
             <button
@@ -181,38 +177,36 @@ export function MT5History() {
             </button>
           ))}
         </div>
-      </div>
+      </MT5TitleBar>
 
-      {/* ── Summary. MetaTrader runs a dotted leader from each label to a figure in blue. The leader
-             is capped on a wide window: stretched across a desktop it stops reading as a leader. ── */}
-      <div className="border-b border-[#2b3543] px-3 py-2 lg:max-w-md">
+      <MT5Summary>
         {tab === 'orders' ? (
           <>
-            <SummaryLine label="Filled" value={String(counts.filled)} />
-            <SummaryLine label="Canceled" value={String(counts.canceled)} />
-            <SummaryLine label="Total" value={String(counts.total)} />
+            <MT5SummaryLine label="Filled" value={String(counts.filled)} />
+            <MT5SummaryLine label="Canceled" value={String(counts.canceled)} />
+            <MT5SummaryLine label="Total" value={String(counts.total)} />
           </>
         ) : (
           <>
             {/* Swap and Commission are the two lines MetaTrader drops when they are zero, and here
                 they are structurally zero — nothing is held overnight and nothing is charged per
                 trade. See moneySummary. */}
-            <SummaryLine label="Profit" value={money.fmt(money3.profitCents)} />
-            <SummaryLine label="Deposit" value={money.fmt(money3.depositCents)} />
-            <SummaryLine label="Balance" value={money.fmt(money3.balanceCents)} />
+            <MT5SummaryLine label="Profit" value={money.fmt(money3.profitCents)} />
+            <MT5SummaryLine label="Deposit" value={money.fmt(money3.depositCents)} />
+            <MT5SummaryLine label="Balance" value={money.fmt(money3.balanceCents)} />
           </>
         )}
-      </div>
+      </MT5Summary>
 
       <div className="flex-1">
         {!token ? (
-          <Empty>Sign in to see your trading history.</Empty>
+          <MT5Empty>Sign in to see your trading history.</MT5Empty>
         ) : loading ? (
-          <Empty>Loading history…</Empty>
+          <MT5Empty>Loading history…</MT5Empty>
         ) : positionsQ.isError || transactionsQ.isError ? (
-          <Empty>History is unavailable right now.</Empty>
+          <MT5Empty>History is unavailable right now.</MT5Empty>
         ) : shown === 0 ? (
-          <Empty>No {TAB_LABELS[tab].toLowerCase()} for {periodSubtitle(range)}.</Empty>
+          <MT5Empty>No {TAB_LABELS[tab].toLowerCase()} for {periodSubtitle(range)}.</MT5Empty>
         ) : (
           // MetaTrader shows history as two-line entries on a phone and as a wide table once the
           // window has room — the same split the Toolbox uses. Both are rendered from the same rows.
@@ -252,7 +246,7 @@ export function MT5History() {
                       <Td>{r.entry ?? '—'}</Td>
                       <Td>{r.lots ?? '—'}</Td>
                       <Td>{r.lots === null ? '—' : EXECUTION_PRICE}</Td>
-                      <Td><Amount cents={r.amountCents} fmt={money.fmt} /></Td>
+                      <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
                     </Row>
                   ))}
                 </Table>
@@ -266,7 +260,7 @@ export function MT5History() {
                       <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
                       <Td>{r.lots ?? '—'}</Td>
                       <Td>{r.lots === null ? '—' : EXECUTION_PRICE}</Td>
-                      <Td><Amount cents={r.amountCents} fmt={money.fmt} /></Td>
+                      <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
                     </Row>
                   ))}
                 </Table>
@@ -298,42 +292,12 @@ function useAutoPage(
 
 // ───────────────────────────────── entries ─────────────────────────────────
 
-/**
- * MetaTrader's two-line entry. Line one is the instrument and what was done, with the time on the
- * right; line two is the size, with the result on the right.
- */
-function Entry({
-  title, time, detail, result, onOpen,
-}: {
-  title: React.ReactNode;
-  time: string;
-  detail: React.ReactNode;
-  result: React.ReactNode;
-  onOpen?: (() => void) | undefined;
-}) {
-  const Tag = onOpen ? 'button' : 'div';
-  return (
-    <Tag
-      {...(onOpen ? { type: 'button' as const, onClick: onOpen } : {})}
-      className="flex w-full items-start gap-3 border-b border-[#2b3543] px-3 py-2 text-left"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-semibold leading-tight">{title}</div>
-        <div className="mt-0.5 truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">{detail}</div>
-      </div>
-      <div className="shrink-0 text-right">
-        <div className="font-mono text-[11px] leading-tight text-[#8fa2b8]">{time}</div>
-        <div className="mt-0.5 font-mono text-[12px] font-semibold leading-tight tabular-nums">{result}</div>
-      </div>
-    </Tag>
-  );
-}
 
 const sideClass = (side: string | null) => (side === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]');
 
 function OrderEntry({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
   return (
-    <Entry
+    <MT5Entry
       title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side}</span></>}
       time={stamp(row.atMs)}
       detail={`${row.lots} / ${row.filledLots} ${EXECUTION_PRICE}`}
@@ -346,20 +310,20 @@ function OrderEntry({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
 function DealEntry({ row, fmt }: { row: DealRow; fmt: (cents: number) => string }) {
   if (row.kind === 'balance') {
     return (
-      <Entry
+      <MT5Entry
         title={row.symbol}
         time={stamp(row.atMs)}
         detail={row.label}
-        result={<Amount cents={row.amountCents} fmt={fmt} />}
+        result={<MT5Amount cents={row.amountCents} fmt={fmt} />}
       />
     );
   }
   return (
-    <Entry
+    <MT5Entry
       title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side}, {row.entry}</span></>}
       time={stamp(row.atMs)}
       detail={`${row.lots} ${EXECUTION_PRICE}`}
-      result={row.amountCents === null ? null : <Amount cents={row.amountCents} fmt={fmt} />}
+      result={row.amountCents === null ? null : <MT5Amount cents={row.amountCents} fmt={fmt} />}
     />
   );
 }
@@ -367,15 +331,15 @@ function DealEntry({ row, fmt }: { row: DealRow; fmt: (cents: number) => string 
 function PositionEntry({ row, fmt, onOpen }: { row: PositionRow; fmt: (cents: number) => string; onOpen: () => void }) {
   if (row.kind === 'balance') {
     return (
-      <Entry title={row.symbol} time={stamp(row.atMs)} detail={row.label} result={<Amount cents={row.amountCents} fmt={fmt} />} />
+      <MT5Entry title={row.symbol} time={stamp(row.atMs)} detail={row.label} result={<MT5Amount cents={row.amountCents} fmt={fmt} />} />
     );
   }
   return (
-    <Entry
+    <MT5Entry
       title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side} {row.lots}</span></>}
       time={stamp(row.atMs)}
       detail={EXECUTION_PRICE}
-      result={<Amount cents={row.amountCents} fmt={fmt} />}
+      result={<MT5Amount cents={row.amountCents} fmt={fmt} />}
       onOpen={onOpen}
     />
   );
@@ -412,23 +376,9 @@ function Td({ children, className }: { children: React.ReactNode; className?: st
   return <td className={cn('whitespace-nowrap px-3 py-1.5', className)}>{children}</td>;
 }
 
-function Amount({ cents, fmt }: { cents: number | null; fmt: (cents: number) => string }) {
-  if (cents === null) return <span className="text-[#8fa2b8]">—</span>;
-  return <span className={cents < 0 ? 'text-[#f23645]' : 'text-[#3183ff]'}>{fmt(cents)}</span>;
-}
 
 // ───────────────────────────────── chrome ─────────────────────────────────
 
-function SummaryLine({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline gap-2 py-0.5">
-      <span className="shrink-0 text-[13px] font-semibold">{label}:</span>
-      {/* MetaTrader's dotted leader, which is what stops the figures reading as a plain table. */}
-      <span aria-hidden className="min-w-4 flex-1 translate-y-[-3px] border-b border-dotted border-[#2b3543]" />
-      <span className="shrink-0 font-mono text-[13px] font-semibold tabular-nums text-[#4597ff]">{value}</span>
-    </div>
-  );
-}
 
 function IconButton({
   label, active, onClick, children,
@@ -532,6 +482,3 @@ function SortMenu({
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 py-10 text-center text-[13px] text-[#8fa2b8]">{children}</div>;
-}

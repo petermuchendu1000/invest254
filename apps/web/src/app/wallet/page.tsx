@@ -10,6 +10,11 @@ import { useAuthUi } from '@/lib/auth/ui';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useWalletFigures } from '@/lib/wallet/hooks';
 import { useHydrated } from '@/lib/useHydrated';
+import { useBrand } from '@/lib/brand/BrandProvider';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
+import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
+import { isTerminalScreen } from '@/lib/ui/terminalScreen';
+import { MT5Funds } from '@/components/wallet/MT5Funds';
 
 export default function WalletPage() {
   const hydrated = useHydrated();
@@ -18,6 +23,10 @@ export default function WalletPage() {
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
   const figures = useWalletFigures();
+  // A candlestick brand's funding screen is the terminal's, not the site's generic wallet page.
+  const brand = useBrand();
+  const { isMarketer } = useMarketerSkin();
+  const mt5 = isTerminalScreen(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer);
 
   if (!hydrated) return <Skeleton className="h-48 w-full" />;
 
@@ -30,6 +39,8 @@ export default function WalletPage() {
       />
     );
   }
+
+  if (mt5) return <MT5Funds />;
 
   return (
     <section className="flex flex-col gap-4">

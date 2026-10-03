@@ -13,7 +13,7 @@ export const isTerminalScreen = (terminalBrand: boolean, isMarketer: boolean): b
   terminalBrand && !isMarketer;
 
 /** Routes that render a full-bleed MetaTrader screen outside the trade surface. */
-export const TERMINAL_ROUTES: ReadonlySet<string> = new Set(['/history', '/account']);
+export const TERMINAL_ROUTES: ReadonlySet<string> = new Set(['/history', '/account', '/wallet']);
 
 export const isTerminalRoute = (pathname: string | null | undefined): boolean =>
   pathname !== null && pathname !== undefined && TERMINAL_ROUTES.has(pathname);
