@@ -16,6 +16,8 @@ import { authErrorMessage } from '@/lib/auth/errors';
 import { phoneError, usernameError, passwordError, referralError } from '@/lib/auth/validation';
 import { REF_KEY } from '@/lib/auth/referral';
 import { cn } from '@/lib/cn';
+import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
+import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 import type { RegisterInput } from '@/lib/api/endpoints';
 
 /*
@@ -142,6 +144,12 @@ export function AuthModal() {
   const { open, mode, openAuth, close } = useAuthUi();
   const { login, register } = useAuthActions();
   const brand = useBrand();
+  /**
+   * On a terminal brand the sign-in screen is MetaTrader's too. The form itself — validation,
+   * two-factor, recovery codes, the reset sub-flow — is not rewritten; re-pointing the theme tokens
+   * repaints it (lib/ui/mt5Tokens) and only the header changes, to MetaTrader's blue band.
+   */
+  const mt5 = useTerminalSkin();
   // If the user arrived here from a logged-out deposit, reopen that sheet once they're in.
   const resumeAfterAuth = useDepositUi((s) => s.resumeAfterAuth);
   const resumeDeposit = useDepositUi((s) => s.resumeDeposit);
@@ -324,7 +332,7 @@ export function AuthModal() {
   /* ── password updated confirmation ─────────────────────────────────────────── */
   if (isReset && resetDone) {
     return (
-      <Modal open={open} onClose={close} title="Password updated" chrome={false}>
+      <Modal open={open} onClose={close} title="Password updated" chrome={false} panelStyle={mt5 ? MT5_TOKENS : undefined}>
         <Header onClose={close} />
         <div className="flex flex-col items-center gap-3 px-6 pb-8 pt-2 text-center">
           <CheckIcon />
@@ -341,14 +349,19 @@ export function AuthModal() {
   }
 
   return (
-    <Modal open={open} onClose={close} title={copy.title} chrome={false}>
-      <Header onClose={close} />
+    <Modal open={open} onClose={close} title={copy.title} chrome={false} panelStyle={mt5 ? MT5_TOKENS : undefined}>
+      <Header onClose={close} mt5={mt5} title={copy.title} />
 
-      {/* Title block — left aligned, tight hierarchy */}
-      <div className="px-6 pb-4">
-        <h2 className="text-[22px] font-semibold leading-tight tracking-tight text-fg">{copy.title}</h2>
-        {copy.sub ? <p className="mt-1 text-sm text-muted">{copy.sub}</p> : null}
-      </div>
+      {/* Title block — left aligned, tight hierarchy. MetaTrader's blue bar already carries the
+          screen name, so repeating it underneath would say the same thing twice on a phone. */}
+      {mt5 ? (
+        copy.sub ? <p className="px-4 pb-3 pt-3 text-[13px] text-muted">{copy.sub}</p> : <div className="pt-1" />
+      ) : (
+        <div className="px-6 pb-4">
+          <h2 className="text-[22px] font-semibold leading-tight tracking-tight text-fg">{copy.title}</h2>
+          {copy.sub ? <p className="mt-1 text-sm text-muted">{copy.sub}</p> : null}
+        </div>
+      )}
 
       {/* Quiet underline tabs (hidden in reset, which is a sub-flow of log in) */}
       {!isReset ? (
@@ -601,7 +614,28 @@ export function AuthModal() {
 }
 
 /** Compact brand row with the dismiss control. */
-function Header({ onClose }: { onClose: () => void }) {
+function Header({ onClose, mt5, title }: { onClose: () => void; mt5?: boolean; title?: string }) {
+  // MetaTrader titles a screen with a solid blue band carrying the screen's own name — see its
+  // "Login to an account" screen. The brand lockup and the theme toggle belong to the site's own
+  // header, not to MetaTrader's.
+  if (mt5) {
+    return (
+      <div className="flex items-center gap-3 border-b border-[#2b3543] bg-[#3183ff] px-3 py-2.5">
+        <div className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-white">{title}</div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="-mr-1 grid h-8 w-8 shrink-0 place-items-center rounded text-white transition hover:bg-white/20"
+        >
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
+            <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center justify-between px-6 pb-5 pt-5">
       <Logo />

@@ -21,6 +21,7 @@ import { SessionBootstrap } from '@/components/auth/SessionBootstrap';
 import { NotificationBanners } from '@/components/notifications/NotificationBanners';
 import { RegisterSW } from '@/components/RegisterSW';
 import { MarketerHUD } from '@/components/marketer/MarketerHUD';
+import { MT5Drawer } from '@/components/layout/MT5Drawer';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { isTerminalScreen, isTerminalRoute } from '@/lib/ui/terminalScreen';
@@ -71,6 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <WalletModal />
         <RegisterSW />
         <MarketerHUD />
+        <MT5Drawer />
       </div>
     );
   }
@@ -85,8 +87,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <TopBar />
         <NotificationBanners />
         <main className={cn(
-          'relative flex w-full min-h-0 flex-1 flex-col px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-2 md:px-4 md:pb-4',
-          terminal ? 'lg:px-3 xl:px-4' : 'mx-auto max-w-app',
+          'relative flex w-full min-h-0 flex-1 flex-col pt-2',
+          // A terminal brand has no bottom nav (MT5Drawer replaces it), so nothing is reserved for
+          // one — and the gutters tighten, because this is the screen the chart lives on.
+          terminal
+            ? 'px-2 pb-[env(safe-area-inset-bottom)] md:px-4 md:pb-4 lg:px-3 xl:px-4'
+            : 'mx-auto max-w-app px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:px-4 md:pb-4',
         )}>
           {children}
         </main>
@@ -99,6 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <LiveChatPanel />
         <AccountDialogs />
         <MarketerHUD />
+        <MT5Drawer />
       </div>
     );
   }
@@ -111,7 +118,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-dvh flex-col">
         <TopBar />
         <NotificationBanners />
-        <main className="flex w-full flex-1 flex-col pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:pb-4">
+        <main className="flex w-full flex-1 flex-col pb-[env(safe-area-inset-bottom)] md:pb-4">
           {children}
         </main>
         <BottomNav />
@@ -123,6 +130,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <LiveChatPanel />
         <AccountDialogs />
         <MarketerHUD />
+        <MT5Drawer />
       </div>
     );
   }
@@ -144,6 +152,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <LiveChatPanel />
         <AccountDialogs />
       <MarketerHUD />
+      <MT5Drawer />
     </div>
   );
 }

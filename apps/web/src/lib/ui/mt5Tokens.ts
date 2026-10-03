@@ -30,6 +30,14 @@ const SHARED = {
   '--pp-info': MT5.blue,
   // The brand hue skins links and soft chips; on a MetaTrader surface those read blue.
   '--pp-brand': MT5.blueLink,
+  /**
+   * MetaTrader is SQUARE. Its fields, buttons and panels have a 2px corner at most — nothing on it
+   * is a pill. The brand radius is 0.875rem, which is what made the sign-in fields and the Deposit
+   * button read as a consumer app sitting inside a terminal. `Input` and `Button` both corner
+   * themselves from this token, so one line squares every control on these surfaces without
+   * touching either component.
+   */
+  '--pp-radius': '2px',
 } as const;
 
 /**

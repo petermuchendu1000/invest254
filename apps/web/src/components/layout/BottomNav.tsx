@@ -73,17 +73,20 @@ export function BottomNav() {
   const pathname = usePathname();
   const { isMarketer } = useMarketerSkin();
   /**
-   * MetaTrader's bottom bar is flat: plain icons, the active one BLUE, the rest grey, and no filled
-   * pill anywhere. The green pill this app uses is the single loudest non-MT5 element left on the
-   * terminal's trade screen, so a candlestick brand gets MetaTrader's treatment.
+   * A terminal brand has NO bottom nav.
    *
-   * The LABELS stay, which MetaTrader's bar does not have. These destinations are Deposit, History,
-   * Profile and Chat rather than MetaTrader's own tabs, and an unlabelled wallet icon is a worse
-   * screen for the people actually using this.
+   * The terminal already ends in a bar: the Toolbox's own tabs. Stacking the app's nav under it put
+   * two rows of chrome along the bottom of a phone — about 120px, on the screen where the chart
+   * matters most. MetaTrader navigates from the side panel instead, so that is where these
+   * destinations went (MT5Drawer): Trade, History, Funds, Settings and Chat are all there, so
+   * nothing became unreachable.
+   *
+   * Every other shell keeps this bar.
    */
   const brand = useBrand();
   const mt5 = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null && !isMarketer;
   const setChat = useLiveChat((s) => s.setOpen);
+  if (mt5) return null;
   const unread = useLiveChatUnread();
   return (
     <nav className={cn(
