@@ -17,6 +17,7 @@ import { useDisplayMoney } from '@/lib/money';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { MT5AccountPanel } from '@/components/account/MT5AccountPanel';
 import { aboutRows, kycSub, kycTone } from '@/lib/account/mt5settings';
+import { MT5TitleBar, MT5Section as Section, MT5Row as Row } from '@/components/mt5/kit';
 import { cn } from '@/lib/cn';
 
 /**
@@ -48,9 +49,7 @@ export function MT5Settings() {
     <div className="flex flex-1 flex-col bg-[#0f1720] text-white">
       {/* MetaTrader's Settings title bar is a single line — there is no second instrument-filter
           line the way the History screen has one. */}
-      <div className="sticky top-14 z-20 bg-[#3183ff] px-3 py-2.5">
-        <div className="text-[15px] font-semibold leading-tight">Settings</div>
-      </div>
+      <MT5TitleBar title="Settings" />
 
       {/* The title bar is full-bleed, as the terminal's chrome is; the settings themselves are a
           reading column — MetaTrader's own settings on a wide window are a panel, not an edge-to-edge
@@ -217,87 +216,5 @@ function InterfaceSection() {
 
 // ───────────────────────────────── chrome ─────────────────────────────────
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h2 className="border-t border-[#2b3543] px-3 pb-1.5 pt-4 text-[12px] font-bold uppercase tracking-wide text-white">
-        {title}
-      </h2>
-      <div className="border-t border-[#2b3543]">{children}</div>
-    </section>
-  );
-}
 
-/**
- * One settings row: the label, the current state under it, and at most one thing on the right —
- * MetaTrader's checkbox, a value, or a chevron.
- */
-function Row({
-  label, sub, subTone, value, check, control, href, onClick, chevron, tone,
-}: {
-  label: string;
-  sub?: string | undefined;
-  subTone?: 'ok' | 'bad' | 'neutral' | undefined;
-  value?: string | undefined;
-  check?: boolean | undefined;
-  control?: React.ReactNode;
-  href?: string | undefined;
-  onClick?: (() => void) | undefined;
-  chevron?: boolean | undefined;
-  tone?: 'bad' | undefined;
-}) {
-  const body = (
-    <>
-      <span className="min-w-0 flex-1">
-        <span className={cn('block truncate text-[15px] leading-tight', tone === 'bad' ? 'text-[#f23645]' : 'text-white')}>
-          {label}
-        </span>
-        {sub ? (
-          /* MetaTrader WRAPS this line rather than clipping it — the sub-label is the setting's
-             current state, so a truncated one ("Amounts are converted for display; yo…") is the one
-             part of the row that must not be cut. Two lines, then ellipsis. */
-          <span
-            className={cn(
-              'mt-0.5 line-clamp-2 block break-words text-[13px] leading-tight',
-              subTone === 'ok' ? 'text-[#41be56]' : subTone === 'bad' ? 'text-[#f23645]' : 'text-[#8fa2b8]',
-            )}
-          >
-            {sub}
-          </span>
-        ) : null}
-      </span>
-      {control ?? null}
-      {value !== undefined ? (
-        <span className="shrink-0 font-mono text-[13px] text-[#4597ff]">{value}</span>
-      ) : null}
-      {check !== undefined ? <Check on={check} /> : null}
-      {chevron ? <span aria-hidden className="shrink-0 text-[#8fa2b8]">›</span> : null}
-    </>
-  );
 
-  const className = 'flex w-full items-center gap-3 border-b border-[#2b3543] px-3 py-3 text-left';
-
-  if (href) return <Link href={href} className={className}>{body}</Link>;
-  // A row with a control inside it is not itself a button — the select would swallow its own taps
-  // and a nested interactive element is invalid markup.
-  if (onClick) return <button type="button" onClick={onClick} className={className}>{body}</button>;
-  return <div className={className}>{body}</div>;
-}
-
-/** MetaTrader's square checkbox: an outline when off, solid blue with a white tick when on. */
-function Check({ on }: { on: boolean }) {
-  return (
-    <span
-      className={cn(
-        'grid h-5 w-5 shrink-0 place-items-center rounded-[2px] border',
-        on ? 'border-[#3183ff] bg-[#3183ff]' : 'border-[#8fa2b8]',
-      )}
-    >
-      {on ? (
-        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M5 12.5l5 5 9-10" />
-        </svg>
-      ) : null}
-    </span>
-  );
-}
