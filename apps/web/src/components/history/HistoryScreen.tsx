@@ -5,7 +5,7 @@ import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { HistoryTabs } from '@/components/wallet/HistoryTabs';
 import { MT5History } from '@/components/history/MT5History';
-import { isTerminalHistory } from '@/lib/history/terminal';
+import { isTerminalScreen } from '@/lib/ui/terminalScreen';
 
 /**
  * A candlestick brand's History screen is MetaTrader's, not the site's generic tabs. Every other
@@ -14,7 +14,7 @@ import { isTerminalHistory } from '@/lib/history/terminal';
 export function HistoryScreen() {
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
-  if (isTerminalHistory(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer)) {
+  if (isTerminalScreen(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer)) {
     return <MT5History />;
   }
   return (

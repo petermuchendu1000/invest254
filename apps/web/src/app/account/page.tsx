@@ -13,6 +13,9 @@ import { useHydrated } from '@/lib/useHydrated';
 import { ReferralInviteCard } from '@/components/account/ReferralInviteCard';
 import { SecurityCard } from '@/components/account/SecurityCard';
 import { MT5AccountPanel } from '@/components/account/MT5AccountPanel';
+import { MT5Settings } from '@/components/account/MT5Settings';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
+import { isTerminalScreen } from '@/lib/ui/terminalScreen';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { useCan } from '@/lib/auth/can';
@@ -27,7 +30,11 @@ export default function AccountPage() {
   const mayEarn = useCan('earn.referrals');
   // A terminal brand gets MetaTrader's account panel; every other shell keeps the plain username card.
   const brand = useBrand();
+  const { isMarketer } = useMarketerSkin();
   const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
+  // …and on a candlestick brand the WHOLE page is MetaTrader's Settings screen, which carries that
+  // panel at its top. A marketer screen never gets terminal chrome.
+  const mt5 = isTerminalScreen(terminal, isMarketer);
 
   if (!hydrated) return <Skeleton className="h-48 w-full" />;
 
@@ -41,6 +48,8 @@ export default function AccountPage() {
   }
 
   if (!user) return <Skeleton className="h-48 w-full" />;
+
+  if (mt5) return <MT5Settings />;
 
   return (
     <section className="flex flex-col gap-4">
