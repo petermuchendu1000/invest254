@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  periodRange, periodSubtitle, dateOnly, stamp, ticketOf, isCompleted, signedCents,
+  periodRange, periodSubtitle, dateOnly, stamp, ticketOf, isCompleted, signedCents, tradeDateOf, priceKnown,
   orderRows, dealRows, positionRows, ordersSummary, moneySummary, sortRows,
 } from './mt5history.js';
 import type { PositionDto, TransactionDto } from '../api/types.js';
@@ -60,6 +60,20 @@ test('periodSubtitle: one day collapses to a single date, a span prints both', (
 test('MetaTrader date and time formats', () => {
   assert.equal(dateOnly(NOW), '2026.06.15');
   assert.equal(stamp(new Date(2026, 5, 15, 9, 7, 4).getTime()), '2026.06.15 09:07:04');
+});
+
+test('a price is only knowable on the day its axis is anchored to', () => {
+  const noon = Date.UTC(2026, 5, 15, 12, 0, 0);
+  assert.equal(tradeDateOf(noon), '2026-06-15');
+  assert.ok(priceKnown(noon, '2026-06-15'));
+  // One UTC day earlier or later is a different anchor, so the price is NOT knowable.
+  assert.ok(!priceKnown(noon - 86_400_000, '2026-06-15'));
+  assert.ok(!priceKnown(noon + 86_400_000, '2026-06-15'));
+  // The boundary is UTC midnight, not local midnight.
+  assert.ok(priceKnown(Date.UTC(2026, 5, 15, 23, 59, 59), '2026-06-15'));
+  assert.ok(!priceKnown(Date.UTC(2026, 5, 16, 0, 0, 0), '2026-06-15'));
+  // No anchor yet (socket has not delivered one) means nothing is knowable.
+  for (const a of [null, undefined, '']) assert.ok(!priceKnown(noon, a), String(a));
 });
 
 test('ticketOf: a uuid becomes a short MetaTrader-looking ticket', () => {
