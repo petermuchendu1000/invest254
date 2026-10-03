@@ -5,7 +5,8 @@ import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas, type MarketerBeat } from '@/components/game/CurveCanvas';
 import { CandleChart } from '@/components/game/CandleChart';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useMarketerSkin } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin, useIsMarketer } from '@/lib/marketer/isMarketer';
+import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { ActivePosition } from '@/lib/game/betting';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
@@ -51,6 +52,20 @@ export function GameCurve() {
   const tvType = tradingViewTypeOf(chartStyleOf(brand.chartStyle));
   // The anticipation beat rides on the neutral wave (basic skin only).
   const beat = useMarketerBeat(isMarketer ? activePosition : null);
+  /**
+   * The interface gear lives in the chart's own top-right corner, where every charting app keeps its
+   * chart settings — and where this one has empty space, because the wave's value axis is drawn down
+   * the LEFT edge. It used to sit in a row of its own above the chart: a full 60px band of a
+   * viewport-locked phone screen spent on one 32px icon, which is 60px the chart was not getting.
+   *
+   * On a candlestick brand the same control is already in the chart toolbar (CandleChart), so this
+   * is the line/wave half of one rule rather than a second placement.
+   *
+   * Real ROLE, not the skin: a marketer is always disguised and must never see a settings gear, but a
+   * player who has switched to Basic still needs it to switch back.
+   */
+  const { isMarketer: isMarketerRole } = useIsMarketer();
+  const gearHere = !tvType && !isMarketerRole;
 
   return (
     <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface">
@@ -62,6 +77,7 @@ export function GameCurve() {
       ) : (
         <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} />
       )}
+      {gearHere ? <div className="absolute right-2 top-2 z-20"><InterfaceModeToggle /></div> : null}
     </div>
   );
 }
