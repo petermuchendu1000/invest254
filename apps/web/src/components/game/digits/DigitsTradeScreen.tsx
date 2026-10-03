@@ -29,7 +29,8 @@ import { pillLabel } from '@/lib/game/stakeLadder';
 import { Segmented } from '@/components/ui/Segmented';
 import { useDisplayMoney } from '@/lib/money';
 import { useWallet, useTopupDemo } from '@/lib/wallet/hooks';
-import { walletFigures } from '@/lib/wallet/figures';
+import { useMarketerDemoTopup } from '@/lib/affiliate/hooks';
+import { walletFigures, shortfallAction } from '@/lib/wallet/figures';
 import { afterSettle, nextAuto, runPnl, startRun, type AutoRun, type AutoStop } from '@/lib/game/autoBot';
 import { useSession } from '@/lib/auth/session';
 import { useDepositUi } from '@/lib/wallet/depositUi';
@@ -114,6 +115,9 @@ export function DigitsTradeScreen() {
   const toast = useToast();
   const { data: wallet } = useWallet();
   const topupDemo = useTopupDemo();
+  // A marketer's funny money is not a demo bucket and is not topped up by the demo call; it has its
+  // own (migration 0102). See shortfallAction in wallet/figures for which balance is which.
+  const topupMarketer = useMarketerDemoTopup();
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
   const amt = useAmountText();
   const { isMarketer } = useMarketerSkin();
@@ -327,9 +331,19 @@ export function DigitsTradeScreen() {
       if (cents > spendable) {
         if (manual) {
           // Demo: refill in place (no menu hunt). Real: the top-up sheet with the shortfall.
-          if (wallet?.mode === 'demo') topupDemo.mutate(undefined, { onSuccess: (r) => (r.demoBalance >= cents
+          // Refill the bucket actually being SPENT. `wallet.mode` is permanently 'demo' for a
+          // marketer, so asking it here refilled their practice bucket while they played their funny
+          // money — and said it had worked.
+          const action = shortfallAction(wallet);
+          if (action === 'refill-demo') topupDemo.mutate(undefined, { onSuccess: (r) => (r.demoBalance >= cents
             ? toast.push({ tone: 'success', title: 'Demo refilled', description: amt.text(r.demoBalance) })
             : toast.push({ tone: 'error', title: `Demo max ${amt.text(r.demoBalance)}` })) });   // a refill cannot cover a stake above it
+          else if (action === 'refill-marketer') topupMarketer.mutate(undefined, {
+            onSuccess: (r) => (r.balanceCents >= cents
+              ? toast.push({ tone: 'success', title: 'Balance refilled', description: amt.text(r.balanceCents) })
+              : toast.push({ tone: 'error', title: `Max ${amt.text(r.balanceCents)}` })),
+            onError: () => toast.push({ tone: 'error', title: 'Could not refill', description: 'Try again.' }),
+          });
           else setNeedFunds({ requiredCents: cents, currentCents: spendable });
         }
         return false;
