@@ -12,7 +12,7 @@ import { useSession } from '@/lib/auth/session';
 import { DepositPanel } from '@/components/wallet/DepositPanel';
 import { WithdrawForm } from '@/components/wallet/WithdrawForm';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
-import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
+import { MT5_CONFIRM_TOKENS } from '@/lib/ui/mt5Tokens';
 
 const TABS: { mode: WalletMode; label: string }[] = [
   { mode: 'deposit', label: 'Deposit' },
@@ -54,7 +54,7 @@ export function WalletModal() {
       onClose={close}
       title={active === 'deposit' ? 'Deposit' : 'Withdraw'}
       chrome={false}
-      panelStyle={mt5 ? MT5_TOKENS : undefined}
+      panelStyle={mt5 ? MT5_CONFIRM_TOKENS : undefined}
     >
       {/* Header. MetaTrader's is a solid blue band with the screen name and a close control. */}
       <div
