@@ -112,6 +112,13 @@ interface GameSocketValue {
   getMarket: () => { instrument: MarketSymbol; anchor: CandlesReply['anchor'] } | null;
   /** Market newswire for the News tab. Public market copy; rejects on failure. */
   requestNews: (limit?: number) => Promise<NewsReply>;
+  /**
+   * The day anchors needed to place rates from EARLIER days on the price axis.
+   *
+   * `getMarket()` carries today's anchor only, and the axis is re-anchored every UTC midnight, so a
+   * rate recorded on an older day cannot be priced from it. Ask the engine for that day's own.
+   */
+  requestAnchors: (days: readonly string[]) => Promise<AnchorsReply>;
 }
 
 export interface NewsItemDto {
@@ -123,6 +130,10 @@ export interface NewsItemDto {
   summary: string;
 }
 export interface NewsReply { items: NewsItemDto[]; fetchedAtMs: number }
+
+/** One UTC day's price anchor: price = base + instrument.scale * (value(t) - openValue). */
+export interface DayAnchor { dateKey: string; base: number; openValue: number }
+export interface AnchorsReply { instrument: MarketSymbol; days: DayAnchor[] }
 
 export interface CandlesReply {
   tf: Timeframe;
@@ -356,6 +367,31 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       candleWaitersRef.current.set(reqId, { resolve, reject, timer });
     });
   }, [send, settleCandleWaiter]);
+
+  // ── Day anchors ────────────────────────────────────────────────────────────────────────────────
+  // Request-id matched like the candles, not queued like the news: two tabs of the Toolbox can be
+  // asking about different sets of days at once, and a reply must reach the caller that wanted it.
+  const anchorSeqRef = useRef(0);
+  const anchorWaitersRef = useRef<Map<string, { resolve: (r: AnchorsReply) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
+  const anchorOutboxRef = useRef<Array<{ reqId: string; days: string[] }>>([]);
+
+  const settleAnchorWaiter = useCallback((reqId: string, outcome: { ok: AnchorsReply } | { err: Error }): void => {
+    const w = anchorWaitersRef.current.get(reqId);
+    if (!w) return;
+    anchorWaitersRef.current.delete(reqId);
+    clearTimeout(w.timer);
+    if ('ok' in outcome) w.resolve(outcome.ok); else w.reject(outcome.err);
+  }, []);
+
+  const requestAnchors = useCallback((days: readonly string[]): Promise<AnchorsReply> => {
+    const reqId = `a${++anchorSeqRef.current}`;
+    return new Promise<AnchorsReply>((resolve, reject) => {
+      const frame = { reqId, days: [...days] };
+      if (!send('anchors', frame)) anchorOutboxRef.current.push(frame);
+      const timer = setTimeout(() => settleAnchorWaiter(reqId, { err: new Error('ANCHORS_TIMEOUT') }), 20_000);
+      anchorWaitersRef.current.set(reqId, { resolve, reject, timer });
+    });
+  }, [send, settleAnchorWaiter]);
 
   const newsWaitersRef = useRef<Array<{ resolve: (r: NewsReply) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
   const newsOutboxRef = useRef<Array<{ limit: number }>>([]);
@@ -728,6 +764,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           for (const w of newsWaitersRef.current.splice(0)) { clearTimeout(w.timer); w.resolve(d); }
           break;
         }
+        case 'anchors': {
+          const d = data as AnchorsReply & { reqId?: string };
+          if (d.reqId) settleAnchorWaiter(d.reqId, { ok: d });
+          break;
+        }
         case 'candles': {
           const d = data as CandlesReply & { reqId?: string };
           if (d.instrument && d.anchor) marketRef.current = { instrument: d.instrument, anchor: d.anchor };
@@ -857,6 +898,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         // Chart history asked for before the socket was ready (see candleOutboxRef).
         for (const frame of candleOutboxRef.current.splice(0)) ws.send(JSON.stringify({ type: 'candles', data: frame }));
         for (const frame of newsOutboxRef.current.splice(0)) ws.send(JSON.stringify({ type: 'news', data: frame }));
+        for (const frame of anchorOutboxRef.current.splice(0)) ws.send(JSON.stringify({ type: 'anchors', data: frame }));
         if (tokenRef.current) { ws.send(JSON.stringify({ type: 'auth', data: { token: tokenRef.current } })); armAuthTimer(); }
         // Heartbeat + dead-socket check (BUGLOG #92): on a network switch a socket can stay "OPEN" for
         // minutes while nothing arrives. A ping every 6 s guarantees a frame (pong) even on a brand with a
@@ -895,6 +937,8 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         dropQueued('NOT_CONNECTED');
         candleOutboxRef.current.length = 0;
         newsOutboxRef.current.length = 0;
+        anchorOutboxRef.current.length = 0;
+        for (const [id] of anchorWaitersRef.current) settleAnchorWaiter(id, { err: new Error('SOCKET_CLOSED') });
         for (const w of newsWaitersRef.current.splice(0)) { clearTimeout(w.timer); w.reject(new Error('NOT_CONNECTED')); }
         dropCandleWaiters('NOT_CONNECTED');
         digitAwaitingRef.current = 0;
@@ -960,10 +1004,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const apiValue = useMemo<GameSocketApi>(() => ({
     getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
-    requestCandles, getMarket, requestNews,
+    requestCandles, getMarket, requestNews, requestAnchors,
   }), [getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
-    requestCandles, getMarket, requestNews]);
+    requestCandles, getMarket, requestNews, requestAnchors]);
   const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition }), [status, online, fairness, activePosition]);
 
   return (

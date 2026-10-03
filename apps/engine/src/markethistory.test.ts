@@ -4,7 +4,7 @@ import {
   DEFAULT_VERSIONED_CONFIG, deriveSiteDaySeed, dateKeyUTC, dayStartMs, CurveGenerator,
   valueOfRate, XAUUSD, DAY_S, TIMEFRAMES, type Timeframe,
 } from "@invest254/shared";
-import { MarketHistory, HISTORY_DAYS, MAX_BARS } from "./markethistory.js";
+import { MarketHistory, HISTORY_DAYS, MAX_BARS, MAX_ANCHORS } from "./markethistory.js";
 
 const MASTER = "history-master-seed";
 const SITE_A = "00000000-0000-0000-0000-0000000000a1";
@@ -150,4 +150,67 @@ test("a year of daily history builds in a reasonable time and caches", () => {
   assert.ok(first > 360, `expected a year of bars, got ${first}`);
   assert.ok(cold < 20_000, `cold year took ${cold}ms`);
   assert.ok(warm < cold / 2 + 50, `warm year (${warm}ms) should be far cheaper than cold (${cold}ms)`);
+});
+
+// ───────────────────────────── day anchors ─────────────────────────────
+
+test("anchors: a day's anchor prices that day's own bars exactly", () => {
+  // The whole point of serving anchors: price = base + scale*(value - openValue) must reproduce the
+  // price the chart itself drew for that day. Checked against the day's FIRST H1 bar, whose open is
+  // by construction the price at the day's opening tick.
+  const h = build();
+  const keys = [dateKeyUTC(NOW), dateKeyUTC(NOW - 3 * DAY_S * 1000), dateKeyUTC(NOW - 40 * DAY_S * 1000)];
+  const got = h.anchors(keys);
+  assert.equal(got.length, 3);
+  for (const a of got) {
+    const dayStartS = dayStartMs(a.dateKey) / 1000;
+    const bars = h.candles("H1", 24, dayStartS + DAY_S - 1);
+    const first = bars.find((b) => b.time === dayStartS);
+    assert.ok(first, `no opening H1 bar for ${a.dateKey}`);
+    // value at the day's open IS openValue, so the reconstructed price is exactly `base`.
+    assert.ok(Math.abs(first!.open - a.base) < 0.01, `${a.dateKey}: bar ${first!.open} vs base ${a.base}`);
+  }
+});
+
+test("anchors: an older day's anchor is NOT today's — which is why this exists", () => {
+  const h = build();
+  const [today, older] = h.anchors([dateKeyUTC(NOW), dateKeyUTC(NOW - 30 * DAY_S * 1000)]) as [
+    { dateKey: string; base: number; openValue: number }, { dateKey: string; base: number; openValue: number },
+  ];
+  assert.notEqual(today.base, older.base);
+  assert.notEqual(today.openValue, older.openValue);
+});
+
+test("anchors: agrees with liveAnchor for today, and is reproducible", () => {
+  const h = build();
+  const live = h.liveAnchor();
+  const [a] = h.anchors([live.dateKey]);
+  assert.deepEqual(a, { dateKey: live.dateKey, base: live.base, openValue: live.openValue });
+  // A second, independently built history derives the identical anchors from the same seeds.
+  const again = build().anchors([live.dateKey]);
+  assert.deepEqual(again, [a]);
+});
+
+test("anchors: duplicates collapse, order is preserved, and the batch is capped", () => {
+  const h = build();
+  const k0 = dateKeyUTC(NOW), k1 = dateKeyUTC(NOW - DAY_S * 1000);
+  assert.deepEqual(h.anchors([k0, k1, k0]).map((a) => a.dateKey), [k0, k1]);
+  const many = Array.from({ length: 200 }, (_, i) => dateKeyUTC(NOW - i * DAY_S * 1000));
+  assert.equal(h.anchors(many).length, MAX_ANCHORS);
+});
+
+test("anchors: a day outside the retained window is absent, not an error", () => {
+  const h = build();
+  const future = dateKeyUTC(NOW + DAY_S * 1000);
+  const tooOld = dateKeyUTC(NOW - (HISTORY_DAYS + 5) * DAY_S * 1000);
+  assert.deepEqual(h.anchors([future, tooOld, "not-a-date"]), []);
+  // …and a valid day alongside them still comes back.
+  assert.deepEqual(h.anchors([future, dateKeyUTC(NOW), tooOld]).map((a) => a.dateKey), [dateKeyUTC(NOW)]);
+});
+
+test("anchors: different brands anchor differently (per-site seeds)", () => {
+  const key = dateKeyUTC(NOW);
+  const [a] = build(SITE_A).anchors([key]);
+  const [b] = build(SITE_B).anchors([key]);
+  assert.notEqual(a!.openValue, b!.openValue);
 });

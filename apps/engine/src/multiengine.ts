@@ -2,6 +2,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import { type Direction, instrumentById, isKnownInstrument, isTimeframe, type DigitKind, type MultDir } from "@invest254/shared";
 import type { SiteRegistry } from "./siteregistry.js";
+import { MAX_ANCHORS } from "./markethistory.js";
 import { MarketNews } from "./marketnews.js";
 import type { GameRepository } from "./wallet.js";
 import type { Verifier } from "./auth.js";
@@ -435,6 +436,24 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                 // How to place live ticks on the same axis: price = base + scale*(value - openValue),
                 // where value = (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE.
                 anchor: { tradeDate: anchor.dateKey, base: anchor.base, openValue: anchor.openValue },
+              });
+            }
+            case "anchors": {
+              // The day anchors a client needs to price OLD rates — one per UTC date it asks about.
+              // Unauthenticated for the same reason the candles are: these are public chart facts,
+              // identical for every player on the brand, and reveal nothing about anyone's trades.
+              const reqId = msg.data?.reqId === undefined ? undefined : String(msg.data.reqId);
+              const rid = reqId === undefined ? {} : { reqId };
+              if (!rt.history) {
+                return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles", ...rid });
+              }
+              const raw = msg.data?.days;
+              if (!Array.isArray(raw)) return send(ws, "error", { code: "BAD_DAYS", ...rid });
+              const days = raw.slice(0, MAX_ANCHORS).map((d: unknown) => String(d));
+              return send(ws, "anchors", {
+                ...rid,
+                instrument: rt.history.instrument,
+                days: rt.history.anchors(days),
               });
             }
             case "news": {
