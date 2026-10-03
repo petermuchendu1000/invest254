@@ -45,6 +45,18 @@ const wallet = (st) => (LOCKED
       practiceBalance: 0, marketerPractice: false, bonuses: [],
     });
 
+/**
+ * The pill's aria-label is NEUTRALISED on a marketer's screen: "Real account" and "Demo account"
+ * read "Coins account" and "Practice account", because a screen recording must not show money or
+ * trading wording. The menu ROWS keep their own names — a recording never shows an aria-label, and
+ * the rows are what the switch is driven by — so only the pill moves.
+ *
+ * Assert whichever pair this run is actually in rather than relaxing the check: a marketer run that
+ * read "Real account" would mean the neutralisation had regressed, and this still catches that.
+ */
+const PILL_REAL = LOCKED ? /^Coins account/ : /^Real account/;
+const PILL_DEMO = LOCKED ? /^Practice account/ : /^Demo account/;
+
 const results = [];
 const check = (n, ok, d = '') => { results.push({ n, ok }); console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${n}${!ok && d ? ` -- ${d}` : ''}`); };
 
@@ -129,7 +141,7 @@ try {
     // below (the Demo row exists, tapping it switches, the pill flips) then holds for a marketer too.
     if (LOCKED) {
       const mlabel = await pill.getAttribute('aria-label');
-      check('marketer: the pill starts on Real (funny money), never the yellow Demo', /^Real account/.test(mlabel ?? ''), String(mlabel));
+      check('marketer: the pill starts on Real (funny money), never the yellow Demo', PILL_REAL.test(mlabel ?? ''), String(mlabel));
       if (await dialog.count()) {
         const dtext = (await dialog.innerText()).toLowerCase();
         check('marketer: the menu never names the account type', !dtext.includes('marketer'), dtext.slice(0, 160));
@@ -154,7 +166,7 @@ try {
       check('phone: tapping Demo fires POST /wallet/mode', fired.length === 1, `calls=${JSON.stringify(calls.filter((c) => c.includes('wallet')))}`);
       await shot(page, 'phone-3-after-demo');
       const label = await pill.getAttribute('aria-label');
-      check('phone: the pill now reads Demo', /^Demo account/.test(label ?? ''), String(label));
+      check('phone: the pill now reads Demo', PILL_DEMO.test(label ?? ''), String(label));
     }
     // outside tap must dismiss immediately (pointerdown, not the delayed synthetic mousedown)
     await page.locator('#balance-pill').tap();
@@ -213,7 +225,7 @@ try {
       check('marketer: tapping Demo fires POST /wallet/mode', calls.filter((c) => c === 'POST /wallet/mode').length === 1,
         JSON.stringify(calls.filter((c) => c.includes('wallet'))));
       const plabel = await page.locator('#balance-pill').getAttribute('aria-label');
-      check('marketer: the pill now reads Demo (on the practice bucket)', /^Demo account/.test(plabel ?? ''), String(plabel));
+      check('marketer: the pill now reads Demo (on the practice bucket)', PILL_DEMO.test(plabel ?? ''), String(plabel));
       // DEMO-2 parity: the practice bucket opens FUNDED to 10,000, never an empty 0.
       check('marketer: the Demo (practice) bucket opens funded at 10,000', /10[,.]?000/.test(plabel ?? '') && !/\bKES 0\b/.test(plabel ?? ''), String(plabel));
       // The switch closes the menu (onSuccess), so re-open it to inspect the practice tab.
@@ -231,7 +243,7 @@ try {
       await page.getByRole('menuitemradio', { name: /Real account/ }).tap();
       await page.waitForTimeout(900);
       const rlabel = await page.locator('#balance-pill').getAttribute('aria-label');
-      check('marketer: can switch back to Real', /^Real account/.test(rlabel ?? ''), String(rlabel));
+      check('marketer: can switch back to Real', PILL_REAL.test(rlabel ?? ''), String(rlabel));
       check('demo->real: no page errors', errors.length === 0, errors.join(' | '));
       await ctx.close();
       return;
