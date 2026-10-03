@@ -33,6 +33,20 @@ export type HistoryTab = 'positions' | 'orders' | 'deals';
  */
 export const EXECUTION_PRICE = 'at market';
 
+/** The UTC trade date a timestamp falls on — the day the chart's price axis is anchored to. */
+export const tradeDateOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * May a rate recorded at `atMs` be rendered as a price against an axis anchored on `anchorDate`?
+ *
+ * Only when they are the same UTC day. The engine re-anchors the axis at every UTC midnight, so a
+ * rate from an earlier day mapped through today's anchor yields a price that never happened —
+ * silently, and plausibly enough that nobody would notice. Anywhere this says no, the surface shows
+ * EXECUTION_PRICE instead of a number it cannot know.
+ */
+export const priceKnown = (atMs: number, anchorDate: string | null | undefined): boolean =>
+  typeof anchorDate === 'string' && anchorDate.length > 0 && tradeDateOf(atMs) === anchorDate;
+
 // ───────────────────────────────── period ─────────────────────────────────
 
 /** MetaTrader's period menu, in its order. */

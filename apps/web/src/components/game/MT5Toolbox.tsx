@@ -15,6 +15,7 @@ import { useTakeProfitStore, useTakeProfitWatch } from '@/lib/game/takeprofit';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
+import { EXECUTION_PRICE, priceKnown } from '@/lib/history/mt5history';
 import { cn } from '@/lib/cn';
 
 /**
@@ -82,6 +83,19 @@ export function MT5Toolbox() {
     if (rate === null || rate === undefined) return '—';
     const p = priceOfRate(rate);
     return p === null ? '—' : p.toFixed(digits);
+  };
+  /**
+   * The same price, but only where it is actually knowable.
+   *
+   * `priceOfRate` maps a rate through the CURRENT day's anchor, which is right for a live position
+   * and wrong for a settled one from any earlier day: the engine re-anchors the axis at every UTC
+   * midnight, so an old trade rendered this way printed a price that never happened — quietly, and
+   * plausibly enough that nobody would spot it. Off its own day the cell says what is true of every
+   * contract here instead, exactly as the History screen does.
+   */
+  const pxOn = (rate: number | null | undefined, atMs: number | null | undefined): string => {
+    if (rate === null || rate === undefined || atMs === null || atMs === undefined) return '—';
+    return priceKnown(atMs, getMarket()?.anchor.tradeDate) ? px(rate) : EXECUTION_PRICE;
   };
 
   // Price alerts fire against the same price the chart draws.
@@ -236,8 +250,8 @@ export function MT5Toolbox() {
                       symbol={symbol}
                       direction={p.direction}
                       lots={lotsOfStake(p.stakeCents)}
-                      from={px(p.entryRate)}
-                      to={px(p.exitRate)}
+                      from={pxOn(p.entryRate, p.openedAt)}
+                      to={pxOn(p.exitRate, p.settledAt ?? p.openedAt)}
                       profit={p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
                       profitCents={p.pnlCents ?? 0}
                       note={clock(p.openedAt)}
@@ -253,8 +267,8 @@ export function MT5Toolbox() {
                       <Td>{clock(p.openedAt)}</Td>
                       <Td className={p.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{p.direction}</Td>
                       <Td>{lotsOfStake(p.stakeCents)}</Td>
-                      <Td>{px(p.entryRate)}</Td>
-                      <Td>{px(p.exitRate)}</Td>
+                      <Td>{pxOn(p.entryRate, p.openedAt)}</Td>
+                      <Td>{pxOn(p.exitRate, p.settledAt ?? p.openedAt)}</Td>
                       <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#3183ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
                         {p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
                       </Td>
