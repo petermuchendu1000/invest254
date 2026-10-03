@@ -2,12 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { useMarketerSkin, useIsMarketer } from '@/lib/marketer/isMarketer';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { PriceHeader } from '@/components/game/PriceHeader';
 import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
 import { BetPanel } from '@/components/game/BetPanel';
-import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { MT5Toolbox } from '@/components/game/MT5Toolbox';
 import { MarketWatch } from '@/components/game/MarketWatch';
 import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
@@ -27,10 +26,6 @@ import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 export function TradeSurface() {
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
-  // Real role (not the skin): marketers are always disguised and must NOT see the interface toggle
-  // (a settings gear would itself be a TikTok tell). Players — including those currently on Basic —
-  // keep the gear so they can switch back.
-  const { isMarketer: isMarketerRole } = useIsMarketer();
   const [override, setOverride] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,13 +39,14 @@ export function TradeSurface() {
   }, []);
 
   const ui = override ?? brand.tradeUi ?? 'classic';
-  // Candlestick brands carry the gear in the chart's own toolbar, where MT5 and TradingView put
-  // chart settings. Only the line brands need the standalone row.
-  const gearInChart = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
+  // The interface gear lives inside the chart on BOTH shells now — the candlestick toolbar
+  // (CandleChart) and the wave's top-right corner (GameCurve) — so this screen no longer spends a
+  // row of a viewport-locked phone layout on it.
+  const isTerminalBrand = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
 
   if (ui === 'digits') return <DigitsTradeScreen />;
 
-  const terminal = gearInChart && !isMarketer;
+  const terminal = isTerminalBrand && !isMarketer;
 
   return (
     /**
@@ -67,13 +63,6 @@ export function TradeSurface() {
       {terminal ? <MarketWatch className="hidden lg:flex lg:w-56 lg:shrink-0 xl:w-64" /> : null}
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 md:gap-3">
-        {/* Interface gear — players switch Classic ↔ Basic here. Stays visible in both modes so a
-            Basic-mode player can switch back; hidden for real marketers (always disguised). */}
-        {isMarketerRole || gearInChart ? null : (
-          <div className="flex items-center justify-end">
-            <InterfaceModeToggle />
-          </div>
-        )}
         {/* MARKETER: the BTC/KES price strip and the scrolling crypto ticker are the two loudest
             "this is a trading terminal" signals — both are removed for marketers (Phase 1).
             TERMINAL: both go too, for the opposite reason. MetaTrader has no scrolling crypto
