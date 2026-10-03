@@ -174,12 +174,17 @@ export function MT5Toolbox() {
         >
           <Figure label="Balance" value={money.fmt(balanceCents)} />
           <Figure label="Equity" value={money.fmt(equityCents)} tone={floatingCents === 0 ? undefined : floatingCents > 0 ? 'up' : 'down'} />
+          {/* Collapsed, the row is ONE line on a phone. Carrying all five pushed "Free margin" off
+              the edge mid-word, which reads as broken rather than as scrollable; the two that only
+              matter with a position open appear when the panel does. */}
           {open ? <Figure label="Margin" value={money.fmt(marginCents)} /> : null}
-          <Figure label="Free margin" value={money.fmt(freeMarginCents)} />
+          {open ? <Figure label="Free margin" value={money.fmt(freeMarginCents)} /> : null}
           <Figure label="Margin level" value={marginLevelPct === null ? '—' : `${marginLevelPct.toFixed(2)}%`} />
         </span>
         <span className="flex shrink-0 items-center gap-2 pl-1">
           {live ? <span className="rounded bg-[#3183ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#3183ff]">1 open</span> : null}
+          <span className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
+            title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} />
           <span className={cn('text-[#8fa2b8] transition', open && 'rotate-180')} aria-hidden>▾</span>
         </span>
       </button>
@@ -196,7 +201,7 @@ export function MT5Toolbox() {
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-30 bg-black/60 sm:hidden"
           />
-          <div className="fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 flex max-h-[62vh] flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none">
+          <div className="fixed inset-x-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom))] z-40 flex max-h-[68vh] flex-col overflow-hidden rounded border border-[#2b3543] bg-[#0f1720] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none">
           <div className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2b3543]" style={{ maxHeight: 'min(46vh, 22rem)' }}>
             {/* MetaTrader shows a position as a two-line entry on a phone and as a wide table on a
                 desktop, because ten columns cannot be read on a 430px screen. Both are rendered from
@@ -340,29 +345,34 @@ export function MT5Toolbox() {
             ) : null}
           </div>
 
-          {/* MetaTrader puts the Toolbox tabs along the BOTTOM edge of the panel. */}
-          <div className="flex items-center gap-0.5 overflow-x-auto border-t border-[#2b3543] bg-[#202933] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                aria-pressed={tab === t.id}
-                className={cn(
-                  'shrink-0 rounded px-2.5 py-1 text-[11px] font-semibold transition',
-                  tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
-                )}
-              >
-                {t.label}
-                {t.id === 'mailbox' && (notifications.data?.items?.length ?? 0) > 0
-                  ? <span className="ml-1 text-[#3183ff]">({notifications.data?.items?.length ?? 0})</span>
-                  : null}
-                {t.id === 'alerts' && alerts.length > 0 ? <span className="ml-1 text-[#8fa2b8]">({alerts.length})</span> : null}
-              </button>
-            ))}
-            <span className="ml-auto shrink-0 pr-1 text-[10px] text-[#8fa2b8]">
-              {status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
-            </span>
+          {/* MetaTrader puts the Toolbox tabs along the BOTTOM edge of the panel. With the app's
+              bottom nav gone this is the only bar on the screen, so the six tabs SHARE the width
+              evenly instead of bunching at the left with a status label eating the rest — on a 390px
+              phone that difference is the whole row. A count rides as a superscript rather than a
+              bracketed suffix, which is what used to push "Mailbox" wider than its neighbours. */}
+          <div className="flex items-stretch border-t border-[#2b3543] bg-[#202933]">
+            {TABS.map((t) => {
+              const count = t.id === 'mailbox'
+                ? (notifications.data?.items?.length ?? 0)
+                : t.id === 'alerts' ? alerts.length : 0;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  aria-pressed={tab === t.id}
+                  className={cn(
+                    'min-w-0 flex-1 px-0.5 py-1.5 text-[10.5px] font-semibold leading-tight transition',
+                    tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
+                  )}
+                >
+                  {t.label}
+                  {count > 0 ? (
+                    <sup className={cn('ml-0.5 text-[9px]', t.id === 'mailbox' ? 'text-[#3183ff]' : 'text-[#8fa2b8]')}>{count}</sup>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
           </div>
         </>
