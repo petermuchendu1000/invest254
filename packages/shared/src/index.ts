@@ -14,6 +14,7 @@ export * from "./curve.js";
 export * from "./candles.js";
 export * from "./account.js";
 export * from "./chart.js";
+export * from "./indicators.js";
 export * from "./contracts.js";
 export * from "./instruments.js";
 export * from "./instrumentfeed.js";
