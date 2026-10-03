@@ -92,6 +92,42 @@ export const toTick = (inst: MarketSymbol, price: number): number => {
   return Math.round(price * f) / f;
 };
 
+/** A day's anchor: the two numbers `priceOf` needs to place that day's rates on the price axis. */
+export interface DayAnchor {
+  base: number;
+  openValue: number;
+}
+
+/**
+ * Enough of the price axis to turn a curve rate into the price it was DISPLAYED at.
+ *
+ * The axis re-anchors every UTC midnight, so a rate is only meaningful against its own day's anchor
+ * — hence the lookup by date key rather than a single pair of numbers. `null` means that day is not
+ * on the chain (before genesis, or in the future), and the caller must not invent a price.
+ *
+ * Narrow on purpose: it lets the money layer stamp execution prices without importing the engine's
+ * day chain, and lets the day chain be faked in a test without a database.
+ */
+export interface PriceAxis {
+  instrument: MarketSymbol;
+  anchorFor(dateKey: string): DayAnchor | null;
+}
+
+/** The UTC date key (`YYYY-MM-DD`) a timestamp falls on — the day its axis anchor belongs to. */
+export const axisDateKey = (atMs: number): string => new Date(atMs).toISOString().slice(0, 10);
+
+/**
+ * The displayed price for a curve `rate` recorded at `atMs`, rounded to the instrument's tick.
+ *
+ * Null when the axis has no anchor for that day: a price that cannot be known is never guessed.
+ */
+export function priceAtRate(axis: PriceAxis, atMs: number, rate: number): number | null {
+  const a = axis.anchorFor(axisDateKey(atMs));
+  if (!a) return null;
+  const p = priceOf(axis.instrument, a.base, a.openValue, valueOfRate(rate));
+  return Number.isFinite(p) ? toTick(axis.instrument, p) : null;
+}
+
 // ───────────────────────────────── bucketing ─────────────────────────────────
 
 /**

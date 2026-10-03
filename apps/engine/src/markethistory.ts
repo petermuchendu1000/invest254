@@ -1,6 +1,7 @@
 import {
   CurveGenerator, XAUUSD, DAY_S, TIMEFRAMES, aggregate, minuteBars, nextBase, nextBucketS,
-  dateKeyUTC, dayStartMs, type Candle, type MarketSymbol, type Timeframe, type VersionedGameConfig,
+  dateKeyUTC, dayStartMs, type Candle, type DayAnchor, type MarketSymbol, type PriceAxis,
+  type Timeframe, type VersionedGameConfig,
 } from "@invest254/shared";
 
 /**
@@ -222,6 +223,22 @@ export class MarketHistory {
       if (slice) out.push({ dateKey: key, base: slice.base, openValue: slice.openValue });
     }
     return out;
+  }
+
+  /** One day's anchor, or null when that date is off the chain (before genesis, or in the future). */
+  anchorFor(dateKey: string): DayAnchor | null {
+    const [a] = this.anchors([dateKey]);
+    return a ? { base: a.base, openValue: a.openValue } : null;
+  }
+
+  /**
+   * This brand's price axis, as the narrow interface the money layer stamps execution prices through.
+   *
+   * Handing out an object rather than `this` keeps that layer unable to reach the day chain for
+   * anything else: a display price is all it may ask for.
+   */
+  axis(): PriceAxis {
+    return { instrument: this.inst, anchorFor: (key) => this.anchorFor(key) };
   }
 }
 

@@ -24,14 +24,30 @@ export type Side = 'buy' | 'sell';
 export type HistoryTab = 'positions' | 'orders' | 'deals';
 
 /**
+ * What a price slot reads when there is no price to print.
+ *
  * MetaTrader prints an execution price on a deal and an entry→exit pair on a position. Those are
- * display prices on the chart's axis, and the axis is anchored per UTC day by the engine, so the
- * price a trade executed at cannot be reconstructed from the trade alone — only from the engine's
- * day chain, which this page has no connection to. Rather than map an old trade through TODAY's
- * anchor and print a number that never happened, those slots read "at market", which is both true
- * (every contract here is market-executed) and MetaTrader's own wording for it.
+ * prices on the chart's axis, and the axis is re-anchored every UTC day by the engine, so a trade's
+ * curve rate cannot be turned back into the number the player saw — only the engine's day chain
+ * knows each day's anchor. So the engine stamps the price at execution time
+ * (`PositionDto.entryPrice` / `exitPrice`, migration 0180) and these screens print it.
+ *
+ * A trade placed before that column existed has no price, and rather than map its old rate through
+ * TODAY's anchor and print a number that never happened, its slots fall back to this — which is
+ * both true (every contract here is market-executed) and MetaTrader's own wording for it.
  */
 export const EXECUTION_PRICE = 'at market';
+
+/**
+ * A price as the symbol quotes it: fixed to the instrument's digits, thousands grouped.
+ *
+ * Falls back to EXECUTION_PRICE for an unstamped trade, so every caller gets a printable string and
+ * none of them has to decide what a missing price looks like.
+ */
+export function priceText(price: number | null | undefined, digits: number): string {
+  if (typeof price !== 'number' || !Number.isFinite(price)) return EXECUTION_PRICE;
+  return price.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
 
 /** The UTC trade date a timestamp falls on — the day the chart's price axis is anchored to. */
 export const tradeDateOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
@@ -137,6 +153,8 @@ export interface OrderRow {
   filledLots: string;
   atMs: number;
   state: 'FILLED' | 'CANCELED';
+  /** The price it filled at; null on a cancelled order, and on a trade placed before 0180. */
+  price: number | null;
 }
 
 /** A row on the DEALS tab. `balance` deals are deposits and withdrawals, as in MetaTrader. */
@@ -152,6 +170,8 @@ export interface DealRow {
   atMs: number;
   /** Set on `out` deals and on balance deals; an `in` deal has no result yet. */
   amountCents: number | null;
+  /** The price this execution happened at — entry on an `in` deal, exit on an `out` one. */
+  price: number | null;
 }
 
 /**
@@ -171,6 +191,9 @@ export interface PositionRow {
   label: string | null;
   atMs: number;
   amountCents: number | null;
+  /** The round trip's two prices. Both null on a balance operation, which has no price at all. */
+  entryPrice: number | null;
+  exitPrice: number | null;
 }
 
 /** MetaTrader shows a ticket as a plain number; ours are uuids, so the leading block stands in. */
@@ -209,6 +232,7 @@ export function orderRows(
       filledLots: canceled ? lotsOf(0) : lotsOf(p.stakeCents),
       atMs: p.openedAt,
       state: canceled ? 'CANCELED' : 'FILLED',
+      price: canceled ? null : p.entryPrice ?? null,
     });
   }
   return out;
@@ -229,6 +253,7 @@ export function dealRows(
       out.push({
         id: `${p.id}:in`, ticket: ticketOf(p.id), kind: 'trade', symbol,
         side: p.direction, entry: 'in', lots, label: null, atMs: p.openedAt, amountCents: null,
+        price: p.entryPrice ?? null,
       });
     }
     // Closing a BUY is a sell execution, and vice versa — MetaTrader reports the deal's own
@@ -237,7 +262,7 @@ export function dealRows(
       out.push({
         id: `${p.id}:out`, ticket: ticketOf(p.id), kind: 'trade', symbol,
         side: p.direction === 'buy' ? 'sell' : 'buy', entry: 'out', lots, label: null,
-        atMs: p.settledAt, amountCents: p.pnlCents,
+        atMs: p.settledAt, amountCents: p.pnlCents, price: p.exitPrice ?? null,
       });
     }
   }
@@ -247,7 +272,7 @@ export function dealRows(
       id: `tx:${t.id}`, ticket: ticketOf(t.id), kind: 'balance', symbol: 'Balance',
       side: null, entry: null, lots: null,
       label: t.kind === 'withdrawal' ? 'Withdrawal' : 'Deposit',
-      atMs: t.ts, amountCents: signedCents(t),
+      atMs: t.ts, amountCents: signedCents(t), price: null,
     });
   }
   return out;
@@ -270,6 +295,7 @@ export function positionRows(
       id: p.id, ticket: ticketOf(p.id), kind: 'trade', symbol,
       side: p.direction, lots: lotsOf(p.stakeCents), label: null,
       atMs: p.settledAt, amountCents: p.pnlCents,
+      entryPrice: p.entryPrice ?? null, exitPrice: p.exitPrice ?? null,
     });
   }
   for (const t of transactions) {
@@ -277,7 +303,7 @@ export function positionRows(
     out.push({
       id: `tx:${t.id}`, ticket: ticketOf(t.id), kind: 'balance', symbol: 'Balance',
       side: null, lots: null, label: t.kind === 'withdrawal' ? 'Withdrawal' : 'Deposit',
-      atMs: t.ts, amountCents: signedCents(t),
+      atMs: t.ts, amountCents: signedCents(t), entryPrice: null, exitPrice: null,
     });
   }
   return out;

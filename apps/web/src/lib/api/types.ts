@@ -135,6 +135,16 @@ export interface PositionDto {
   status: PositionStatus;
   openedAt: number; // epoch ms
   settledAt: number | null; // epoch ms, null while open
+  /**
+   * The chart PRICES the contract opened and closed at, as recorded at execution time.
+   *
+   * `entryRate`/`exitRate` above are the engine's unitless curve rates. The price axis re-anchors
+   * every UTC midnight, so a rate cannot be turned back into the number the player saw — the engine
+   * stamps these from the trade's own day (migration 0180). Null means unstamped (a trade older than
+   * the column, or a brand that charts a line), and a price slot then reads "at market".
+   */
+  entryPrice?: number | null;
+  exitPrice?: number | null;
 }
 
 /** Provable-fairness commitment for a game-day (`serverSeed` is null until revealed). */

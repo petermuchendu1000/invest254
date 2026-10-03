@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { type Cents, assertCents, lastDigit } from "@invest254/shared";
-import type { Direction } from "@invest254/shared";
+import { type Cents, assertCents, lastDigit, priceAtRate } from "@invest254/shared";
+import type { Direction, PriceAxis } from "@invest254/shared";
 import {
   type Page, type PageQuery, clampLimit, decodeCursor, decodeKeyset, pageFrom,
 } from "./paging.js";
@@ -64,6 +64,15 @@ export interface PositionRecord {
   stakeCents: Cents; entryRate: number; exitRate: number | null; multiplier: number | null;
   payoutCents: Cents | null; pnlCents: Cents | null; result: string | null;
   durationS: number; status: string; openedAtMs: number; settledAtMs: number | null;
+  /**
+   * The DISPLAY prices the contract opened and closed at (migration 0180), or null when unstamped.
+   *
+   * `entryRate`/`exitRate` above are curve rates; the terminal charts a price, and the price axis
+   * re-anchors every UTC midnight, so a rate alone cannot be turned back into the number the player
+   * saw. These are recorded at execution time from that day's own anchor. Display-only — nothing in
+   * settlement reads them, and null simply means the screen shows "at market".
+   */
+  entryPrice: number | null; exitPrice: number | null;
 }
 
 /** A single position plus its day's public fairness data (seed hidden until reveal). */
@@ -124,6 +133,20 @@ export interface GameRepository {
   listDigitHistory(userId: string, q: PageQuery, siteId?: string): Promise<Page<DigitHistoryRow>>;
   /** A single owned position with its day's fairness data, or null if not found/owned. `siteId` scopes it per brand. */
   getPositionDetail(userId: string, positionId: string, siteId?: string): Promise<PositionDetail | null>;
+  /**
+   * Record the DISPLAY prices a trade executed at (migration 0180) — `positions.entry_price` and,
+   * once it has settled, `exit_price`.
+   *
+   * Strictly outside settlement. This runs as its own statements AFTER the atomic money RPC has
+   * returned and committed, so it cannot fail, delay or alter a trade; the columns are nullable and
+   * the client falls back to "at market", which is why a miss is a cosmetic non-event rather than
+   * something to retry. Idempotent: it only fills a price that is still null, so calling it again
+   * after settlement stamps the exit without disturbing the entry.
+   *
+   * Optional so the in-memory repository and every test fake keep compiling — absent means a brand
+   * simply stores no display prices.
+   */
+  setExecutionPrices?(positionId: string, axis: PriceAxis): Promise<void>;
 }
 
 /** Minimal query surface compatible with `pg`'s Pool/Client. */
@@ -390,6 +413,9 @@ function toPositionRecord(p: MemPos): PositionRecord {
     entryRate: p.entryRate, exitRate: p.exitRate, multiplier: p.multiplier, payoutCents: p.payout,
     pnlCents: p.pnl, result: p.result, durationS: p.durationS, status: p.status,
     openedAtMs: p.openedAtMs, settledAtMs: p.settledAtMs,
+    // The dev/test repository stores no display prices: there is no day chain behind it to anchor
+    // them to, and "at market" is the honest fallback (migration 0180).
+    entryPrice: null, exitPrice: null,
   };
 }
 
@@ -520,7 +546,7 @@ export class PgGameRepository implements GameRepository {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
-      `select id, user_id, game_day_id, direction, stake, entry_rate, exit_rate, multiplier, payout, pnl, result, duration_s, status, opened_at, settled_at
+      `select id, user_id, game_day_id, direction, stake, entry_rate, exit_rate, entry_price, exit_price, multiplier, payout, pnl, result, duration_s, status, opened_at, settled_at
          from positions
         where user_id = $1
           and ($6::uuid is null or site_id = $6)
@@ -562,7 +588,7 @@ export class PgGameRepository implements GameRepository {
 
   async getPositionDetail(userId: string, positionId: string, siteId?: string): Promise<PositionDetail | null> {
     const r = await this.q.query(
-      `select p.id, p.user_id, p.game_day_id, p.direction, p.stake, p.entry_rate, p.exit_rate, p.multiplier, p.payout, p.pnl, p.result, p.duration_s, p.status, p.opened_at, p.settled_at,
+      `select p.id, p.user_id, p.game_day_id, p.direction, p.stake, p.entry_rate, p.exit_rate, p.entry_price, p.exit_price, p.multiplier, p.payout, p.pnl, p.result, p.duration_s, p.status, p.opened_at, p.settled_at,
               f.id as f_id, f.trade_date as f_trade_date, f.server_seed_hash as f_hash, f.server_seed as f_seed, f.revealed_at as f_revealed
          from positions p
          left join v_fairness f on f.id = p.game_day_id
@@ -579,6 +605,37 @@ export class PgGameRepository implements GameRepository {
     };
     return { ...mapPositionRow(x), fairness };
   }
+
+  /**
+   * Stamp the display prices this trade executed at (migration 0180).
+   *
+   * Reads the row rather than taking the rates as arguments, for two reasons. The exit price must be
+   * placed on the axis of the day it SETTLED on — a contract opened at 23:59:58 settles after
+   * midnight against the next day's anchor — and only the row carries the `settled_at` the database
+   * recorded; and crash recovery settles positions long after their nominal expiry, where "now" is
+   * the wrong day entirely. The row is the one source that is right in both cases.
+   *
+   * `coalesce` in the UPDATE makes this idempotent and makes a first-stamped price permanent: the
+   * open call fills the entry, the settle call fills the exit, and neither can overwrite the other
+   * if the day chain is later rebuilt under a different config.
+   */
+  async setExecutionPrices(positionId: string, axis: PriceAxis): Promise<void> {
+    const r = await this.q.query(
+      "select opened_at, settled_at, entry_rate, exit_rate, entry_price, exit_price from positions where id = $1::uuid",
+      [positionId]);
+    if (!r.rows.length) return;
+    const x = r.rows[0];
+    const entry = x.entry_price === null || x.entry_price === undefined
+      ? priceAtRate(axis, toMs(x.opened_at), Number(x.entry_rate))
+      : null;
+    const exit = (x.exit_price === null || x.exit_price === undefined) && x.exit_rate !== null && x.exit_rate !== undefined && x.settled_at
+      ? priceAtRate(axis, toMs(x.settled_at), Number(x.exit_rate))
+      : null;
+    if (entry === null && exit === null) return;
+    await this.q.query(
+      "update positions set entry_price = coalesce(entry_price, $2), exit_price = coalesce(exit_price, $3) where id = $1::uuid",
+      [positionId, entry, exit]);
+  }
 }
 
 /** Map a raw `positions` row (optionally joined) into the public PositionRecord. */
@@ -593,6 +650,10 @@ function mapPositionRow(x: any): PositionRecord {
     pnlCents: x.pnl === null || x.pnl === undefined ? null : toCents(x.pnl),
     result: x.result ?? null, durationS: Number(x.duration_s), status: String(x.status),
     openedAtMs: toMs(x.opened_at), settledAtMs: x.settled_at ? toMs(x.settled_at) : null,
+    // Display prices (0180). Absent on a row written before the stamper existed, and on a brand that
+    // charts a line rather than candles — both read back as null, which the client shows as "at market".
+    entryPrice: x.entry_price === null || x.entry_price === undefined ? null : Number(x.entry_price),
+    exitPrice: x.exit_price === null || x.exit_price === undefined ? null : Number(x.exit_price),
   };
 }
 

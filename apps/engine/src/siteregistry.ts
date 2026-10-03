@@ -6,6 +6,7 @@ import { affectsPricing, type ConfigProvider } from "./gameconfig.js";
 import type { PoolController } from "./poolcontroller.js";
 import { deriveSiteDaySeed, type CurveProfile } from "@invest254/shared";
 import { MarketHistory } from "./markethistory.js";
+import { withPriceStamp } from "./pricestamp.js";
 
 /**
  * SiteRegistry — the multiplexed engine's per-brand runtime manager.
@@ -33,6 +34,15 @@ export interface SiteRuntime {
    * than an empty result, which is why this is undefined rather than an empty history.
    */
   history?: MarketHistory;
+  /**
+   * The repository every path that opens or settles for this brand must trade through.
+   *
+   * It is the shared repository with display-price stamping bolted on (migration 0180) on a
+   * candlestick brand, and the shared repository itself on a line brand. Anything that settles
+   * outside the GameServer — crash recovery, notably — uses this rather than the raw repo, or the
+   * positions it closes would be the only ones in the table with no exit price.
+   */
+  tradeRepo: GameRepository;
 }
 
 export interface SiteRegistryOptions {
@@ -91,22 +101,14 @@ export class SiteRegistry {
       }
       const seeds = new SeedManager(master, config, this.opts.repo, this.opts.now, this.opts.seedManagerOpts, siteId, curveProfile);
       await seeds.init();
-      const game = new GameServer(
-        () => seeds.getActive(),
-        this.opts.repo,
-        () => config.active(),
-        this.opts.now,
-        this.opts.loadOverride,
-        this.opts.poolController
-          ? { enabled: () => (this.opts.poolModeFor?.(siteId) ?? false), controller: this.opts.poolController }
-          : undefined,
-        this.opts.loadIsMarketer,
-      );
       // Candle history is display-only: it never settles anything, so it derives its own seeds
       // rather than going through SeedManager (which caches per config version, commits game-day
       // rows and holds only a few days — all wrong for reconstructing hundreds of past days).
       // Forced rotations (J5) are read once here so a rotated day's chart shows the day that was
       // actually traded, not the version-0 one that never existed.
+      //
+      // Built BEFORE the GameServer because it owns this brand's price axis, and the repository the
+      // GameServer trades through stamps execution prices against that axis (see below).
       let history: MarketHistory | undefined;
       if (curveProfile === "market") {
         let versions = new Map<string, number>();
@@ -118,7 +120,28 @@ export class SiteRegistry {
           this.opts.now ? { now: this.opts.now } : {},
         );
       }
-      const rt: SiteRuntime = { siteId, seeds, game, config, ...(history ? { history } : {}) };
+      // On a candlestick brand, record the chart price every trade executed at (migration 0180), so
+      // a receipt can print the number the player actually saw instead of "at market". The wrapper
+      // writes AFTER the atomic money RPC returns and never awaits the write, so settlement is
+      // untouched and unslowed; a line brand has no price axis and is handed the repo unwrapped.
+      const tradeRepo: GameRepository = history
+        ? withPriceStamp(this.opts.repo, {
+            axis: () => history!.axis(),
+            onError: (err, ctx) => this.report(err, `${ctx} ${siteId}`),
+          })
+        : this.opts.repo;
+      const game = new GameServer(
+        () => seeds.getActive(),
+        tradeRepo,
+        () => config.active(),
+        this.opts.now,
+        this.opts.loadOverride,
+        this.opts.poolController
+          ? { enabled: () => (this.opts.poolModeFor?.(siteId) ?? false), controller: this.opts.poolController }
+          : undefined,
+        this.opts.loadIsMarketer,
+      );
+      const rt: SiteRuntime = { siteId, seeds, game, config, tradeRepo, ...(history ? { history } : {}) };
 
       // Live config hot-reload (docs/22 Task C). When this brand's economy is edited, price the
       // NEXT round under the new version by rebuilding the seed context, and re-arm the tick loop
@@ -161,7 +184,10 @@ export class SiteRegistry {
     const out = new Map<string, RecoveryReport>();
     for (const siteId of siteIds) {
       const rt = await this.ensure(siteId);
-      const rec = new RecoveryService(this.opts.repo, rt.seeds, rt.game, this.opts.now, this.opts.loadOverride, siteId, this.opts.poolController, this.opts.loadIsMarketer);
+      // rt.tradeRepo, not the raw repo: a position settled by recovery must get its exit price
+      // stamped like any other, and recovery is precisely the case where "now" is the wrong day to
+      // price against (see PgGameRepository.setExecutionPrices).
+      const rec = new RecoveryService(rt.tradeRepo, rt.seeds, rt.game, this.opts.now, this.opts.loadOverride, siteId, this.opts.poolController, this.opts.loadIsMarketer);
       out.set(siteId, await rec.recover());
     }
     return out;
