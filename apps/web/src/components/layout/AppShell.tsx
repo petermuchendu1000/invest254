@@ -22,10 +22,13 @@ import { NotificationBanners } from '@/components/notifications/NotificationBann
 import { RegisterSW } from '@/components/RegisterSW';
 import { MarketerHUD } from '@/components/marketer/MarketerHUD';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { useMarketerSkin } from '@/lib/marketer/isMarketer';
+import { isTerminalHistory, isTerminalRoute } from '@/lib/history/terminal';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const brand = useBrand();
+  const { isMarketer } = useMarketerSkin();
 
   // The admin console + platform console provide their own chrome (sidebar). Suppress the player
   // top bar / bottom nav / footer there, but keep session bootstrap + SW.
@@ -85,6 +88,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           'relative flex w-full min-h-0 flex-1 flex-col px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-2 md:px-4 md:pb-4',
           terminal ? 'lg:px-3 xl:px-4' : 'mx-auto max-w-app',
         )}>
+          {children}
+        </main>
+        <BottomNav />
+        <SessionBootstrap />
+        <AuthModal />
+        <WalletModal />
+        <RegisterSW />
+        <LiveChatLauncher />
+        <LiveChatPanel />
+        <AccountDialogs />
+        <MarketerHUD />
+      </div>
+    );
+  }
+
+  // A MetaTrader screen off the trade surface (History today) is still a terminal screen: it fills
+  // the window edge to edge, draws its own blue title bar flush under the app bar, and ends at the
+  // toolbar — so no centred reading column, no page padding, and no marketing footer under it.
+  if (isTerminalHistory(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer) && isTerminalRoute(pathname)) {
+    return (
+      <div className="flex min-h-dvh flex-col">
+        <TopBar />
+        <NotificationBanners />
+        <main className="flex w-full flex-1 flex-col pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:pb-4">
           {children}
         </main>
         <BottomNav />

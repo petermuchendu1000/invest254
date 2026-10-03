@@ -1,0 +1,537 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { XAUUSD } from '@invest254/shared/candles';
+import { lotsOfStake } from '@invest254/shared/account';
+import { usePositions } from '@/lib/positions/hooks';
+import { useTransactions } from '@/lib/wallet/hooks';
+import { useSession } from '@/lib/auth/session';
+import { useDisplayMoney } from '@/lib/money';
+import { PositionDetailModal } from '@/components/positions/PositionDetailModal';
+import {
+  EXECUTION_PRICE, PERIODS, SORTS, dealRows, moneySummary, orderRows, ordersSummary,
+  periodRange, periodSubtitle, positionRows, sortRows, stamp,
+  type DealRow, type HistoryTab, type OrderRow, type PeriodKey, type PositionRow, type Range,
+  type SortKey,
+} from '@/lib/history/mt5history';
+import type { PositionDto, TransactionDto } from '@/lib/api/types';
+import { cn } from '@/lib/cn';
+
+/**
+ * MetaTrader 5's History screen.
+ *
+ * Built against the product's own screens (metatrader5.com/en/mobile-trading/android/help/history),
+ * element by element: the blue header carrying the screen name over the symbol filter, the three
+ * tabs underlined in the title bar itself, the dotted-leader summary with its figures in blue, and
+ * two-line entries whose side and result carry MetaTrader's blue/red pairing. The period and sort
+ * menus are the ones behind its two header icons, and both really filter and really sort.
+ *
+ * What each tab means — and why we genuinely have all three — is documented in lib/history/mt5history.
+ * Scoped to candlestick (terminal) brands; every other shell keeps the standard History tabs.
+ */
+
+const SYMBOL = XAUUSD.symbol;
+
+/** Enough pages to cover the longest preset without hammering the API on a large account. */
+const MAX_AUTO_PAGES = 20;
+
+const TAB_LABELS: Record<HistoryTab, string> = { positions: 'Positions', orders: 'Orders', deals: 'Deals' };
+
+export function MT5History() {
+  const token = useSession((s) => s.token);
+  const money = useDisplayMoney();
+
+  const [tab, setTab] = useState<HistoryTab>('positions');
+  const [period, setPeriod] = useState<PeriodKey>('month');
+  const [custom, setCustom] = useState<{ from: string; to: string }>({ from: '', to: '' });
+  const [menu, setMenu] = useState<'period' | 'sort' | null>(null);
+  const [sort, setSort] = useState<SortKey>('time');
+  const [ascending, setAscending] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  // The range is recomputed per render from a clock read, which is correct for "Today" when the page
+  // is left open across midnight.
+  const range: Range = useMemo(
+    () => periodRange(period, Date.now(), {
+      ...(custom.from ? { fromMs: new Date(`${custom.from}T00:00:00`).getTime() } : {}),
+      ...(custom.to ? { toMs: new Date(`${custom.to}T00:00:00`).getTime() + 86_400_000 } : {}),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [period, custom.from, custom.to],
+  );
+
+  const positionsQ = usePositions('all');
+  const transactionsQ = useTransactions();
+
+  const positions: PositionDto[] = useMemo(
+    () => (positionsQ.data?.pages ?? []).flatMap((p) => p.items),
+    [positionsQ.data],
+  );
+  const transactions: TransactionDto[] = useMemo(
+    () => (transactionsQ.data?.pages ?? []).flatMap((p) => p.items),
+    [transactionsQ.data],
+  );
+
+  // Both feeds are newest-first and cursor-paged. A period filter that only ever saw the first page
+  // would quietly under-report "Last 3 months", so keep pulling until the oldest record loaded is
+  // older than the window — then stop, because everything beyond it is outside the period anyway.
+  useAutoPage(positionsQ, positions.at(-1)?.openedAt, range.fromMs);
+  useAutoPage(transactionsQ, transactions.at(-1)?.ts, range.fromMs);
+
+  const orders = useMemo(
+    () => orderRows(positions, range, SYMBOL, lotsOfStake),
+    [positions, range],
+  );
+  const deals = useMemo(
+    () => dealRows(positions, transactions, range, SYMBOL, lotsOfStake),
+    [positions, transactions, range],
+  );
+  const closed = useMemo(
+    () => positionRows(positions, transactions, range, SYMBOL, lotsOfStake),
+    [positions, transactions, range],
+  );
+
+  const money3 = moneySummary(tab === 'deals' ? deals : closed);
+  const counts = ordersSummary(orders);
+  const loading = positionsQ.isLoading || transactionsQ.isLoading;
+
+  // Sorted per tab rather than over a union, so each row type keeps its own shape all the way to
+  // the entry that renders it.
+  const sortedOrders = sortRows(orders, sort, ascending);
+  const sortedDeals = sortRows(deals, sort, ascending);
+  const sortedClosed = sortRows(closed, sort, ascending);
+  const shown = tab === 'orders' ? sortedOrders.length : tab === 'deals' ? sortedDeals.length : sortedClosed.length;
+
+  return (
+    <div className="flex flex-1 flex-col bg-[#0f1720] text-white">
+      {/* ── Title bar. MetaTrader keeps the screen name, the symbol filter and the tabs all inside
+             the one blue band, which is why this sits flush under the app bar with no gap. ── */}
+      <div className="sticky top-14 z-20 bg-[#3183ff]">
+        <div className="flex items-center gap-3 px-3 pb-1 pt-2">
+          <div className="min-w-0">
+            <div className="text-[11px] leading-tight text-white/75">History</div>
+            {/* One instrument is quoted, so "All symbols" is a statement of fact rather than a
+                picker that would open on a list of one. */}
+            <div className="truncate text-[15px] font-semibold leading-tight">All symbols</div>
+          </div>
+          <div className="relative ml-auto flex items-center gap-1">
+            <IconButton
+              label="Sort"
+              active={menu === 'sort'}
+              onClick={() => setMenu((m) => (m === 'sort' ? null : 'sort'))}
+            >
+              <path d="M7 4v16M7 20l-3-3M7 4l3 3M17 20V4M17 4l3 3M17 20l-3-3" />
+            </IconButton>
+            <IconButton
+              label="Period"
+              active={menu === 'period'}
+              onClick={() => setMenu((m) => (m === 'period' ? null : 'period'))}
+            >
+              <path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" />
+            </IconButton>
+
+            {menu ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  onClick={() => setMenu(null)}
+                  className="fixed inset-0 z-30 cursor-default"
+                />
+                <div className="absolute right-0 top-full z-40 mt-1 w-60 overflow-hidden rounded border border-[#2b3543] bg-[#202933] shadow-2xl">
+                  {menu === 'period' ? (
+                    <PeriodMenu
+                      period={period}
+                      custom={custom}
+                      onPeriod={(k) => { setPeriod(k); if (k !== 'custom') setMenu(null); }}
+                      onCustom={setCustom}
+                    />
+                  ) : (
+                    <SortMenu
+                      sort={sort}
+                      ascending={ascending}
+                      onPick={(k) => {
+                        // Tapping the current key flips the arrow, as MetaTrader's menu does.
+                        if (k === sort) setAscending((v) => !v); else { setSort(k); setAscending(false); }
+                        setMenu(null);
+                      }}
+                    />
+                  )}
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex">
+          {(['positions', 'orders', 'deals'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              aria-pressed={tab === t}
+              className={cn(
+                'flex-1 border-b-2 px-2 pb-2 pt-1.5 text-center text-[12px] font-medium uppercase tracking-wider transition',
+                tab === t ? 'border-white text-white' : 'border-transparent text-white/70',
+              )}
+            >
+              {/* Capitalised in the markup and uppercased in CSS: MetaTrader's look, without
+                  handing a screen reader three shouted words. */}
+              {TAB_LABELS[t]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Summary. MetaTrader runs a dotted leader from each label to a figure in blue. The leader
+             is capped on a wide window: stretched across a desktop it stops reading as a leader. ── */}
+      <div className="border-b border-[#2b3543] px-3 py-2 lg:max-w-md">
+        {tab === 'orders' ? (
+          <>
+            <SummaryLine label="Filled" value={String(counts.filled)} />
+            <SummaryLine label="Canceled" value={String(counts.canceled)} />
+            <SummaryLine label="Total" value={String(counts.total)} />
+          </>
+        ) : (
+          <>
+            {/* Swap and Commission are the two lines MetaTrader drops when they are zero, and here
+                they are structurally zero — nothing is held overnight and nothing is charged per
+                trade. See moneySummary. */}
+            <SummaryLine label="Profit" value={money.fmt(money3.profitCents)} />
+            <SummaryLine label="Deposit" value={money.fmt(money3.depositCents)} />
+            <SummaryLine label="Balance" value={money.fmt(money3.balanceCents)} />
+          </>
+        )}
+      </div>
+
+      <div className="flex-1">
+        {!token ? (
+          <Empty>Sign in to see your trading history.</Empty>
+        ) : loading ? (
+          <Empty>Loading history…</Empty>
+        ) : positionsQ.isError || transactionsQ.isError ? (
+          <Empty>History is unavailable right now.</Empty>
+        ) : shown === 0 ? (
+          <Empty>No {TAB_LABELS[tab].toLowerCase()} for {periodSubtitle(range)}.</Empty>
+        ) : (
+          // MetaTrader shows history as two-line entries on a phone and as a wide table once the
+          // window has room — the same split the Toolbox uses. Both are rendered from the same rows.
+          <>
+            <div className="lg:hidden">
+              {tab === 'orders'
+                ? sortedOrders.map((r) => <OrderEntry key={r.id} row={r} onOpen={() => setSelected(r.id)} />)
+                : tab === 'deals'
+                  ? sortedDeals.map((r) => <DealEntry key={r.id} row={r} fmt={money.fmt} />)
+                  : sortedClosed.map((r) => (
+                    <PositionEntry key={r.id} row={r} fmt={money.fmt} onOpen={() => setSelected(r.id)} />
+                  ))}
+            </div>
+            <div className="hidden lg:block">
+              {tab === 'orders' ? (
+                <Table head={['Time', 'Order', 'Symbol', 'Type', 'Volume', 'Price', 'State']}>
+                  {sortedOrders.map((r) => (
+                    <Row key={r.id} onOpen={() => setSelected(r.id)}>
+                      <Td>{stamp(r.atMs)}</Td>
+                      <Td>{r.ticket}</Td>
+                      <Td>{r.symbol}</Td>
+                      <Td className={sideClass(r.side)}>{r.side}</Td>
+                      <Td>{r.lots} / {r.filledLots}</Td>
+                      <Td>{EXECUTION_PRICE}</Td>
+                      <Td className="text-[#8fa2b8]">{r.state}</Td>
+                    </Row>
+                  ))}
+                </Table>
+              ) : tab === 'deals' ? (
+                <Table head={['Time', 'Deal', 'Symbol', 'Type', 'Direction', 'Volume', 'Price', 'Profit']}>
+                  {sortedDeals.map((r) => (
+                    <Row key={r.id}>
+                      <Td>{stamp(r.atMs)}</Td>
+                      <Td>{r.ticket}</Td>
+                      <Td>{r.symbol}</Td>
+                      <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
+                      <Td>{r.entry ?? '—'}</Td>
+                      <Td>{r.lots ?? '—'}</Td>
+                      <Td>{r.lots === null ? '—' : EXECUTION_PRICE}</Td>
+                      <Td><Amount cents={r.amountCents} fmt={money.fmt} /></Td>
+                    </Row>
+                  ))}
+                </Table>
+              ) : (
+                <Table head={['Time', 'Position', 'Symbol', 'Type', 'Volume', 'Price', 'Profit']}>
+                  {sortedClosed.map((r) => (
+                    <Row key={r.id} onOpen={r.kind === 'trade' ? () => setSelected(r.id) : undefined}>
+                      <Td>{stamp(r.atMs)}</Td>
+                      <Td>{r.ticket}</Td>
+                      <Td>{r.symbol}</Td>
+                      <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
+                      <Td>{r.lots ?? '—'}</Td>
+                      <Td>{r.lots === null ? '—' : EXECUTION_PRICE}</Td>
+                      <Td><Amount cents={r.amountCents} fmt={money.fmt} /></Td>
+                    </Row>
+                  ))}
+                </Table>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <PositionDetailModal id={selected} onClose={() => setSelected(null)} />
+    </div>
+  );
+}
+
+/** Pull older pages until the loaded tail reaches past the start of the period, then stop. */
+function useAutoPage(
+  q: { hasNextPage: boolean; isFetchingNextPage: boolean; fetchNextPage: () => unknown; data?: { pages: unknown[] } | undefined },
+  oldestMs: number | undefined,
+  fromMs: number,
+): void {
+  const pages = q.data?.pages.length ?? 0;
+  const needMore = q.hasNextPage && !q.isFetchingNextPage && pages < MAX_AUTO_PAGES
+    && (oldestMs === undefined || oldestMs >= fromMs);
+  useEffect(() => {
+    if (needMore) void q.fetchNextPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needMore]);
+}
+
+// ───────────────────────────────── entries ─────────────────────────────────
+
+/**
+ * MetaTrader's two-line entry. Line one is the instrument and what was done, with the time on the
+ * right; line two is the size, with the result on the right.
+ */
+function Entry({
+  title, time, detail, result, onOpen,
+}: {
+  title: React.ReactNode;
+  time: string;
+  detail: React.ReactNode;
+  result: React.ReactNode;
+  onOpen?: (() => void) | undefined;
+}) {
+  const Tag = onOpen ? 'button' : 'div';
+  return (
+    <Tag
+      {...(onOpen ? { type: 'button' as const, onClick: onOpen } : {})}
+      className="flex w-full items-start gap-3 border-b border-[#2b3543] px-3 py-2 text-left"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-semibold leading-tight">{title}</div>
+        <div className="mt-0.5 truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">{detail}</div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="font-mono text-[11px] leading-tight text-[#8fa2b8]">{time}</div>
+        <div className="mt-0.5 font-mono text-[12px] font-semibold leading-tight tabular-nums">{result}</div>
+      </div>
+    </Tag>
+  );
+}
+
+const sideClass = (side: string | null) => (side === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]');
+
+function OrderEntry({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
+  return (
+    <Entry
+      title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side}</span></>}
+      time={stamp(row.atMs)}
+      detail={`${row.lots} / ${row.filledLots} ${EXECUTION_PRICE}`}
+      result={<span className="text-[#8fa2b8]">{row.state}</span>}
+      onOpen={onOpen}
+    />
+  );
+}
+
+function DealEntry({ row, fmt }: { row: DealRow; fmt: (cents: number) => string }) {
+  if (row.kind === 'balance') {
+    return (
+      <Entry
+        title={row.symbol}
+        time={stamp(row.atMs)}
+        detail={row.label}
+        result={<Amount cents={row.amountCents} fmt={fmt} />}
+      />
+    );
+  }
+  return (
+    <Entry
+      title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side}, {row.entry}</span></>}
+      time={stamp(row.atMs)}
+      detail={`${row.lots} ${EXECUTION_PRICE}`}
+      result={row.amountCents === null ? null : <Amount cents={row.amountCents} fmt={fmt} />}
+    />
+  );
+}
+
+function PositionEntry({ row, fmt, onOpen }: { row: PositionRow; fmt: (cents: number) => string; onOpen: () => void }) {
+  if (row.kind === 'balance') {
+    return (
+      <Entry title={row.symbol} time={stamp(row.atMs)} detail={row.label} result={<Amount cents={row.amountCents} fmt={fmt} />} />
+    );
+  }
+  return (
+    <Entry
+      title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side} {row.lots}</span></>}
+      time={stamp(row.atMs)}
+      detail={EXECUTION_PRICE}
+      result={<Amount cents={row.amountCents} fmt={fmt} />}
+      onOpen={onOpen}
+    />
+  );
+}
+
+/** MetaTrader's wide-window history table: one line per record, grey headings, no rules between
+ *  columns — only the thin row rule the entry list uses. */
+function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
+  return (
+    <table className="w-full border-collapse text-left font-mono text-[12px] tabular-nums">
+      <thead>
+        <tr className="border-b border-[#2b3543] text-[#8fa2b8]">
+          {head.map((h) => (
+            <th key={h} className="whitespace-nowrap px-3 py-1.5 font-normal">{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>{children}</tbody>
+    </table>
+  );
+}
+
+function Row({ children, onOpen }: { children: React.ReactNode; onOpen?: (() => void) | undefined }) {
+  return (
+    <tr
+      {...(onOpen ? { onClick: onOpen, className: 'cursor-pointer border-b border-[#2b3543] hover:bg-[#202933]' } : { className: 'border-b border-[#2b3543]' })}
+    >
+      {children}
+    </tr>
+  );
+}
+
+function Td({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <td className={cn('whitespace-nowrap px-3 py-1.5', className)}>{children}</td>;
+}
+
+function Amount({ cents, fmt }: { cents: number | null; fmt: (cents: number) => string }) {
+  if (cents === null) return <span className="text-[#8fa2b8]">—</span>;
+  return <span className={cents < 0 ? 'text-[#f23645]' : 'text-[#3183ff]'}>{fmt(cents)}</span>;
+}
+
+// ───────────────────────────────── chrome ─────────────────────────────────
+
+function SummaryLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline gap-2 py-0.5">
+      <span className="shrink-0 text-[13px] font-semibold">{label}:</span>
+      {/* MetaTrader's dotted leader, which is what stops the figures reading as a plain table. */}
+      <span aria-hidden className="min-w-4 flex-1 translate-y-[-3px] border-b border-dotted border-[#2b3543]" />
+      <span className="shrink-0 font-mono text-[13px] font-semibold tabular-nums text-[#4597ff]">{value}</span>
+    </div>
+  );
+}
+
+function IconButton({
+  label, active, onClick, children,
+}: { label: string; active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-expanded={active}
+      onClick={onClick}
+      className={cn('rounded p-1.5 text-white transition', active && 'bg-white/20')}
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        {children}
+      </svg>
+    </button>
+  );
+}
+
+function PeriodMenu({
+  period, custom, onPeriod, onCustom,
+}: {
+  period: PeriodKey;
+  custom: { from: string; to: string };
+  onPeriod: (k: PeriodKey) => void;
+  onCustom: (c: { from: string; to: string }) => void;
+}) {
+  return (
+    <div className="py-1">
+      {PERIODS.map((p) => (
+        <button
+          key={p.key}
+          type="button"
+          onClick={() => onPeriod(p.key)}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[#2b3543]"
+        >
+          {/* MetaTrader marks each period with a calendar glyph; the two that are not a plain span
+              carry what distinguishes them inside the frame. */}
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden className="shrink-0 text-[#8fa2b8]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+            <rect x="3.5" y="5.5" width="17" height="15" rx="1.5" />
+            <path d="M3.5 10h17M8 3v4M16 3v4" />
+            {p.key === 'quarter' ? <text x="12" y="18" textAnchor="middle" fontSize="7" stroke="none" fill="currentColor">3</text> : null}
+            {p.key === 'custom' ? <path d="M9 15h6" /> : null}
+          </svg>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] text-white">{p.label}</span>
+            {p.key !== 'custom' ? (
+              <span className="block truncate font-mono text-[11px] text-[#8fa2b8]">
+                {periodSubtitle(periodRange(p.key, Date.now()))}
+              </span>
+            ) : null}
+          </span>
+          {period === p.key ? <span className="shrink-0 text-[#4597ff]" aria-hidden>✓</span> : null}
+        </button>
+      ))}
+      {period === 'custom' ? (
+        <div className="flex flex-col gap-1.5 border-t border-[#2b3543] px-3 py-2">
+          <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+            From
+            <input
+              type="date"
+              value={custom.from}
+              onChange={(e) => onCustom({ ...custom, from: e.target.value })}
+              className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[#3183ff]"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+            To
+            <input
+              type="date"
+              value={custom.to}
+              onChange={(e) => onCustom({ ...custom, to: e.target.value })}
+              className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[#3183ff]"
+            />
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SortMenu({
+  sort, ascending, onPick,
+}: { sort: SortKey; ascending: boolean; onPick: (k: SortKey) => void }) {
+  return (
+    <div className="py-1">
+      {SORTS.map((s) => (
+        <button
+          key={s.key}
+          type="button"
+          onClick={() => onPick(s.key)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-white hover:bg-[#2b3543]"
+        >
+          <span className="flex-1">{s.label}</span>
+          {sort === s.key ? (
+            <span className="shrink-0 text-[#4597ff]" aria-hidden>{ascending ? '↑' : '↓'}</span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div className="px-3 py-10 text-center text-[13px] text-[#8fa2b8]">{children}</div>;
+}
