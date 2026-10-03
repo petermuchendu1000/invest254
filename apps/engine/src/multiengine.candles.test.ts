@@ -6,7 +6,7 @@ import { InMemoryGameRepository } from "./wallet.js";
 import { StaticConfigProvider } from "./gameconfig.js";
 import { SiteRegistry } from "./siteregistry.js";
 import { startMultiEngine, type MultiEngineHandle } from "./multiengine.js";
-import { MAX_BARS } from "./markethistory.js";
+import { MAX_ANCHORS, MAX_BARS } from "./markethistory.js";
 
 /**
  * The candle feed over the wire (Step 2 of the MT5 chart work).
@@ -24,7 +24,12 @@ const cfg: VersionedGameConfig = { ...DEFAULT_VERSIONED_CONFIG, version: 1, defa
 class Client {
   ws: WebSocket;
   constructor(url: string) { this.ws = new WebSocket(url); }
-  open(): Promise<void> { return new Promise((res, rej) => { this.ws.once("open", () => res()); this.ws.once("error", rej); }); }
+  open(): Promise<void> {
+    // Already open? `once("open")` would never fire — the event has been and gone — and the test
+    // would hang for ever instead of failing. Costs one check; saves a mystery timeout.
+    if (this.ws.readyState === this.ws.OPEN) return Promise.resolve();
+    return new Promise((res, rej) => { this.ws.once("open", () => res()); this.ws.once("error", rej); });
+  }
   /** Send a request and resolve on the first reply of `type` (or an `error`, so a test fails fast). */
   ask(type: string, data: unknown, expect: string, timeoutMs = 20_000): Promise<any> {
     return new Promise((res, rej) => {
@@ -163,4 +168,59 @@ test("WS candles: bad input is rejected, and an oversized count is clamped not r
     assert.equal(big.type, "candles");
     assert.ok(big.data.bars.length <= MAX_BARS, `expected a clamp, got ${big.data.bars.length} bars`);
   } finally { c.close(); await handle.close(); }
+});
+
+// ───────────────────────────── day anchors ─────────────────────────────
+
+const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+test("WS anchors: each requested day comes back with its own anchor, and today's matches the candles reply", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const today = dayKey(Date.now());
+    const older = dayKey(Date.now() - 5 * 86_400_000);
+    const m = await c.ask("anchors", { days: [today, older] }, "anchors");
+    assert.equal(m.type, "anchors", `unexpected error: ${JSON.stringify(m.data)}`);
+    assert.equal(m.data.instrument.symbol, "XAUUSD");
+    assert.deepEqual(m.data.days.map((d: any) => d.dateKey), [today, older]);
+    // The anchor the candles reply ships for today must be the same one this endpoint serves, or the
+    // live chart and the trade list would place the same rate at two different prices.
+    const fromCandles = (await c.ask("candles", { tf: "H1", count: 2 }, "candles")).data.anchor;
+    assert.deepEqual(m.data.days[0], { dateKey: fromCandles.tradeDate, base: fromCandles.base, openValue: fromCandles.openValue });
+    // …and an older day is genuinely anchored elsewhere, which is the reason to ask at all.
+    assert.notEqual(m.data.days[1].base, m.data.days[0].base);
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS anchors: reqId is echoed, so concurrent requests can be told apart", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const m = await c.ask("anchors", { days: [dayKey(Date.now())], reqId: "a7" }, "anchors");
+    assert.equal(m.data.reqId, "a7");
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS anchors: a line brand is told it has none; bad input is rejected; the batch is capped", async () => {
+  const { handle, url } = await boot();
+  const line = new Client(url(LINE_SITE));
+  // Opened one at a time: a client built up front can finish connecting while the first is being
+  // driven, and the handshake it is waiting for has then already happened.
+  const candle = new Client(url(CANDLE_SITE));
+  try {
+    await line.open();
+    assert.equal((await line.ask("anchors", { days: [dayKey(Date.now())] }, "anchors")).data.code, "NO_CANDLES");
+    await candle.open();
+    assert.equal((await candle.ask("anchors", { days: "today" }, "anchors")).data.code, "BAD_DAYS");
+    assert.equal((await candle.ask("anchors", {}, "anchors")).data.code, "BAD_DAYS");
+    // Unknown days are absent rather than fatal, so one stale row cannot break a whole page.
+    const mixed = await candle.ask("anchors", { days: ["1999-01-01", dayKey(Date.now())] }, "anchors");
+    assert.deepEqual(mixed.data.days.map((d: any) => d.dateKey), [dayKey(Date.now())]);
+    const many = Array.from({ length: 300 }, (_, i) => dayKey(Date.now() - i * 86_400_000));
+    const big = await candle.ask("anchors", { days: many }, "anchors");
+    assert.ok(big.data.days.length <= MAX_ANCHORS, `expected a cap, got ${big.data.days.length}`);
+  } finally { line.close(); candle.close(); await handle.close(); }
 });

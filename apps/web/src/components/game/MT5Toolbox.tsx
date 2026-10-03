@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { valueOfRate } from '@invest254/shared/candles';
 import { accountSummary, lotsOfStake } from '@invest254/shared/account';
-import { useGameSocket, useGameSocketApi, type NewsItemDto } from '@/lib/game/GameSocketProvider';
+import { useGameSocket, useGameSocketApi, type NewsItemDto, type DayAnchor } from '@/lib/game/GameSocketProvider';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
 import { useSession } from '@/lib/auth/session';
@@ -15,7 +15,7 @@ import { useTakeProfitStore, useTakeProfitWatch } from '@/lib/game/takeprofit';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
-import { EXECUTION_PRICE, priceKnown } from '@/lib/history/mt5history';
+import { EXECUTION_PRICE, tradeDateOf } from '@/lib/history/mt5history';
 import { cn } from '@/lib/cn';
 
 /**
@@ -85,17 +85,22 @@ export function MT5Toolbox() {
     return p === null ? '—' : p.toFixed(digits);
   };
   /**
-   * The same price, but only where it is actually knowable.
+   * The price a rate had on ITS OWN day.
    *
-   * `priceOfRate` maps a rate through the CURRENT day's anchor, which is right for a live position
-   * and wrong for a settled one from any earlier day: the engine re-anchors the axis at every UTC
-   * midnight, so an old trade rendered this way printed a price that never happened — quietly, and
-   * plausibly enough that nobody would spot it. Off its own day the cell says what is true of every
-   * contract here instead, exactly as the History screen does.
+   * `priceOfRate` maps through the CURRENT day's anchor, which is right for a live position and
+   * wrong for anything settled earlier: the engine re-anchors the axis at every UTC midnight, so an
+   * old trade rendered that way printed a price that never happened — quietly, and plausibly enough
+   * that nobody would spot it. Each trade is priced from the anchor of the day it was made on,
+   * fetched from the engine (see `useDayAnchors`). Until that day's anchor has arrived — or if it
+   * falls outside the history the engine retains — the cell says what is true of every contract
+   * here, as the History screen does, rather than guessing.
    */
   const pxOn = (rate: number | null | undefined, atMs: number | null | undefined): string => {
     if (rate === null || rate === undefined || atMs === null || atMs === undefined) return '—';
-    return priceKnown(atMs, getMarket()?.anchor.tradeDate) ? px(rate) : EXECUTION_PRICE;
+    const m = getMarket();
+    const a = anchors.get(tradeDateOf(atMs));
+    if (!m || !a) return EXECUTION_PRICE;
+    return (a.base + m.instrument.scale * (valueOfRate(rate) - a.openValue)).toFixed(digits);
   };
 
   // Price alerts fire against the same price the chart draws.
@@ -131,6 +136,17 @@ export function MT5Toolbox() {
     staleTime: 15_000,
   });
   const rows = useMemo(() => history?.items ?? [], [history]);
+  // Every UTC day the open position and the loaded history touch — the days whose anchors price them.
+  const days = useMemo(() => {
+    const out: string[] = [];
+    if (live) out.push(tradeDateOf(live.expiresAtMs ? live.expiresAtMs - live.durationS * 1000 : Date.now()));
+    for (const p of rows) {
+      out.push(tradeDateOf(p.openedAt));
+      if (p.settledAt !== null) out.push(tradeDateOf(p.settledAt));
+    }
+    return out;
+  }, [rows, live]);
+  const anchors = useDayAnchors(days, open);
 
   const notifications = useMyNotifications();
   const journal = useJournal();
@@ -287,9 +303,9 @@ export function MT5Toolbox() {
             {tab === 'mailbox' ? (
               !token ? (
                 <Empty>Sign in to read your messages.</Empty>
-              ) : (notifications.data?.items.length ?? 0) > 0 ? (
+              ) : (notifications.data?.items?.length ?? 0) > 0 ? (
                 <ul className="divide-y divide-[#2b3543]/60">
-                  {notifications.data!.items.map((n) => (
+                  {(notifications.data?.items ?? []).map((n) => (
                     <li key={n.id} className="px-3 py-2">
                       <div className="flex items-baseline gap-2">
                         <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', n.level === 'error' ? 'bg-[#f23645]' : n.level === 'warning' ? 'bg-[#f0b90b]' : n.level === 'success' ? 'bg-[#41be56]' : 'bg-[#3183ff]')} />
@@ -338,8 +354,8 @@ export function MT5Toolbox() {
                 )}
               >
                 {t.label}
-                {t.id === 'mailbox' && (notifications.data?.items.length ?? 0) > 0
-                  ? <span className="ml-1 text-[#3183ff]">({notifications.data!.items.length})</span>
+                {t.id === 'mailbox' && (notifications.data?.items?.length ?? 0) > 0
+                  ? <span className="ml-1 text-[#3183ff]">({notifications.data?.items?.length ?? 0})</span>
                   : null}
                 {t.id === 'alerts' && alerts.length > 0 ? <span className="ml-1 text-[#8fa2b8]">({alerts.length})</span> : null}
               </button>
@@ -467,6 +483,46 @@ function AlertsTab({
       )}
     </div>
   );
+}
+
+/**
+ * The day anchors for a page of trade history, fetched once per day and kept for the session.
+ *
+ * A page spans a handful of UTC days, so this is one small request, not one per row; days already
+ * held are never asked for again. A failure is swallowed deliberately — the prices degrade to
+ * "at market" and the rest of the tab keeps working, which is the right trade for a display field.
+ */
+function useDayAnchors(days: readonly string[], enabled: boolean): Map<string, DayAnchor> {
+  const { requestAnchors } = useGameSocketApi();
+  const { status } = useGameSocket();
+  const [anchors, setAnchors] = useState<Map<string, DayAnchor>>(new Map());
+  // Keyed on the SORTED JOIN rather than the array: a re-render that produces an equal list must not
+  // refire the request.
+  const wanted = useMemo(() => [...new Set(days)].sort().join(','), [days]);
+
+  useEffect(() => {
+    if (!enabled || status !== 'open' || wanted === '') return;
+    const missing = wanted.split(',').filter((d) => !anchors.has(d));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    requestAnchors(missing)
+      .then((r) => {
+        if (cancelled) return;
+        setAnchors((prev) => {
+          const next = new Map(prev);
+          for (const d of r.days) next.set(d.dateKey, d);
+          return next;
+        });
+      })
+      .catch(() => { /* prices fall back to "at market"; nothing else depends on this */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted, enabled, status]);
+
+  // A reconnect re-anchors the series, so anything held is re-fetched rather than trusted.
+  useEffect(() => { if (status !== 'open') setAnchors(new Map()); }, [status]);
+
+  return anchors;
 }
 
 /**

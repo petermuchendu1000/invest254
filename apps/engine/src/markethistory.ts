@@ -23,6 +23,13 @@ import {
 export const HISTORY_DAYS = 400;
 /** Largest window a single request may ask for, in bars. Clients page backwards for more. */
 export const MAX_BARS = 5000;
+/**
+ * Largest number of day anchors one request may ask for.
+ *
+ * A page of trade history spans a handful of days in practice; the cap is what stops a client
+ * asking the engine to walk and hold the whole year in one call.
+ */
+export const MAX_ANCHORS = 64;
 
 export interface MarketHistoryOptions {
   /** Instrument the prices are expressed in. Defaults to XAUUSD. */
@@ -40,6 +47,12 @@ interface DaySlice {
   base: number;
   /** The NEXT day's base, i.e. this day's close after the anchor pull. Carries the chain forward. */
   nextBase: number;
+  /**
+   * The curve's value at this day's open — the second half of the day's price anchor, since
+   * price = base + scale * (value(t) - openValue). It falls out of the chaining pass for free, and
+   * keeping it is what lets an OLD day's anchor be served without rebuilding that day's curve.
+   */
+  openValue: number;
   /**
    * The day's 24 H1 bars, kept for the life of the chain (~1KB a day).
    *
@@ -107,9 +120,10 @@ export class MarketHistory {
       // One sampling pass gives the chain its close AND the day's hourly bars. Minute bars come from
       // the same curve but are built only if a sub-hour timeframe actually asks for them.
       const h1 = aggregate(minuteBars(this.inst, dayStartS, base, (t) => curve.value(t)), "H1");
+      const openValue = curve.value(0);
       const slice: DaySlice = {
-        dateKey: key, dayStartS, base, h1,
-        nextBase: nextBase(this.inst, base, curve.value(0), curve.value(DAY_S)),
+        dateKey: key, dayStartS, base, h1, openValue,
+        nextBase: nextBase(this.inst, base, openValue, curve.value(DAY_S)),
       };
       this.days.set(key, slice);
       base = slice.nextBase;
@@ -179,7 +193,35 @@ export class MarketHistory {
     this.chainThrough(key);
     const slice = this.days.get(key);
     const base = slice?.base ?? this.inst.anchor;
-    return { dateKey: key, base, openValue: this.curveFor(key).value(0), instrument: this.inst };
+    return { dateKey: key, base, openValue: slice?.openValue ?? this.curveFor(key).value(0), instrument: this.inst };
+  }
+
+  /**
+   * Day anchors for a set of UTC dates, so a client can place an OLD rate on the price axis.
+   *
+   * The axis is re-anchored every UTC midnight, so a rate recorded on an earlier day is meaningless
+   * against today's anchor — mapped through today's it yields a price that never happened. A trade
+   * list showing historical prices needs the anchor of each trade's OWN day, and this is the only
+   * place that knows them: they come out of the same forward chain the candles do, and now cost
+   * nothing to serve because the chain already keeps them.
+   *
+   * Dates outside the retained window are simply absent from the reply rather than an error: a
+   * client asking about a trade older than history reaches should fall back, not fail.
+   */
+  anchors(dateKeys: readonly string[]): Array<{ dateKey: string; base: number; openValue: number }> {
+    const genesis = this.genesisKey();
+    const today = dateKeyUTC(this.now());
+    const out: Array<{ dateKey: string; base: number; openValue: number }> = [];
+    const seen = new Set<string>();
+    for (const key of dateKeys) {
+      if (seen.has(key) || key < genesis || key > today) continue;
+      seen.add(key);
+      if (out.length >= MAX_ANCHORS) break;
+      this.chainThrough(key);
+      const slice = this.days.get(key);
+      if (slice) out.push({ dateKey: key, base: slice.base, openValue: slice.openValue });
+    }
+    return out;
   }
 }
 
