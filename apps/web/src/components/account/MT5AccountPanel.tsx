@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useSession } from '@/lib/auth/session';
-import { useWallet, useSetAccountMode } from '@/lib/wallet/hooks';
+import { useWallet, useWalletFigures, useSetAccountMode, useTopupDemo } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { useDepositUi } from '@/lib/wallet/depositUi';
@@ -35,11 +35,22 @@ export function MT5AccountPanel() {
   const money = useDisplayMoney();
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const setMode = useSetAccountMode();
+  const topup = useTopupDemo();
+  /**
+   * Which account is active, and what each one holds — from the ONE rule (wallet/figures).
+   *
+   * Never `wallet.mode`: a marketer's account_mode is permanently 'demo' (their stakes spend the demo
+   * bucket, migration 0084) while the money they play and withdraw is presented as their REAL
+   * account. Their Demo is the SEPARATE practice bucket (0176), and `marketerPractice` says which of
+   * the two is live. Reading `mode` straight off the wallet put a marketer on "Demo account" the
+   * moment they signed in, and then refused to let them leave it.
+   */
+  const figures = useWalletFigures();
   const [copied, setCopied] = useState(false);
 
   if (!user) return null;
 
-  const demo = wallet?.mode === 'demo';
+  const demo = figures.demo;
   const currency = wallet?.currency || brand.currency || 'KES';
   // MetaTrader names the server "<Broker>-Demo" / "<Broker>-Live"; the same convention reads
   // correctly here and is derived, not invented.
@@ -56,9 +67,15 @@ export function MT5AccountPanel() {
     }
   };
 
-  const locked = wallet?.modeLocked === true;
-  const realCents = wallet?.realBalance ?? (demo ? 0 : wallet?.real ?? 0);
-  const demoCents = wallet?.demoBalance ?? (demo ? wallet?.real ?? 0 : 0);
+  /**
+    * BOTH account types switch. `modeLocked` is not "cannot switch" — it is the money layer's
+    * marketer predicate (fn_is_marketer_account), and a marketer switching to Demo moves to their
+    * practice bucket exactly as a player switching to Demo moves to theirs. The waves switcher has
+    * always allowed it; this panel was alone in disabling the rows and printing "Switching is
+    * disabled on this account", which left a marketer with no demo at all.
+    */
+  const realCents = figures.realCash;
+  const demoCents = figures.demoBalance;
 
   return (
     <section className="overflow-hidden rounded-md border border-[#2b3543] bg-[#0f1720]">
@@ -78,12 +95,11 @@ export function MT5AccountPanel() {
               <button
                 key={mode}
                 type="button"
-                disabled={locked || setMode.isPending || active}
+                disabled={setMode.isPending || active}
                 onClick={() => setMode.mutate(mode)}
                 className={cn(
                   'flex w-full items-center gap-2 px-3 py-2.5 text-left transition',
                   active ? 'bg-[#202933]' : 'hover:bg-[#202933]/60',
-                  locked && !active && 'cursor-not-allowed opacity-40',
                 )}
               >
                 <span className={cn('grid h-5 w-5 shrink-0 place-items-center rounded-sm', active ? 'bg-[#3183ff]' : 'bg-[#2b3543]')}>
@@ -101,7 +117,7 @@ export function MT5AccountPanel() {
               </button>
             );
           })}
-          {locked ? <p className="px-3 py-2 text-[11px] text-[#8fa2b8]">Switching is disabled on this account.</p> : null}
+
         </nav>
 
         <div className="min-w-0 flex-1 px-4 py-4">
@@ -118,7 +134,21 @@ export function MT5AccountPanel() {
           {user.phone ? <Row label="Phone" value={user.phone} /> : null}
         </dl>
 
-        <div className="mt-4 flex justify-end">
+        {/* A demo account nobody can refill is a demo account that works once. MetaTrader's own demo
+            is reopened at its starting balance, and this is that: available on the demo account to
+            whoever is on it — player or marketer, whose demo is their practice bucket. It moves no
+            real money, so it sits beside the live switch rather than competing with it. */}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          {demo ? (
+            <button
+              type="button"
+              onClick={() => topup.mutate()}
+              disabled={topup.isPending}
+              className="rounded border border-[#2b3543] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#202933] disabled:opacity-60"
+            >
+              {topup.isPending ? 'Topping up…' : 'Top up demo balance'}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => (demo ? setMode.mutate('real') : openDeposit({}))}
