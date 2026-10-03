@@ -15,11 +15,9 @@ import { MT5 } from '@/lib/ui/mt5';
  * code that moves real money, for a change that is entirely cosmetic. Re-pointing the tokens gets
  * the same screen with the payment path untouched.
  *
- * `accent` is MetaTrader's confirmation green rather than its blue: the primary action on these
- * surfaces is a deposit, and green is what MetaTrader puts on a confirming action (its blue is
- * chrome and the buy side). `up`/`down` keep MetaTrader's own pairing.
+ * `up`/`down` keep MetaTrader's own pairing. Only ACCENT differs between the two sets below.
  */
-export const MT5_TOKENS: CSSProperties = {
+const SHARED = {
   '--pp-bg': MT5.surface,
   '--pp-surface': MT5.surface,
   '--pp-surface-2': MT5.raised,
@@ -28,9 +26,21 @@ export const MT5_TOKENS: CSSProperties = {
   '--pp-muted': MT5.muted,
   '--pp-up': MT5.green,
   '--pp-down': MT5.red,
-  '--pp-accent': MT5.green,
   '--pp-accent-fg': MT5.text,
   '--pp-info': MT5.blue,
   // The brand hue skins links and soft chips; on a MetaTrader surface those read blue.
   '--pp-brand': MT5.blueLink,
-} as CSSProperties;
+} as const;
+
+/**
+ * The default set. Accent is MetaTrader's BLUE, which is its identity colour: the title bar, the
+ * active control, the buy side, and your own voice in a chat thread.
+ */
+export const MT5_TOKENS: CSSProperties = { ...SHARED, '--pp-accent': MT5.blue } as CSSProperties;
+
+/**
+ * For a surface whose primary action CONFIRMS something — a deposit, a withdrawal. MetaTrader puts
+ * green on a confirming action and keeps blue for chrome, so a green Deposit button is right where a
+ * green chat bubble would not be.
+ */
+export const MT5_CONFIRM_TOKENS: CSSProperties = { ...SHARED, '--pp-accent': MT5.green } as CSSProperties;
