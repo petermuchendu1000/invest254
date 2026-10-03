@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSession } from '@/lib/auth/session';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useInterfaceMode } from '@/lib/ui/interfaceMode';
+import { marketerSkinOn } from '@/lib/marketer/skinPolicy';
 
 /**
  * PREVIEW override (presentation only). `?preview=marketer` forces the marketer SKIN on for anyone —
@@ -55,32 +56,14 @@ export function useIsMarketer(): { isMarketer: boolean; resolved: boolean } {
 }
 
 /**
- * OWNER POLICY: the marketer app must be TikTok-safe — it must NOT read as a binary-options / trading
- * terminal. So the full P1–P3 neutral skin is ON: money shown as game points, Buy/Sell as wordless
- * arrows, neutral nav, neutral trade-type/instrument names, and the 18+/licence/responsible-gaming
- * footer hidden. `useMarketerSkin()` reports a marketer to every shared player surface.
- *
- * What is NOT neutralised (handled elsewhere, by design): the candlestick/bars/area CHART, which
- * `GameCurve` renders as a real TradingView view for candle brands (TikTok should not read a candle
- * chart as binary). The classic line wave stays the neutral game wave (GameCurve passes the real
- * marketer flag to `CurveCanvas`). So "chart neutralisation = the line wave only"; every OTHER
- * gambling/trading tell is still neutralised here.
- *
- * This is a presentation policy only. Marketer ROLE (routing, the marketer HUD, referral earnings,
- * admin) uses `useIsMarketer()`, and every marketer endpoint stays gated server-side.
- */
-const NEUTRALISE_SHARED_UI: boolean = true;
-
-/**
  * Does this screen wear the simplified "basic" skin (points, wordless arrows, neutral wave/chrome)?
  *
- * True when EITHER the account is a real marketer (always disguised — TikTok-safe) OR a player has
- * opted into the Basic interface via the trade-screen gear (`useInterfaceMode`). This is presentation
- * only: a player on Basic gets the LOOK, never marketer access — `useIsMarketer` (role/routing) is
- * unchanged and every marketer endpoint stays gated server-side.
+ * Now true only when a PLAYER has opted into Basic via the trade-screen gear (`useInterfaceMode`). A
+ * marketer gets the full player interface — see the policy note in `skinPolicy`. Presentation only: Basic has
+ * never granted marketer access, and `useIsMarketer` (role/routing) is a separate question.
  */
 export function useMarketerSkin(): { isMarketer: boolean; resolved: boolean } {
   const { isMarketer, resolved } = useIsMarketer();
   const playerBasic = useInterfaceMode() === 'basic';
-  return { isMarketer: (NEUTRALISE_SHARED_UI && isMarketer) || playerBasic, resolved };
+  return { isMarketer: marketerSkinOn(isMarketer, playerBasic), resolved };
 }

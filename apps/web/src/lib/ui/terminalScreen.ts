@@ -6,8 +6,12 @@
  * toolbar). Keeping the rule in one place is what stops them drifting apart — a terminal screen
  * inside a centred container with a footer under it is neither one thing nor the other.
  *
- * A marketer screen never qualifies: trading-terminal chrome is exactly what the marketer skin
- * exists to remove.
+ * A BASIC-skin screen never qualifies: MetaTrader chrome is the opposite of what Basic is for. That
+ * used to exclude every marketer, since a marketer was pinned to Basic; marketers now get the player
+ * interface, so the only screen this turns away is a player who chose the simplified view.
+ *
+ * The parameter keeps its name because it is still what `useMarketerSkin()` returns — see the policy
+ * note in lib/marketer/isMarketer.
  */
 export const isTerminalScreen = (terminalBrand: boolean, isMarketer: boolean): boolean =>
   terminalBrand && !isMarketer;
