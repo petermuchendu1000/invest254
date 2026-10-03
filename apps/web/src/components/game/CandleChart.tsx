@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   IChartApi, ISeriesApi, UTCTimestamp, CandlestickData, BarData, LineData, Time, SeriesType, LogicalRange,
 } from 'lightweight-charts';
-import { sma, bollinger, type Candle } from '@invest254/shared/chart';
+import type { Candle } from '@invest254/shared/chart';
+import {
+  INDICATOR_BY_ID, INDICATOR_GROUPS, VOLUME_GROUP_NOTE, type Plot,
+} from '@/lib/chart/indicatorCatalog';
 import { TIMEFRAME_KEYS, TIMEFRAMES, bucketStartS, valueOfRate, XAUUSD, type MarketSymbol, type Timeframe } from '@invest254/shared/candles';
 import type { CandlesReply } from '@/lib/game/GameSocketProvider';
 import type { ConnStatus, Tick } from '@/lib/game/types';
@@ -57,7 +60,6 @@ const MAX_HELD_BARS = 6000;
 
 const MIN_BARS = 8, MAX_BARS = 600, ZOOM_STEP = 0.7, RIGHT_OFFSET_BARS = 3;
 const RESUME_MS = 3000; // auto-return to the live edge after this idle time following manual pan/zoom
-const MA = { fast: 7, mid: 25, slow: 99 }, BB_PERIOD = 20, BB_MULT = 2;
 
 /**
  * MetaTrader 5's dark theme, sampled from the product (see lib/ui/mt5.ts for the counts).
@@ -93,7 +95,9 @@ const asLine = (candles: Candle[], vals: Array<number | null>): LineData[] => {
 
 const utcDateKey = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
-interface Ind { ma7: boolean; ma25: boolean; ma99: boolean; bb: boolean }
+/** Which of MetaTrader's indicators are switched on, by catalogue id (lib/chart/indicatorCatalog). */
+type Enabled = ReadonlySet<string>;
+const IND_STORAGE_KEY = 'pp-chart-indicators';
 interface Legend { o: number; h: number; l: number; c: number; changePct: number }
 type Anchor = CandlesReply['anchor'];
 
@@ -109,12 +113,16 @@ export function CandleChart({
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const mainRef = useRef<ISeriesApi<SeriesType> | null>(null);
-  const maFastRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const maMidRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const maSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const bbUpRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const bbMidRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const bbLoRef = useRef<ISeriesApi<'Line'> | null>(null);
+  /**
+   * Live indicator series, keyed `<indicatorId>:<plotKey>`, plus the sub-pane each own-pane
+   * indicator was given and the marker plugin for the ones MetaTrader draws as arrows.
+   *
+   * Created on demand rather than up front: the catalogue is long, and pre-creating a series for
+   * every plot of every indicator would mean dozens of empty series on a chart showing none.
+   */
+  const plotsRef = useRef(new Map<string, ISeriesApi<SeriesType>>());
+  const markersRef = useRef(new Map<string, { setMarkers: (m: unknown[]) => void }>());
+  const lcRef = useRef<typeof import('lightweight-charts') | null>(null);
   /** Closed history plus, as the last element, the bar currently forming from live ticks. */
   const candlesRef = useRef<Candle[]>([]);
   const anchorRef = useRef<Anchor | null>(null);
@@ -140,8 +148,8 @@ export function CandleChart({
   const [chartType, setChartType] = useState<MainType>(initialType);
   const chartTypeRef = useRef<MainType>(initialType); chartTypeRef.current = chartType;
   const [scaleMode, setScaleMode] = useState<ScaleMode>('normal');
-  const [ind, setInd] = useState<Ind>({ ma7: false, ma25: false, ma99: false, bb: false });
-  const indRef = useRef(ind); indRef.current = ind;
+  const [ind, setInd] = useState<Enabled>(() => new Set<string>());
+  const indRef = useRef<Enabled>(ind); indRef.current = ind;
   const followingRef = useRef(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [legend, setLegend] = useState<Legend | null>(null);
@@ -175,19 +183,144 @@ export function CandleChart({
     else { const r = chart.timeScale().getVisibleLogicalRange(); if (r) chart.timeScale().setVisibleLogicalRange({ from: r.to - visibleBarsRef.current, to: r.to }); }
   }, [snapToLive]);
 
+  /**
+   * Draw whatever is switched on, and remove whatever is not.
+   *
+   * Every indicator goes through one path: read its definition from the catalogue, compute its
+   * plots, and create or update a series per plot. Nothing here knows what an RSI is — which is why
+   * adding an indicator is an entry in the catalogue and no change to this component.
+   *
+   * It recomputes from the whole bar array rather than appending the newest value, because several
+   * of MetaTrader's indicators are displaced (Ichimoku's cloud is drawn 26 bars ahead, the Chikou
+   * span 26 behind) and an append cannot place a value in a bar that has not arrived. Only the
+   * indicators actually switched on are computed, so the usual cost is one or two passes.
+   */
   const refreshIndicators = useCallback(() => {
-    const candles = candlesRef.current, closes = candles.map((c) => c.close), on = indRef.current;
-    maFastRef.current?.setData(on.ma7 ? asLine(candles, sma(closes, MA.fast)) : []);
-    maMidRef.current?.setData(on.ma25 ? asLine(candles, sma(closes, MA.mid)) : []);
-    maSlowRef.current?.setData(on.ma99 ? asLine(candles, sma(closes, MA.slow)) : []);
-    if (bbUpRef.current && bbMidRef.current && bbLoRef.current) {
-      const bb = on.bb ? bollinger(closes, BB_PERIOD, BB_MULT) : [];
-      bbUpRef.current.setData(asLine(candles, bb.map((b) => b?.upper ?? null)));
-      bbMidRef.current.setData(asLine(candles, bb.map((b) => b?.mid ?? null)));
-      bbLoRef.current.setData(asLine(candles, bb.map((b) => b?.lower ?? null)));
+    const chart = chartRef.current, lc = lcRef.current;
+    if (!chart || !lc) return;
+    const bars = candlesRef.current;
+    const on = indRef.current;
+    const live = new Set<string>();
+
+    for (const id of on) {
+      const def = INDICATOR_BY_ID.get(id);
+      if (!def) continue;
+      let plots: Plot[];
+      try {
+        plots = def.compute(bars);
+      } catch {
+        // A single bad indicator must never take the chart down with it.
+        continue;
+      }
+
+      /**
+       * An own-pane indicator gets its sub-pane the first time it is switched on.
+       *
+       * The pane is found by ASKING one of the indicator's existing series which pane it is in,
+       * never from a remembered index. Removing a pane renumbers the ones after it, so a cached
+       * index silently starts pointing at someone else's pane — which is exactly how the Awesome
+       * Oscillator ended up drawing into, and then stranding, a pane that was not its own.
+       */
+      let paneIndex = 0;
+      if (def.pane === 'own') {
+        const existing = plots.map((pl) => plotsRef.current.get(`${id}:${pl.key}`)).find((x) => x !== undefined);
+        if (existing) paneIndex = existing.getPane().paneIndex();
+        else {
+          const pane = chart.addPane();
+          paneIndex = pane.paneIndex();
+          pane.setHeight(Math.max(60, Math.round(chart.paneSize(0).height * 0.22)));
+        }
+      }
+
+      for (const plot of plots) {
+        const key = `${id}:${plot.key}`;
+        live.add(key);
+        if (plot.kind === 'markers') {
+          const main = mainRef.current;
+          if (!main) continue;
+          const marks = bars.flatMap((b, i) => {
+            const v = plot.values[i];
+            return v === null || v === undefined ? [] : [{
+              time: b.time as UTCTimestamp,
+              position: plot.markerUp ? 'aboveBar' : 'belowBar',
+              color: plot.color,
+              shape: plot.markerUp ? 'arrowDown' : 'arrowUp',
+            }];
+          });
+          let api = markersRef.current.get(key);
+          if (!api) {
+            api = lc.createSeriesMarkers(main, []) as unknown as { setMarkers: (m: unknown[]) => void };
+            markersRef.current.set(key, api);
+          }
+          api.setMarkers(marks);
+          continue;
+        }
+
+        let series = plotsRef.current.get(key);
+        if (!series) {
+          const common = { priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false };
+          series = plot.kind === 'histogram'
+            ? chart.addSeries(lc.HistogramSeries, { ...common, color: plot.color }, paneIndex)
+            : chart.addSeries(lc.LineSeries, {
+                ...common,
+                color: plot.color,
+                lineWidth: plot.width ?? 1,
+                lineStyle: plot.style === 'dotted' ? lc.LineStyle.Dotted : plot.style === 'dashed' ? lc.LineStyle.Dashed : lc.LineStyle.Solid,
+              }, paneIndex);
+          plotsRef.current.set(key, series);
+          // MetaTrader's reference levels (RSI's 30/70, a zero line) belong to the pane, so they are
+          // drawn once on the indicator's first plot.
+          if (def.levels && plot === plots[0]) {
+            for (const level of def.levels) {
+              series.createPriceLine({ price: level, color: TV.grid, lineWidth: 1, lineStyle: lc.LineStyle.Dashed, axisLabelVisible: false, title: '' });
+            }
+          }
+        }
+        series.setData(asLine(bars, plot.values));
+      }
+    }
+
+    // Anything left over belongs to an indicator that has been switched off.
+    for (const [key, series] of plotsRef.current) {
+      if (live.has(key)) continue;
+      try { chart.removeSeries(series); } catch { /* already gone with its pane */ }
+      plotsRef.current.delete(key);
+    }
+    for (const [key, api] of markersRef.current) {
+      if (live.has(key)) continue;
+      try { api.setMarkers([]); } catch { /* the main series was rebuilt */ }
+      markersRef.current.delete(key);
+    }
+    // Panes need no cleanup of their own: `addPane()` without `preserveEmptyPane` lets the chart
+    // drop a pane once its last series goes, which the loop above has just done.
+    for (let i = chart.panes().length - 1; i >= 1; i--) {
+      const pane = chart.panes()[i];
+      if (pane && pane.getSeries().length === 0) {
+        try { chart.removePane(i); } catch { /* already gone */ }
+      }
     }
   }, []);
   useEffect(() => { refreshIndicators(); }, [ind, refreshIndicators]);
+
+  /** Toggle one indicator, and remember the set across sessions as MetaTrader does. */
+  const toggleIndicator = useCallback((id: string) => {
+    setInd((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { window.localStorage.setItem(IND_STORAGE_KEY, JSON.stringify([...next])); } catch { /* blocked storage */ }
+      return next;
+    });
+  }, []);
+
+  // Restore the indicators the player last had on.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(IND_STORAGE_KEY);
+      if (!raw) return;
+      const ids = (JSON.parse(raw) as unknown);
+      if (Array.isArray(ids)) setInd(new Set(ids.filter((x): x is string => typeof x === 'string' && INDICATOR_BY_ID.has(x))));
+    } catch { /* private mode / corrupt value — no indicators is a fine default */ }
+  }, []);
 
   // Price-scale mode is applied live (no rebuild).
   useEffect(() => {
@@ -307,6 +440,8 @@ export function CandleChart({
       const lc = await import('lightweight-charts');
       const { createChart, CandlestickSeries, BarSeries, LineSeries, AreaSeries, BaselineSeries, ColorType, CrosshairMode, LineStyle } = lc;
       if (disposed) return;
+      // Held so indicators can add their own series and panes after the chart exists.
+      lcRef.current = lc;
       const up = TV.up, down = TV.down, accent = TV.accent, info = TV.info, border = TV.border;
 
       const chart = createChart(host, {
@@ -328,15 +463,6 @@ export function CandleChart({
         handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: false } },
       });
       chartRef.current = chart;
-
-      // Indicators under the price series (created regardless; data set only when toggled on).
-      const lineOpts = { priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false } as const;
-      bbUpRef.current = chart.addSeries(LineSeries, { ...lineOpts, color: info, lineWidth: 1, lineStyle: LineStyle.Dotted });
-      bbMidRef.current = chart.addSeries(LineSeries, { ...lineOpts, color: info, lineWidth: 1, lineStyle: LineStyle.Dashed });
-      bbLoRef.current = chart.addSeries(LineSeries, { ...lineOpts, color: info, lineWidth: 1, lineStyle: LineStyle.Dotted });
-      maFastRef.current = chart.addSeries(LineSeries, { ...lineOpts, color: accent, lineWidth: 2 });
-      maMidRef.current = chart.addSeries(LineSeries, { ...lineOpts, color: '#F0B90B', lineWidth: 2 });
-      maSlowRef.current = chart.addSeries(LineSeries, { ...lineOpts, color: '#A78BFA', lineWidth: 2 });
 
       const digits = instRef.current.digits;
       const priceFormat = { type: 'price', precision: digits, minMove: 1 / 10 ** digits } as const;
@@ -363,7 +489,6 @@ export function CandleChart({
         if (range && range.from < PAGE_TRIGGER_BARS) loadOlder();
       });
 
-      const put = (s: ISeriesApi<'Line'> | null, tm: UTCTimestamp, v: number | null) => { if (s && v != null) s.update({ time: tm, value: v }); };
       const loop = () => {
         if (disposed) return;
         const last = getLastTick();
@@ -402,14 +527,9 @@ export function CandleChart({
           if (kind === 'candles' || kind === 'bars') series.update({ time: tm, open: bar.open, high: bar.high, low: bar.low, close: bar.close } as CandlestickData);
           else series.update({ time: tm, value: bar.close } as LineData);
 
-          if (closedOne) refreshIndicators();
-          else {
-            const closes = candlesRef.current.map((x) => x.close), on = indRef.current;
-            if (on.ma7) put(maFastRef.current, tm, sma(closes, MA.fast).at(-1)!);
-            if (on.ma25) put(maMidRef.current, tm, sma(closes, MA.mid).at(-1)!);
-            if (on.ma99) put(maSlowRef.current, tm, sma(closes, MA.slow).at(-1)!);
-            if (on.bb) { const b = bollinger(closes, BB_PERIOD, BB_MULT).at(-1); if (b) { put(bbUpRef.current, tm, b.upper); put(bbMidRef.current, tm, b.mid); put(bbLoRef.current, tm, b.lower); } }
-          }
+          // One path for both cases. Appending only the newest value cannot work once displaced
+          // indicators are in play, and recomputing costs a pass per switched-on indicator.
+          if (indRef.current.size > 0) refreshIndicators();
           if (!hoverRef.current) setLegend(legendOf(bar));
           if (followingRef.current) snapToLive();
         }
@@ -426,8 +546,11 @@ export function CandleChart({
       host.removeEventListener('pointerdown', detach);
       host.removeEventListener('touchstart', detach);
       chartRef.current?.remove();
-      chartRef.current = mainRef.current = null;
-      maFastRef.current = maMidRef.current = maSlowRef.current = bbUpRef.current = bbMidRef.current = bbLoRef.current = null;
+      chartRef.current = mainRef.current = lcRef.current = null;
+      // The chart owned every indicator series and pane, so dropping the registries is the cleanup —
+      // leaving stale handles behind would have the next chart draw onto a disposed one.
+      plotsRef.current.clear();
+      markersRef.current.clear();
     };
   }, [getLastTick, chartType, setFollow, snapToLive, refreshIndicators, paint, loadOlder, scaleMode]);
 
@@ -457,7 +580,7 @@ export function CandleChart({
           <div className="relative">
             <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} className={cn(pill, menuOpen ? active : idle, 'px-2')} title="Chart features">⚙ Tools</button>
             {menuOpen ? (
-              <div className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
+              <div className="absolute right-0 top-8 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
                 <Section title="Chart type">
                   <div className="grid grid-cols-3 gap-1">
                     {CHART_TYPES.map((c) => (
@@ -472,13 +595,21 @@ export function CandleChart({
                     ))}
                   </div>
                 </Section>
-                <Section title="Indicators">
-                  <div className="grid grid-cols-2 gap-1">
-                    <Toggle on={ind.ma7} onClick={() => setInd((s) => ({ ...s, ma7: !s.ma7 }))}>MA 7</Toggle>
-                    <Toggle on={ind.ma25} onClick={() => setInd((s) => ({ ...s, ma25: !s.ma25 }))}>MA 25</Toggle>
-                    <Toggle on={ind.ma99} onClick={() => setInd((s) => ({ ...s, ma99: !s.ma99 }))}>MA 99</Toggle>
-                    <Toggle on={ind.bb} onClick={() => setInd((s) => ({ ...s, bb: !s.bb }))}>Boll 20</Toggle>
-                  </div>
+                {/* MetaTrader's Navigator tree: its groups, its order, its names. Scrolls because the
+                    list is long — which is the point of it. */}
+                {INDICATOR_GROUPS.map((g) => (
+                  <Section key={g.group} title={g.label}>
+                    <div className="grid gap-1">
+                      {g.items.map((def) => (
+                        <Toggle key={def.id} on={ind.has(def.id)} onClick={() => toggleIndicator(def.id)}>
+                          <span className="truncate">{def.name} <span className="text-[9px] opacity-70">{def.params}</span></span>
+                        </Toggle>
+                      ))}
+                    </div>
+                  </Section>
+                ))}
+                <Section title="Volumes">
+                  <p className="px-0.5 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
                 </Section>
               </div>
             ) : null}
