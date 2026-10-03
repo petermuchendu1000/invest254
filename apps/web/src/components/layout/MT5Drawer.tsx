@@ -8,7 +8,7 @@ import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { useSession } from '@/lib/auth/session';
 import { useAuthUi } from '@/lib/auth/ui';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
-import { useWallet } from '@/lib/wallet/hooks';
+import { useWallet, useWalletFigures } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { useLiveChat } from '@/lib/chat/liveChat';
@@ -75,6 +75,17 @@ export function MT5Drawer() {
   const openAuth = useAuthUi((s) => s.openAuth);
   const { logout } = useAuthActions();
   const { data: wallet } = useWallet();
+  /**
+   * Which account this is, from the ONE rule (wallet/figures).
+   *
+   * Never `wallet.mode`: a marketer's account_mode is permanently 'demo' because their stakes spend
+   * the demo bucket (migration 0084), while the money they are actually playing — and can withdraw —
+   * is presented as their REAL account. Reading `mode` straight off the wallet therefore tagged
+   * every marketer DEMO and named their server "<Brand>-Demo", on the one screen they hold up on a
+   * live stream. `figures.demo` is `marketerPractice` for a marketer and `mode` for a player, which
+   * is exactly the distinction the waves switcher has always made.
+   */
+  const figures = useWalletFigures();
   const brand = useBrand();
   const money = useDisplayMoney();
   const setChat = useLiveChat((s) => s.setOpen);
@@ -95,7 +106,7 @@ export function MT5Drawer() {
 
   if (!mt5 || !open) return null;
 
-  const demo = wallet?.mode === 'demo';
+  const demo = figures.demo;
   const server = `${brand.name || brand.slug || 'invest254'}-${demo ? 'Demo' : 'Live'}`;
   const balanceCents = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
 

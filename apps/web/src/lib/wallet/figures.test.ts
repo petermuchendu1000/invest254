@@ -149,3 +149,48 @@ test('shortfallAction: it always agrees with walletFigures about what a demo is'
     assert.equal(shortfallAction(w) === 'refill-demo', walletFigures(w).demo, JSON.stringify(w));
   }
 });
+
+// ── "DEMO" is a WORD ON SCREEN, and a marketer must never see it on their own money ─────────────
+
+/**
+ * The bug this pins: `wallet.mode` is permanently 'demo' for a marketer, because their stakes spend
+ * the demo bucket (migration 0084). Any surface that asks `wallet.mode === 'demo'` to decide what to
+ * LABEL the account therefore tags every marketer DEMO and names their server "<Brand>-Demo" — on
+ * the screen they hold up on a live stream. `figures.demo` is the only correct answer, and it is
+ * `marketerPractice` for a marketer.
+ */
+const marketerOnFunnyMoney = {
+  real: 149_242, bonus: 0, mode: 'demo' as const, modeLocked: true, marketerPractice: false,
+  realBalance: 0, demoBalance: 149_242, practiceBalance: 0,
+};
+
+test('a marketer on their own money is NOT a demo account, though wallet.mode says demo', () => {
+  assert.equal(marketerOnFunnyMoney.mode, 'demo', 'the raw field really does say demo');
+  assert.equal(walletFigures(marketerOnFunnyMoney).demo, false, 'but the account is not a demo one');
+});
+
+test('a marketer and a player on their live account agree: neither is demo', () => {
+  const player = walletFigures({ real: 149_242, bonus: 0, mode: 'real', realBalance: 149_242 });
+  assert.equal(walletFigures(marketerOnFunnyMoney).demo, player.demo);
+});
+
+test('a marketer DOES get a demo — their practice bucket — and it reads as one', () => {
+  const onPractice = walletFigures({ ...marketerOnFunnyMoney, marketerPractice: true, practiceBalance: 1_000_000 });
+  assert.equal(onPractice.demo, true, 'the practice tab is the demo account');
+  assert.equal(onPractice.canWithdraw, false, 'and it is play money, so there is no way out of it');
+  assert.equal(onPractice.demoBalance, 1_000_000);
+});
+
+test('both account types have a demo to switch to, and it is never the live balance', () => {
+  // The point of "a demo both players and marketers can use": each has a second, separate,
+  // non-withdrawable balance, and neither one's demo is the other's live money.
+  const player = walletFigures({ real: 1_000_000, bonus: 0, mode: 'demo', realBalance: 500_000, demoBalance: 1_000_000 });
+  const marketer = walletFigures({ ...marketerOnFunnyMoney, marketerPractice: true, practiceBalance: 1_000_000 });
+  for (const [who, f] of [['player', player], ['marketer', marketer]] as const) {
+    assert.equal(f.demo, true, `${who} is on demo`);
+    assert.equal(f.canWithdraw, false, `${who}'s demo offers no way out`);
+    assert.equal(f.withdrawable, 0, `${who} has nothing withdrawable while on demo`);
+    assert.ok(f.demoBalance > 0, `${who} has a funded demo balance`);
+    assert.notEqual(f.demoBalance, f.realCash, `${who}'s demo is a separate balance from their live one`);
+  }
+});
