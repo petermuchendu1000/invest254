@@ -9,8 +9,8 @@ import { useSession } from '@/lib/auth/session';
 import { useDisplayMoney } from '@/lib/money';
 import { PositionDetailModal } from '@/components/positions/PositionDetailModal';
 import {
-  EXECUTION_PRICE, PERIODS, SORTS, dealRows, moneySummary, orderRows, ordersSummary,
-  periodRange, periodSubtitle, positionRows, sortRows, stamp,
+  PERIODS, SORTS, dealRows, moneySummary, orderRows, ordersSummary,
+  periodRange, periodSubtitle, positionRows, priceText, sortRows, stamp,
   type DealRow, type HistoryTab, type OrderRow, type PeriodKey, type PositionRow, type Range,
   type SortKey,
 } from '@/lib/history/mt5history';
@@ -32,6 +32,15 @@ import { cn } from '@/lib/cn';
  */
 
 const SYMBOL = XAUUSD.symbol;
+
+/**
+ * A price as this symbol quotes it, or "at market" when the trade carries none.
+ *
+ * The engine stamps the executed price on every trade (migration 0180), so these screens print the
+ * number the player actually saw. Only a trade older than that column falls back — see
+ * EXECUTION_PRICE in lib/history/mt5history.
+ */
+const px = (price: number | null) => priceText(price, XAUUSD.digits);
 
 /** Enough pages to cover the longest preset without hammering the API on a large account. */
 const MAX_AUTO_PAGES = 20;
@@ -230,7 +239,7 @@ export function MT5History() {
                       <Td>{r.symbol}</Td>
                       <Td className={sideClass(r.side)}>{r.side}</Td>
                       <Td>{r.lots} / {r.filledLots}</Td>
-                      <Td>{EXECUTION_PRICE}</Td>
+                      <Td>{r.state === 'CANCELED' ? '—' : px(r.price)}</Td>
                       <Td className="text-[#8fa2b8]">{r.state}</Td>
                     </Row>
                   ))}
@@ -245,13 +254,15 @@ export function MT5History() {
                       <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
                       <Td>{r.entry ?? '—'}</Td>
                       <Td>{r.lots ?? '—'}</Td>
-                      <Td>{r.lots === null ? '—' : EXECUTION_PRICE}</Td>
+                      <Td>{r.lots === null ? '—' : px(r.price)}</Td>
                       <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
                     </Row>
                   ))}
                 </Table>
               ) : (
-                <Table head={['Time', 'Position', 'Symbol', 'Type', 'Volume', 'Price', 'Profit']}>
+                // MetaTrader's positions table prints the round trip's two prices side by side —
+                // what it opened at and what it closed at — which is the whole point of the tab.
+                <Table head={['Time', 'Position', 'Symbol', 'Type', 'Volume', 'Price', 'Close price', 'Profit']}>
                   {sortedClosed.map((r) => (
                     <Row key={r.id} onOpen={r.kind === 'trade' ? () => setSelected(r.id) : undefined}>
                       <Td>{stamp(r.atMs)}</Td>
@@ -259,7 +270,8 @@ export function MT5History() {
                       <Td>{r.symbol}</Td>
                       <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
                       <Td>{r.lots ?? '—'}</Td>
-                      <Td>{r.lots === null ? '—' : EXECUTION_PRICE}</Td>
+                      <Td>{r.lots === null ? '—' : px(r.entryPrice)}</Td>
+                      <Td>{r.lots === null ? '—' : px(r.exitPrice)}</Td>
                       <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
                     </Row>
                   ))}
@@ -300,7 +312,7 @@ function OrderEntry({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
     <MT5Entry
       title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side}</span></>}
       time={stamp(row.atMs)}
-      detail={`${row.lots} / ${row.filledLots} ${EXECUTION_PRICE}`}
+      detail={`${row.lots} / ${row.filledLots} ${row.state === 'CANCELED' ? '' : px(row.price)}`.trim()}
       result={<span className="text-[#8fa2b8]">{row.state}</span>}
       onOpen={onOpen}
     />
@@ -322,7 +334,7 @@ function DealEntry({ row, fmt }: { row: DealRow; fmt: (cents: number) => string 
     <MT5Entry
       title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side}, {row.entry}</span></>}
       time={stamp(row.atMs)}
-      detail={`${row.lots} ${EXECUTION_PRICE}`}
+      detail={`${row.lots} ${px(row.price)}`}
       result={row.amountCents === null ? null : <MT5Amount cents={row.amountCents} fmt={fmt} />}
     />
   );
@@ -338,7 +350,7 @@ function PositionEntry({ row, fmt, onOpen }: { row: PositionRow; fmt: (cents: nu
     <MT5Entry
       title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side} {row.lots}</span></>}
       time={stamp(row.atMs)}
-      detail={EXECUTION_PRICE}
+      detail={`${px(row.entryPrice)} \u2192 ${px(row.exitPrice)}`}
       result={<MT5Amount cents={row.amountCents} fmt={fmt} />}
       onOpen={onOpen}
     />

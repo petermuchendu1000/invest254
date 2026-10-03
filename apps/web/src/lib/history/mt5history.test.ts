@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   periodRange, periodSubtitle, dateOnly, stamp, ticketOf, isCompleted, signedCents, tradeDateOf, priceKnown,
-  orderRows, dealRows, positionRows, ordersSummary, moneySummary, sortRows,
+  orderRows, dealRows, positionRows, ordersSummary, moneySummary, sortRows, priceText, EXECUTION_PRICE,
 } from './mt5history.js';
 import type { PositionDto, TransactionDto } from '../api/types.js';
 
@@ -202,4 +202,72 @@ test('sortRows: ties fall back to newest-first, so the order is reproducible', (
     { symbol: 'X', ticket: 'c', atMs: 200, amountCents: 0 },
   ];
   assert.deepEqual(sortRows(rows, 'symbol', true).map((r) => r.ticket), ['b', 'c', 'a']);
+});
+
+// ───────────────────────────── execution price (0180) ─────────────────────────────
+
+test('priceText: quotes to the symbol\'s digits, and falls back when there is no price', () => {
+  assert.equal(priceText(2761.5, 2), '2,761.50');
+  assert.equal(priceText(2761.456, 2), '2,761.46');
+  // Below the symbol's precision, a price is still a price — it is not a missing one.
+  assert.equal(priceText(0, 2), '0.00');
+  assert.equal(priceText(null, 2), EXECUTION_PRICE);
+  assert.equal(priceText(undefined, 2), EXECUTION_PRICE);
+  assert.equal(priceText(Number.NaN, 2), EXECUTION_PRICE);
+  assert.equal(priceText(Number.POSITIVE_INFINITY, 2), EXECUTION_PRICE);
+});
+
+test('orderRows: carry the fill price, and a cancelled order carries none', () => {
+  const r = periodRange('week', NOW);
+  const [filled, canceled] = orderRows(
+    [
+      pos({ id: 'a', openedAt: NOW - DAY, result: 'win', entryPrice: 2761.47 }),
+      pos({ id: 'b', openedAt: NOW - DAY, result: 'void', entryPrice: 2761.47 }),
+    ],
+    r, 'XAUUSD', lots,
+  );
+  assert.equal(filled!.price, 2761.47);
+  // Nothing was filled, so there is no fill price to print — even though the row has one stored.
+  assert.equal(canceled!.price, null);
+});
+
+test('dealRows: the `in` deal prices at entry and the `out` deal at exit', () => {
+  const r = periodRange('week', NOW);
+  const rows = dealRows(
+    [pos({ id: 'a', openedAt: NOW - 1000, settledAt: NOW - 500, result: 'win', pnlCents: 10, entryPrice: 2761.47, exitPrice: 2765.02 })],
+    [tx({ id: 't', ts: NOW - 400 })],
+    r, 'XAUUSD', lots,
+  );
+  const inDeal = rows.find((x) => x.entry === 'in')!;
+  const outDeal = rows.find((x) => x.entry === 'out')!;
+  assert.equal(inDeal.price, 2761.47);
+  assert.equal(outDeal.price, 2765.02);
+  // A deposit has no price at all, which is not the same as an unstamped trade.
+  assert.equal(rows.find((x) => x.kind === 'balance')!.price, null);
+});
+
+test('positionRows: carry the round trip\'s two prices; a balance row carries neither', () => {
+  const r = periodRange('week', NOW);
+  const rows = positionRows(
+    [pos({ id: 'a', openedAt: NOW - 1000, settledAt: NOW - 500, result: 'win', pnlCents: 10, entryPrice: 2761.47, exitPrice: 2765.02 })],
+    [tx({ id: 't', ts: NOW - 400 })],
+    r, 'XAUUSD', lots,
+  );
+  const trade = rows.find((x) => x.kind === 'trade')!;
+  assert.equal(trade.entryPrice, 2761.47);
+  assert.equal(trade.exitPrice, 2765.02);
+  const balance = rows.find((x) => x.kind === 'balance')!;
+  assert.equal(balance.entryPrice, null);
+  assert.equal(balance.exitPrice, null);
+});
+
+test('a trade from before migration 0180 reads "at market" rather than a wrong number', () => {
+  const r = periodRange('week', NOW);
+  // No entryPrice/exitPrice at all: the shape an older API serves, and an older row stores.
+  const [row] = positionRows(
+    [pos({ id: 'a', openedAt: NOW - 1000, settledAt: NOW - 500, result: 'loss', pnlCents: -10 })],
+    [], r, 'XAUUSD', lots,
+  );
+  assert.equal(row!.entryPrice, null);
+  assert.equal(priceText(row!.entryPrice, 2), EXECUTION_PRICE);
 });

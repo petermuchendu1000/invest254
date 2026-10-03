@@ -87,16 +87,25 @@ export function MT5Toolbox() {
   /**
    * The price a rate had on ITS OWN day.
    *
-   * `priceOfRate` maps through the CURRENT day's anchor, which is right for a live position and
-   * wrong for anything settled earlier: the engine re-anchors the axis at every UTC midnight, so an
-   * old trade rendered that way printed a price that never happened — quietly, and plausibly enough
-   * that nobody would spot it. Each trade is priced from the anchor of the day it was made on,
-   * fetched from the engine (see `useDayAnchors`). Until that day's anchor has arrived — or if it
-   * falls outside the history the engine retains — the cell says what is true of every contract
-   * here, as the History screen does, rather than guessing.
+   * `stored` wins whenever it is there: since migration 0180 the engine records the executed price
+   * on the trade itself, which is the price that was shown, not a reconstruction of it — and it
+   * stays right even for a trade older than the day chain the engine retains.
+   *
+   * Otherwise the price is rebuilt from the anchor of the day the trade was made on (see
+   * `useDayAnchors`). It cannot come from the CURRENT day's anchor, which is right for a live
+   * position and wrong for anything settled earlier: the engine re-anchors the axis at every UTC
+   * midnight, so an old trade rendered that way printed a price that never happened — quietly, and
+   * plausibly enough that nobody would spot it. Until that day's anchor has arrived, or if the day
+   * is off the chain entirely, the cell says what is true of every contract here, as the History
+   * screen does, rather than guessing.
    */
-  const pxOn = (rate: number | null | undefined, atMs: number | null | undefined): string => {
+  const pxOn = (
+    rate: number | null | undefined,
+    atMs: number | null | undefined,
+    stored?: number | null | undefined,
+  ): string => {
     if (rate === null || rate === undefined || atMs === null || atMs === undefined) return '—';
+    if (typeof stored === 'number' && Number.isFinite(stored)) return stored.toFixed(digits);
     const m = getMarket();
     const a = anchors.get(tradeDateOf(atMs));
     if (!m || !a) return EXECUTION_PRICE;
@@ -271,8 +280,8 @@ export function MT5Toolbox() {
                       symbol={symbol}
                       direction={p.direction}
                       lots={lotsOfStake(p.stakeCents)}
-                      from={pxOn(p.entryRate, p.openedAt)}
-                      to={pxOn(p.exitRate, p.settledAt ?? p.openedAt)}
+                      from={pxOn(p.entryRate, p.openedAt, p.entryPrice)}
+                      to={pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}
                       profit={p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
                       profitCents={p.pnlCents ?? 0}
                       note={clock(p.openedAt)}
@@ -288,8 +297,8 @@ export function MT5Toolbox() {
                       <Td>{clock(p.openedAt)}</Td>
                       <Td className={p.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{p.direction}</Td>
                       <Td>{lotsOfStake(p.stakeCents)}</Td>
-                      <Td>{pxOn(p.entryRate, p.openedAt)}</Td>
-                      <Td>{pxOn(p.exitRate, p.settledAt ?? p.openedAt)}</Td>
+                      <Td>{pxOn(p.entryRate, p.openedAt, p.entryPrice)}</Td>
+                      <Td>{pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}</Td>
                       <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#3183ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
                         {p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
                       </Td>

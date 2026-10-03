@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_VERSIONED_CONFIG, deriveSiteDaySeed, dateKeyUTC, dayStartMs, CurveGenerator,
-  valueOfRate, XAUUSD, DAY_S, TIMEFRAMES, type Timeframe,
+  valueOfRate, priceAtRate, XAUUSD, DAY_S, TIMEFRAMES, type Timeframe,
 } from "@invest254/shared";
 import { MarketHistory, HISTORY_DAYS, MAX_BARS, MAX_ANCHORS } from "./markethistory.js";
 
@@ -213,4 +213,29 @@ test("anchors: different brands anchor differently (per-site seeds)", () => {
   const [a] = build(SITE_A).anchors([key]);
   const [b] = build(SITE_B).anchors([key]);
   assert.notEqual(a!.openValue, b!.openValue);
+});
+
+test("axis: prices a rate against its OWN day, and refuses a day off the chain", () => {
+  const h = build();
+  const axis = h.axis();
+  const today = dateKeyUTC(NOW);
+  const yesterday = dateKeyUTC(NOW - DAY_S * 1000);
+
+  // The axis agrees with the anchor list it comes from.
+  const [a] = h.anchors([today]);
+  assert.deepEqual(axis.anchorFor(today), { base: a!.base, openValue: a!.openValue });
+  assert.equal(axis.instrument.symbol, h.instrument.symbol);
+
+  // Same rate, two days — two prices, because the axis re-anchors at midnight. This is the whole
+  // reason a trade's price is stamped at execution instead of recomputed later.
+  const rate = 0.21;
+  const pToday = priceAtRate(axis, dayStartMs(today) + 3_600_000, rate);
+  const pYesterday = priceAtRate(axis, dayStartMs(yesterday) + 3_600_000, rate);
+  assert.ok(pToday !== null && pYesterday !== null);
+  assert.notEqual(pToday, pYesterday);
+
+  // Rounded to the symbol's tick, and never invented for a day the chain does not cover.
+  assert.equal(pToday, Number(pToday!.toFixed(h.instrument.digits)));
+  assert.equal(axis.anchorFor(dateKeyUTC(NOW + DAY_S * 1000)), null);
+  assert.equal(priceAtRate(axis, NOW + DAY_S * 1000, rate), null);
 });
