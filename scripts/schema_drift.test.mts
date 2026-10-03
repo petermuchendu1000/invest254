@@ -115,3 +115,24 @@ test("publishReport: outside Actions it stays a plain log, and never throws with
   const { out: out2 } = capture([item("fn_a()")], { summary: false });
   assert.equal(out2.filter((l) => l.startsWith("::error")).length, 1);
 });
+
+test("the report names the VALUE of a readable difference, so the fix can be written from it", () => {
+  const prod: Snapshot = { column: { "profiles.display_currency": "text", "profiles.id": "uuid" } };
+  const ref: Snapshot = { column: { "profiles.id": "uuid" } };
+  const items = diffSnapshots(prod, ref, {});
+  assert.deepEqual(items, [{ kind: "column", key: "profiles.display_currency", change: "only-production", prod: "text" }]);
+
+  const { out, summary } = capture(items);
+  const ann = out.find((l) => l.startsWith("::error"))!;
+  // Without the type you cannot write the migration that adopts the column.
+  assert.match(ann, /prod=text/);
+  assert.match(summary, /\| only-production \| column \| `profiles\.display_currency` \| \[prod=text\] \|/);
+});
+
+test("an md5-valued difference stays unadorned — a digest in a report is noise", () => {
+  const prod: Snapshot = { function: { "fn_a()": "aaaaaaaa" } };
+  const ref: Snapshot = { function: { "fn_a()": "bbbbbbbb" } };
+  const { out } = capture(diffSnapshots(prod, ref, {}));
+  const ann = out.find((l) => l.startsWith("::error"))!;
+  assert.ok(!ann.includes("aaaaaaaa") && !ann.includes("bbbbbbbb"), ann);
+});

@@ -50,7 +50,24 @@ export const CATALOG: Record<string, string> = {
 };
 
 export type Snapshot = Record<string, Record<string, string>>;
-export interface DriftItem { kind: string; key: string; change: "only-production" | "only-migrations" | "differs" }
+export interface DriftItem {
+  kind: string;
+  key: string;
+  change: "only-production" | "only-migrations" | "differs";
+  /**
+   * The catalog VALUE on each side, where one exists.
+   *
+   * Carried because "only-production column profiles.display_currency" tells you an orphan exists but
+   * not what it IS, and you cannot write the migration that adopts it without its type. Rendered only
+   * for the kinds whose value is readable — see READABLE_VALUE; the rest are md5 digests, which add
+   * nothing to a report.
+   */
+  prod?: string;
+  ref?: string;
+}
+
+/** Catalog kinds whose value is a fact rather than an md5 of a definition. */
+export const READABLE_VALUE = new Set(["column", "function-exec", "table-write-grant"]);
 
 /** Pure: every object that differs between production and the migrations-built reference. */
 export function diffSnapshots(prod: Snapshot, ref: Snapshot, known: Record<string, string> = KNOWN_DIFFERENCES): DriftItem[] {
@@ -58,9 +75,9 @@ export function diffSnapshots(prod: Snapshot, ref: Snapshot, known: Record<strin
   for (const kind of Object.keys(CATALOG)) {
     const p = prod[kind] ?? {}, r = ref[kind] ?? {};
     const allowed = (k: string) => `${kind === "function-exec" ? "function" : kind}:${k}` in known;
-    for (const k of Object.keys(p)) if (!(k in r) && !allowed(k)) out.push({ kind, key: k, change: "only-production" });
-    for (const k of Object.keys(r)) if (!(k in p) && !allowed(k)) out.push({ kind, key: k, change: "only-migrations" });
-    for (const k of Object.keys(p)) if (k in r && p[k] !== r[k] && !allowed(k)) out.push({ kind, key: k, change: "differs" });
+    for (const k of Object.keys(p)) if (!(k in r) && !allowed(k)) out.push({ kind, key: k, change: "only-production", prod: p[k]! });
+    for (const k of Object.keys(r)) if (!(k in p) && !allowed(k)) out.push({ kind, key: k, change: "only-migrations", ref: r[k]! });
+    for (const k of Object.keys(p)) if (k in r && p[k] !== r[k] && !allowed(k)) out.push({ kind, key: k, change: "differs", prod: p[k]!, ref: r[k]! });
   }
   return out.sort((a, b) => (a.kind + a.key).localeCompare(b.kind + b.key));
 }
@@ -99,7 +116,12 @@ async function buildReference(client: pg.Client): Promise<void> {
  * ten per step, and a truncated drift report is a misleading drift report.
  */
 export function publishReport(items: DriftItem[]): void {
-  const lines = items.map((i) => `${i.change.padEnd(16)} ${i.kind.padEnd(18)} ${i.key}`);
+  const detail = (i: DriftItem): string => {
+    if (!READABLE_VALUE.has(i.kind)) return "";
+    const parts = [i.prod === undefined ? "" : `prod=${i.prod}`, i.ref === undefined ? "" : `migrations=${i.ref}`].filter(Boolean);
+    return parts.length ? `  [${parts.join(" ")}]` : "";
+  };
+  const lines = items.map((i) => `${i.change.padEnd(16)} ${i.kind.padEnd(18)} ${i.key}${detail(i)}`);
   for (const l of lines) console.log(`  ${l}`);
   if (!process.env.GITHUB_ACTIONS) return;
 
@@ -123,9 +145,9 @@ export function publishReport(items: DriftItem[]): void {
       "",
       `\`${tally}\``,
       "",
-      "| change | kind | object |",
-      "| --- | --- | --- |",
-      ...items.map((i) => `| ${i.change} | ${i.kind} | \`${i.key.replace(/\|/g, "\\|")}\` |`),
+      "| change | kind | object | value |",
+      "| --- | --- | --- | --- |",
+      ...items.map((i) => `| ${i.change} | ${i.kind} | \`${i.key.replace(/\|/g, "\\|")}\` |${detail(i) ? ` ${detail(i).trim()} |` : " |"}`),
       "",
       "`only-production` = something exists in the database that no migration builds (the out-of-band",
       "change this gate exists to catch). `only-migrations` = a migration was recorded but its object is",
