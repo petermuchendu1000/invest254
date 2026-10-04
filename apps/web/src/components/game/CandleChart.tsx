@@ -8,6 +8,10 @@ import type { Candle } from '@invest254/shared/chart';
 import {
   INDICATOR_BY_ID, INDICATOR_GROUPS, VOLUME_GROUP_NOTE, type Plot,
 } from '@/lib/chart/indicatorCatalog';
+import { ChartDrawings, type Projection } from '@/components/game/ChartDrawings';
+import {
+  TOOLS, parseDrawings, serializeDrawings, storageKey, type Drawing, type ToolId,
+} from '@/lib/chart/drawings';
 import { TIMEFRAME_KEYS, TIMEFRAMES, bucketStartS, valueOfRate, XAUUSD, type MarketSymbol, type Timeframe } from '@invest254/shared/candles';
 import type { CandlesReply } from '@/lib/game/GameSocketProvider';
 import type { ConnStatus, Tick } from '@/lib/game/types';
@@ -150,6 +154,18 @@ export function CandleChart({
   const [scaleMode, setScaleMode] = useState<ScaleMode>('normal');
   const [ind, setInd] = useState<Enabled>(() => new Set<string>());
   const indRef = useRef<Enabled>(ind); indRef.current = ind;
+  /**
+   * The drawing rail's state. `revision` is bumped whenever the visible range moves, which is what
+   * re-projects every object onto its bars after a pan or zoom — objects are stored in time/price,
+   * so without it they would paint once and then drift away from the candles they mark.
+   */
+  const [tool, setTool] = useState<ToolId>('cursor');
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [selectedDrawing, setSelectedDrawing] = useState<string | null>(null);
+  const [plotSize, setPlotSize] = useState({ w: 0, h: 0 });
+  const [revision, setRevision] = useState(0);
+  const plotRef = useRef<HTMLDivElement>(null);
+  const resizeObsRef = useRef<ResizeObserver | null>(null);
   const followingRef = useRef(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [legend, setLegend] = useState<Legend | null>(null);
@@ -166,6 +182,34 @@ export function CandleChart({
     setTf(next);
     try { window.localStorage.setItem(TF_STORAGE_KEY, next); } catch { /* non-fatal */ }
   }, []);
+
+  // Objects survive a reload, as MetaTrader's do, and are kept per symbol.
+  useEffect(() => {
+    try { setDrawings(parseDrawings(window.localStorage.getItem(storageKey(instrument.symbol)))); }
+    catch { setDrawings([]); }
+    setSelectedDrawing(null);
+  }, [instrument.symbol]);
+  const changeDrawings = useCallback((next: Drawing[]) => {
+    setDrawings(next);
+    try { window.localStorage.setItem(storageKey(instRef.current.symbol), serializeDrawings(next)); }
+    catch { /* private mode — the objects still work for this session */ }
+  }, []);
+
+  /**
+   * Project between the chart's coordinates and pixels.
+   *
+   * Read from the live chart on every call rather than captured, because the mapping changes with
+   * every pan, zoom and new bar; a captured projection would place objects where the chart USED to
+   * be. Returns null off-scale so a half-visible object is clipped rather than drawn at the edge.
+   */
+  const projection: Projection = {
+    xOf: (time) => chartRef.current?.timeScale().timeToCoordinate(time as UTCTimestamp) ?? null,
+    yOf: (price) => mainRef.current?.priceToCoordinate(price) ?? null,
+    timeOf: (x) => (chartRef.current?.timeScale().coordinateToTime(x) as number | null) ?? null,
+    priceOf: (y) => mainRef.current?.coordinateToPrice(y) ?? null,
+    barSeconds: TIMEFRAMES[tf] ?? 60,
+    digits: instrument.digits,
+  };
 
   const setFollow = useCallback((v: boolean) => { followingRef.current = v; }, []);
   const legendOf = (c: Candle): Legend => ({ o: c.open, h: c.high, l: c.low, c: c.close, changePct: c.open ? ((c.close - c.open) / c.open) * 100 : 0 });
@@ -321,6 +365,17 @@ export function CandleChart({
       if (Array.isArray(ids)) setInd(new Set(ids.filter((x): x is string => typeof x === 'string' && INDICATOR_BY_ID.has(x))));
     } catch { /* private mode / corrupt value — no indicators is a fine default */ }
   }, []);
+
+  /**
+   * The crosshair tool is not a drawing tool — it switches the chart's own crosshair to MAGNET,
+   * which snaps it to the nearest OHLC value. That is what the icon means in MetaTrader, and it is
+   * why the tool belongs on the rail beside the objects rather than in the settings menu.
+   */
+  useEffect(() => {
+    const chart = chartRef.current, lc = lcRef.current;
+    if (!chart || !lc) return;
+    chart.applyOptions({ crosshair: { mode: tool === 'crosshair' ? lc.CrosshairMode.Magnet : lc.CrosshairMode.Normal } });
+  }, [tool]);
 
   // Price-scale mode is applied live (no rebuild).
   useEffect(() => {
@@ -487,7 +542,19 @@ export function CandleChart({
       // Scrolled near the left edge ⇒ fetch the page before it (MT5/TradingView lazy history).
       chart.timeScale().subscribeVisibleLogicalRangeChange((range: LogicalRange | null) => {
         if (range && range.from < PAGE_TRIGGER_BARS) loadOlder();
+        // Objects live in time/price, so every view change has to re-project them onto their bars.
+        setRevision((r) => r + 1);
       });
+
+      // Keep the drawing surface the size of the plot, so its coordinate space is the chart's.
+      const measurePlot = () => {
+        const el = plotRef.current;
+        if (el) setPlotSize({ w: el.clientWidth, h: el.clientHeight });
+      };
+      measurePlot();
+      const ro = new ResizeObserver(measurePlot);
+      if (plotRef.current) ro.observe(plotRef.current);
+      resizeObsRef.current = ro;
 
       const loop = () => {
         if (disposed) return;
@@ -546,6 +613,8 @@ export function CandleChart({
       host.removeEventListener('pointerdown', detach);
       host.removeEventListener('touchstart', detach);
       chartRef.current?.remove();
+      resizeObsRef.current?.disconnect();
+      resizeObsRef.current = null;
       chartRef.current = mainRef.current = lcRef.current = null;
       // The chart owned every indicator series and pane, so dropping the registries is the cleanup —
       // leaving stale handles behind would have the next chart draw onto a disposed one.
@@ -622,9 +691,38 @@ export function CandleChart({
 
       {/* Body = left drawing rail + plot (TradingView layout). */}
       <div className="flex min-h-0 flex-1">
-        <DrawRail />
-        <div className="relative min-h-0 flex-1">
+        <DrawRail
+          tool={tool}
+          onPick={(id) => {
+            if (id === 'trash') {
+              // Delete the selected object, or clear the lot when nothing is selected — which is
+              // what a bin with no selection can only sensibly mean.
+              changeDrawings(selectedDrawing ? drawings.filter((d) => d.id !== selectedDrawing) : []);
+              setSelectedDrawing(null);
+              return;
+            }
+            setSelectedDrawing(null);
+            setTool(id);
+          }}
+          count={drawings.length}
+          hasSelection={selectedDrawing !== null}
+        />
+        <div ref={plotRef} className="relative min-h-0 flex-1">
           <div ref={hostRef} className="h-full w-full" aria-label={`${instrument.symbol} price chart`} role="img" />
+          <ChartDrawings
+            tool={tool}
+            project={projection}
+            drawings={drawings}
+            onChange={changeDrawings}
+            // MetaTrader drops back to the cursor once an object is placed, rather than drawing a
+            // second one on the next tap.
+            onToolDone={() => setTool('cursor')}
+            selected={selectedDrawing}
+            onSelect={setSelectedDrawing}
+            width={plotSize.w}
+            height={plotSize.h}
+            revision={revision}
+          />
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
             <span className="select-none text-4xl font-black uppercase tracking-widest text-white/[0.04]">{instrument.symbol}</span>
           </div>
@@ -657,39 +755,58 @@ export function CandleChart({
 }
 
 /**
- * Left drawing rail — the TradingView Supercharts tool column (cursor, crosshair, trend/horizontal
- * lines, Fibonacci, text, measure, …). Cosmetic chrome that completes the terminal look; the chart's
- * own pointer tools (pan/zoom/crosshair) remain active in the plot to its right.
+ * Left drawing rail — MetaTrader's object toolbar, and it draws.
+ *
+ * It used to be eight icons that did nothing: "cosmetic chrome that completes the terminal look".
+ * Each one now selects a real tool (see lib/chart/drawings for the geometry, ChartDrawings for the
+ * surface). `crosshair` is not a drawing tool — it switches the chart's own crosshair to magnet
+ * mode, which is what the icon means in MetaTrader.
  */
-function DrawRail() {
-  const tools: { d: string; label: string }[] = [
-    { d: 'M5 3l6 14 2-6 6-2z', label: 'Cursor' },
-    { d: 'M12 3v18M3 12h18', label: 'Crosshair' },
-    { d: 'M4 20L20 4', label: 'Trend line' },
-    { d: 'M3 12h18', label: 'Horizontal line' },
-    { d: 'M5 19l4-9 3 5 3-8 4 12', label: 'Pitchfork' },
-    { d: 'M6 4v16M18 4v16M3 9h18M3 15h18', label: 'Fibonacci' },
-    { d: 'M4 7h16M4 12h10M4 17h16', label: 'Text' },
-    { d: 'M7 4h10l-5 16z', label: 'Measure' },
-  ];
+function DrawRail({
+  tool, onPick, count, hasSelection,
+}: {
+  tool: ToolId;
+  onPick: (id: ToolId) => void;
+  count: number;
+  hasSelection: boolean;
+}) {
   return (
-    <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2b3543] bg-[#202933] py-1.5" aria-hidden>
-      {tools.map((t, i) => (
-        <span
-          key={t.label}
+    <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2b3543] bg-[#202933] py-1.5">
+      {TOOLS.map((t) => (
+        <button
+          key={t.id}
+          type="button"
           title={t.label}
-          className={cn('grid h-8 w-8 place-items-center rounded-md', i === 0 ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8]')}
+          aria-label={t.label}
+          aria-pressed={tool === t.id}
+          onClick={() => onPick(t.id)}
+          className={cn(
+            'grid h-8 w-8 shrink-0 place-items-center rounded-md transition',
+            tool === t.id ? 'bg-[#3183ff] text-white' : 'text-[#8fa2b8] hover:bg-[#2b3543] hover:text-white',
+          )}
         >
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d={t.d} />
+            <path d={t.icon} />
           </svg>
-        </span>
+        </button>
       ))}
-      <span className="mt-auto grid h-8 w-8 place-items-center rounded-md text-[#8fa2b8]" title="Trash" aria-hidden>
+      {/* The bin deletes the selected object, or clears the chart when nothing is selected. Disabled
+          with nothing to remove, so it never looks like it did something it could not. */}
+      <button
+        type="button"
+        title={hasSelection ? 'Delete selected object' : 'Clear all objects'}
+        aria-label={hasSelection ? 'Delete selected object' : 'Clear all objects'}
+        onClick={() => onPick('trash')}
+        disabled={count === 0}
+        className={cn(
+          'mt-auto grid h-8 w-8 shrink-0 place-items-center rounded-md transition',
+          count === 0 ? 'cursor-not-allowed text-[#2b3543]' : 'text-[#8fa2b8] hover:bg-[#2b3543] hover:text-[#f23645]',
+        )}
+      >
         <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13" />
         </svg>
-      </span>
+      </button>
     </div>
   );
 }

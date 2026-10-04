@@ -7,6 +7,8 @@ import { MK } from '@/lib/marketer/labels';
 import { cn } from '@/lib/cn';
 import { useCountUp } from '@/lib/useCountUp';
 import { useOutcomeFx, BALANCE_BUMP_EVENT, type OutcomeHeadline } from '@/lib/game/outcomeFx';
+import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
+import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 
 interface Theme {
   ring: string;
@@ -82,6 +84,12 @@ function prefersReducedMotion(): boolean {
 export function OutcomeOverlay() {
   const { fmt } = useDisplayMoney();
   const { isMarketer } = useMarketerSkin();
+  /**
+   * MetaTrader does not celebrate. A closed position is reported as a plain dialog — the figures,
+   * the profit coloured, and a button — so on a terminal brand this drops the confetti, the glow,
+   * the pop and the flying payout chip, and states the result instead.
+   */
+  const mt5 = useTerminalSkin();
   const current = useOutcomeFx((s) => s.current);
   const clear = useOutcomeFx((s) => s.clear);
   const [visible, setVisible] = useState(false);
@@ -144,7 +152,7 @@ export function OutcomeOverlay() {
 
   // Confetti (wins only, motion allowed).
   useEffect(() => {
-    if (!visible || !current || !theme.celebratory) return;
+    if (!visible || !current || !theme.celebratory || mt5) return;
     if (prefersReducedMotion()) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -274,23 +282,30 @@ export function OutcomeOverlay() {
       {/* Backdrop */}
       <div className="absolute inset-0 bg-bg/70 backdrop-blur-sm" />
 
-      {/* Confetti canvas (wins) */}
-      {theme.celebratory ? (
+      {/* Confetti canvas (wins) — never on a terminal. */}
+      {theme.celebratory && !mt5 ? (
         <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
       ) : null}
 
       {/* Result card */}
       <div
         ref={cardRef}
+        style={mt5 ? MT5_TOKENS : undefined}
         className={cn(
-          'relative z-10 w-full max-w-xs rounded-2xl border bg-surface p-6 text-center',
-          theme.ring,
-          theme.glow,
-          visible ? 'animate-[pp-pop_320ms_cubic-bezier(0.2,0.9,0.2,1)]' : '',
-          !won && current.result === 'loss' ? 'animate-[pp-shake_320ms_ease-in-out]' : '',
+          'relative z-10 w-full border bg-surface',
+          mt5
+            // Square, unlit, and headed by MetaTrader's blue band — a dialog, not a prize.
+            ? 'mt5-square max-w-[300px] overflow-hidden rounded-sm border-[#2b3543] text-left'
+            : cn('max-w-xs rounded-2xl p-6 text-center', theme.ring, theme.glow,
+                 visible ? 'animate-[pp-pop_320ms_cubic-bezier(0.2,0.9,0.2,1)]' : '',
+                 !won && current.result === 'loss' ? 'animate-[pp-shake_320ms_ease-in-out]' : ''),
         )}
       >
-        <div className="flex items-center justify-center gap-2">
+        {mt5 ? (
+          <div className="bg-[#3183ff] px-3 py-2 text-[13px] font-semibold text-white">Position closed</div>
+        ) : null}
+        <div className={cn(mt5 && 'px-4 pb-4 pt-3')}>
+        <div className={cn('flex items-center gap-2', mt5 ? 'justify-start' : 'justify-center')}>
           <span className={cn('text-xs font-bold uppercase tracking-[0.2em]', theme.chipText)}>
             {title}
           </span>
@@ -319,16 +334,18 @@ export function OutcomeOverlay() {
             setVisible(false);
           }}
           className={cn(
-            'mt-5 h-10 w-full rounded-xl text-sm font-semibold transition',
+            'mt-5 h-10 w-full text-sm font-semibold transition',
+            mt5 ? 'rounded-sm' : 'rounded-xl',
             won ? 'bg-up text-white hover:opacity-90' : 'bg-surface-2 text-fg hover:bg-border',
           )}
         >
           {won ? 'Collect' : 'Continue'}
         </button>
+        </div>
       </div>
 
-      {/* Flying payout chip (wins) */}
-      {won ? (
+      {/* Flying payout chip (wins) — a terminal states the profit, it does not throw it. */}
+      {won && !mt5 ? (
         <div
           ref={flyRef}
           className={cn(

@@ -332,7 +332,7 @@ export function AuthModal() {
   /* ── password updated confirmation ─────────────────────────────────────────── */
   if (isReset && resetDone) {
     return (
-      <Modal open={open} onClose={close} title="Password updated" chrome={false} panelStyle={mt5 ? MT5_TOKENS : undefined}>
+      <Modal open={open} onClose={close} title="Password updated" chrome={false} panelStyle={mt5 ? MT5_TOKENS : undefined} panelClassName={mt5 ? 'mt5-square sm:!rounded-sm' : undefined}>
         <Header onClose={close} />
         <div className="flex flex-col items-center gap-3 px-6 pb-8 pt-2 text-center">
           <CheckIcon />
@@ -349,7 +349,7 @@ export function AuthModal() {
   }
 
   return (
-    <Modal open={open} onClose={close} title={copy.title} chrome={false} panelStyle={mt5 ? MT5_TOKENS : undefined}>
+    <Modal open={open} onClose={close} title={copy.title} chrome={false} panelStyle={mt5 ? MT5_TOKENS : undefined} panelClassName={mt5 ? 'mt5-square sm:!rounded-sm' : undefined}>
       <Header onClose={close} mt5={mt5} title={copy.title} />
 
       {/* Title block — left aligned, tight hierarchy. MetaTrader's blue bar already carries the

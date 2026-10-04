@@ -14,7 +14,7 @@ import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useHydrated } from '@/lib/useHydrated';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { api } from '@/lib/api/endpoints';
-import { LivePnl } from '@/components/game/LivePnl';
+import { MT5LivePosition } from '@/components/game/MT5LivePosition';
 import { useTakeProfitStore } from '@/lib/game/takeprofit';
 import { MT5Price } from '@/components/game/MT5Price';
 import { cn } from '@/lib/cn';
@@ -138,9 +138,8 @@ export function MT5OrderTicket() {
 
   if (activePosition) {
     return (
-      <div className="flex flex-col gap-2 rounded-xl border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
-        <LivePnl pos={activePosition} />
-        <p className="text-center text-[11px] text-[#8fa2b8]">Settles automatically when the timer ends</p>
+      <div className="flex flex-col gap-2 rounded border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
+        <MT5LivePosition pos={activePosition} symbol={symbol} />
       </div>
     );
   }
