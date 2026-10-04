@@ -55,6 +55,9 @@ export function WalletModal() {
       title={active === 'deposit' ? 'Deposit' : 'Withdraw'}
       chrome={false}
       panelStyle={mt5 ? MT5_CONFIRM_TOKENS : undefined}
+      // The tokens repaint the colours of all 1,100 lines of payment code below; `mt5-square` is the
+      // other half — the radii, which are literal classes and so survive a token repaint.
+      panelClassName={mt5 ? 'mt5-square sm:!rounded-sm' : undefined}
     >
       {/* Header. MetaTrader's is a solid blue band with the screen name and a close control. */}
       <div
