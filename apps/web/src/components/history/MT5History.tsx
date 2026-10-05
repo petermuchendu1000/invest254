@@ -47,7 +47,10 @@ const MAX_AUTO_PAGES = 20;
 
 const TAB_LABELS: Record<HistoryTab, string> = { positions: 'Positions', orders: 'Orders', deals: 'Deals' };
 
-export function MT5History() {
+export function MT5History({ embedded = false }: {
+  /** Rendered inside the phone shell's History tab rather than on the /history route. */
+  embedded?: boolean;
+}) {
   const token = useSession((s) => s.token);
   const money = useDisplayMoney();
 
@@ -118,6 +121,7 @@ export function MT5History() {
           band. One instrument is quoted, so "All symbols" is a statement of fact rather than a picker
           that would open on a list of one. */}
       <MT5TitleBar
+        embedded={embedded}
         title="History"
         subtitle="All symbols"
         actions={<>

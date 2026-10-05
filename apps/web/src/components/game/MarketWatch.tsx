@@ -18,6 +18,8 @@ import { MT5SymbolsDialog } from '@/components/game/MT5SymbolsDialog';
 import { useSymbolSetStore, MAX_WATCHED } from '@/lib/game/symbolSet';
 import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
 import { detailRows, sessionSoFar } from '@/lib/game/symbolDetails';
+import { MT5MobileQuoteMenu } from '@/components/game/mobile/MT5MobileQuoteMenu';
+import { useQuotesViewStore, useRestoreQuotesView } from '@/lib/game/quotesView';
 import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
 
@@ -59,7 +61,14 @@ const TABS: ReadonlyArray<{ id: Tab; label: string; unavailable?: string }> = [
   },
 ];
 
-export function MarketWatch({ className }: { className?: string }) {
+export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
+  className?: string;
+  phone?: boolean;
+  /** Phone only: leave the Quotes tab for the chart, which is where `Chart` goes. */
+  onChart?: (() => void) | undefined;
+  /** Phone only: open the New Order screen, which is where `New order` goes. */
+  onNewOrder?: (() => void) | undefined;
+}) {
   const { getMarket, requestCandles, requestSymbols, getSymbolQuote } = useGameSocketApi();
   const { status } = useGameSocket();
   const money = useDisplayMoney();
@@ -116,6 +125,15 @@ export function MarketWatch({ className }: { className?: string }) {
 
   /** The row the Details tab and the Specification dialog describe. */
   const [selected, setSelected] = useState<string | null>(null);
+  /**
+   * The phone's own two pieces of Quotes state: which row's context menu is open, and MetaTrader's
+   * Advanced/Simple view mode. Neither exists on a desktop, where the menu is positioned at the
+   * pointer and every row is the full grid.
+   */
+  const [sheet, setSheet] = useState<string | null>(null);
+  const view = useQuotesViewStore((st) => st.view);
+  const toggleView = useQuotesViewStore((st) => st.toggle);
+  useRestoreQuotesView();
   const active = selected !== null && visible.includes(selected)
     ? selected
     : visible.includes(defaultSymbol ?? '') ? defaultSymbol! : visible[0] ?? defaultSymbol ?? 'XAUUSD';
@@ -240,17 +258,60 @@ export function MarketWatch({ className }: { className?: string }) {
   });
 
   return (
-    <aside className={cn('flex flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] text-[#ffffff]', className)}>
+    <aside className={cn(
+      'flex flex-col overflow-hidden bg-[#0f1720] text-[#ffffff]',
+      // On a phone this IS the Quotes tab, filling the screen, so it has no card edge to draw.
+      phone ? '' : 'rounded-xl border border-[#2b3543]',
+      className,
+    )}>
+      {/* On a phone, a tab other than Symbols is a SCREEN pushed over the list, so its bar is a back
+          chevron and the screen's name — there is no tab strip down there to get back with. */}
+      {phone && tab !== 'symbols' ? (
+        <div className="flex items-center gap-1 border-b border-[#2b3543] px-1 py-2">
+          <button
+            type="button"
+            onClick={() => setTab('symbols')}
+            aria-label="Back to quotes"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded text-[#3183ff]"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
+              <path d="M15 5l-7 7 7 7" />
+            </svg>
+          </button>
+          <span className="text-[14px] font-semibold text-white">
+            {tab === 'details' ? 'Market statistics' : TABS.find((t) => t.id === tab)?.label}
+          </span>
+        </div>
+      ) : (
       <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8fa2b8]">Market Watch</span>
-        {/* No add button up here: MetaTrader puts its `+` at the BOTTOM of the list, on the add
-            row with the shown/available counter, and nowhere else. */}
+        {/* The window is "Market Watch" on a desktop and the tab is "Quotes" on a phone, and those
+            are MetaTrader's own two names for it. The phone bar is `☰ | Quotes | ＋ | ✎`; the
+            hamburger lives on the chart screen's bar in this shell and the pencil's job (hide,
+            reorder) is the row context menu, so the `＋` is what is carried over. */}
+        <span className={cn('font-semibold text-[#8fa2b8]', phone ? 'text-[14px] text-white' : 'text-[11px] uppercase tracking-wide')}>
+          {phone ? 'Quotes' : 'Market Watch'}
+        </span>
         <span className="ml-auto" />
+        {/* On a DESKTOP there is no add button up here: MetaTrader puts its `+` at the BOTTOM of the
+            list, on the add row with the shown/available counter, and nowhere else. */}
+        {phone ? (
+          <button
+            type="button"
+            onClick={() => setSymbolsOpen(true)}
+            aria-label="Add symbol"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded text-[#3183ff]"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-5 w-5" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        ) : null}
         <span
           className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
           title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
         />
       </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {tab === 'symbols' ? (
@@ -280,7 +341,21 @@ export function MarketWatch({ className }: { className?: string }) {
                 const glyph = gutterGlyph(toneInput);
                 const open = q?.anchor.base ?? null;
                 const price = q?.price ?? null;
-                const changePct = price !== null && open ? ((price - open) / open) * 100 : null;
+                /**
+                 * The daily change, in points and in per cent, derived from ONE figure.
+                 *
+                 * They used to be computed independently and could disagree about the sign: a row
+                 * whose price was a hair under its open printed "+0" beside "-0.00%", because the
+                 * points figure rounded to zero and took the positive branch while the percent kept
+                 * its sign through `toFixed`. Rounding first and reading the sign off the rounded
+                 * points fixes both halves at once.
+                 */
+                const points = price !== null && open !== null
+                  ? Math.round((price - open) * 10 ** digits)
+                  : null;
+                const changePct = price !== null && open
+                  ? (points === 0 ? 0 : ((price - open) / open) * 100)
+                  : null;
                 return (
                   <button
                     key={symbol}
@@ -295,7 +370,13 @@ export function MarketWatch({ className }: { className?: string }) {
                      * Details is a tab the trader chooses. It also made the double-click below
                      * impossible, because the first of its two clicks unmounted the row.
                      */
-                    onClick={() => setSelected(symbol)}
+                    onClick={() => {
+                      setSelected(symbol);
+                      // "To open the context menu, tap on the ... line in the list" — Android's own
+                      // gesture, and the only one a phone has: there is no right-click to reach the
+                      // desktop menu with, and no second pane for a selection to drive.
+                      if (phone) setSheet(symbol);
+                    }}
                     /**
                      * Drag a symbol onto the chart to chart it. MetaQuotes, verbatim: "A symbol
                      * chart can be opened by dragging it to the chart viewing area using a mouse
@@ -319,11 +400,90 @@ export function MarketWatch({ className }: { className?: string }) {
                     onDoubleClick={() => openChart(symbol)}
                     onContextMenu={(e) => { e.preventDefault(); setSelected(symbol); setMenu({ x: e.clientX, y: e.clientY, symbol }); }}
                     className={cn(
-                      'flex w-full items-center gap-2 px-2 py-1.5 text-left transition hover:bg-[#202933]',
+                      'w-full text-left transition hover:bg-[#202933]',
+                      phone
+                        ? (view === 'simple' ? 'flex items-center gap-2 px-3 py-3' : 'flex items-start gap-2 px-3 py-2')
+                        : 'flex items-center gap-2 px-2 py-1.5',
                       grid ? 'border-b border-[#2b3543]/60' : '',
                       symbol === active ? 'bg-[#202933]' : '',
                     )}
                   >
+                    {phone && view === 'simple' ? (
+                      /* MetaTrader Android's reduced row: "In the simple view mode only the Bid and
+                         Ask prices are shown." One price here, for the reason the panel's header
+                         comment gives, so the row is the symbol and that price. */
+                      <>
+                        <span aria-hidden className="w-3 shrink-0 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
+                          {GUTTER_GLYPH[glyph]}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-white">{symbol}</span>
+                        <span className="shrink-0 text-right">
+                          {price === null
+                            ? <span className="font-mono text-[11px] text-[#4a5666]">waiting</span>
+                            : <MT5Price value={price} digits={digits} className="text-[13px]" style={{ color: colour }} />}
+                        </span>
+                      </>
+                    ) : phone ? (
+                      /**
+                       * MetaTrader's PHONE quote row, which is a different row from the desktop
+                       * grid rather than the same one narrowed (docs/mt5/04-mobile-app.md section 2,
+                       * read off `android/en/quotes.png`). Two columns, three lines on the left:
+                       *
+                       *     +151  0.14%                      1.08 07⁶
+                       *     EURUSD
+                       *     15:09:42  ⌶ 0
+                       *
+                       * Line 1 is the daily change: the POINTS figure grey and never colour-coded,
+                       * the percent blue when positive and red when negative. That split is
+                       * measured, not guessed, and it is the detail this row is most easily got
+                       * wrong on. Line 2 is the symbol, bold and the largest text in the row. Line 3
+                       * is the last quote's time, then the I-beam spread glyph and the spread.
+                       *
+                       * ON THE RIGHT MetaTrader prints Bid and Ask side by side with `L:` and `H:`
+                       * beneath them. There is one price here and no spread, for the reason the
+                       * panel's own header comment gives, so the right column carries that one price
+                       * and the spread reads 0 rather than an invented figure.
+                       *
+                       * `L:`/`H:` are ABSENT, and that is a gap rather than a decision: the quote
+                       * the engine fans out carries no day range, and fetching a day of bars per
+                       * watched symbol from a phone to derive one would be the wrong way to get it.
+                       * The engine already holds the day, so the range belongs on the quote.
+                       */
+                      <>
+                        <span aria-hidden className="w-3 shrink-0 pt-1 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
+                          {GUTTER_GLYPH[glyph]}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-baseline gap-1.5 font-mono text-[10px] tabular-nums">
+                            <span className="text-[#969696]">
+                              {points === null ? '' : `${points > 0 ? '+' : ''}${points}`}
+                            </span>
+                            <span style={{ color: changePct === null || points === 0 ? '#969696' : changePct > 0 ? '#3183ff' : '#f23645' }}>
+                              {changePct === null ? '' : `${changePct.toFixed(2)}%`}
+                            </span>
+                          </span>
+                          <span className="block truncate text-[15px] font-bold leading-tight text-white">{symbol}</span>
+                          <span className="flex items-center gap-1.5 font-mono text-[10px] tabular-nums text-[#8fa2b8]">
+                            <span>{q?.t ? clockOf(q.t) : ''}</span>
+                            {/* The I-beam MetaTrader draws beside the spread: two short verticals
+                                joined by a rule. Drawn, not typed — U+2336 is absent from most
+                                Android system fonts and renders as a box. */}
+                            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="h-2.5 w-2.5" aria-hidden>
+                              <path d="M3 2h6M3 10h6M6 2v8" />
+                            </svg>
+                            <span>0</span>
+                          </span>
+                        </span>
+                        <span className="shrink-0 pt-0.5 text-right">
+                          {price === null ? (
+                            <span className="font-mono text-[11px] text-[#4a5666]">waiting</span>
+                          ) : (
+                            <MT5Price value={price} digits={digits} className="text-[13px]" style={{ color: colour }} />
+                          )}
+                        </span>
+                      </>
+                    ) : (
+                    <>
                     {/* MetaTrader's gutter glyph: a thin green arrow, a thin red arrow, or a grey
                         dot where the price has not moved. It sits INSIDE the Symbol column rather
                         than in a column of its own, which is why there is no header above it.
@@ -357,6 +517,8 @@ export function MarketWatch({ className }: { className?: string }) {
                     <span className="w-[46px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8]">
                       {changePct === null ? '' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
                     </span>
+                    </>
+                    )}
                   </button>
                 );
               })}
@@ -368,6 +530,9 @@ export function MarketWatch({ className }: { className?: string }) {
                   MetaTrader turns the row itself into an inline field with an autocomplete list;
                   this opens the Symbols dialog, which is the same search over the same catalogue in
                   a window a phone can use. */}
+              {/* MetaTrader's add row is a DESKTOP control: its phone app puts the `+` in the top
+                  bar, which this panel already does, so the row would be the same action twice. */}
+              {phone ? null : (
               <button
                 type="button"
                 data-quote-add=""
@@ -380,6 +545,7 @@ export function MarketWatch({ className }: { className?: string }) {
                   {visible.length} / {catalogue.length || visible.length}
                 </span>
               </button>
+              )}
             </div>
           )
         ) : tab === 'trading' || tab === 'ticks' ? (
@@ -434,6 +600,35 @@ export function MarketWatch({ className }: { className?: string }) {
         )}
       </div>
 
+      {/* MetaTrader Android's Quotes row menu, which a TAP opens on a phone. Its six items are its
+          own, in its own order; see MT5MobileQuoteMenu. */}
+      {phone && sheet !== null ? (
+        <MT5MobileQuoteMenu
+          title={sheet}
+          subtitle={describe(sheet) === '' ? 'Instrument' : describe(sheet)}
+          onDismiss={() => setSheet(null)}
+          items={[
+            // "hidden when not connected to the server" — MetaTrader's own rule for this item, and
+            // the only one of the six it drops rather than disables.
+            ...(status === 'open'
+              ? [{
+                  label: 'New order',
+                  ...(sheet === defaultSymbol
+                    ? { onPick: () => { openChart(sheet); onNewOrder?.(); } }
+                    : { unavailable: `This brand settles ${defaultSymbol ?? 'one symbol'} only, so an order cannot be placed on ${sheet}.` }),
+                }]
+              : []),
+            { label: 'Chart', onPick: () => { openChart(sheet); onChart?.(); } },
+            // MetaTrader's phone calls the symbol specification "Properties".
+            { label: 'Properties', onPick: () => { setSelected(sheet); setSpecOpen(true); } },
+            { label: 'Depth of Market', unavailable: 'This engine quotes one price per symbol and keeps no order book, so there is no depth to show.' },
+            // Its "Market statistics" is the session figures, which is this panel's Details tab.
+            { label: 'Market statistics', onPick: () => { setSelected(sheet); setTab('details'); } },
+            { label: 'Advanced view mode', checked: view === 'advanced', onPick: toggleView },
+          ]}
+        />
+      ) : null}
+
       {menu ? (
         <MT5MarketWatchMenu
           at={{ x: menu.x, y: menu.y }}
@@ -477,6 +672,12 @@ export function MarketWatch({ className }: { className?: string }) {
       ) : null}
 
       {/* MetaTrader's Market Watch tabs sit along the bottom of the panel, as the Toolbox's do. */}
+      {/* MetaTrader's four Market Watch tabs are a DESKTOP window's tabs. Its phone app has no
+          such strip: it reaches the same places from the row's own context menu, and stacking a
+          second bar under the five-tab bar would put two rows of chrome along the bottom of a
+          360px screen. Details is reached from `Market statistics`, and the Specification from
+          `Properties`. */}
+      {phone ? null : (
       <div data-mw-tabs="" className="flex gap-0.5 border-t border-[#2b3543] bg-[#202933] px-1 py-1">
         {TABS.map((t) => (
           <button
@@ -495,6 +696,7 @@ export function MarketWatch({ className }: { className?: string }) {
           </button>
         ))}
       </div>
+      )}
     </aside>
   );
 }

@@ -11,6 +11,7 @@ import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { ActivePosition } from '@/lib/game/betting';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
+import { cn } from '@/lib/cn';
 import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
 import type { Timeframe } from '@invest254/shared/candles';
 import type { Tick } from '@/lib/game/types';
@@ -47,7 +48,7 @@ function useMarketerBeat(active: ActivePosition | null): MarketerBeat {
  * (`CandleChart`) opening on THAT series type. ADDON-1: area/bars/baseline used to fall back to the line curve,
  * so brands paid for a chart their players never saw. Both views share the authoritative tick stream.
  */
-export function GameCurve() {
+export function GameCurve({ phone = false }: { phone?: boolean } = {}) {
   const { getTicks, getLastTick, requestCandles, getSymbolQuote, getMarket } = useGameSocketApi();
   /**
    * The symbol the chart is on. Null means the brand's own — the one it settles — so the default
@@ -118,7 +119,12 @@ export function GameCurve() {
         // device on the old one. Same rule as Market Watch's own `openChart`.
         setCharted(dropped === defaultSymbol ? null : dropped);
       }}
-      className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface"
+      className={cn(
+        'relative h-full min-h-0 w-full overflow-hidden bg-surface',
+        // On a phone the chart IS the screen, the way MetaTrader's Charts tab is: a card border and
+        // rounded corners around a full-bleed view would only take pixels off the plot.
+        phone ? '' : 'rounded-xl border border-border',
+      )}
     >
       {/* Candlestick/OHLC brands render the TradingView view; line brands render the wave. The wave's
           neutralized form (no price axis, labels or red/green) is now reached only by a player who
@@ -131,6 +137,7 @@ export function GameCurve() {
           requestCandles={chartCandles}
           status={status}
           symbol={symbol}
+          phone={phone}
           openPosition={activePosition && activePosition.entryRate !== null
             ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents) }
             : null}

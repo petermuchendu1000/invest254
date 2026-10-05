@@ -1,20 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import type { Direction } from '@invest254/shared';
-import { valueOfRate } from '@invest254/shared/candles';
-import { LOT_STAKE_CENTS } from '@invest254/shared/account';
-import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
-import { useChartSymbolStore } from '@/lib/game/chartSymbol';
-import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useDisplayMoney } from '@/lib/money';
-import { useSession } from '@/lib/auth/session';
-import { useWallet } from '@/lib/wallet/hooks';
-import { useDepositUi } from '@/lib/wallet/depositUi';
-import { useHydrated } from '@/lib/useHydrated';
-import { useBrand } from '@/lib/brand/BrandProvider';
-import { api } from '@/lib/api/endpoints';
+import { useStakeLimits } from '@/lib/game/useStakeLimits';
+import { useOrderEntry, DURATION_OPTIONS, durationLabel } from '@/lib/game/useOrderEntry';
 import { MT5LivePosition } from '@/components/game/MT5LivePosition';
 import { useRestoreTakeProfit, useTakeProfitStore } from '@/lib/game/takeprofit';
 import { MT5Price } from '@/components/game/MT5Price';
@@ -41,93 +29,32 @@ import { cn } from '@/lib/cn';
  */
 
 /**
- * The contract terms this ticket offers, in seconds. Exported because the Specification dialog
- * states them as the instrument's Expiration: none of MetaTrader's four expiration values describes
- * a contract that runs on a timer the trader picks, so the timers themselves are the honest answer.
+ * The contract terms and their labels now live with the order logic, in lib/game/useOrderEntry,
+ * because the one-click panel offers the same terms. Re-exported here because the Specification
+ * dialog and Market Watch already import them from this module: none of MetaTrader's four
+ * expiration values describes a contract that runs on a timer the trader picks, so the timers
+ * themselves are what its Expiration row states.
  */
-export const DURATION_OPTIONS = [10, 30, 60, 120];
-
-/** "10s", "1m", "2m" — the same labels the Expiry row prints. */
-export const durationLabel = (s: number): string => (s < 60 ? `${s}s` : `${s / 60}m`);
+export { DURATION_OPTIONS, durationLabel };
 /** MetaTrader's own volume increments, offered as the two "+" buttons. */
 const VOLUME_STEPS = [0.01, 0.1] as const;
 
 export function MT5OrderTicket() {
-  const hydrated = useHydrated();
-  const brand = useBrand();
-  const token = useSession((s) => s.token);
-  const openDeposit = useDepositUi((s) => s.openDeposit);
+  /**
+   * The order itself — volume, limits, duration, the live quote and `place()` — comes from
+   * `useOrderEntry`, which the chart's one-click panel uses too. This component is the CONTROLS:
+   * MetaTrader's stepper, its S/L and T/P rows, its fill policy and its two by-Market buttons.
+   */
+  const order = useOrderEntry();
+  const {
+    ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
+    lots, minLots, maxLots, volDigits, bump, stakeCents, overBalance, signedIn,
+    durationS, setDurationS, durations, place, activePosition, earlyCloseEnabled,
+    tick, priceOfRate, market,
+  } = order;
   const money = useDisplayMoney();
   const limits = useStakeLimits();
-  const { data: wallet } = useWallet();
-  const { status, activePosition, openPosition, earlyCloseEnabled } = useGameSocket();
-  const { getLastTick, getMarket, getSymbolQuote } = useGameSocketApi();
-  const charted = useChartSymbolStore((st) => st.symbol);
-  const setCharted = useChartSymbolStore((st) => st.set);
-  const { data: config } = useQuery({
-    queryKey: ['gameConfig', brand.slug],
-    queryFn: () => api.gameConfig(brand.slug),
-    staleTime: 5 * 60_000,
-  });
 
-  const defaultDurationS = config?.defaultDurationS ?? 10;
-  const [durationS, setDurationS] = useState<number>(defaultDurationS);
-  useEffect(() => { setDurationS(defaultDurationS); }, [defaultDurationS]);
-
-  // Quote updates ride the tick stream, which does not re-render React on its own.
-  const [, force] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => force((n) => (n + 1) % 1_000_000), 250);
-    return () => clearInterval(id);
-  }, []);
-
-  const market = getMarket();
-  /**
-   * The ticket follows the CHART, as MetaTrader's does: its order dialog belongs to the symbol you
-   * opened it on. This brand settles one of them, so every other symbol is quoted and charted with
-   * MetaTrader's own `Disabled` trade mode, and the ticket says so rather than offering a button
-   * that would open a position on a different instrument from the one on screen.
-   */
-  const quote = charted === null ? null : getSymbolQuote(charted);
-  const tradeDisabled = charted !== null;
-  const settledSymbol = market?.instrument.symbol ?? 'XAUUSD';
-  const symbol = charted ?? settledSymbol;
-  const digits = quote?.instrument.digits ?? market?.instrument.digits ?? 2;
-  const tick = getLastTick();
-  const priceOfRate = (rate: number | null | undefined): number | null =>
-    market && rate !== null && rate !== undefined
-      ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue)
-      : null;
-  const price = charted === null ? (tick ? priceOfRate(tick.rate) : null) : quote?.price ?? null;
-
-  // ── Volume ─────────────────────────────────────────────────────────────────────────────────────
-  // Lots are the stake divided by the contract size. The brand's MINIMUM is the floor, so the
-  // smallest selectable volume is whatever that minimum is worth — exactly how MetaTrader derives a
-  // symbol's minimum volume — rather than a round number that would sit under it.
-  const minLots = limits.minCents / LOT_STAKE_CENTS;
-  // A brand may set no ceiling; the wallet is then the only limit, so volume is left open.
-  const maxLots = (limits.maxCents ?? Number.MAX_SAFE_INTEGER) / LOT_STAKE_CENTS;
-  // If the minimum is not a whole number of 0.01 lots, show the extra decimal rather than print a
-  // rounded volume that does not match the stake actually sent.
-  const volDigits = Math.abs(minLots * 100 - Math.round(minLots * 100)) < 1e-9 ? 2 : 3;
-  const [lots, setLots] = useState<number>(minLots);
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (seeded.current || !limits.ready) return;
-    seeded.current = true;
-    setLots(minLots);
-  }, [limits.ready, minLots]);
-
-  const clampLots = (v: number): number => {
-    const snapped = Number(v.toFixed(volDigits));
-    return Math.min(maxLots, Math.max(minLots, snapped));
-  };
-  const bump = (delta: number) => setLots((v) => clampLots(v + delta));
-
-  const stakeCents = Math.round(lots * LOT_STAKE_CENTS);
-  const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
-  const overBalance = !!token && stakeCents > spendable;
-  const connecting = status !== 'open';
   // S/L and T/P sit on the ticket in MetaTrader, so they sit here. The target is shared with the
   // Toolbox row, which modifies it on an open contract exactly as MetaTrader does.
   const tpTarget = useTakeProfitStore((st) => st.targetCents);
@@ -141,27 +68,7 @@ export function MT5OrderTicket() {
     setTp(next <= 0 ? null : next);
   };
 
-  const durations = useMemo(
-    () => Array.from(new Set([...DURATION_OPTIONS, defaultDurationS])).sort((a, b) => a - b),
-    [defaultDurationS],
-  );
-
-  function place(dir: Direction) {
-    if (connecting) return;
-    // Defence in depth behind the disabled buttons: this brand settles one symbol, and an order
-    // raised while the chart is on another would open a position on an instrument the trader is
-    // not looking at.
-    if (tradeDisabled) return;
-    // A logged-out or short-funded tap is real buying intent: route it to the deposit sheet seeded
-    // with this stake, which then resumes the trade. Same behaviour as the classic panel.
-    if (!token || overBalance) {
-      openDeposit({ amountCents: stakeCents, pending: { direction: dir, stakeCents } });
-      return;
-    }
-    openPosition({ stakeCents, direction: dir, durationS });
-  }
-
-  if (!hydrated) {
+  if (!ready) {
     return <div className="h-40 animate-pulse rounded-xl border border-[#2b3543] bg-[#0f1720]" />;
   }
 
@@ -326,7 +233,7 @@ export function MT5OrderTicket() {
           Trade disabled for {symbol}.{' '}
           <button
             type="button"
-            onClick={() => setCharted(null)}
+            onClick={order.chartSettled}
             className="underline underline-offset-2 transition hover:text-white"
           >
             Chart {settledSymbol}
@@ -335,7 +242,7 @@ export function MT5OrderTicket() {
         </p>
       ) : null}
       {connecting ? <p className="text-center text-[11px] text-[#8fa2b8]">Connecting…</p> : null}
-      {overBalance && token ? (
+      {overBalance && signedIn ? (
         <p className="text-center text-[11px] text-[#f0b90b]">Not enough free margin: tap a side to top up.</p>
       ) : null}
     </div>
