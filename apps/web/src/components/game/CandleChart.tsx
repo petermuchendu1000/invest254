@@ -175,10 +175,20 @@ interface Legend { o: number; h: number; l: number; c: number; changePct: number
 type Anchor = CandlesReply['anchor'];
 
 export function CandleChart({
-  getLastTick, requestCandles, status, initialType = 'candles', openPosition = null,
+  getLastTick, requestCandles, status, initialType = 'candles', openPosition = null, symbol,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
+  /**
+   * The symbol this chart is drawing, when the caller is tracking one.
+   *
+   * It is not used to FETCH anything — `requestCandles` is already bound to it by the caller — only
+   * to tell the live edge which instrument the bars it is extending belong to. Between a symbol
+   * change and the new history landing, `getLastTick` is already the new symbol's while the anchor
+   * is still the old one, and pricing one against the other would draw a bar at a price that never
+   * existed on either instrument.
+   */
+  symbol?: string | undefined;
   /** Connection state, so history can be refetched after a drop. */
   status: ConnStatus;
   initialType?: MainType;
@@ -213,6 +223,9 @@ export function CandleChart({
   const candlesRef = useRef<Candle[]>([]);
   const anchorRef = useRef<Anchor | null>(null);
   const instRef = useRef<MarketSymbol>(XAUUSD);
+  /** The requested symbol, read inside the animation loop, which never re-renders. */
+  const symbolRef = useRef(symbol);
+  symbolRef.current = symbol;
   const hoverRef = useRef(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
   const resumeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -897,7 +910,10 @@ export function CandleChart({
         // Ticks after UTC midnight belong to a new seeded day with a new base; pricing them against
         // yesterday's anchor would step the whole chart. The history effect refetches on its own —
         // until it does, leave the last closed bar standing rather than draw a wrong one.
-        if (last && anchor && series && utcDateKey(last.t) === anchor.tradeDate) {
+        // The symbol guard is the second half of the same rule as the day guard below it: draw only
+        // when the tick, the anchor and the instrument all belong together.
+        const sameSymbol = symbolRef.current === undefined || instRef.current.symbol === symbolRef.current;
+        if (last && anchor && series && sameSymbol && utcDateKey(last.t) === anchor.tradeDate) {
           const inst = instRef.current;
           const raw = anchor.base + inst.scale * (valueOfRate(last.rate) - anchor.openValue);
           const f = 10 ** inst.digits;
@@ -1151,7 +1167,13 @@ export function CandleChart({
             // One line, always. Wrapped onto two it covered the top of the plot on a phone, so the
             // full O/H/L/C set appears from `sm` up and a narrow screen gets close + change — which
             // is what MetaTrader's own mobile chart shows.
-            <div className="pointer-events-none absolute left-2 top-1.5 z-20 flex items-baseline gap-x-2 overflow-hidden whitespace-nowrap font-mono text-[11px] tabular-nums">
+            <div
+              // The symbol and period this chart is drawing, as one readable string. Also the hook
+              // that lets a test read the CHART's own instrument rather than the screen's, which
+              // matters now that Market Watch quotes other symbols a few pixels to the left.
+              data-chart-legend={`${instrument.symbol} ${tf}`}
+              className="pointer-events-none absolute left-2 top-1.5 z-20 flex items-baseline gap-x-2 overflow-hidden whitespace-nowrap font-mono text-[11px] tabular-nums"
+            >
               {/* Show ticker is the symbol and period; Show OHLC is the four prices. MetaTrader
                   couples them: unticking the ticker unticks OHLC, so OHLC never shows alone. */}
               {props.showTicker ? <span className="font-semibold" style={{ color: TV.text }}>{instrument.symbol}</span> : null}

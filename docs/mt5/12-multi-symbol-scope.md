@@ -168,10 +168,10 @@ That is reference data, it is static, and it is the low-risk half of the licensi
 | 4 | ~~`MarketHistory` per symbol, cached per `(site, symbol)`~~ **DONE** | `apps/engine/src/symbolhistories.ts` (new), `siteregistry.ts`, `markethistory.ts` | M |
 | 5a | ~~Socket protocol: symbol list, symbol on the candles and anchors requests~~ **DONE (engine)** | `apps/engine/src/multiengine.ts` | S |
 | 5b | ~~Per-symbol LIVE quotes: subscribe/unsubscribe, one quote message per socket per tick~~ **DONE** | `apps/engine/src/multiengine.ts`, `GameSocketProvider` | M |
-| 6 | Position records its symbol (migration + repo + receipts) | `packages/db/migrations/0182_*`, repo | M |
+| 6 | Position records its symbol (migration + repo + receipts) — **BLOCKED, see 6a** | `packages/db/migrations/0182_*`, repo | M |
 | 7 | Per-brand symbol assignment, so a brand can offer a subset | DB + admin | M |
 | 8 | ~~Market Watch becomes a real list; the context menu's `Symbols`, `Sort`, `Hide` become live~~ **DONE** | `MarketWatch.tsx`, `MT5SymbolsDialog.tsx`, `lib/game/symbolSet.ts` | M |
-| 9 | Chart symbol switching, with drawings and properties already stored per symbol | `CandleChart.tsx` | S (both already key off symbol) |
+| 9 | ~~Chart symbol switching~~ **DONE** (drawings and properties already keyed off symbol) | `CandleChart.tsx`, `GameCurve.tsx`, `lib/game/chartSymbol.ts` | S |
 
 Items 8 and 9 are the only UI work; 1 to 7 are platform.
 
@@ -351,6 +351,55 @@ The money side needs care rather than courage:
 
 `exposureRows` was written to take a list and net per symbol, so the Exposure tab needs no change at
 all. That was not foresight about this decision; it was what the MetaTrader tab genuinely means.
+
+### 6a. Why the position's symbol is blocked, and why it is not like the execution price
+
+The display price (migration 0180) is written by a separate UPDATE after the atomic money RPC
+returns, never awaited, because a missed stamp costs nothing: the column stays null and the client
+prints "at market".
+
+**The symbol cannot work that way.** It is an input to settlement, not a record of it: in the
+statistical path the curve decides win or loss, so a position opened on EURUSD has to settle on
+EURUSD's curve. Crash recovery reconstructs a position from its seed, nonce and config version, so
+if a fire-and-forget symbol write were lost, recovery would settle that position on the wrong
+curve — different money, not a missing label. That makes it a trade attribute like `direction` and
+`duration_s`, and those live inside `fn_open_position`.
+
+So item 6 needs the atomic open RPC extended, and this container has no `DATABASE_URL`. Writing a
+377-line money-RPC rewrite that cannot be executed even once is the wrong kind of brave, so it is
+not written here. What it needs, when the database is reachable:
+
+1. `positions.symbol text` (nullable; null means the brand's own symbol, which is every row that
+   exists today).
+2. `fn_open_position` extended with `p_symbol`. Note the signature trap: `create or replace` with an
+   extra parameter creates an OVERLOAD rather than replacing, and a default would then make the
+   10-argument call ambiguous. The old signature has to be dropped in the same migration.
+3. The engine settling on that symbol's curve, which means `SeedManager` caching a context per
+   `(day, config, symbol)` rather than per `(day, config)`.
+4. Recovery reading the symbol back, since it is what decides which curve to reconstruct.
+
+### 9. Chart symbol switching, and the honest state of the ones it cannot trade
+
+The chart switches symbol: double-click a Market Watch row, or `Chart Window` from its context menu.
+The choice is stored per device, the drawings and chart properties were already keyed off the
+symbol, and the live edge follows the charted instrument rather than the brand's own tick stream.
+
+The interesting part is what happens to the ORDER TICKET, because item 6 is blocked and this brand
+settles exactly one symbol. The ticket follows the chart, as MetaTrader's does, and on any other
+symbol it refuses the order and says `Trade disabled for <SYMBOL>` with a link back to the tradable
+one.
+
+That is not a gap dressed up as a feature. `Trade` is a real row in MetaTrader's own Specification
+dialog, and `Disabled` is one of its five values: a broker sets it on a symbol it quotes and charts
+but will not accept an order on. The Specification dialog here now prints exactly that for every
+symbol the brand does not settle, so the ticket and the specification agree, and a trader who checks
+why gets MetaTrader's own answer. When item 6 lands, those symbols become `Full access` and the same
+ticket starts taking orders on them.
+
+Two guards behind the disabled buttons, because a disabled button is not a money-path argument:
+`place()` returns early on a disabled symbol, and an OPEN position is named and priced with the
+symbol the brand settles rather than the charted one — otherwise a gold contract would be labelled
+EURUSD and its P/L drawn against the wrong axis.
 
 ## 8. What is NOT in scope
 

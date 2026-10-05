@@ -15,7 +15,8 @@ import {
   MT5Specification, MT5MarketWatchMenu, marketWatchMenu,
 } from '@/components/game/MT5Specification';
 import { MT5SymbolsDialog } from '@/components/game/MT5SymbolsDialog';
-import { useRestoreSymbolSet, useSymbolSetStore, MAX_WATCHED } from '@/lib/game/symbolSet';
+import { useSymbolSetStore, MAX_WATCHED } from '@/lib/game/symbolSet';
+import { useChartSymbolStore } from '@/lib/game/chartSymbol';
 import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
 
@@ -58,7 +59,7 @@ const TABS: ReadonlyArray<{ id: Tab; label: string; unavailable?: string }> = [
 ];
 
 export function MarketWatch({ className }: { className?: string }) {
-  const { getMarket, requestCandles, requestSymbols, subscribeSymbols, getSymbolQuote } = useGameSocketApi();
+  const { getMarket, requestCandles, requestSymbols, getSymbolQuote } = useGameSocketApi();
   const { status } = useGameSocket();
   const money = useDisplayMoney();
   const [tab, setTab] = useState<Tab>('symbols');
@@ -70,13 +71,14 @@ export function MarketWatch({ className }: { className?: string }) {
   const [grid, setGrid] = useState(true);
   const limits = useStakeLimits();
 
-  useRestoreSymbolSet();
   const watched = useSymbolSetStore((s) => s.watched);
   const hide = useSymbolSetStore((s) => s.hide);
   const hideAll = useSymbolSetStore((s) => s.hideAll);
   const showAll = useSymbolSetStore((s) => s.showAll);
   const sortList = useSymbolSetStore((s) => s.sort);
   const replace = useSymbolSetStore((s) => s.replace);
+  const charted = useChartSymbolStore((s) => s.symbol);
+  const setCharted = useChartSymbolStore((s) => s.set);
 
   /** The brand's whole catalogue, which the Symbols dialog shows as MetaTrader's group tree. */
   const [catalogue, setCatalogue] = useState<readonly SymbolRow[]>([]);
@@ -107,12 +109,9 @@ export function MarketWatch({ className }: { className?: string }) {
     [watched, bySymbol, catalogue.length],
   );
 
-  // Tell the engine which symbols to quote. Re-sent whenever the set changes; the provider re-arms
-  // it after a reconnect on its own.
-  const watchKey = visible.join(',');
-  useEffect(() => {
-    subscribeSymbols(watchKey === '' ? [] : watchKey.split(','));
-  }, [subscribeSymbols, watchKey]);
+  // Which symbols the engine quotes is decided in one place for the whole screen (see
+  // lib/game/chartSymbol's useQuoteSubscription), because the subscription is a set per socket and
+  // two components sending their own would take turns clobbering each other.
 
   /** The row the Details tab and the Specification dialog describe. */
   const [selected, setSelected] = useState<string | null>(null);
@@ -189,8 +188,20 @@ export function MarketWatch({ className }: { className?: string }) {
   const show = (n: number | null | undefined, digits = activeDigits) => (n === null || n === undefined ? '-' : n.toFixed(digits));
   const describe = (symbol: string) => bySymbol.get(symbol)?.description ?? '';
 
+  /**
+   * MetaTrader's `Chart Window`: open the clicked symbol's chart.
+   *
+   * Switching back to the brand's own symbol stores null rather than its name, so a brand changing
+   * its instrument does not strand the device on the old one.
+   */
+  const chartSymbol = charted ?? defaultSymbol;
+  const openChart = useCallback((symbol: string) => {
+    setCharted(symbol === defaultSymbol ? null : symbol);
+  }, [setCharted, defaultSymbol]);
+
   const menuItems = marketWatchMenu({
     onSpecification: () => setSpecOpen(true),
+    ...(menu?.symbol && menu.symbol !== chartSymbol ? { onChartWindow: () => openChart(menu.symbol!) } : {}),
     ...(catalogue.length > 0 ? { onSymbols: () => setSymbolsOpen(true) } : {}),
     ...(menu?.symbol ? { onHide: () => hide(menu.symbol!) } : {}),
     ...(visible.length > 0 ? { onHideAll: hideAll, onSort: sortList } : {}),
@@ -254,7 +265,18 @@ export function MarketWatch({ className }: { className?: string }) {
                     type="button"
                     data-quote-row={symbol}
                     aria-pressed={symbol === active}
-                    onClick={() => { setSelected(symbol); setTab('details'); }}
+                    /**
+                     * A click SELECTS, and that is all it does.
+                     *
+                     * It used to switch to the Details tab as well, which took the list off screen
+                     * the moment a row was touched: MetaTrader's Symbols tab stays on the list and
+                     * Details is a tab the trader chooses. It also made the double-click below
+                     * impossible, because the first of its two clicks unmounted the row.
+                     */
+                    onClick={() => setSelected(symbol)}
+                    // MetaTrader opens a symbol's chart from this window; double-click is its own
+                    // shortcut for it, and the context menu's `Chart Window` is the long way round.
+                    onDoubleClick={() => openChart(symbol)}
                     onContextMenu={(e) => { e.preventDefault(); setSelected(symbol); setMenu({ x: e.clientX, y: e.clientY, symbol }); }}
                     className={cn(
                       'flex w-full items-center gap-2 px-2 py-1.5 text-left transition hover:bg-[#202933]',
@@ -262,7 +284,9 @@ export function MarketWatch({ className }: { className?: string }) {
                       symbol === active ? 'bg-[#202933]' : '',
                     )}
                   >
-                    <span className="w-[72px] shrink-0 truncate text-[11px] font-bold text-white">{symbol}</span>
+                    {/* The symbol the chart is on, so the window says which one is on screen. */}
+                    <span aria-hidden className={cn('w-1 shrink-0 self-stretch rounded-sm', symbol === chartSymbol ? 'bg-[#3183ff]' : '')} />
+                    <span className="w-[68px] shrink-0 truncate text-[11px] font-bold text-white">{symbol}</span>
                     <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#8fa2b8]">
                       {changePct === null ? '' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
                     </span>
@@ -340,6 +364,12 @@ export function MarketWatch({ className }: { className?: string }) {
             volumeStep: 0.01,
             expiries: DURATION_OPTIONS.map(durationLabel),
             volumeDigits: 3,
+            /**
+             * Only the symbol this brand settles accepts an order. Every other one is quoted and
+             * charted but not tradable, which is MetaTrader's own `Disabled` trade mode rather than
+             * a gap: a broker sets it on a symbol it quotes and will not accept an order on.
+             */
+            tradeMode: active === defaultSymbol ? 'Full access' : 'Disabled',
           }}
           onDismiss={() => setSpecOpen(false)}
         />

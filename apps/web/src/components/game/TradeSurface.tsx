@@ -13,6 +13,8 @@ import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
+import { useRestoreSymbolSet } from '@/lib/game/symbolSet';
+import { useRestoreChartSymbol, useQuoteSubscription } from '@/lib/game/chartSymbol';
 
 /**
  * Chooses the trade layout for the current brand:
@@ -43,6 +45,18 @@ export function TradeSurface() {
   // (CandleChart) and the wave's top-right corner (GameCurve) — so this screen no longer spends a
   // row of a viewport-locked phone layout on it.
   const isTerminalBrand = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
+
+  /**
+   * The symbol preferences, restored and subscribed in ONE place for the whole screen.
+   *
+   * The engine's quote subscription is a set per socket, so two components each sending their own
+   * would take turns clobbering each other: opening a chart would stop the watch list quoting, and
+   * the next change to the list would stop the chart. Market Watch and the chart only write to
+   * their stores; this screen is what talks to the socket.
+   */
+  useRestoreSymbolSet();
+  useRestoreChartSymbol();
+  useQuoteSubscription(isTerminalBrand && !isMarketer);
 
   if (ui === 'digits') return <DigitsTradeScreen />;
 

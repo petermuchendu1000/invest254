@@ -58,6 +58,26 @@ interface SymbolSetState {
  */
 export const MAX_WATCHED = 20;
 
+/**
+ * The set of symbols to ask the engine to quote: the charted one, then the watch list, deduplicated
+ * and capped.
+ *
+ * The chart's symbol goes first so that when the union exceeds the cap it is the tail of the watch
+ * list that is dropped rather than the instrument on screen. Pulled out of the hook because the
+ * ordering rule is the whole substance of it, and a rule worth stating is worth testing.
+ */
+export function quoteSubscription(
+  charted: string | null,
+  watched: readonly string[],
+  cap: number = MAX_WATCHED,
+): string[] {
+  const out: string[] = [];
+  for (const s of [...(charted === null ? [] : [charted]), ...watched]) {
+    if (s && !out.includes(s) && out.length < cap) out.push(s);
+  }
+  return out;
+}
+
 const STORAGE_KEY = 'pp-market-watch';
 
 const persist = (watched: readonly string[]): void => {
