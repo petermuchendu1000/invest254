@@ -114,8 +114,14 @@ separate branch.
 (Note: 78.6 is NOT an MT5 default. Fan/Arcs use 38.2/50/61.8; Expansion 61.8/100/161.8.)
 
 **Objects List (Ctrl+B)** — columns Object · Name · Description · Window; buttons Show ·
-Properties · Delete · List all. Object Properties tabs: Common · Parameters · Levels ·
-Visualization.
+Properties · Delete · List all. Object Properties tabs: **Common · Levels · Parameters ·
+Visualization** — Levels is SECOND, and appears only on the Fibonacci tools and Andrews'
+Pitchfork, so most objects show three tabs. (This line previously gave the order as Common ·
+Parameters · Levels · Visualization, which MetaQuotes' own screenshots contradict.)
+
+The window title is not "Objects List": it is `Objects on <SYMBOL>,<TIMEFRAME> (<count>)`.
+Both dialogs are specified field by field, from the screenshots, in
+[07-objects-list-and-properties.md](./07-objects-list-and-properties.md).
 
 MetaQuotes' help twice claims "46 analytical objects" while its own category pages and
 `ENUM_OBJECT` both enumerate 44. Unreconciled.

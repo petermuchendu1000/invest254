@@ -8,10 +8,14 @@ import { heikinAshi, heikinAshiBar, type Candle } from '@invest254/shared/chart'
 import {
   INDICATOR_BY_ID, INDICATOR_GROUPS, VOLUME_GROUP_NOTE, type Plot,
 } from '@/lib/chart/indicatorCatalog';
-import { ChartDrawings, type Projection } from '@/components/game/ChartDrawings';
+import { ChartDrawings, DrawingsBackdrop, type Projection } from '@/components/game/ChartDrawings';
 import {
-  TOOLS, parseDrawings, serializeDrawings, storageKey, type Drawing, type ToolId,
+  TOOLS, parseDrawings, serializeDrawings, storageKey, type Drawing, type DrawingKind, type ToolId,
 } from '@/lib/chart/drawings';
+import { OBJECT_GROUPS, objectOf } from '@/lib/chart/objects';
+import { MT5ObjectMenu, type ObjectMenuAt } from '@/components/game/MT5ObjectMenu';
+import { MT5ObjectsList } from '@/components/game/MT5ObjectsList';
+import { MT5ObjectProperties } from '@/components/game/MT5ObjectProperties';
 import { TIMEFRAME_KEYS, TIMEFRAMES, bucketStartS, valueOfRate, XAUUSD, type MarketSymbol, type Timeframe } from '@invest254/shared/candles';
 import type { CandlesReply } from '@/lib/game/GameSocketProvider';
 import type { ConnStatus, Tick } from '@/lib/game/types';
@@ -196,7 +200,18 @@ export function CandleChart({
    */
   const [tool, setTool] = useState<ToolId>('cursor');
   const [drawings, setDrawings] = useState<Drawing[]>([]);
+  /**
+   * The current objects, read outside React's update cycle, and written beside every `setDrawings`.
+   *
+   * The undo stack is pushed to from here, NOT from inside a `setDrawings` updater: React may run
+   * an updater more than once for the same change, which would push one deletion onto the stack
+   * twice and make the first Undo Delete restore it and the second restore it again.
+   */
+  const drawingsRef = useRef<Drawing[]>([]);
   const [selectedDrawing, setSelectedDrawing] = useState<string | null>(null);
+  const [objectsListOpen, setObjectsListOpen] = useState(false);
+  const [propertiesFor, setPropertiesFor] = useState<string | null>(null);
+  const [objectMenu, setObjectMenu] = useState<ObjectMenuAt | null>(null);
   const [plotSize, setPlotSize] = useState({ w: 0, h: 0 });
   const [revision, setRevision] = useState(0);
   const plotRef = useRef<HTMLDivElement>(null);
@@ -220,14 +235,90 @@ export function CandleChart({
 
   // Objects survive a reload, as MetaTrader's do, and are kept per symbol.
   useEffect(() => {
-    try { setDrawings(parseDrawings(window.localStorage.getItem(storageKey(instrument.symbol)))); }
-    catch { setDrawings([]); }
+    let restored: Drawing[] = [];
+    try { restored = parseDrawings(window.localStorage.getItem(storageKey(instrument.symbol))); }
+    catch { restored = []; }
+    drawingsRef.current = restored;
+    setDrawings(restored);
     setSelectedDrawing(null);
+    // A different symbol's objects are a different chart's: nothing deleted on the old one is
+    // restorable onto this one.
+    undoRef.current = [];
+    setCanUndoDelete(false);
   }, [instrument.symbol]);
-  const changeDrawings = useCallback((next: Drawing[]) => {
+  /**
+   * Every deletion is recorded so MetaTrader's "Undo Delete" can restore it.
+   *
+   * It is captured HERE rather than at each delete button, because objects are removed from four
+   * places (the rail's bin, the Objects List, the Delete and Backspace keys, the context menu) and
+   * an undo that only covered some of them would be worse than none.
+   */
+  const undoRef = useRef<Drawing[][]>([]);
+  const [canUndoDelete, setCanUndoDelete] = useState(false);
+  const persistDrawings = useCallback((next: Drawing[]) => {
+    drawingsRef.current = next;
     setDrawings(next);
     try { window.localStorage.setItem(storageKey(instRef.current.symbol), serializeDrawings(next)); }
     catch { /* private mode — the objects still work for this session */ }
+  }, []);
+
+  const changeDrawings = useCallback((next: Drawing[]) => {
+    const kept = new Set(next.map((d) => d.id));
+    const removed = drawingsRef.current.filter((d) => !kept.has(d.id));
+    if (removed.length > 0) {
+      undoRef.current = [...undoRef.current.slice(-19), removed];
+      setCanUndoDelete(true);
+    }
+    persistDrawings(next);
+  }, [persistDrawings]);
+
+  /** MetaTrader's "Undo Delete": "restore the last deleted object". */
+  const undoDelete = useCallback(() => {
+    const batch = undoRef.current.pop();
+    setCanUndoDelete(undoRef.current.length > 0);
+    if (!batch || batch.length === 0) return;
+    const prev = drawingsRef.current;
+    persistDrawings([...prev, ...batch.filter((d) => !prev.some((p) => p.id === d.id))]);
+  }, [persistDrawings]);
+
+  /**
+   * MetaTrader's Objects List "Show": scroll the chart until the object is on screen.
+   *
+   * The object's own time span sets the range, with a margin either side so it does not land
+   * against the edge, and a single-anchor object (a horizontal line, an arrow) gets the current
+   * window's width centred on it rather than a zero-width range.
+   */
+  const showObject = useCallback((id: string) => {
+    const chart = chartRef.current;
+    const d = drawings.find((x) => x.id === id);
+    if (!chart || !d || d.points.length === 0) return;
+    const times = d.points.map((pt) => pt.time);
+    const from = Math.min(...times), to = Math.max(...times);
+    const bar = TIMEFRAMES[tf] ?? 60;
+    const pad = Math.max(bar * 8, (to - from) * 0.15);
+    try {
+      chart.timeScale().setVisibleRange({
+        from: ((from - pad) as unknown) as UTCTimestamp,
+        to: ((to + pad) as unknown) as UTCTimestamp,
+      });
+      // Scrolling away from the live edge means the chart must stop snapping back to it.
+      followingRef.current = false;
+    } catch { /* the object is outside the loaded history; the list still selected it */ }
+  }, [drawings, tf]);
+
+  // Ctrl+B, which is MetaTrader's own shortcut for the Objects List. Not while a field has focus:
+  // a dialog's own text boxes keep their editing keys.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el !== null && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        setObjectsListOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   /**
@@ -238,13 +329,44 @@ export function CandleChart({
    * be. Returns null off-scale so a half-visible object is clipped rather than drawn at the edge.
    */
   const projection: Projection = {
-    xOf: (time) => chartRef.current?.timeScale().timeToCoordinate(time as UTCTimestamp) ?? null,
+    /**
+     * Chart time to pixels.
+     *
+     * `timeToCoordinate` answers only for times the series actually HAS, so a ray extended four
+     * spans past its anchors, which is how a Gann Fan and a Fibonacci Fan are drawn, asks about a
+     * time beyond the last bar and gets null. That used to make the whole fan disappear rather
+     * than run off the edge. Past the data the coordinate is extrapolated at the bar spacing the
+     * chart is currently using, so a ray leaves the plot in the direction it should and the SVG
+     * clips it, which is what MetaTrader shows.
+     */
+    xOf: (time) => {
+      const ts = chartRef.current?.timeScale();
+      if (!ts) return null;
+      const exact = ts.timeToCoordinate(time as UTCTimestamp);
+      if (exact !== null && exact !== undefined) return exact;
+      const bars = candlesRef.current;
+      const first = bars[0], last = bars[bars.length - 1];
+      if (!first || !last || last.time === first.time) return null;
+      const x0 = ts.timeToCoordinate(first.time as UTCTimestamp);
+      const xN = ts.timeToCoordinate(last.time as UTCTimestamp);
+      if (x0 === null || xN === null) return null;
+      return x0 + (time - first.time) * ((xN - x0) / (last.time - first.time));
+    },
     yOf: (price) => mainRef.current?.priceToCoordinate(price) ?? null,
     timeOf: (x) => (chartRef.current?.timeScale().coordinateToTime(x) as number | null) ?? null,
     priceOf: (y) => mainRef.current?.coordinateToPrice(y) ?? null,
+    // The regression and standard-deviation channels are fitted through the BARS in the span.
+    closesBetween: (from: number, to: number) => {
+      const lo = Math.min(from, to), hi = Math.max(from, to);
+      return candlesRef.current
+        .filter((c) => c.time >= lo && c.time <= hi)
+        .map((c) => ({ x: c.time, y: c.close }));
+    },
     barSeconds: TIMEFRAMES[tf] ?? 60,
     digits: instrument.digits,
   };
+
+  const propertiesDrawing = propertiesFor === null ? null : drawings.find((d) => d.id === propertiesFor) ?? null;
 
   const setFollow = useCallback((v: boolean) => { followingRef.current = v; }, []);
   const legendOf = (c: Candle): Legend => ({ o: c.open, h: c.high, l: c.low, c: c.close, changePct: c.open ? ((c.close - c.open) / c.open) * 100 : 0 });
@@ -542,7 +664,12 @@ export function CandleChart({
 
       const chart = createChart(host, {
         autoSize: true,
-        layout: { background: { type: ColorType.Solid, color: TV.bg }, textColor: TV.text, fontSize: 11, attributionLogo: true },
+        /**
+         * The pane colour is painted by the wrapper, not the chart, so an object with MetaTrader's
+         * "Draw object as background" set can be drawn BETWEEN the colour and the candles. The
+         * chart's own background is transparent for that one reason; see DrawingsBackdrop.
+         */
+        layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: TV.text, fontSize: 11, attributionLogo: true },
         grid: { vertLines: { color: TV.grid }, horzLines: { color: TV.grid } },
         // The price axis is MetaTrader's second control surface, not decoration: it is where the
         // vertical scale is set. `visible` and `minimumWidth` are stated rather than left to the
@@ -826,9 +953,19 @@ export function CandleChart({
           }}
           count={drawings.length}
           hasSelection={selectedDrawing !== null}
+          onObjectsList={() => setObjectsListOpen(true)}
         />
-        <div ref={plotRef} className="relative min-h-0 flex-1">
-          <div ref={hostRef} className="h-full w-full" aria-label={`${instrument.symbol} price chart`} role="img" />
+        <div ref={plotRef} className="relative min-h-0 flex-1" style={{ background: TV.bg }}>
+          {/* Behind the candles: objects the trader set to draw as background. */}
+          <DrawingsBackdrop
+            project={projection}
+            drawings={drawings}
+            width={plotSize.w}
+            height={plotSize.h}
+            revision={revision}
+            timeframe={tf}
+          />
+          <div ref={hostRef} className="relative z-[1] h-full w-full" aria-label={`${instrument.symbol} price chart`} role="img" />
           <ChartDrawings
             tool={tool}
             project={projection}
@@ -842,6 +979,17 @@ export function CandleChart({
             width={plotSize.w}
             height={plotSize.h}
             revision={revision}
+            timeframe={tf}
+            onProperties={setPropertiesFor}
+            onContextMenu={(id, x, y) => setObjectMenu({ id, x, y })}
+            onDeleteLatest={() => {
+              const last = drawings[drawings.length - 1];
+              if (last) {
+                changeDrawings(drawings.slice(0, -1));
+                if (selectedDrawing === last.id) setSelectedDrawing(null);
+              }
+            }}
+            onUndoDelete={undoDelete}
           />
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
             <span className="select-none text-4xl font-black uppercase tracking-widest text-white/[0.04]">{instrument.symbol}</span>
@@ -870,6 +1018,59 @@ export function CandleChart({
           ) : null}
         </div>
       </div>
+
+      {objectsListOpen ? (
+        <MT5ObjectsList
+          drawings={drawings}
+          symbol={instrument.symbol}
+          timeframe={tf}
+          selected={selectedDrawing}
+          onSelect={setSelectedDrawing}
+          // Show closes the list: it moves the chart, and on a phone the list covers the chart,
+          // so leaving it open would hide the one thing the button did.
+          onShow={(id) => { showObject(id); setObjectsListOpen(false); }}
+          // Properties does NOT close it. MetaTrader opens the properties window OVER the Objects
+          // List and returns to the list when it is closed, so Cancel goes back rather than out.
+          onProperties={(id) => { setSelectedDrawing(id); setPropertiesFor(id); }}
+          onDelete={(id) => {
+            changeDrawings(drawings.filter((d) => d.id !== id));
+            if (selectedDrawing === id) setSelectedDrawing(null);
+          }}
+          onDismiss={() => setObjectsListOpen(false)}
+        />
+      ) : null}
+
+      {objectMenu ? (
+        <MT5ObjectMenu
+          at={objectMenu}
+          drawing={drawings.find((d) => d.id === objectMenu.id) ?? null}
+          arrowCount={drawings.filter((d) => objectOf(d.kind)?.group === 'arrows').length}
+          canUndo={canUndoDelete}
+          onProperties={() => setPropertiesFor(objectMenu.id)}
+          onObjectList={() => setObjectsListOpen(true)}
+          onDelete={() => {
+            changeDrawings(drawings.filter((d) => d.id !== objectMenu.id));
+            setSelectedDrawing(null);
+          }}
+          onDeleteAllArrows={() => {
+            changeDrawings(drawings.filter((d) => objectOf(d.kind)?.group !== 'arrows'));
+            setSelectedDrawing(null);
+          }}
+          onUnselect={() => setSelectedDrawing(null)}
+          onUndoDelete={undoDelete}
+          onDismiss={() => setObjectMenu(null)}
+        />
+      ) : null}
+
+      {propertiesDrawing ? (
+        <MT5ObjectProperties
+          drawing={propertiesDrawing}
+          digits={instrument.digits}
+          barSeconds={TIMEFRAMES[tf] ?? 60}
+          onChange={(next) => changeDrawings(drawings.map((d) => (d.id === next.id ? next : d)))}
+          onDismiss={() => setPropertiesFor(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -883,15 +1084,27 @@ export function CandleChart({
  * mode, which is what the icon means in MetaTrader.
  */
 function DrawRail({
-  tool, onPick, count, hasSelection,
+  tool, onPick, count, hasSelection, onObjectsList,
 }: {
   tool: ToolId;
   onPick: (id: ToolId) => void;
   count: number;
   hasSelection: boolean;
+  onObjectsList: () => void;
 }) {
+  const [treeOpen, setTreeOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!treeOpen) return;
+    const away = (e: MouseEvent) => { if (!wrap.current?.contains(e.target as Node)) setTreeOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setTreeOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [treeOpen]);
+
   return (
-    <div className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2b3543] bg-[#202933] py-1.5">
+    <div ref={wrap} className="relative flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2b3543] bg-[#202933] py-1.5">
       {TOOLS.map((t) => (
         <button
           key={t.id}
@@ -910,6 +1123,69 @@ function DrawRail({
           </svg>
         </button>
       ))}
+      {/* MetaTrader groups its 44 objects into dropdowns on the Line Studies toolbar rather than
+          laying them out as 44 icons. This is that button: it opens the Insert > Objects tree. */}
+      <button
+        type="button"
+        title="Objects"
+        aria-label="Objects"
+        aria-expanded={treeOpen}
+        onClick={() => setTreeOpen((v) => !v)}
+        className={cn(
+          'grid h-8 w-8 shrink-0 place-items-center rounded-md transition',
+          treeOpen ? 'bg-[#3183ff] text-white' : 'text-[#8fa2b8] hover:bg-[#2b3543] hover:text-white',
+        )}
+      >
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 20L20 4M6 4v16M3 15h18" />
+        </svg>
+      </button>
+
+      {treeOpen ? (
+        <div className="absolute left-10 top-1 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
+          {OBJECT_GROUPS.map((g) => (
+            <div key={g.group} className="mb-2 last:mb-0">
+              <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted">{g.label}</div>
+              <div className="grid gap-1">
+                {g.items.map((o) => (
+                  <button
+                    key={o.name}
+                    type="button"
+                    disabled={o.unavailable !== undefined}
+                    title={o.unavailable}
+                    aria-pressed={o.kind !== null && tool === o.kind}
+                    onClick={() => { if (o.kind) { onPick(o.kind as ToolId); setTreeOpen(false); } }}
+                    className={cn(
+                      'flex h-6 items-center rounded-md border px-2 text-left text-[10px] font-semibold transition',
+                      o.kind !== null && tool === o.kind
+                        ? 'border-accent bg-accent/15 text-accent'
+                        : 'border-border bg-surface/80 text-muted hover:text-fg',
+                      o.unavailable && 'cursor-not-allowed opacity-45 hover:text-muted',
+                    )}
+                  >
+                    <span className="truncate">{o.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {/* MetaTrader opens the Objects List on Ctrl+B, from the View menu and from the Line Studies
+          toolbar. A phone has no Ctrl key, so the rail carries it too. */}
+      <button
+        type="button"
+        title="Objects List (Ctrl+B)"
+        aria-label="Objects List"
+        onClick={onObjectsList}
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[#8fa2b8] transition hover:bg-[#2b3543] hover:text-white"
+      >
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
+
       {/* The bin deletes the selected object, or clears the chart when nothing is selected. Disabled
           with nothing to remove, so it never looks like it did something it could not. */}
       <button
