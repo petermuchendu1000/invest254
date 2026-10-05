@@ -17,6 +17,7 @@ import {
 import { MT5SymbolsDialog } from '@/components/game/MT5SymbolsDialog';
 import { useSymbolSetStore, MAX_WATCHED } from '@/lib/game/symbolSet';
 import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
+import { detailRows, sessionSoFar } from '@/lib/game/symbolDetails';
 import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
 
@@ -137,7 +138,8 @@ export function MarketWatch({ className }: { className?: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const [day, setDay] = useState<{ symbol: string; bar: Candle } | null>(null);
+  /** The selected symbol's closed hourly bars, from which today's session is computed. */
+  const [hours, setHours] = useState<{ symbol: string; bars: Candle[] } | null>(null);
   const [, force] = useState(0);
 
   // Quote updates come off the tick stream, which does not re-render React on its own.
@@ -147,10 +149,16 @@ export function MarketWatch({ className }: { className?: string }) {
   }, []);
 
   /**
-   * The session figures are the latest closed D1 bar — the same bar the chart's D1 period shows.
+   * The selected symbol's closed HOURLY bars, from which today's session open, high and low are
+   * computed (see `sessionSoFar`).
+   *
+   * It used to ask for the latest closed DAILY bar, which before midnight is yesterday's: the panel
+   * showed one day's session open beside a Daily Change measured against another day's close. Every
+   * number was true and the set of them was not. The engine never serves an unfinished bar, so
+   * today's daily bar does not exist to ask for; hours plus the live price are the honest source.
    *
    * For the SELECTED symbol only. Fetching them for every row would ask the engine to build twenty
-   * day chains to print two numbers each, and only one symbol's detail is on screen at a time.
+   * day chains to print three numbers each, and only one symbol's detail is on screen at a time.
    *
    * Refetched whenever the connection comes back, not only on a timer: a request made while the
    * socket is down is rejected, and waiting out the interval left the panel showing dashes for a
@@ -161,8 +169,9 @@ export function MarketWatch({ className }: { className?: string }) {
     if (status !== 'open') return;
     let cancelled = false;
     const load = () => {
-      requestCandles('D1', 1, undefined, active)
-        .then((r) => { if (!cancelled && r.bars.length) setDay({ symbol: active, bar: r.bars[r.bars.length - 1]! }); })
+      // 26 covers a full UTC day plus the slack for whichever hour is forming.
+      requestCandles('H1', 26, undefined, active)
+        .then((r) => { if (!cancelled) setHours({ symbol: active, bars: r.bars }); })
         .catch((e: Error) => { if (!cancelled) logJournal('warn', 'Quotes', `session figures unavailable (${e.message})`); });
     };
     load();
@@ -184,8 +193,25 @@ export function MarketWatch({ className }: { className?: string }) {
 
   const digitsOf = (symbol: string) => bySymbol.get(symbol)?.digits ?? market?.instrument.digits ?? 2;
   const activeDigits = digitsOf(active);
-  const activeDay = day !== null && day.symbol === active ? day.bar : null;
-  const show = (n: number | null | undefined, digits = activeDigits) => (n === null || n === undefined ? '-' : n.toFixed(digits));
+  const activeHours = hours !== null && hours.symbol === active ? hours.bars : null;
+  /**
+   * The Details tab's rows, in MetaTrader's own order and under its own labels. The whole list,
+   * including which rows are absent and why, is argued in lib/game/symbolDetails.
+   */
+  const activeQuote = quoteOf(active);
+  const details = detailRows({
+    digits: activeDigits,
+    last: activeQuote?.price ?? null,
+    session: activeHours && activeQuote
+      ? sessionSoFar(activeHours, activeQuote.anchor.tradeDate, activeQuote.price)
+      : null,
+    // The day's base IS the previous session's close: the axis is re-anchored every UTC midnight by
+    // carrying that close forward, so MetaTrader's Daily Change definition lands on it exactly.
+    previousClose: activeQuote?.anchor.base ?? null,
+  });
+  const activeToneInput = { up: activeQuote?.up ?? null, changedAt: activeQuote?.changedAt ?? null, now: Date.now() };
+  const activeTone = quoteTone(activeToneInput);
+  const glyphOfActive = gutterGlyph(activeToneInput);
   const describe = (symbol: string) => bySymbol.get(symbol)?.description ?? '';
 
   /**
@@ -361,17 +387,38 @@ export function MarketWatch({ className }: { className?: string }) {
             {TABS.find((t) => t.id === tab)?.unavailable}
           </div>
         ) : (
-          <dl className="divide-y divide-[#2b3543]/50 text-[11px]">
-            <Detail label="Symbol" value={active} />
-            {describe(active) === '' ? null : <Detail label="Description" value={describe(active)} />}
-            <Detail label="Last" value={show(quoteOf(active)?.price ?? null)} />
-            <Detail label="Session open" value={show(activeDay?.open ?? null)} />
-            <Detail label="Session high" value={show(activeDay?.high ?? null)} />
-            <Detail label="Session low" value={show(activeDay?.low ?? null)} />
-            <Detail label="Digits" value={String(activeDigits)} />
-            {/* The contract size behind the Volume column, stated rather than implied. */}
-            <Detail label="Contract size" value={`${money.fmt(LOT_STAKE_CENTS)} / lot`} />
-            <Detail label="Session" value="00:00–24:00 UTC" />
+          <div className="text-[11px]">
+            {/* MetaTrader's blue header line: the symbol, then its description. The Specification
+                dialog carries the same line. */}
+            <div className="bg-[#3183ff] px-3 py-1 text-[11px] font-semibold text-white">
+              {active}{describe(active) === '' ? '' : `, ${describe(active)}`}
+            </div>
+            {/* Not a grid: two columns, label left and value right-aligned, with the same
+                three-state glyph the Symbols tab puts in its gutter. MetaTrader alternates its row
+                backgrounds #FFFFFF / #EBEBEB; this is that alternation on the dark palette. */}
+            <dl>
+              {details.map((r, i) => {
+                const rowGlyph = r.live ? glyphOfActive : 'flat';
+                return (
+                  <div
+                    key={r.label}
+                    data-detail-row={r.label}
+                    className={cn('flex items-baseline gap-2 px-3 py-1', i % 2 === 1 ? 'bg-[#141c26]' : '')}
+                  >
+                    <span aria-hidden className="w-3 shrink-0 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[rowGlyph] }}>
+                      {GUTTER_GLYPH[rowGlyph]}
+                    </span>
+                    <dt className="min-w-0 flex-1 truncate text-[#8fa2b8]">{r.label}</dt>
+                    <dd
+                      className="shrink-0 font-mono tabular-nums"
+                      style={{ color: r.live && activeTone !== null ? QUOTE_TONE_COLOUR[activeTone] : '#ffffff' }}
+                    >
+                      {r.value}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
             <div className="px-3 py-2">
               {/* MetaTrader reaches this from the context menu. A phone has no right click, so the
                   Details tab carries it too. */}
@@ -383,7 +430,7 @@ export function MarketWatch({ className }: { className?: string }) {
                 Specification
               </button>
             </div>
-          </dl>
+          </div>
         )}
       </div>
 
@@ -465,11 +512,3 @@ const clockOf = (ms: number): string => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-2 px-3 py-1.5">
-      <dt className="text-[#8fa2b8]">{label}</dt>
-      <dd className="font-mono tabular-nums text-[#ffffff]">{value}</dd>
-    </div>
-  );
-}
