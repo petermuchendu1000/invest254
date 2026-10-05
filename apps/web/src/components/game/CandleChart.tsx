@@ -776,20 +776,30 @@ export function CandleChart({
                 </Section>
                 {/* MetaTrader's Navigator tree: its groups, its order, its names. Scrolls because the
                     list is long — which is the point of it. */}
+                {/* All four of MetaTrader's Navigator groups, under its own names, carrying all 38
+                    of its built-in indicators. The seven that read traded volume are listed and
+                    DISABLED with the reason: omitting them hides the gap, and feeding them an
+                    invented volume would draw a confident line that means nothing. */}
                 {INDICATOR_GROUPS.map((g) => (
                   <Section key={g.group} title={g.label}>
                     <div className="grid gap-1">
                       {g.items.map((def) => (
-                        <Toggle key={def.id} on={ind.has(def.id)} onClick={() => toggleIndicator(def.id)}>
+                        <Toggle
+                          key={def.id}
+                          on={ind.has(def.id)}
+                          disabled={def.unavailable !== undefined}
+                          title={def.unavailable}
+                          onClick={() => { if (!def.unavailable) toggleIndicator(def.id); }}
+                        >
                           <span className="truncate">{def.name} <span className="text-[9px] opacity-70">{def.params}</span></span>
                         </Toggle>
                       ))}
                     </div>
+                    {g.group === 'volumes' ? (
+                      <p className="px-0.5 pt-1 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
+                    ) : null}
                   </Section>
                 ))}
-                <Section title="Volumes">
-                  <p className="px-0.5 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
-                </Section>
               </div>
             ) : null}
           </div>
@@ -929,15 +939,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   );
 }
-function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+function Toggle({ on, onClick, children, disabled, title }: {
+  on: boolean; onClick: () => void; children: React.ReactNode;
+  disabled?: boolean | undefined; title?: string | undefined;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={on}
+      disabled={disabled}
+      title={title}
       className={cn(
         'flex h-6 items-center justify-between rounded-md border px-2 text-[10px] font-semibold transition',
         on ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-surface/80 text-muted hover:text-fg',
+        disabled && 'cursor-not-allowed opacity-45 hover:text-muted',
       )}
     >
       <span>{children}</span>

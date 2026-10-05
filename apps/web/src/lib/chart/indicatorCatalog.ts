@@ -1,9 +1,9 @@
 import type { Candle } from '@invest254/shared/chart';
 import { bollinger } from '@invest254/shared/chart';
 import {
-  accelerator, adx, alligator, ama, atr, awesome, bearsPower, bullsPower, cci,
-  closes, dema, demarker, envelopes, fractals, gator, ichimoku, macd, momentum, movingAverage,
-  osma, parabolicSar, rsi, rvi, stdDev, stochastic, tema, trix, williamsR,
+  accelerator, adx, adxWilder, alligator, ama, atr, awesome, bearsPower, bullsPower, cci,
+  closes, dema, demarker, envelopes, fractals, frama, gator, ichimoku, macd, momentum, movingAverage,
+  osma, parabolicSar, rsi, rvi, stdDev, stochastic, tema, trix, vidya, williamsR,
   type Series,
 } from '@invest254/shared/indicators';
 
@@ -40,7 +40,7 @@ export interface Plot {
   markerUp?: boolean;
 }
 
-export type IndicatorGroup = 'trend' | 'oscillators' | 'bill-williams';
+export type IndicatorGroup = 'trend' | 'oscillators' | 'volumes' | 'bill-williams';
 
 export interface IndicatorDef {
   id: string;
@@ -52,8 +52,19 @@ export interface IndicatorDef {
   pane: 'price' | 'own';
   /** Horizontal reference lines drawn in an own-pane indicator (RSI's 30/70, CCI's ±100, zero). */
   levels?: number[];
+  /**
+   * Set where MetaTrader has the indicator but this instrument cannot feed it. The entry is still
+   * listed, because the catalogue is meant to be checkable against MetaTrader's Navigator, but it
+   * cannot be switched on and says why. Seven of MetaTrader's 38 read traded volume, and a
+   * synthetic price curve has none.
+   */
+  unavailable?: string;
   compute: (bars: readonly Candle[]) => Plot[];
 }
+
+/** The reason the volume-fed indicators cannot run here. One sentence, used on every one of them. */
+const NO_VOLUME = 'Needs traded volume, which this instrument does not report.';
+const noPlots = (): Plot[] => [];
 
 // MetaTrader's own line colours, plus a few distinct hues for the multi-line indicators.
 const C = {
@@ -89,7 +100,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     },
   },
   {
-    id: 'bollinger', name: 'Bollinger Bands', params: '(20, 2)', group: 'trend', pane: 'price',
+    id: 'bollinger', name: 'Bollinger Bands®', params: '(20, 2)', group: 'trend', pane: 'price',
     compute: (bars) => {
       const b = bollinger(closes(bars), 20, 2);
       return [
@@ -132,11 +143,11 @@ export const INDICATORS: readonly IndicatorDef[] = [
     compute: (bars) => [line('ama', 'AMA', C.pink, ama(closes(bars), 10, 2, 30), { width: 2 })],
   },
   {
-    id: 'dema', name: 'Double Exponential MA', params: '(14)', group: 'trend', pane: 'price',
+    id: 'dema', name: 'Double Exponential Moving Average', params: '(14)', group: 'trend', pane: 'price',
     compute: (bars) => [line('dema', 'DEMA', C.teal, dema(closes(bars), 14), { width: 2 })],
   },
   {
-    id: 'tema', name: 'Triple Exponential MA', params: '(14)', group: 'trend', pane: 'price',
+    id: 'tema', name: 'Triple Exponential Moving Average', params: '(14)', group: 'trend', pane: 'price',
     compute: (bars) => [line('tema', 'TEMA', C.sky, tema(closes(bars), 14), { width: 2 })],
   },
   {
@@ -144,7 +155,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     compute: (bars) => [line('sd', 'StdDev', C.violet, stdDev(closes(bars), 20))],
   },
   {
-    id: 'adx', name: 'Average Directional Movement', params: '(14)', group: 'trend', pane: 'own', levels: [20, 25],
+    id: 'adx', name: 'Average Directional Movement Index', params: '(14)', group: 'trend', pane: 'own', levels: [20, 25],
     compute: (bars) => {
       const a = adx(bars, 14);
       return [
@@ -154,8 +165,38 @@ export const INDICATORS: readonly IndicatorDef[] = [
       ];
     },
   },
+  {
+    // MetaTrader ships BOTH, and they are different indicators: ADX smooths with an EMA, ADXW with
+    // Wilder's SMMA. What this catalogue used to call "Average Directional Movement" was the Wilder
+    // one all along.
+    id: 'adxw', name: 'Average Directional Movement Index Wilder', params: '(14)', group: 'trend', pane: 'own', levels: [20, 25],
+    compute: (bars) => {
+      const a = adxWilder(bars, 14);
+      return [
+        line('adx', 'ADXW', C.amber, field(a, 'adx'), { width: 2 }),
+        line('plus', '+DI', C.green, field(a, 'plusDi')),
+        line('minus', '−DI', C.red, field(a, 'minusDi')),
+      ];
+    },
+  },
+  {
+    id: 'frama', name: 'Fractal Adaptive Moving Average', params: '(14)', group: 'trend', pane: 'price',
+    compute: (bars) => [line('frama', 'FRAMA', C.teal, frama(bars, 14), { width: 2 })],
+  },
+  {
+    id: 'vidya', name: 'Variable Index Dynamic Average', params: '(9, 12)', group: 'trend', pane: 'price',
+    compute: (bars) => [line('vidya', 'VIDyA', C.pink, vidya(closes(bars), 9, 12), { width: 2 })],
+  },
 
   // ───────────────────────────── oscillators ─────────────────────────────
+  {
+    id: 'chaikin', name: 'Chaikin Oscillator', params: '(3, 10)', group: 'oscillators', pane: 'own', levels: [0],
+    unavailable: NO_VOLUME, compute: noPlots,
+  },
+  {
+    id: 'force', name: 'Force Index', params: '(13)', group: 'oscillators', pane: 'own', levels: [0],
+    unavailable: NO_VOLUME, compute: noPlots,
+  },
   {
     id: 'rsi', name: 'Relative Strength Index', params: '(14)', group: 'oscillators', pane: 'own', levels: [30, 50, 70],
     compute: (bars) => [line('rsi', 'RSI', C.violet, rsi(closes(bars), 14), { width: 2 })],
@@ -270,31 +311,53 @@ export const INDICATORS: readonly IndicatorDef[] = [
       ];
     },
   },
+
+  // ───────────────────── volume indicators (all four need traded volume) ─────────────────────
+  { id: 'ad', name: 'Accumulation/Distribution', params: '', group: 'volumes', pane: 'own', unavailable: NO_VOLUME, compute: noPlots },
+  { id: 'mfi', name: 'Money Flow Index', params: '(14)', group: 'volumes', pane: 'own', levels: [20, 80], unavailable: NO_VOLUME, compute: noPlots },
+  { id: 'obv', name: 'On Balance Volume', params: '', group: 'volumes', pane: 'own', unavailable: NO_VOLUME, compute: noPlots },
+  { id: 'volumes', name: 'Volumes', params: '', group: 'volumes', pane: 'own', unavailable: NO_VOLUME, compute: noPlots },
+
+  // Bill Williams' sixth, which also reads volume.
+  { id: 'bwmfi', name: 'Market Facilitation Index', params: '', group: 'bill-williams', pane: 'own', unavailable: NO_VOLUME, compute: noPlots },
 ];
 
 export const INDICATOR_BY_ID: ReadonlyMap<string, IndicatorDef> = new Map(INDICATORS.map((i) => [i.id, i]));
 
+/**
+ * MetaTrader's Navigator group names, exactly as it writes them: "Trend Indicators",
+ * "Oscillators", "Volume Indicators" and "Bill Williams' Indicators" (with the apostrophe). The
+ * short forms this catalogue used before do not appear anywhere in the terminal.
+ */
 export const GROUP_LABELS: Record<IndicatorGroup, string> = {
-  trend: 'Trend',
+  trend: 'Trend Indicators',
   oscillators: 'Oscillators',
-  'bill-williams': 'Bill Williams',
+  volumes: 'Volume Indicators',
+  'bill-williams': "Bill Williams' Indicators",
 };
 
 /** The groups in MetaTrader's Navigator order, each with its indicators. */
 export const INDICATOR_GROUPS: ReadonlyArray<{ group: IndicatorGroup; label: string; items: readonly IndicatorDef[] }> =
-  (['trend', 'oscillators', 'bill-williams'] as const).map((group) => ({
+  (['trend', 'oscillators', 'volumes', 'bill-williams'] as const).map((group) => ({
     group,
     label: GROUP_LABELS[group],
     items: INDICATORS.filter((i) => i.group === group),
   }));
 
 /**
- * Why MetaTrader's Volumes group is not here.
+ * MetaTrader has 38 built-in indicators. All 38 are listed here, because a catalogue you cannot
+ * check against the Navigator is not a catalogue. Seven of them read traded volume:
  *
- * On Balance Volume, Money Flow Index, Accumulation/Distribution, Force Index, the Chaikin
- * Oscillator, Market Facilitation Index and the Volumes histogram all read traded volume, and this
- * platform's candles come from a synthetic price curve that has none. Feeding them an invented
- * volume would draw a confident line that means nothing, so the group is absent rather than wrong.
- * Shown in the menu so the omission is visibly deliberate.
+ *   Volume Indicators   Accumulation/Distribution, Money Flow Index, On Balance Volume, Volumes
+ *   Oscillators         Chaikin Oscillator, Force Index
+ *   Bill Williams'      Market Facilitation Index
+ *
+ * These candles come from a synthetic price curve that reports no volume, and the engine emits
+ * ticks on a fixed timer, so even tick volume would be a constant: a flat line dressed as data.
+ * They are therefore listed and disabled with the reason, rather than omitted (which hides the
+ * gap) or fed an invented series (which fabricates one).
  */
 export const VOLUME_GROUP_NOTE = 'Volume indicators need traded volume, which this instrument does not report.';
+
+/** Every indicator MetaTrader ships, for the test that asserts the catalogue is complete. */
+export const MT5_INDICATOR_COUNT = 38;
