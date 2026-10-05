@@ -85,7 +85,10 @@ export function MT5Funds() {
           </p>
         ) : bonus > 0 ? (
           <p className="px-3 pb-3 text-[12px] leading-snug text-[#8fa2b8]">
-            Includes {money.fmt(bonus)} bonus: stakeable now, withdrawable after wagering.
+            {/* MetaTrader's own word for money a broker adds that is not a deposit is CREDIT, and
+                it is a field of the account alongside Balance and Equity. "Stakeable" and
+                "wagering" are this platform's older vocabulary and not a terminal's. */}
+            Includes {money.fmt(bonus)} credit: tradable now, withdrawable once it has been traded.
           </p>
         ) : null}
 
