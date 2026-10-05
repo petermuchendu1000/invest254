@@ -19,6 +19,9 @@ import { EXECUTION_PRICE, tradeDateOf } from '@/lib/history/mt5history';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
 import { MIN_PANEL_PX } from '@/lib/chart/paneSplit';
+import { MT5PositionMenu } from '@/components/game/MT5PositionMenu';
+import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
+import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
 
 /**
  * MetaTrader's Toolbox.
@@ -168,6 +171,11 @@ export function MT5Toolbox() {
     panel.begin(clientY, panelRef.current?.getBoundingClientRect().height ?? MIN_PANEL_PX);
   }, [panel]);
 
+  // MetaTrader reaches the Close position form from the Trade tab's own row, through the position
+  // context menu. Opening the form from a button on the ticket was our invention; this is the route
+  // the terminal actually has.
+  const [sheet, setSheet] = useState<null | 'menu' | 'close' | 'modify'>(null);
+
   const notifications = useMyNotifications();
   const journal = useJournal();
   const alerts = useAlertsStore((s) => s.alerts);
@@ -244,6 +252,7 @@ export function MT5Toolbox() {
                 <>
                   <PositionRow
                     className="sm:hidden"
+                    onOpenMenu={() => setSheet('menu')}
                     symbol={symbol}
                     direction={live.direction}
                     lots={lotsOfStake(live.stakeCents)}
@@ -255,7 +264,11 @@ export function MT5Toolbox() {
                   />
                   <div className="hidden sm:block">
                     <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
-                      <tr className="border-t border-[#2b3543]/60">
+                      <tr
+                        className="cursor-pointer border-t border-[#2b3543]/60 hover:bg-[#202933]"
+                        onClick={() => setSheet('menu')}
+                        title="Open the position menu"
+                      >
                         <Td>{symbol}</Td>
                         <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
                         <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '-'}</Td>
@@ -434,6 +447,61 @@ export function MT5Toolbox() {
           </div>
         </>
       ) : null}
+
+      {/* MetaTrader's position menu and the two forms it leads to. Rendered once, outside the
+          collapsible pane, so dismissing the panel does not strand an open form. */}
+      {live && sheet === 'menu' ? (
+        <MT5PositionMenu
+          title={`${symbol}, ${live.direction} ${lotsOfStake(live.stakeCents)}`}
+          subtitle={`#${live.positionId ? live.positionId.slice(0, 8) : '…'} at ${px(live.entryRate)}`}
+          onDismiss={() => setSheet(null)}
+          items={[
+            {
+              id: 'close',
+              label: 'Close position',
+              onPick: () => setSheet('close'),
+              disabled: !earlyCloseEnabled || !live.sellable || live.phase !== 'open',
+              note: !earlyCloseEnabled
+                ? 'This brand settles every contract at expiry.'
+                : !live.sellable
+                  ? 'This contract settles at expiry and cannot be closed at a loss.'
+                  : undefined,
+            },
+            { id: 'modify', label: 'Modify position', onPick: () => setSheet('modify') },
+            {
+              id: 'chart',
+              label: 'Chart',
+              onPick: () => { setSheet(null); setOpen(false); },
+              note: 'Collapses this panel so the chart fills the screen.',
+            },
+          ]}
+        />
+      ) : null}
+
+      {live && sheet === 'close' ? (
+        <MT5ClosePosition
+          pos={live}
+          symbol={symbol}
+          digits={digits}
+          price={livePrice()}
+          openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
+          busy={live.phase === 'settling'}
+          onDismiss={() => setSheet(null)}
+          onConfirm={() => { sell(); setSheet(null); }}
+        />
+      ) : null}
+
+      {live && sheet === 'modify' ? (
+        <MT5ModifyPosition
+          pos={live}
+          symbol={symbol}
+          digits={digits}
+          openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
+          canTakeProfit={earlyCloseEnabled}
+          stepCents={10_000}
+          onDismiss={() => setSheet(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -598,14 +666,24 @@ function useDayAnchors(days: readonly string[], enabled: boolean): Map<string, D
  * and for loss — which is MetaTrader's pairing throughout.
  */
 function PositionRow({
-  symbol, direction, lots, from, to, profit, profitCents, note, className,
+  symbol, direction, lots, from, to, profit, profitCents, note, className, onOpenMenu,
 }: {
   symbol: string; direction: string; lots: string; from: string; to: string;
   profit: string; profitCents: number; note: string | null; className?: string;
+  /** Present on a LIVE position only: MetaTrader opens the position menu from this row. */
+  onOpenMenu?: (() => void) | undefined;
 }) {
   const buy = direction === 'buy';
+  const Tag = onOpenMenu ? 'button' : 'div';
   return (
-    <div className={cn('flex items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2', className)}>
+    <Tag
+      {...(onOpenMenu ? { type: 'button' as const, onClick: onOpenMenu, 'aria-label': `Position menu for ${symbol} ${direction} ${lots}` } : {})}
+      className={cn(
+        'flex w-full items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2 text-left',
+        onOpenMenu && 'transition hover:bg-[#202933]',
+        className,
+      )}
+    >
       <div className="min-w-0">
         <div className="text-[12px] font-semibold text-white">
           {symbol},{' '}
@@ -617,7 +695,7 @@ function PositionRow({
         <div className={cn('font-mono text-[12px] font-semibold tabular-nums', profitCents > 0 ? 'text-[#3183ff]' : profitCents < 0 ? 'text-[#f23645]' : 'text-[#ffffff]')}>{profit}</div>
         {note ? <div className="font-mono text-[10px] text-[#8fa2b8]">{note}</div> : null}
       </div>
-    </div>
+    </Tag>
   );
 }
 
