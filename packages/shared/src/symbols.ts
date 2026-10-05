@@ -288,3 +288,99 @@ export const symbolsInGroup = (g: SymbolGroup): readonly SymbolDef[] =>
 
 /** The default symbol: the one this platform shipped with, and the one that keeps the bare seed. */
 export const DEFAULT_SYMBOL = "XAUUSD";
+
+/**
+ * ── Volume, per symbol ───────────────────────────────────────────────────────────────────────────
+ *
+ * MetaTrader carries a volume spec on EVERY symbol, not one range for the whole book: its
+ * Specification dialog prints "Minimal volume", "Maximal volume" and "Volume step" per instrument,
+ * and the ticket's stepper, its slider and its typed entry all obey that symbol's own three
+ * numbers. A terminal that offers 0.01 to 1.00 in hundredths on gold, crypto and an index alike is
+ * not showing a book, it is showing one setting.
+ *
+ * Brokers differ on these more than on anything else in a specification, so what follows is a
+ * stated CONVENTION, in the same spirit as `conventionalDigits`: one rule that can be checked,
+ * rather than ninety hand-picked rows that can each be quietly wrong. It is shaped by the two
+ * things that actually drive a broker's limits:
+ *
+ *   LIQUIDITY sets the ceiling. A major absorbs size that an exotic does not, and a single crypto
+ *   lot carries a notional an order of magnitude larger than a forex lot, so its ceiling is lower.
+ *
+ *   CONTRACT SIZE sets the step. An index contract is large enough that hundredths of a lot are
+ *   meaningless granularity, which is why brokers quote index volume in tenths; everything else
+ *   steps in hundredths, the figure MetaTrader's own screenshots show (0.01).
+ *
+ * ── What this does NOT do ────────────────────────────────────────────────────────────────────────
+ * It does not touch settlement, and it cannot loosen the money path. A volume is only ever a way of
+ * saying a stake: `stakeCents = lots * LOT_STAKE_CENTS`, and the engine validates the CENTS against
+ * the brand's own minimum and maximum whatever a symbol's spec says. So these numbers narrow what
+ * the UI offers; the brand's limits still bind, and the effective range is the intersection of the
+ * two (see `effectiveVolume`).
+ */
+export interface VolumeSpec {
+  /** Smallest tradable volume, in lots. */
+  min: number;
+  /** Largest, in lots. */
+  max: number;
+  /** The increment the stepper and typed entry snap to, in lots. */
+  step: number;
+}
+
+export function conventionalVolume(group: SymbolGroup): VolumeSpec {
+  switch (group) {
+    // The seven deepest books in the catalogue: the highest ceiling, the finest step.
+    case "Forex\\Majors":
+      return { min: 0.01, max: 100, step: 0.01 };
+    // Crosses are liquid but thinner than the majors against USD.
+    case "Forex\\Minors":
+      return { min: 0.01, max: 50, step: 0.01 };
+    // Exotics are where a broker's ceiling drops hardest, and for the honest reason: the
+    // underlying book cannot absorb the size.
+    case "Forex\\Exotics":
+      return { min: 0.01, max: 20, step: 0.01 };
+    case "Metals":
+      return { min: 0.01, max: 50, step: 0.01 };
+    case "Energies":
+      return { min: 0.01, max: 50, step: 0.01 };
+    // Tenths, not hundredths: an index contract is large enough that a hundredth of a lot is
+    // granularity nobody trades in, which is why brokers quote index volume this way.
+    case "Indices":
+      return { min: 0.1, max: 50, step: 0.1 };
+    // One lot of crypto carries the largest notional in the book, so the ceiling is the lowest.
+    case "Crypto":
+      return { min: 0.01, max: 10, step: 0.01 };
+  }
+}
+
+/** This symbol's own volume spec. Unknown symbols fall back to the majors' rule. */
+export const volumeSpecOf = (symbol: string): VolumeSpec =>
+  conventionalVolume(BY_SYMBOL.get(symbol)?.group ?? "Forex\\Majors");
+
+/** Decimals a volume prints to on this symbol, which follows from its step. */
+export const volumeDigitsOf = (spec: VolumeSpec): number =>
+  (Math.abs(spec.step * 100 - Math.round(spec.step * 100)) < 1e-9 && spec.step < 0.1 ? 2 : 1);
+
+/**
+ * The symbol's spec intersected with what the brand's stake limits allow, in lots.
+ *
+ * The brand's money limits are authoritative: they are what the engine enforces. A symbol whose
+ * conventional minimum is below the brand's minimum stake must offer the brand's, or the ticket
+ * would show a volume the engine refuses; a symbol whose conventional ceiling is above the brand's
+ * must offer the brand's, for the same reason.
+ *
+ * The STEP is the symbol's own either way, because it is granularity rather than a limit, and an
+ * index that steps in tenths still steps in tenths on a brand with a small minimum.
+ *
+ * `brandMaxLots` of null means the brand sets no ceiling, and the symbol's own stands.
+ */
+export function effectiveVolume(
+  spec: VolumeSpec,
+  brandMinLots: number,
+  brandMaxLots: number | null,
+): VolumeSpec {
+  const min = Math.max(spec.min, brandMinLots);
+  const ceiling = brandMaxLots === null ? spec.max : Math.min(spec.max, brandMaxLots);
+  // A brand whose minimum is above the symbol's ceiling leaves one tradable volume rather than an
+  // inverted range the stepper could not clamp into.
+  return { min, max: Math.max(min, ceiling), step: spec.step };
+}

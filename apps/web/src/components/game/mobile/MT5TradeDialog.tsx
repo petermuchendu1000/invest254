@@ -63,7 +63,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
   const { data: wallet } = useWallet();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, bump, setLots, stakeCents, overBalance, signedIn,
+    lots, minLots, maxLots, volDigits, volStep, bump, setLots, stakeCents, overBalance, signedIn,
     durationS, place, earlyCloseEnabled, chartSettled,
     priceOfRate,
   } = useOrderEntry();
@@ -244,7 +244,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
             type="range"
             min={minLots}
             max={maxLots}
-            step={0.01}
+            step={volStep}
             value={lots}
             onChange={(e) => setLots(Number(e.target.value))}
             aria-label="Volume slider"

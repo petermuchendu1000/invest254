@@ -38,8 +38,14 @@ import { cn } from '@/lib/cn';
  * themselves are what its Expiration row states.
  */
 export { DURATION_OPTIONS, durationLabel };
-/** MetaTrader's own volume increments, offered as the two "+" buttons. */
-const VOLUME_STEPS = [0.01, 0.1] as const;
+/**
+ * The two increments the "+"/"−" cells offer, derived from the SYMBOL's own step.
+ *
+ * MetaTrader's volume step is per symbol: hundredths on a major, tenths on an index. A fixed
+ * `[0.01, 0.1]` offered a hundredth of an index lot, which is not a volume on one, and offered the
+ * same two figures at 0.03 lots and at 30.
+ */
+const volumeStepsOf = (step: number): readonly number[] => [step, step * 10];
 
 export function MT5OrderTicket() {
   /**
@@ -50,13 +56,14 @@ export function MT5OrderTicket() {
   const order = useOrderEntry();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, bump, stakeCents, overBalance, signedIn,
+    lots, minLots, maxLots, volDigits, volStep, bump, stakeCents, overBalance, signedIn,
     durationS, setDurationS, durations, place, activePosition, earlyCloseEnabled,
     tick, priceOfRate, market,
   } = order;
   const money = useDisplayMoney();
   const limits = useStakeLimits();
   const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
+  const steps = volumeStepsOf(volStep);
   const send = (dir: 'buy' | 'sell') => report(dir, place(dir));
 
   // S/L and T/P sit on the ticket in MetaTrader, so they sit here. The target is shared with the
@@ -118,9 +125,9 @@ export function MT5OrderTicket() {
           scaling with magnitude). Ours had a label and an asymmetric -1/+2 arrangement that no
           MetaTrader build has, and at phone width it wrapped onto two lines. */}
       <div className="grid grid-cols-5 gap-1">
-        {VOLUME_STEPS.slice().reverse().map((st) => (
+        {steps.slice().reverse().map((st) => (
           <button key={`-${st}`} type="button" onClick={() => bump(-st)} disabled={lots <= minLots} className={stepBtn} aria-label={`Decrease volume by ${st}`}>
-            −{st}
+            −{st.toFixed(volDigits)}
           </button>
         ))}
         <span
@@ -129,9 +136,9 @@ export function MT5OrderTicket() {
         >
           {lots.toFixed(volDigits)}
         </span>
-        {VOLUME_STEPS.map((st) => (
+        {steps.map((st) => (
           <button key={`+${st}`} type="button" onClick={() => bump(st)} disabled={lots >= maxLots} className={stepBtn} aria-label={`Increase volume by ${st}`}>
-            +{st}
+            +{st.toFixed(volDigits)}
           </button>
         ))}
       </div>

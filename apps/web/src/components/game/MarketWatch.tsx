@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Candle } from '@invest254/shared/candles';
 import { LOT_STAKE_CENTS } from '@invest254/shared/account';
+import { effectiveVolume, volumeSpecOf, volumeDigitsOf } from '@invest254/shared/symbols';
 import {
   useGameSocket, useGameSocketApi, type SymbolRow,
 } from '@/lib/game/GameSocketProvider';
@@ -219,6 +220,18 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
 
   const digitsOf = (symbol: string) => bySymbol.get(symbol)?.digits ?? market?.instrument.digits ?? 2;
   const activeDigits = digitsOf(active);
+  /**
+   * The ACTIVE symbol's own volume spec, narrowed by the brand's money limits.
+   *
+   * MetaTrader's Specification dialog is per symbol, so selecting an index has to change these
+   * three rows. They were the brand's single range with a hard-coded 0.01 step, which made every
+   * instrument in the book claim the same volumes.
+   */
+  const activeVolume = effectiveVolume(
+    volumeSpecOf(active),
+    limits.minCents / LOT_STAKE_CENTS,
+    limits.maxCents === undefined ? null : limits.maxCents / LOT_STAKE_CENTS,
+  );
   const activeHours = hours !== null && hours.symbol === active ? hours.bars : null;
   /**
    * The Details tab's rows, in MetaTrader's own order and under its own labels. The whole list,
@@ -718,11 +731,17 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
             digits: activeDigits,
             contractSize: money.fmt(LOT_STAKE_CENTS),
             currency: money.currency,
-            minVolume: limits.minCents / LOT_STAKE_CENTS,
-            maxVolume: limits.maxCents === undefined ? null : limits.maxCents / LOT_STAKE_CENTS,
-            volumeStep: 0.01,
+            /* MetaTrader prints the SYMBOL's own three volume numbers here, not the brand's one
+               range: "Minimal volume", "Maximal volume", "Volume step" are per instrument. The
+               brand's money limits still narrow them, because they are what the engine enforces. */
+            minVolume: activeVolume.min,
+            maxVolume: activeVolume.max,
+            volumeStep: activeVolume.step,
             expiries: DURATION_OPTIONS.map(durationLabel),
-            volumeDigits: 3,
+            /* The step decides the decimals, so an index reads 0.1 and a major 0.01; one more
+               place where the brand's minimum sits off the symbol's grid. */
+            volumeDigits: volumeDigitsOf(activeVolume)
+              + (Math.abs(activeVolume.min / activeVolume.step - Math.round(activeVolume.min / activeVolume.step)) < 1e-9 ? 0 : 1),
             /**
              * Only the symbol this brand settles accepts an order. Every other one is quoted and
              * charted but not tradable, which is MetaTrader's own `Disabled` trade mode rather than

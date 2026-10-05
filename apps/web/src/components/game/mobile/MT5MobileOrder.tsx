@@ -63,7 +63,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   const { getTicks, getLastTick } = useGameSocketApi();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, bump, setLots, stakeCents, overBalance, signedIn,
+    lots, minLots, maxLots, volDigits, volStep, bump, setLots, stakeCents, overBalance, signedIn,
     durationS, setDurationS, durations, place, earlyCloseEnabled, chartSettled,
     priceOfRate,
   } = useOrderEntry();
@@ -86,7 +86,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
     setTyping(null);
   };
   const description = symbolDef(symbol)?.description ?? '';
-  const steps = volumeSteps(lots, { min: minLots, max: maxLots, step: 0.01 });
+  const steps = volumeSteps(lots, { min: minLots, max: maxLots, step: volStep });
   const refused = tradeDisabled || connecting;
   /**
    * MetaTrader's execution result, which belongs IN THIS WINDOW: "either confirmation of a
