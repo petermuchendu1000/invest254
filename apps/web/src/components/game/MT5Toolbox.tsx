@@ -18,6 +18,10 @@ import type { PositionDto } from '@/lib/api/types';
 import { EXECUTION_PRICE, tradeDateOf } from '@/lib/history/mt5history';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
+import {
+  TOOLBOX_COLUMNS, VISIBLE_TOOLBOX_TABS, toolboxTab, type ToolboxTab,
+} from '@/lib/game/toolboxTabs';
+import { exposureRows } from '@invest254/shared/account';
 import { MIN_PANEL_PX } from '@/lib/chart/paneSplit';
 import { MT5PositionMenu } from '@/components/game/MT5PositionMenu';
 import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
@@ -44,16 +48,7 @@ import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
  * Tabs sit along the BOTTOM edge, where MetaTrader puts them.
  */
 
-type Tab = 'trade' | 'history' | 'news' | 'mailbox' | 'alerts' | 'journal';
-
-const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
-  { id: 'trade', label: 'Trade' },
-  { id: 'history', label: 'History' },
-  { id: 'news', label: 'News' },
-  { id: 'mailbox', label: 'Mailbox' },
-  { id: 'alerts', label: 'Alerts' },
-  { id: 'journal', label: 'Journal' },
-];
+type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
   const { activePosition, status, earlyCloseEnabled } = useGameSocket();
@@ -65,6 +60,34 @@ export function MT5Toolbox() {
 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('trade');
+
+  /**
+   * MetaTrader's two Toolbox shortcuts, and it has no others.
+   *
+   *   Ctrl+T     "Open/close the 'Toolbox' window."
+   *   Ctrl+F9    "Open the 'Trade' tab in the 'Toolbox' window and switch the control focus to it."
+   *
+   * No other tab has one. Neither fires while a field has focus, so a dialog's own text boxes keep
+   * their editing keys.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el !== null && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 't' || e.key === 'T')) {
+        e.preventDefault();
+        setOpen((v) => !v);
+        return;
+      }
+      if (e.key === 'F9' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setTab('trade');
+        setOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   // The live row is driven by the tick stream, which does not re-render React on its own.
   const [, force] = useState(0);
   useEffect(() => {
@@ -194,10 +217,19 @@ export function MT5Toolbox() {
       >
         <span
           className={cn(
-            'min-w-0 flex-1 gap-x-4 gap-y-1',
+            'min-w-0 flex-1 gap-x-5 gap-y-1',
             open
-              ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5'
-              : 'flex items-center gap-3 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+              /**
+               * WRAPPING, not a fixed column count.
+               *
+               * A five-column grid sized its cells by the container and the figures by their text,
+               * and each figure is `whitespace-nowrap shrink-0`, so "Free margin KES 442.91" simply
+               * ran over the top of "Margin level" and rendered as "442.91ARGIN LEVEL". Wrapping
+               * lets each figure keep its own width and drop to a second line when the bar runs out,
+               * which cannot overlap at any width.
+               */
+              ? 'flex flex-wrap items-center'
+              : 'flex items-center overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
           )}
         >
           <Figure label="Balance" value={money.fmt(balanceCents)} />
@@ -398,6 +430,23 @@ export function MT5Toolbox() {
 
             {tab === 'alerts' ? <AlertsTab symbol={symbol} digits={digits} livePrice={livePrice} alerts={alerts} /> : null}
 
+            {/* Exposure: real numbers, computed from the contracts that are open. Its fourth column
+                is headed with the deposit currency's own code, as MetaTrader heads it. */}
+            {tab === 'exposure' ? (
+              <ExposureTab
+                symbol={symbol}
+                live={live}
+                currency={money.currency}
+                fmt={(cents) => money.fmt(cents)}
+              />
+            ) : null}
+
+            {/* The tabs MetaTrader fills from somewhere this platform is not connected to. The panel
+                says which, rather than showing an empty grid that looks broken. */}
+            {UNFILLABLE.includes(tab) ? (
+              <Empty>{toolboxTab(tab)?.unavailable}</Empty>
+            ) : null}
+
             {tab === 'journal' ? (
               journal.length > 0 ? (
                 <ul className="divide-y divide-[#2b3543]/40 font-mono text-[11px]">
@@ -415,13 +464,14 @@ export function MT5Toolbox() {
             ) : null}
           </div>
 
-          {/* MetaTrader puts the Toolbox tabs along the BOTTOM edge of the panel. With the app's
-              bottom nav gone this is the only bar on the screen, so the six tabs SHARE the width
-              evenly instead of bunching at the left with a status label eating the rest — on a 390px
-              phone that difference is the whole row. A count rides as a superscript rather than a
-              bracketed suffix, which is what used to push "Mailbox" wider than its neighbours. */}
-          <div className="flex items-stretch border-t border-[#2b3543] bg-[#202933]">
-            {TABS.map((t) => {
+          {/* MetaTrader puts the Toolbox tabs along the BOTTOM edge of the panel, and there are
+              eleven of them drawn (Company is hidden, as MetaTrader hides it). Eleven cannot share
+              a 390px phone evenly — "Code Base" alone would not fit in a thirty-pixel slot — so the
+              strip SCROLLS rather than crushing the labels, which is what the period row above the
+              chart already does with twenty-one periods. On a wide screen they still fill the bar.
+              A count rides as a superscript, as MetaTrader's red subscript count does. */}
+          <div className="flex items-stretch overflow-x-auto border-t border-[#2b3543] bg-[#202933] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {VISIBLE_TOOLBOX_TABS.map((t) => {
               const count = t.id === 'mailbox'
                 ? (notifications.data?.items?.length ?? 0)
                 : t.id === 'alerts' ? alerts.length : 0;
@@ -431,9 +481,11 @@ export function MT5Toolbox() {
                   type="button"
                   onClick={() => setTab(t.id)}
                   aria-pressed={tab === t.id}
+                  title={t.unavailable}
                   className={cn(
-                    'min-w-0 flex-1 px-0.5 py-1.5 text-[10.5px] font-semibold leading-tight transition',
+                    'shrink-0 whitespace-nowrap px-2 py-1.5 text-[10.5px] font-semibold leading-tight transition sm:min-w-0 sm:flex-1 sm:px-0.5',
                     tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
+                    t.unavailable ? 'opacity-55' : '',
                   )}
                 >
                   {t.label}
@@ -736,5 +788,75 @@ function Td({ children, className }: { children: React.ReactNode; className?: st
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 py-4 text-center text-[11px] text-[#8fa2b8]">{children}</div>;
+  return <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">{children}</div>;
+}
+
+/** The tabs MetaTrader has and this platform cannot fill. Company is hidden, so it is not here. */
+const UNFILLABLE: readonly ToolboxTab[] = ['calendar', 'articles', 'codebase', 'experts'];
+
+/**
+ * MetaTrader's Exposure tab.
+ *
+ * Its columns are MetaTrader's: `Assets`, `Volume`, `Rate`, the deposit currency's own code, and
+ * `Graph`. Two of them are worth a word:
+ *
+ *   Assets  is the INSTRUMENT here, not a money figure. MetaQuotes uses the same word for both a
+ *           column header and a money field elsewhere on the same screen, and never flags it.
+ *   Graph   a bar from a centre zero: "long positions are displayed with blue bars and short
+ *           positions are displayed with red ones".
+ *
+ * The arithmetic is `exposureRows` in the shared package, which is unit-tested there: a buy and a
+ * sell of equal size on one symbol are flat in volume and NOT flat in money, because both stakes
+ * are still at risk.
+ */
+function ExposureTab({ symbol, live, currency, fmt }: {
+  symbol: string;
+  live: { direction: 'buy' | 'sell'; stakeCents: number } | null | undefined;
+  currency: string;
+  fmt: (cents: number) => string;
+}) {
+  const rows = exposureRows(
+    live ? [{ symbol, direction: live.direction, stakeCents: live.stakeCents }] : [],
+  );
+  if (rows.length === 0) return <Empty>No open positions, so nothing is exposed.</Empty>;
+  const headers = [...(TOOLBOX_COLUMNS.exposure ?? [])];
+  headers[3] = currency;
+  return (
+    <table className="w-full table-fixed border-collapse text-[11px]">
+      <thead className="bg-[#202933] text-[#8fa2b8]">
+        <tr>
+          {headers.map((h, i) => (
+            <th key={i} scope="col" className="border-b border-[#2b3543] px-2 py-1.5 text-left font-semibold">{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => {
+          const long = r.netLots >= 0;
+          return (
+            <tr key={r.symbol} className="border-b border-[#2b3543]">
+              <td className="truncate px-2 py-1.5 font-semibold">{r.symbol}</td>
+              <td className="truncate px-2 py-1.5 font-mono tabular-nums">{r.netLots.toFixed(2)}</td>
+              {/* Rate is 1 because a contract is staked and settled in the deposit currency: there
+                  is no conversion to make, and printing an invented FX rate would be worse. */}
+              <td className="truncate px-2 py-1.5 font-mono tabular-nums text-[#8fa2b8]">1.00</td>
+              <td className="truncate px-2 py-1.5 font-mono tabular-nums">{fmt(r.valueCents)}</td>
+              <td className="px-2 py-1.5">
+                {/* A bar from a centre zero: blue for long, red for short, as MetaTrader draws it. */}
+                <span className="flex h-2 w-full items-center" aria-label={`${long ? 'Long' : 'Short'} ${(r.share * 100).toFixed(0)}%`}>
+                  <span className="flex h-2 flex-1 justify-end">
+                    {long ? null : <span className="h-2 rounded-l-sm" style={{ width: `${r.share * 100}%`, background: '#f23645' }} />}
+                  </span>
+                  <span aria-hidden className="h-3 w-px bg-[#2b3543]" />
+                  <span className="flex h-2 flex-1">
+                    {long ? <span className="h-2 rounded-r-sm" style={{ width: `${r.share * 100}%`, background: '#3183ff' }} /> : null}
+                  </span>
+                </span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
 }

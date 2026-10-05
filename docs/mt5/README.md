@@ -21,6 +21,7 @@ does.
 | `06-our-current-ui-inventory.md` | What this repository actually renders today, read from the source. |
 | `07-objects-list-and-properties.md` | Objects List (Ctrl+B) columns and buttons, Object Properties tabs and fields, on-chart selection and context menu, mobile objects. |
 | `08-chart-properties.md` | Chart Properties (F8): the three tabs, 13 colours, 4 schemes, 13 Show checkboxes, the scale-fixing controls, the chart context menu, chart shift. **MT5 has no logarithmic scale.** |
+| `09-toolbox.md` | The Toolbox window (Ctrl+T), its docking, the twelve tabs in order plus the conditional `Search` tab, exact columns and context menus per tab, the account summary line measured character by character, Margin Call behaviour, mobile equivalents. |
 
 ## Settled facts that contradicted our build
 
@@ -70,7 +71,9 @@ one above it is merged.
    and Colors, built to [08-chart-properties.md](./08-chart-properties.md). The
    `Linear | Log | Percent` price-scale control is deleted: MetaTrader has neither a
    logarithmic nor a percentage scale.
-9. **Toolbox tabs** — Exposure, Calendar, Articles, Code Base, Experts.
+9. **Toolbox tabs** — Exposure, Calendar, Articles, Code Base, Experts. **Done.** All twelve,
+   in MetaTrader's order, built to [09-toolbox.md](./09-toolbox.md). Exposure carries real
+   numbers; Company is hidden exactly as MetaTrader hides it.
 10. **Market Watch** — bid/ask/spread columns, tick-direction colouring, Depth of Market,
     Symbol Specification.
 11. **Account summary line** — MT5's exact labels, spacing and Margin Call highlighting.
