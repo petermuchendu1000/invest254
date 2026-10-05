@@ -40,6 +40,7 @@ Measured again on the same 360x800 phone, after:
 | Phone chart bar (`☰ ✛ ∿ M30 ◐ ▭`) | `components/game/CandleChart.tsx`, `phone` prop |
 | Swipe-left quick commands on a row | `components/game/mobile/MT5SwipeRow.tsx`, `lib/game/swipe.ts` |
 | Order execution result | `components/game/mobile/MT5OrderResult.tsx`, `lib/game/orderResult.ts` |
+| Landscape full-screen | `lib/ui/useIsPhone.ts` (`useIsLandscape`) + the shell and chart bar |
 | On-chart draggable SL and TP | `components/game/mobile/MT5ChartLevels.tsx` |
 | Quick timeframe strip + the 21-period sheet | `lib/game/mobileTimeframes.ts` + the bar above |
 | One-click trading panel | `components/game/mobile/MT5OneClickPanel.tsx` |
@@ -230,7 +231,50 @@ control carries one of those characters as text.
    circle on a chat with new messages, and a red badge on the Messages tab. The notifications API
    gives a notification no read state, so all three would be decoration. `MT5MobileTabs` already
    takes an `unread` prop for when it exists.
-2. **Landscape full-screen.** "Rotate to landscape = full-screen mode, automatically."
+
+## Landscape is full-screen
+
+*"Rotate to landscape = full-screen mode, AUTOMATICALLY. On iOS you can then toggle
+full-screen/normal by tapping the chart"* (`04-mobile-app.md` section 3).
+
+Turning a phone sideways at a chart is a request for more chart, and MetaTrader reads it that way
+without asking twice. Whatever tab was showing, a sideways phone shows the chart; the tab it was on
+is still remembered for when it is turned back.
+
+Measured at 800x360, which is why the app's TITLE BAR goes too and not only the tab bar:
+
+| | chart | of 360 |
+|---|---|---|
+| before | 164px | 46% |
+| tab bar hidden only | 164px | 46% (the tab bar is not drawn in this view) |
+| title bar hidden as well | **214px** | **59%** |
+
+The title bar is 49px, and on a landscape phone that is 14% of the screen given to a logo.
+Full-screen has to mean the app's chrome or it means very little, so `lib/ui/fullscreen.ts` carries
+that one bit from the shell up to `TopBar`, which is above the whole route.
+
+The remaining 106px is the one-click trading panel, and it stays: MetaTrader's full-screen hides the
+app's chrome, not the chart's own tools, and the chart bar's `▭` already hides the panel for a trader
+who wants the rest.
+
+Rotating back to portrait starts again from MetaTrader's own answer for that orientation, rather than
+keeping a choice made sideways.
+
+### Two deviations, both deliberate
+
+- **The chart's own top bar stays.** MetaTrader's full-screen hides the app's chrome; this shell has
+  no radial menu and no iOS context menu, so that bar is the only way to reach the period strip, the
+  crosshair, the chart type and the one-click panel. Hiding it would make full-screen a mode a trader
+  could change nothing from.
+- **iOS's "toggle by tapping the chart" is a button on that bar.** A tap on the plot is already the
+  crosshair and the drawing tools here, so the same gesture would mean two things and the one it
+  meant would be whichever the chart read first. The button is absent in portrait rather than
+  disabled, because MetaTrader has no full-screen mode there to be in or out of.
+
+The toggle's two states were inverted on the first build: `onFullScreen` asks for a full-screen
+state and was wired straight to the setter that holds the opposite, so the "leave full screen" tap
+asked to hide chrome that was already hidden and the button did nothing at all. The phone probe
+caught it.
 
 ## The order execution result, in the window
 

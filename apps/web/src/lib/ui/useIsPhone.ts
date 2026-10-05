@@ -34,3 +34,34 @@ export function useIsPhone(): boolean {
     () => false,
   );
 }
+
+/**
+ * Whether the phone is held on its side.
+ *
+ * MetaTrader: *"Rotate to landscape = full-screen mode, automatically. On iOS you can then toggle
+ * full-screen/normal by tapping the chart"* (docs/mt5/04-mobile-app.md section 3). The phone shell
+ * uses it to put the chart full-screen, which is the whole point of turning a phone sideways at a
+ * chart: at 360x800 the tab bar is 57px of 800, and rotated it is 57 of 360.
+ *
+ * Orientation alone, not a height breakpoint, because this is only ever read inside the phone tree:
+ * the shell is chosen at 1024px, so anything asking this question is already a phone-sized screen
+ * and "landscape" means short and wide.
+ *
+ * Reports FALSE during the server render, for the reason `useIsPhone` gives.
+ */
+const LANDSCAPE = '(orientation: landscape)';
+
+const subscribeLandscape = (onChange: () => void): (() => void) => {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => { /* no window */ };
+  const mq = window.matchMedia(LANDSCAPE);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+};
+
+export function useIsLandscape(): boolean {
+  return useSyncExternalStore(
+    subscribeLandscape,
+    () => (typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(LANDSCAPE).matches),
+    () => false,
+  );
+}
