@@ -146,3 +146,53 @@ export function tradingViewTypeOf(style: ChartStyle): "candles" | "bars" | "area
 export function curveProfileForChartStyle(style: ChartStyle): "market" | "wave" {
   return style === "line" ? "wave" : "market";
 }
+
+/**
+ * Heikin Ashi bars.
+ *
+ * MetaTrader 5 has exactly THREE chart types on the desktop (Bar chart, Candlesticks, Line chart):
+ * `ENUM_CHART_MODE` has three members and there is no API surface for a fourth. On MOBILE it has a
+ * native FOURTH, Heikin Ashi, and both the Android and iPhone chart help pages spell out the
+ * formula, which is the one implemented here verbatim:
+ *
+ *     Close = (Open + High + Low + Close) / 4
+ *     Open  = [Open(previous) + Close(previous)] / 2
+ *     High  = Max(High, Open, Close)
+ *     Low   = Min(Low, Open, Close)
+ *
+ * The first bar has no previous bar to average, so it opens at (Open + Close) / 2, which is the
+ * conventional seed and keeps the series continuous from its first candle.
+ *
+ * This is a chart MODE, not an indicator: MetaTrader draws the transformed bars in place of the
+ * real ones, so the price axis and anything read off the bars is in Heikin Ashi space. That is the
+ * real terminal's behaviour, not an approximation of it.
+ */
+export function heikinAshi(candles: readonly Candle[]): Candle[] {
+  const out: Candle[] = [];
+  let prev: Candle | null = null;
+  for (const c of candles) {
+    const bar = heikinAshiBar(c, prev);
+    out.push(bar);
+    prev = bar;
+  }
+  return out;
+}
+
+/**
+ * ONE Heikin Ashi bar, from its raw bar and the Heikin Ashi bar before it.
+ *
+ * This is the live path. A charting library will only accept an update to the newest bar, so a
+ * forming Heikin Ashi bar cannot be produced by repainting the tail: it has to be derived from the
+ * single bar before it, which is exactly what the formula says anyway.
+ */
+export function heikinAshiBar(c: Candle, prev: Candle | null): Candle {
+  const close = (c.open + c.high + c.low + c.close) / 4;
+  const open = prev === null ? (c.open + c.close) / 2 : (prev.open + prev.close) / 2;
+  return {
+    time: c.time,
+    open,
+    close,
+    high: Math.max(c.high, open, close),
+    low: Math.min(c.low, open, close),
+  };
+}
