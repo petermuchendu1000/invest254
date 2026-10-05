@@ -4,6 +4,7 @@ import {
   CurveGenerator, SettlementEngine, SeededRng,
   winMultiplier, solveTruncExpBeta,
   checkFeasible, rtp, requiredMeanWinMultiplier, DEFAULT_CONFIG, CALIBRATION_WINDOW_S,
+  curveDomain,
   type GameConfig,
 } from "@invest254/shared";
 
@@ -137,4 +138,107 @@ test("checkFeasible: rejects infeasible economies (RTP unreachable within the ca
   assert.equal(checkFeasible(cfgFor(0.01, 0.05)).ok, false, "edge 0.01 / wr 0.05 needs mean 19.8 > cap");
   // win-rate above RTP -> required mean <= 1 -> winners wouldn't profit -> infeasible
   assert.equal(checkFeasible(cfgFor(0.5, 0.9)).ok, false, "RTP 0.5 at wr 0.9 -> mean 0.56 <= 1");
+});
+
+// ─────────────────────── THE MULTI-SYMBOL GATE ───────────────────────
+//
+// Each tradable symbol gets its own curve from the same day seed, via a domain separator on the
+// seed (see curveDomain). The question this section answers, before any multi-symbol work is built
+// on top of it, is whether the calibrated win rate and RTP still hold on a curve the calibrator has
+// never seen.
+//
+// They should: a per-symbol curve is the SAME stochastic process with a different seed, and the
+// calibration (tau, gain) is a property of that process's distribution rather than of any one seed.
+// But "should" is not evidence, so it is measured here per symbol. If this fails, multi-symbol does
+// not ship in the statistical path.
+
+const SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "XAGUSD"];
+
+for (const lc of [
+  // Production: the shipped default.
+  { label: "production default", houseEdge: 0.75, targetWinRate: 0.125 },
+  // A marketer-shaped config, at the other end of the range.
+  { label: "marketer-shaped", houseEdge: 0.05, targetWinRate: 0.8 },
+]) {
+  test(`multi-symbol gate (${lc.label}): every symbol's own curve honours the calibration`, () => {
+    const cfg = cfgFor(lc.houseEdge, lc.targetWinRate);
+    assert.equal(checkFeasible(cfg).ok, true, "config must be feasible to calibrate");
+    const seed = SEEDS[0]!;
+    for (const symbol of SYMBOLS) {
+      const curve = new CurveGenerator(seed, cfg, "market", symbol);
+      const eng = new SettlementEngine(curve, cfg, "calibration", cfg.defaultDurationS, CALIBRATION_WINDOW_S, CAL);
+      const rnd = new SeededRng(seed, `eval:${symbol}`);
+      let win = 0, payout = 0, stakeTot = 0;
+      for (let i = 0; i < EVAL; i++) {
+        const o = eng.settleVariable(25000, i % 2 ? "buy" : "sell", rnd.range(0, 86_400), i, seed);
+        if (o.result === "win") { win++; payout += o.payoutCents; }
+        stakeTot += 25000;
+      }
+      const wr = win / EVAL, realRtp = payout / stakeTot;
+      assert.ok(
+        Math.abs(wr - lc.targetWinRate) <= WR_TOL,
+        `${symbol}: win-rate ${wr.toFixed(3)} vs target ${lc.targetWinRate}`,
+      );
+      assert.ok(
+        Math.abs(realRtp - rtp(cfg)) <= RTP_TOL,
+        `${symbol}: RTP ${realRtp.toFixed(3)} vs 1-edge ${rtp(cfg).toFixed(3)}`,
+      );
+    }
+  });
+}
+
+test("multi-symbol gate: a symbol's curve is genuinely its own, not a transform of another's", () => {
+  // The failure this guards against is the one that would make multi-symbol fake: if every symbol
+  // were drawn from one series, the charts would be affine transforms of each other and every
+  // "pair" would trace the same shape at a different scale. Independent seeds mean the per-second
+  // increments should be uncorrelated.
+  const cfg = DEFAULT_CONFIG;
+  const seed = SEEDS[0]!;
+  const sample = (symbol: string): number[] => {
+    const c = new CurveGenerator(seed, cfg, "market", symbol);
+    const out: number[] = [];
+    for (let t = 0; t < 4000; t++) out.push(c.rate(t + 1) - c.rate(t));
+    return out;
+  };
+  const a = sample("EURUSD"), b = sample("BTCUSD");
+  const mean = (x: number[]) => x.reduce((s, v) => s + v, 0) / x.length;
+  const ma = mean(a), mb = mean(b);
+  let cov = 0, va = 0, vb = 0;
+  for (let i = 0; i < a.length; i++) {
+    const da = a[i]! - ma, db = b[i]! - mb;
+    cov += da * db; va += da * da; vb += db * db;
+  }
+  const r = cov / Math.sqrt(va * vb);
+  assert.ok(Math.abs(r) < 0.1, `two symbols' increments correlate at r=${r.toFixed(4)}`);
+  // And they are not simply the same numbers.
+  assert.notDeepEqual(a.slice(0, 50), b.slice(0, 50));
+});
+
+test("multi-symbol gate: the default symbol reconstructs bit-for-bit, so history is untouched", () => {
+  // Every day already generated and every position already settled used the bare "curve" domain.
+  // XAUUSD and the no-symbol caller must keep landing on exactly those numbers, or the chart would
+  // redraw history that does not match what was settled.
+  const cfg = DEFAULT_CONFIG;
+  const seed = SEEDS[1]!;
+  const before = new CurveGenerator(seed, cfg);
+  const named = new CurveGenerator(seed, cfg, "market", "XAUUSD");
+  for (let t = 0; t < 2000; t += 7) {
+    assert.equal(named.rate(t), before.rate(t), `t=${t}`);
+  }
+  assert.equal(curveDomain(undefined), "curve");
+  assert.equal(curveDomain("XAUUSD"), "curve");
+  assert.equal(curveDomain("EURUSD"), "curve:EURUSD");
+  // A different symbol must NOT land on the old domain.
+  const other = new CurveGenerator(seed, cfg, "market", "EURUSD");
+  assert.notEqual(other.rate(500), before.rate(500));
+});
+
+test("multi-symbol gate: the wave profile separates too, for the line brands", () => {
+  const cfg = DEFAULT_CONFIG;
+  const seed = SEEDS[0]!;
+  const base = new CurveGenerator(seed, cfg, "wave");
+  const same = new CurveGenerator(seed, cfg, "wave", "XAUUSD");
+  const other = new CurveGenerator(seed, cfg, "wave", "EURUSD");
+  assert.deepEqual(same.components, base.components, "the default must stay byte-identical");
+  assert.notDeepEqual(other.components, base.components, "a named symbol must differ");
 });

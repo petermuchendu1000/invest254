@@ -56,6 +56,12 @@ settled position reconstructs exactly as before.
 
 ## 2. Does this touch the win/loss engine? Two paths, two answers
 
+> **GATE RESULT: PASSED.** Measured, not assumed, in `settle.calibration.test.ts`. The realised win
+> rate and RTP hold on six symbols' own curves at both the production config (edge 0.75, win rate
+> 0.125) and a marketer-shaped one (edge 0.05, win rate 0.8); two symbols' per-second increments
+> correlate at |r| < 0.1, so they are genuinely independent rather than transforms of one series; and
+> the default symbol reconstructs bit-for-bit, so nothing already settled moves.
+
 This is the question that decides whether the work is allowed at all, and the two paths differ.
 
 ### Pool path — the curve is already cosmetic
@@ -102,12 +108,34 @@ this, not a nice-to-have.**
 
 The request was to pull prices from TradingView or another free source. Two separate problems.
 
-### 3a. Licensing
+### 3a. Licensing — surveyed, and the answer is harder than expected
 
-See [11-market-data-sources.md](./11-market-data-sources.md). The short version is that TradingView
-sells data access and its terms forbid redistribution; its *free* offerings (Lightweight Charts,
-which this chart already uses, and the Charting Library) are **chart renderers you feed your own
-data to**, not a data feed.
+Full survey in [11-market-data-sources.md](./11-market-data-sources.md). Three findings.
+
+**TradingView has no data API at all.** Its own support page: *"We don't have an API that gives
+access to data as of now, but we are planning to add it in the future."* Its terms go further than
+barring redistribution: *"price referencing"* is named in the prohibited **non-display** list, so
+reading a TradingView price to drive anything in this system is already out before redistribution is
+reached. What it gives away is chart CODE: Lightweight Charts (Apache 2.0) and Advanced Charts
+(proprietary, free with their logo). TradingView's own words: *"Advanced Charts is a chart with your
+data."*
+
+This chart already uses Lightweight Charts, and already sets `attributionLogo: true`, which carries
+the link the Apache-2.0 NOTICE requires. **We are compliant today and gain nothing by changing.**
+
+**There is no free, licence-clean source of redistributable intraday FX or spot-metals prices.** Not
+one. Every free FX source is end-of-day only (ECB), or keyed to a trivial quota, or explicitly
+personal-use. Metals benchmarks are paid outright: LBMA requires an IBA licence *"in order to obtain,
+use or redistribute"* its data. **If this product ever showed live gold or FX to end users, that is a
+paid line item**, not a free one. The two exceptions are crypto (CoinGecko's Demo tier permits it
+with attribution) and end-of-day EUR-base FX (ECB, free, with conditions).
+
+Worth knowing for this product specifically: **the ECB reference set does not include KES.** Verified
+live.
+
+**Reference metadata, though, is solved free and commercially.** Digit counts and contract sizes are
+market conventions and need no licence at all; OpenFIGI identifiers are dedicated to the public
+domain; GLEIF's LEI data is CC0. That is exactly the half we need.
 
 ### 3b. The architectural problem, which is the bigger one
 
@@ -157,17 +185,47 @@ symbol seeds, the whole plan changes and nothing after it is worth building.
    need different `digits`/`anchor`/`scale`. A catalogue of ~20 is a different job from ~200.
 2. **Per brand, or global?** MT5 brokers offer per-account symbol sets. Item 7 only matters if
    brands differ.
-3. **Do open positions survive a symbol switch?** MetaTrader holds positions across symbols at once.
-   This engine currently tracks one open contract; multi-symbol makes "one per symbol" plausible and
-   that is a product decision with a real blast radius in the Toolbox, the account summary and the
-   pool budget.
+3. ~~**Do open positions survive a symbol switch?**~~ **DECIDED: yes, a trader may hold positions on
+   several symbols at once**, as MetaTrader does. This is the largest single consequence of the
+   whole plan and it is now in scope. See section 7.
 4. **Historical reconstruction.** A new symbol has no past. Either its history starts today, or the
    generator backfills it from the same seeds — the latter is free, because the curve is
    deterministic from the day seed, and is what the chart already does for XAUUSD.
 
 ---
 
-## 6. What is NOT in scope
+## 7. Concurrent positions across symbols (DECIDED: yes)
+
+MetaTrader holds many positions at once and so will this. It is the largest consequence of the plan,
+because several things in the engine and the UI assume exactly one open contract.
+
+What it reaches, found by reading rather than guessed:
+
+| Assumes one open contract | Where |
+|---|---|
+| `activePosition` is a single value on the socket context | `GameSocketProvider` |
+| The Toolbox's Trade tab renders `live` as one row, and the account strip prints "1 open" | `MT5Toolbox.tsx` |
+| `openStakeCents` feeds Margin as a single stake | `accountSummary`, shared |
+| The chart draws one open-position price line | `CandleChart.tsx` |
+| The order ticket's Stop Loss text says "the stake", singular | `MT5OrderTicket.tsx` |
+| Exposure already handles many, and nets them per symbol | `exposureRows`, shared — **already correct** |
+
+The money side needs care rather than courage:
+
+- **Margin becomes the SUM of open stakes**, which `accountSummary` takes as one number today. That
+  is a small change with a large blast radius, because Equity, Free margin and Margin level all hang
+  off it.
+- **The pool budget is per brand, not per position.** Several contracts open at once draw on one
+  RTP budget concurrently. `decideReserve` already reserves atomically per position id, so the
+  mechanism holds, but the concurrency is new and wants a test that N simultaneous opens cannot
+  over-reserve.
+- **A per-symbol open limit** is worth having from the start, so one account cannot hold a hundred
+  contracts and make the Toolbox unusable.
+
+`exposureRows` was written to take a list and net per symbol, so the Exposure tab needs no change at
+all. That was not foresight about this decision; it was what the MetaTrader tab genuinely means.
+
+## 8. What is NOT in scope
 
 - Real-money market exposure, or any claim that these prices are real.
 - Prices sourced from a vendor whose terms forbid redistribution.
