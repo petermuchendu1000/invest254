@@ -43,6 +43,8 @@ Measured again on the same 360x800 phone, after:
 | Trade screen (account block + position rows) | `components/game/mobile/MT5MobileTrade.tsx` |
 | Phone Quotes row + its context menu | `components/game/MarketWatch.tsx` (`phone`), `mobile/MT5MobileQuoteMenu.tsx` |
 | Advanced / Simple view mode | `lib/game/quotesView.ts` |
+| The phone order ticket (section 5a) | `components/game/mobile/MT5MobileOrder.tsx` |
+| Its adaptive seven-cell volume stepper | `lib/game/volumeSteps.ts` |
 | Messages (Broker chat) | `components/game/mobile/MT5MobileMessages.tsx` |
 | Order logic shared by both tickets | `lib/game/useOrderEntry.ts` |
 | Which shell renders | `lib/ui/useIsPhone.ts`, branched in `TradeSurface` |
@@ -50,6 +52,36 @@ Measured again on the same 360x800 phone, after:
 The phone shell and the desktop layout are chosen in JavaScript, not with `lg:hidden`, because they
 are different TREES: hiding one with CSS would mount two charts, two quote subscriptions and two
 sets of chart state.
+
+## The order ticket is its own screen, not the desktop one
+
+The New Order screen shipped first as the docked desktop ticket pushed over the shell: a bordered
+card of label/value rows with two filled blue and red rectangles under a centred price. That is the
+DESKTOP dialog, and the filled rectangles are iOS's treatment of the phone one; Android's phone
+ticket, which is the build the rest of this shell follows, is a different screen with no fills at
+all. `MT5MobileOrder` is Android's, field for field (section 5a, `android/en/open_market.png`):
+
+| # | MetaTrader | Here |
+|---|---|---|
+| 1 | back, symbol bold, description subtitle | same |
+| 2 | order type, full width, centred, triangle at the right | same, and disabled: every contract is market execution |
+| 3 | `-0.5 -0.1 -0.01 [0.61] +0.01 +0.1 +0.5`, steps adaptive, tap the value to type | same, both gestures |
+| 4 | Bid and Ask, large, side by side | one price, centred, for the reason above |
+| 5 | `- SL +` orange underline, `- TP +` green underline | same rows and the same two rules |
+| 6 | `Fill policy` ..... `Fill or Kill` | same, with Android's dotted leader |
+| 7 | a tick chart | the live tick buffer, drawn with no value axis |
+| 8 | a warning line | the one true of THIS contract, not MetaTrader's slippage sentence |
+| 9 | `SELL`/`BY MARKET` red #D00000, `BUY`/`BY MARKET` blue #0064F2, text only, thin divider | same |
+
+The volume steps scale with the value (`-5 -1 [7.00] +1 +5` at a volume of 7), which MetaQuotes
+documents only by showing two screenshots at two volumes. The rule derived from them is
+`D/10, D, 5D` for `D = 10^floor(log10(value))`, clamped so the finest cell is never below the
+instrument's own volume step; `lib/game/volumeSteps.test.ts` pins it against both screenshots.
+
+The tick chart really is ticks: the engine streams them and the client keeps the buffer, so the band
+draws the same live edge the chart's forming candle is built from. It is drawn without the canvas's
+value axis, because that axis is the curve's unitless value and a scale running 0.8 to -0.8 directly
+under a quote of 3081.42 reads as a second price that disagrees with the first.
 
 ## Deviations, and the reason for each
 
@@ -65,6 +97,8 @@ sets of chart state.
 | Chart's `◐` places a pending order | Present and disabled, with the reason | Market execution only. A button drawn as if it worked is worse than one that says why it cannot. |
 | Phone has no Market Watch tab strip | The strip is hidden on a phone | Its destinations moved into the row context menu, where MetaTrader's phone keeps them: `Properties` is the Specification, `Market statistics` is the session figures. |
 | Android's quick-strip gesture is a long press | Long press, 600ms | Same gesture; the timing is this shell's. |
+| The ticket's order type is a selector over five types | Present, showing Market Execution, disabled | The other four are pending orders, and this engine has none. |
+| The ticket has no expiry | An `Expiry` row | MetaTrader's positions run until closed; these settle on a timer the trader picks, which is the single most important fact about the trade. |
 
 ### The one-click panel's colour
 

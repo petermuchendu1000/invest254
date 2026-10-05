@@ -84,6 +84,7 @@ export function CurveCanvas({
   getLastTick,
   windowMs,
   marketer = false,
+  numbers = true,
   beat,
 }: {
   getTicks: () => Tick[];
@@ -92,6 +93,19 @@ export function CurveCanvas({
   /** MARKETER: render a neutral single-colour wave — no price axis/grid/labels and no red/green
    *  up-down split — so the motion reads as a game visual, not a trading chart (TikTok Phase 2). */
   marketer?: boolean;
+  /**
+   * Draw the y-axis NUMBERS and their calibration grid.
+   *
+   * They are the curve's own unitless value, between about -1 and +1, which is the right axis for
+   * the line-brand chart this canvas was written for. It is the wrong one beside a price: the phone
+   * order ticket draws this canvas as MetaTrader's tick chart directly under a quote reading
+   * 3081.42, and an axis running 0.8 to -0.8 next to it reads as a second, contradictory price.
+   *
+   * With it off the grid and the labels go and the wave keeps its shape, its red/green split and
+   * its zero line, which is what a small tick chart is for: the direction of the last minute, not a
+   * scale to read off.
+   */
+  numbers?: boolean;
   /** MARKETER: live round progress + settlement, for the anticipation beat (perimeter charge meter
    *  + live-point pulse + payoff burst). Ignored unless `marketer` is set. */
   beat?: MarketerBeat;
@@ -101,6 +115,8 @@ export function CurveCanvas({
   windowRef.current = windowMs;
   const marketerRef = useRef(marketer);
   marketerRef.current = marketer;
+  const numbersRef = useRef(numbers);
+  numbersRef.current = numbers;
   const beatRef = useRef(beat);
   beatRef.current = beat;
 
@@ -138,7 +154,7 @@ export function CurveCanvas({
 
     const PAD_Y = 12;
     // gutter so the curve never paints over the y-axis labels; marketers have no axis, so no gutter.
-    const PAD_LEFT = marketer ? 8 : 30;
+    const PAD_LEFT = marketer || !numbers ? 8 : 30;
     // MARKETER: a right gutter leaving a clear GAP between the wave tip (+ its live-point beacon) and
     // the board edge — the wave never runs into the edge. Players keep the full-bleed right edge.
     const PAD_RIGHT = marketer ? 28 : 0;
@@ -189,12 +205,16 @@ export function CurveCanvas({
       for (const v of AXIS_TICKS) {
         const y = Y(v);
         const zero = v === 0;
+        // Without the numbers only the zero line is drawn: it is what tells an up minute from a
+        // down one, and the 0.2 grid without labels against it would be decoration.
+        if (!numbersRef.current && !zero) continue;
         ctx.strokeStyle = hexA(colors.axis, zero ? 0.5 : 0.13);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(PAD_LEFT, y);
         ctx.lineTo(cssW, y);
         ctx.stroke();
+        if (!numbersRef.current) continue;
         ctx.fillStyle = hexA(colors.muted, zero ? 0.95 : 0.55);
         ctx.fillText(v.toFixed(1), PAD_LEFT - 5, y);
       }

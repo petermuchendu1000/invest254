@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { GameCurve } from '@/components/game/GameCurve';
 import { MarketWatch } from '@/components/game/MarketWatch';
 import { MT5History } from '@/components/history/MT5History';
-import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
+import { MT5MobileOrder } from '@/components/game/mobile/MT5MobileOrder';
 import { MT5MobileTabs } from '@/components/game/mobile/MT5MobileTabs';
 import { MT5MobileTrade } from '@/components/game/mobile/MT5MobileTrade';
 import { MT5MobileMessages } from '@/components/game/mobile/MT5MobileMessages';
@@ -48,8 +48,12 @@ export function MT5MobileShell() {
    *
    * It is a screen rather than a tab because MetaTrader's is: it is pushed from the Trade screen's
    * `＋` and from the one-click panel when one-click firing is off, and it is dismissed back to
-   * where it was opened from. The ticket inside it is the SAME `MT5OrderTicket` the desktop docks
-   * to the right, which is why volume, limits and the order it places cannot drift between them.
+   * where it was opened from.
+   *
+   * Its ticket is `MT5MobileOrder`, which is MetaTrader's PHONE ticket rather than the desktop one
+   * this screen used to carry. They place the same order — both read `useOrderEntry`, so the volume
+   * set on the one-click panel is the volume this screen opens on — and they are laid out the way
+   * MetaTrader lays each of them out, which is not the same way.
    */
   const [ticketOpen, setTicketOpen] = useState(false);
 
@@ -98,23 +102,7 @@ export function MT5MobileShell() {
 
       {ticketOpen ? (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0f1720]">
-          <div className="flex shrink-0 items-center gap-2 border-b border-[#2b3543] px-2 py-2">
-            {/* MetaTrader's back chevron, left, with the screen's name beside it. */}
-            <button
-              type="button"
-              onClick={() => setTicketOpen(false)}
-              aria-label="Back"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded text-[#3183ff]"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
-                <path d="M15 5l-7 7 7 7" />
-              </svg>
-            </button>
-            <span className="text-[14px] font-semibold text-white">New order</span>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-            <MT5OrderTicket />
-          </div>
+          <MT5MobileOrder onBack={() => setTicketOpen(false)} />
         </div>
       ) : null}
     </div>
