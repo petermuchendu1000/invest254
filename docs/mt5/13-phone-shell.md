@@ -45,6 +45,8 @@ Measured again on the same 360x800 phone, after:
 | Advanced / Simple view mode | `lib/game/quotesView.ts` |
 | The phone order ticket (section 5a) | `components/game/mobile/MT5MobileOrder.tsx` |
 | The day's range on the quote | `packages/shared/src/candles.ts` (`dayExtremes`), `apps/engine/src/markethistory.ts` (`dayRange`) |
+| The advanced trading dialog (section 5b) | `components/game/mobile/MT5TradeDialog.tsx` |
+| Its SL/TP level model | `lib/game/levels.ts`, `lib/game/levelsStore.ts` |
 | Its adaptive seven-cell volume stepper | `lib/game/volumeSteps.ts` |
 | Messages (Broker chat) | `components/game/mobile/MT5MobileMessages.tsx` |
 | Order logic shared by both tickets | `lib/game/useOrderEntry.ts` |
@@ -84,6 +86,58 @@ draws the same live edge the chart's forming candle is built from. It is drawn w
 value axis, because that axis is the curve's unitless value and a scale running 0.8 to -0.8 directly
 under a quote of 3081.42 reads as a second price that disagrees with the first.
 
+## The advanced trading dialog, and what its SL/TP really do
+
+MetaTrader has TWO order screens on a phone and they are reached from different places. The classic
+full-screen ticket (section 5a) is pushed from the Trade tab's `+`; the advanced dialog (5b) is
+"used from the chart", and the classic ticket's top-right button switches to it. All three routes
+are wired exactly that way here, and both screens place the same order through `useOrderEntry`.
+
+The advanced dialog is where MetaTrader's real Stop Loss and Take Profit live, and it carries them:
+
+| | |
+|---|---|
+| Levels stored in | POINTS, signed, as MetaTrader stores pips, so a level restored onto the next order still means something after the price has moved |
+| Unit control | `Price \| Pips \| Currency`, MetaTrader's three |
+| Chips | red `SL` #DD5B4E, green `TP` #0EB52E, Android's measured hexes |
+| Default shape | buy-shaped: TP above the price, SL below |
+| Tapping the other side | swaps them, and is idempotent |
+| Inverting them by hand | disables **Buy** and leaves Sell, "on the assumption you meant it" |
+| A pair on one side of the price | red, and both buttons dead |
+| The lock | fixes the TP:SL **ratio**, so one level drags the other proportionally, and persists across orders |
+| Remembered | levels and lock, most-recent only, **not** per symbol, as MetaTrader's are |
+
+All of it is `lib/game/levels.ts`, unit-tested there against each of those sentences.
+
+### What the engine will act on, which is a different question
+
+```
+if (this.pool?.enabled()) throw new Error("SELL_DISABLED: manual sell is disabled in pool mode");
+if (!p.sellable)          throw new Error("NOT_SELLABLE: losing positions settle at expiry");
+```
+with `sellable: outcome.result === "win"`, set at open. So:
+
+- on a **pool brand** every manual close is refused, and neither level can ever fire;
+- on any brand, a position may be closed early only if it was already decided a **win**, so a stop
+  loss can never fire by construction.
+
+The dialog therefore renders MetaTrader's controls exactly and states what each does here, in the
+slot where MetaTrader prints the level's money value: the stop reads `Risk <stake>`, because the
+stake is the most this contract can lose whatever the price does, and the target reads what the
+contract settles at. In `Currency` mode the stop is the stake and the target reads `varies`, because
+the payout is a multiplier assigned at open that rises with elapsed time and no level determines it.
+
+Two layout concessions at 360px, both measured rather than preferred:
+
+- The lock sits at the end of the unit row rather than between the chips. MetaTrader puts it
+  between them; with this app's 44px minimum tap targets, a chip, two of those buttons and a full
+  price came to 166px against 164 available, and the price ellipsized to `30…`.
+- The chip sits above its stepper rather than beside it, for the same budget.
+
+The dialog's scroller is `overflow-x-hidden`. The order-type strip bleeds past it to scroll edge to
+edge, which made the scroller horizontally scrollable too, and once anything nudged it the whole
+sheet sat 14px off the left edge with the symbol, the SL chip and the money lines clipped.
+
 ## Deviations, and the reason for each
 
 | MetaTrader | Here | Why |
@@ -100,6 +154,9 @@ under a quote of 3081.42 reads as a second price that disagrees with the first.
 | Android's quick-strip gesture is a long press | Long press, 600ms | Same gesture; the timing is this shell's. |
 | The ticket's order type is a selector over five types | Present, showing Market Execution, disabled | The other four are pending orders, and this engine has none. |
 | The ticket has no expiry | An `Expiry` row | MetaTrader's positions run until closed; these settle on a timer the trader picks, which is the single most important fact about the trade. |
+| The advanced dialog's volume unit switches to Margin | The selector states `Lots` only | The margin on this contract IS the stake, which the line below already prints, so the second mode would be two names for one number. |
+| It attaches a comment of up to 31 characters | The row says the contract carries none | Nothing on this platform reads an order comment back. |
+| Its SL/TP levels are draggable on the chart | Not draggable | The on-chart level drag is still to build; the dialog sets the same levels. |
 
 ### The one-click panel's colour
 
