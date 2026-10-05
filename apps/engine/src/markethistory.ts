@@ -1,7 +1,7 @@
 import {
   CurveGenerator, XAUUSD, DAY_S, TIMEFRAMES, aggregate, minuteBars, nextBase, nextBucketS,
   dateKeyUTC, dayStartMs, type Candle, type DayAnchor, type MarketSymbol, type PriceAxis,
-  type Timeframe, type VersionedGameConfig,
+  type Tick, type Timeframe, type VersionedGameConfig,
 } from "@invest254/shared";
 
 /**
@@ -31,6 +31,14 @@ export const MAX_BARS = 5000;
  * asking the engine to walk and hold the whole year in one call.
  */
 export const MAX_ANCHORS = 64;
+/**
+ * Days chained per slice when warming asynchronously.
+ *
+ * Two, because a day costs ~8ms and sixteen is about one frame: short enough that nothing else the
+ * engine is doing waits noticeably on it. Warming 400 days is then ~200 slices, and the yields cost
+ * nothing next to the work between them.
+ */
+const WARM_SLICE_DAYS = 2;
 
 export interface MarketHistoryOptions {
   /** Instrument the prices are expressed in. Defaults to XAUUSD. */
@@ -98,6 +106,8 @@ export class MarketHistory {
   /** Insertion order of dateKeys whose `bars` are populated, for eviction. */
   private readonly barOrder: string[] = [];
   private chainedTo: string | null = null;
+  /** Today's curve, kept so a live quote is a lookup rather than a rebuild. */
+  private liveCurve: { dateKey: string; curve: CurveGenerator } | null = null;
 
   constructor(
     private readonly seedFor: (dateKey: string) => string,
@@ -239,6 +249,55 @@ export class MarketHistory {
     src = src.filter((b) => b.time + unit <= end);
     const bars = (tf === "M1" || tf === "H1") ? src : aggregate(src, tf);
     return bars.filter((b) => nextBucketS(b.time, tf) <= end).slice(-want);
+  }
+
+  /**
+   * Chain forward to today in slices, yielding to the event loop between them.
+   *
+   * The chain is ~2.2 seconds of CPU for the production window, and doing it inside a request
+   * handler is 2.2 seconds during which this process serves no other brand. Nothing about the
+   * result changes: the same days are built in the same order, and a caller that does not warm
+   * first simply pays the whole cost at once inside its first `candles` or `liveAnchor` call.
+   *
+   * Concurrent calls are safe but wasteful rather than wrong — each would chain the days the other
+   * has not reached yet — so a caller with several symbols to warm should queue them (see
+   * `SymbolHistories.warm`).
+   */
+  async warm(): Promise<void> {
+    const today = dateKeyUTC(this.now());
+    let cursor = this.genesisKey();
+    while (cursor < today) {
+      for (let i = 0; i < WARM_SLICE_DAYS && cursor < today; i++) cursor = nextKey(cursor);
+      this.chainThrough(cursor);
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+    }
+    this.chainThrough(today);
+  }
+
+  /** Whether the chain already reaches today, so a caller can tell a warm history from a cold one. */
+  get warmed(): boolean {
+    const today = dateKeyUTC(this.now());
+    return this.chainedTo === today && this.days.has(this.genesisKey());
+  }
+
+  /**
+   * This instrument's live quote: the same `Tick` shape the brand's own curve emits.
+   *
+   * Today's curve is built once and kept, so a quote costs an O(1) lookup into an already
+   * materialised walk. It is rebuilt when the UTC day turns, which is also when the price axis
+   * re-anchors, so a client reading quotes must re-read `liveAnchor` at the same moment.
+   *
+   * For the default symbol this agrees exactly with the rate the settlement curve emits — the two
+   * derive the same day seed and run the same generator — which is what lets one chart show the
+   * history and the live edge without them disagreeing. See markethistory.test.ts.
+   */
+  liveTick(nowMs?: number, prevRate?: number): Tick {
+    const ms = nowMs ?? this.now();
+    const key = dateKeyUTC(ms);
+    if (!this.liveCurve || this.liveCurve.dateKey !== key) {
+      this.liveCurve = { dateKey: key, curve: this.curveFor(key) };
+    }
+    return this.liveCurve.curve.tick(ms, dayStartMs(key), prevRate);
   }
 
   /**

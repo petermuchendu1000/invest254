@@ -259,3 +259,60 @@ test("the chain's own bar-filling shortcut agrees with building them afterwards"
   m.candles("M15", 96);
   assert.deepEqual(m.candles("H1", 24), build().candles("H1", 24));
 });
+
+test("warm: the chain built in slices is the same chain built in one go", () => {
+  // Warming exists to keep the event loop responsive, not to change anything, so the two paths must
+  // agree bar for bar. If they ever diverged, a brand's prices would depend on whether a client
+  // happened to subscribe before it asked for candles.
+  const eager = build().candles("H1", 72);
+  const h = build();
+  assert.equal(h.warmed, false, "a fresh history is cold");
+  return h.warm().then(() => {
+    assert.equal(h.warmed, true);
+    assert.deepEqual(h.candles("H1", 72), eager);
+    // Warming again is a no-op rather than a second walk.
+    return h.warm().then(() => { assert.deepEqual(h.candles("H1", 72), eager); });
+  });
+});
+
+test("warm: the event loop keeps running while the chain is walked", async () => {
+  // The whole point. A chain walked inside one synchronous block is ~2.2s during which this process
+  // answers nothing; walked in slices, other work interleaves. Counting timer callbacks that fired
+  // DURING the warm is the honest way to assert that, since it is exactly what was blocked before.
+  const h = build();
+  let beats = 0;
+  const beat = setInterval(() => { beats += 1; }, 5);
+  try {
+    await h.warm();
+  } finally { clearInterval(beat); }
+  assert.equal(h.warmed, true);
+  assert.ok(beats > 10, `only ${beats} timer callbacks ran during the warm; the loop was blocked`);
+});
+
+test("liveTick: the quote is the same number the day's own curve produces", () => {
+  // A watch list and the chart's price header must not derive a rate differently, or the same
+  // instrument shows two prices on one screen.
+  const h = build();
+  const dateKey = dateKeyUTC(NOW);
+  const curve = new CurveGenerator(deriveSiteDaySeed(MASTER, SITE_A, dateKey, 0), DEFAULT_VERSIONED_CONFIG, "market");
+  const expected = curve.tick(NOW, dayStartMs(dateKey));
+  const got = h.liveTick(NOW);
+  assert.equal(got.rate, expected.rate);
+  assert.equal(got.t, NOW);
+  // The delta is against the rate the caller last saw, not against zero, so a stream can colour it.
+  assert.equal(h.liveTick(NOW).delta, 0);
+  const earlier = h.liveTick(NOW - 5000);
+  assert.equal(h.liveTick(NOW, earlier.rate).delta, expected.rate - earlier.rate);
+});
+
+test("liveTick: the quote lands on the same price axis as the bars", () => {
+  // A rate is unusable without the anchor it belongs to; this is the arithmetic a client performs.
+  const h = build();
+  const bars = h.candles("M1", 3);
+  const a = h.liveAnchor(NOW);
+  const price = a.base + a.instrument.scale * (valueOfRate(h.liveTick(NOW).rate) - a.openValue);
+  const lastBar = bars[bars.length - 1]!;
+  // Within a minute of the last closed bar, so the two cannot be far apart on a gold-sized axis.
+  assert.ok(Math.abs(price - lastBar.close) < 50, `quote ${price} vs last bar ${lastBar.close}`);
+  assert.equal(a.instrument.symbol, "XAUUSD");
+});

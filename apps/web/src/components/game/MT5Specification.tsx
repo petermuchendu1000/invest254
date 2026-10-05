@@ -103,10 +103,13 @@ export function MT5Specification({ spec, onDismiss }: { spec: SpecInput; onDismi
  * page still tells you to enable a checkbox the dialog no longer has.
  *
  * `Options Board` is greyed in MetaTrader's own screenshot, so it is greyed here too. `Auto Arrange`
- * is UNCHECKED here, unlike in every Toolbox tab, which is also MetaTrader's own state. The rest are
- * disabled where this platform genuinely cannot do them, each with its reason: this brand quotes one
- * symbol, so hiding it or sorting a list of one does nothing, and there is no order book behind
- * Depth Of Market at all.
+ * is UNCHECKED here, unlike in every Toolbox tab, which is also MetaTrader's own state.
+ *
+ * Everything the list can genuinely do is wired to a callback; everything it cannot carries the
+ * reason, because a disabled item with no reason reads as a bug. The reasons changed when the
+ * catalogue did: `Hide`, `Show All`, `Symbols` and `Sort` were disabled while a brand quoted one
+ * symbol and are real actions now, while `Popup Prices` and `Columns` are refused for reasons that
+ * have nothing to do with how many symbols there are.
  */
 export interface MarketWatchMenuItem {
   label: string;
@@ -117,18 +120,34 @@ export interface MarketWatchMenuItem {
   onPick?: () => void;
 }
 
-const ONE_SYMBOL =
-  'This brand quotes one symbol, so there is no list to change.';
 const NO_BOOK =
   'Depth of Market needs an order book. Contracts here are struck against the brand, not matched against other orders, so there is no book to show.';
 
 export function marketWatchMenu(opts: {
   onSpecification: () => void;
   onNewOrder?: (() => void) | undefined;
+  /** MetaTrader's Symbols dialog (Ctrl+U). */
+  onSymbols?: (() => void) | undefined;
+  /** `Hide` (Delete): drop the symbol the menu was opened on. */
+  onHide?: (() => void) | undefined;
+  onHideAll?: (() => void) | undefined;
+  onShowAll?: (() => void) | undefined;
+  onSort?: (() => void) | undefined;
+  /** `Grid`: MetaTrader's grid-line toggle, with its current state. */
+  grid?: { on: boolean; toggle: () => void } | undefined;
+  /** Whether the chart can be switched to the symbol the menu was opened on. */
+  onChartWindow?: (() => void) | undefined;
 }): MarketWatchMenuItem[] {
+  // An action is offered when this platform can genuinely do it and carries a reason when it
+  // cannot. A disabled item with no reason is worse than no item: it looks like a bug.
+  const act = (fn: (() => void) | undefined, why: string) =>
+    (fn ? { onPick: fn } : { unavailable: why });
   return [
-    { label: 'New Order', ...(opts.onNewOrder ? { onPick: opts.onNewOrder } : { unavailable: 'The order ticket is already on screen.' }) },
-    { label: 'Chart Window', unavailable: 'The chart for this symbol is already on screen.' },
+    { label: 'New Order', ...act(opts.onNewOrder, 'The order ticket is already on screen.') },
+    {
+      label: 'Chart Window',
+      ...act(opts.onChartWindow, 'The chart draws the symbol this brand settles on. Charting another is not built yet, and a chart the order ticket could not trade would be worse than none.'),
+    },
     { label: 'Tick Chart', unavailable: 'This feed is served as bars from M1 up, so there is no tick series to chart.' },
     { label: 'Depth Of Market', shortcut: 'Alt+B', unavailable: NO_BOOK },
     // Greyed in MetaTrader's own screenshot.
@@ -136,20 +155,36 @@ export function marketWatchMenu(opts: {
     { label: 'Specification', onPick: opts.onSpecification },
     { label: 'Subscribe to Realtime Datafeed', unavailable: 'The quote here is already the live feed; there is no delayed one to upgrade from.' },
     { label: 'Fundamental Data', unavailable: 'MetaTrader links out to twelve financial-news sites from here. This platform links to none.' },
-    { label: 'Popup Prices', shortcut: 'F10', unavailable: ONE_SYMBOL },
-    { label: 'Hide', shortcut: 'Delete', separatorBefore: true, unavailable: ONE_SYMBOL },
-    { label: 'Hide All', unavailable: ONE_SYMBOL },
-    { label: 'Show All', unavailable: ONE_SYMBOL },
-    { label: 'Symbols', shortcut: 'Ctrl+U', unavailable: ONE_SYMBOL },
-    { label: 'Sets', unavailable: ONE_SYMBOL },
-    { label: 'Sort', unavailable: ONE_SYMBOL },
+    {
+      label: 'Popup Prices',
+      shortcut: 'F10',
+      unavailable: 'Popup Prices is a separate always-on-top window. This terminal runs in a browser tab, which cannot open one.',
+    },
+    { label: 'Hide', shortcut: 'Delete', separatorBefore: true, ...act(opts.onHide, 'There is no symbol selected to hide.') },
+    { label: 'Hide All', ...act(opts.onHideAll, 'The list is already empty.') },
+    { label: 'Show All', ...act(opts.onShowAll, 'Every symbol this feed quotes at once is already shown.') },
+    { label: 'Symbols', shortcut: 'Ctrl+U', ...act(opts.onSymbols, 'The symbol list has not arrived yet.') },
+    {
+      label: 'Sets',
+      unavailable: 'Saved symbol sets are not built on this platform. The list itself is remembered per device.',
+    },
+    { label: 'Sort', ...act(opts.onSort, 'There is nothing to sort.') },
     { label: 'Export', unavailable: 'Quote export is not built on this platform.' },
     // The newer menu has no `Use System Colors`.
     { label: 'Show Milliseconds', separatorBefore: true, unavailable: 'This feed is not quoted to the millisecond.' },
-    { label: 'Auto Remove Expired', checked: true, unavailable: 'Nothing expires out of a one-symbol list.' },
-    { label: 'Auto Arrange', unavailable: ONE_SYMBOL },
-    { label: 'Grid', checked: true, unavailable: ONE_SYMBOL },
-    { label: 'Columns', separatorBefore: true, unavailable: ONE_SYMBOL },
+    { label: 'Auto Remove Expired', checked: true, unavailable: 'Nothing here expires out of the list: no symbol in this catalogue has an expiry date.' },
+    {
+      label: 'Auto Arrange',
+      unavailable: 'MetaTrader fits its column widths to the window. The columns here are a fixed layout, so there is nothing to arrange.',
+    },
+    ...(opts.grid
+      ? [{ label: 'Grid', checked: opts.grid.on, onPick: opts.grid.toggle }]
+      : [{ label: 'Grid', checked: true, unavailable: 'The grid is on.' }]),
+    {
+      label: 'Columns',
+      separatorBefore: true,
+      unavailable: 'MetaTrader\u2019s optional columns are Bid, Ask, Spread and Time. There is no spread on these contracts and one price rather than two, so the column set is fixed.',
+    },
   ];
 }
 
@@ -191,6 +226,10 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
           <button
             type="button"
             role="menuitem"
+            // A stable hook for the label, since the rendered row also carries a tick glyph and a
+            // shortcut, so matching on its text alone confuses `Hide` with `Hide All`.
+            data-mw-item={it.label}
+            data-mw-checked={it.checked === true ? '' : undefined}
             title={it.unavailable}
             disabled={it.unavailable !== undefined}
             onClick={() => { it.onPick?.(); onDismiss(); }}

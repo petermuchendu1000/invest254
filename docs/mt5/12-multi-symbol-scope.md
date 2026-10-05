@@ -167,10 +167,10 @@ That is reference data, it is static, and it is the low-risk half of the licensi
 | 3 | Calibration test across many symbol seeds | `packages/shared/src/settle.calibration.test.ts` | S |
 | 4 | ~~`MarketHistory` per symbol, cached per `(site, symbol)`~~ **DONE** | `apps/engine/src/symbolhistories.ts` (new), `siteregistry.ts`, `markethistory.ts` | M |
 | 5a | ~~Socket protocol: symbol list, symbol on the candles and anchors requests~~ **DONE (engine)** | `apps/engine/src/multiengine.ts` | S |
-| 5b | Per-symbol LIVE quotes: a quote streamer per `(site, symbol)`, subscribe/unsubscribe | `apps/engine/src/multiengine.ts`, `GameSocketProvider` | M |
+| 5b | ~~Per-symbol LIVE quotes: subscribe/unsubscribe, one quote message per socket per tick~~ **DONE** | `apps/engine/src/multiengine.ts`, `GameSocketProvider` | M |
 | 6 | Position records its symbol (migration + repo + receipts) | `packages/db/migrations/0182_*`, repo | M |
 | 7 | Per-brand symbol assignment, so a brand can offer a subset | DB + admin | M |
-| 8 | Market Watch becomes a real list; the context menu's `Symbols`, `Sets`, `Sort`, `Hide` become live | `MarketWatch.tsx` | M |
+| 8 | ~~Market Watch becomes a real list; the context menu's `Symbols`, `Sort`, `Hide` become live~~ **DONE** | `MarketWatch.tsx`, `MT5SymbolsDialog.tsx`, `lib/game/symbolSet.ts` | M |
 | 9 | Chart symbol switching, with drawings and properties already stored per symbol | `CandleChart.tsx` | S (both already key off symbol) |
 
 Items 8 and 9 are the only UI work; 1 to 7 are platform.
@@ -239,12 +239,70 @@ A new `symbols` request returns the brand's list: symbol, description, group and
 reason the candles are, and it carries **no prices** — a quote is the tick stream's job, and a quote
 embedded in a list reply is one nothing can age.
 
-**Why the UI does not follow yet.** The chart could already draw any symbol's history, but the live
-tick stream is still the brand's single curve, so switching the chart's symbol would draw that
-symbol's bars with the default symbol's live edge: a chart that disagrees with itself at the right-
-hand edge. Market Watch has the same problem one step worse — a list of ninety-six rows with empty
-Bid and Ask columns. So 5b (per-symbol live quotes) comes before any of the UI work, and items 8 and
-9 wait on it rather than on 5a.
+**Why the UI did not follow immediately.** The chart could already draw any symbol's history, but
+the live tick stream was still the brand's single curve, so switching the chart's symbol would have
+drawn that symbol's bars with the default symbol's live edge: a chart that disagrees with itself at
+the right-hand edge. Market Watch had the same problem one step worse. So 5b came first.
+
+### 5b. Live quotes, and why there is no quote streamer
+
+The original plan said "a quote streamer per `(site, symbol)`". There is none, and that is better.
+
+A quote is emitted on the brand's EXISTING tick loop: `onTick` sends the brand tick as before, then
+one `symbol_ticks` message per socket carrying every symbol that socket watches. Three consequences,
+each of which a separate timer would have cost:
+
+- **A symbol's quote cannot drift out of step with the brand's own tick.** For the default symbol
+  the two are the same number, and a terminal shows the brand tick in its price header and the watch
+  list beside it; on separate timers the same instrument would show two prices on one screen. There
+  is a test that pins them equal at a shared timestamp.
+- **One message per socket per tick, not one per symbol.** Twenty rows would otherwise be twenty
+  messages a tick.
+- **Nothing to start, stop or garbage-collect.** No idle-streamer bookkeeping, because there is no
+  streamer.
+
+What a quote needs is a rate AND the anchor it belongs to, so a subscription is answered in two
+parts: `subscribed_symbols` immediately (what was accepted, what was rejected and the cap), then a
+`symbol_quote` per symbol once its chain is warm, carrying the instrument, its day anchor and a
+first price. The tick stream afterwards carries only `{symbol, rate, delta}`. A symbol that is not
+warm yet is **skipped rather than quoted**: its rate is available, since that needs only today's
+curve, but a rate without its anchor cannot be turned into a price, so sending it would be a number
+the client could only misplot.
+
+**Warming is sliced.** `MarketHistory.warm()` walks the chain two days at a time and yields to the
+event loop between slices, so the ~2.2s is wall time rather than a stall. `SymbolHistories.warm()`
+queues them: one chain at a time per brand, because concurrency cannot make any of them finish
+sooner on one thread and would interleave the stalls that slicing exists to avoid. The candles and
+anchors handlers warm the same way instead of chaining inline.
+
+**Two caps that have to agree.** The engine holds `DEFAULT_MAX_RESIDENT = 24` histories per brand
+and a socket may watch `MAX_WATCHED_SYMBOLS = 20`. The order matters: a watched symbol is touched
+every tick, so a watch list LONGER than the resident set would evict and rebuild every symbol on it
+continuously, and because a rebuilt history starts cold, not one of them would ever be warm enough
+to quote. The quotes would simply never arrive. A test asserts the inequality rather than trusting
+the two numbers to stay in step.
+
+### 8. Market Watch, as MetaTrader's actually works
+
+MetaQuotes is explicit that the window "shows the symbols selected by the trader" — a broker's
+catalogue runs to hundreds and the window shows a dozen. So the list is a stored per-device
+preference (`lib/game/symbolSet.ts`), seeded with the seven majors plus gold, curated through the
+Symbols dialog (Ctrl+U) and the context menu's Hide / Hide All / Show All / Sort.
+
+The stored list is **filtered against the brand's catalogue on every read**, because the preference
+outlives the catalogue: a symbol the brand stops offering would otherwise sit in the window for ever,
+never quoting and never explaining itself. An EMPTY stored list is respected rather than replaced
+with the default, because `Hide All` is a thing a trader can choose.
+
+The context menu's reasons were rewritten, not just unlocked. `Hide`, `Show All`, `Symbols`, `Sort`
+and `Grid` are real actions now. The rest still carry a reason, and the reasons had to change: they
+used to say "this brand quotes one symbol", which is no longer true of anything. `Popup Prices` is
+refused because it is a separate always-on-top window and this terminal is a browser tab; `Columns`
+because MetaTrader's optional columns are Bid, Ask, Spread and Time, and there is no spread on these
+contracts and one price rather than two.
+
+`Show All` is the one place the cap shows through: MetaTrader shows everything, this shows as many
+as the feed quotes at once, and the dialog says how many that is rather than silently truncating.
 
 ---
 

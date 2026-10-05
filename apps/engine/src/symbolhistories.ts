@@ -46,7 +46,26 @@ export interface SymbolHistoriesOptions {
   historyDays?: number;
 }
 
-export const DEFAULT_MAX_RESIDENT = 12;
+/**
+ * How many symbols one brand holds resident by default.
+ *
+ * This number has to stay ABOVE the number of symbols a client may watch at once
+ * (`MAX_WATCHED_SYMBOLS` in multiengine.ts), and the relationship is not a nicety. A watched symbol
+ * is touched on every tick, so a watch list longer than the resident set would evict and rebuild
+ * every symbol on it continuously, and because a rebuilt history starts cold, not one of them would
+ * ever be warm enough to quote. The quotes would simply never arrive.
+ */
+export const DEFAULT_MAX_RESIDENT = 24;
+
+/**
+ * Days of minute bars a NON-primary history keeps.
+ *
+ * The primary symbol keeps `MarketHistory`'s own default, because it is the one the chart is
+ * usually on. A symbol that is only being quoted needs no minute bars at all, and a symbol being
+ * charted needs the few days around the view; four is enough to page without turning 24 resident
+ * histories into several hundred megabytes of bars (~46KB a day each).
+ */
+export const NON_PRIMARY_CACHED_DAYS = 4;
 
 export class SymbolHistories {
   private readonly offered: readonly string[];
@@ -54,6 +73,8 @@ export class SymbolHistories {
   /** Least-recently-used first, and never contains the pinned default. */
   private readonly lru: string[] = [];
   private readonly maxResident: number;
+  /** The tail of this brand's warm queue, so only one chain is walked at a time. */
+  private warming: Promise<void> = Promise.resolve();
 
   constructor(private readonly opts: SymbolHistoriesOptions) {
     const offered = opts.symbols ?? SYMBOLS.map((s) => s.symbol);
@@ -98,6 +119,29 @@ export class SymbolHistories {
     return made;
   }
 
+  /**
+   * The symbol's history, with its chain already walked to today.
+   *
+   * Warming is ~2.2 seconds of CPU per cold symbol, so the warms are QUEUED: one at a time for this
+   * brand, in the order they were asked for. Running several at once would not make any of them
+   * finish sooner — it is one thread — and would interleave 2.2-second stalls instead of yielding
+   * between slices, which is the whole point of warming asynchronously.
+   *
+   * A symbol already warm resolves immediately without joining the queue, so the common case of a
+   * client resubscribing to what it already watches costs nothing.
+   */
+  async warm(symbol: string): Promise<MarketHistory | undefined> {
+    const h = this.for(symbol);
+    if (!h || h.warmed) return h;
+    // Chain onto whatever is already warming for this brand, so the slices never interleave.
+    const run = this.warming.then(() => h.warm(), () => h.warm());
+    this.warming = run.catch(() => { /* a failed warm must not poison the queue */ });
+    await run;
+    // The symbol may have been evicted while it warmed, in which case the caller should ask again
+    // rather than be handed a history that is no longer this brand's.
+    return this.built.get(symbol) === h ? h : this.for(symbol);
+  }
+
   private touch(symbol: string): void {
     if (symbol === DEFAULT_SYMBOL) return;
     const at = this.lru.indexOf(symbol);
@@ -119,6 +163,7 @@ export class SymbolHistories {
       instrument,
       ...(this.opts.now ? { now: this.opts.now } : {}),
       ...(this.opts.historyDays !== undefined ? { historyDays: this.opts.historyDays } : {}),
+      ...(symbol === DEFAULT_SYMBOL ? {} : { maxCachedDays: NON_PRIMARY_CACHED_DAYS }),
     };
     return new MarketHistory(this.opts.seedFor, this.opts.cfg, o);
   }

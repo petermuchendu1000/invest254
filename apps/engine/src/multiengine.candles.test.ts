@@ -7,6 +7,7 @@ import { StaticConfigProvider } from "./gameconfig.js";
 import { SiteRegistry } from "./siteregistry.js";
 import { startMultiEngine, type MultiEngineHandle } from "./multiengine.js";
 import { MAX_ANCHORS, MAX_BARS } from "./markethistory.js";
+import { DEFAULT_MAX_RESIDENT } from "./symbolhistories.js";
 
 /**
  * The candle feed over the wire (Step 2 of the MT5 chart work).
@@ -342,5 +343,163 @@ test("WS anchors: a named symbol's anchors price that symbol's own days", async 
     assert.equal(bad.type, "error");
     assert.equal(bad.data.code, "UNKNOWN_SYMBOL");
     assert.equal(bad.data.reqId, "a9");
+  } finally { c.close(); await handle.close(); }
+});
+
+/**
+ * Per-symbol LIVE quotes (item 5b).
+ *
+ * The chart could already fetch any symbol's history; what was missing was its live edge. These
+ * cover the subscription (a set the client owns, capped, with unoffered symbols refused), the seed
+ * reply that makes a quote pricable, and the one invariant that matters most: the default symbol's
+ * quote is the SAME number the brand's own tick carries, so a client showing both cannot see them
+ * disagree.
+ */
+
+/** Collect every message of the given types until `done` says it has enough. */
+function collect(c: Client, types: readonly string[], done: (seen: any[]) => boolean, timeoutMs = 30_000): Promise<any[]> {
+  return new Promise((res, rej) => {
+    const seen: any[] = [];
+    const t = setTimeout(() => rej(new Error(`timeout; saw ${seen.map((m) => m.type).join(",")}`)), timeoutMs);
+    const h = (raw: any) => {
+      let m: any; try { m = JSON.parse(String(raw)); } catch { return; }
+      if (!types.includes(m.type)) return;
+      seen.push(m);
+      if (!done(seen)) return;
+      clearTimeout(t); c.ws.off("message", h); res(seen);
+    };
+    c.ws.on("message", h);
+  });
+}
+
+test("WS quotes: the watch list is a set the client owns, capped, with unoffered symbols refused", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const m = await c.ask("subscribe_symbols", {
+      // A duplicate, an unoffered symbol, and more than the cap allows, all in one request.
+      symbols: ["EURUSD", "EURUSD", "NOPE", ...Array.from({ length: 25 }, (_, i) => `FILL${i}`)],
+      reqId: "w1",
+    }, "subscribed_symbols");
+    assert.equal(m.data.reqId, "w1");
+    // The duplicate collapsed to one subscription, not two.
+    assert.deepEqual(m.data.symbols, ["EURUSD"]);
+    assert.ok(m.data.rejected.includes("NOPE"), "an unoffered symbol must be named as rejected");
+    assert.ok(m.data.max >= 1 && m.data.max <= 64, `max ${m.data.max}`);
+    // Rejected rather than silently dropped: a client has to be able to tell the trader that a
+    // symbol it asked for is not coming. Every DISTINCT symbol asked for is accounted for in one
+    // list or the other — the repeat of EURUSD is absorbed, not rejected, because asking twice for
+    // the same symbol is one subscription rather than one subscription and one failure.
+    assert.equal(m.data.symbols.length + m.data.rejected.length, 27);
+    assert.equal(new Set([...m.data.symbols, ...m.data.rejected]).size, 27);
+
+    // A second request REPLACES the list rather than adding to it.
+    const r2 = await c.ask("subscribe_symbols", { symbols: ["GBPUSD"] }, "subscribed_symbols");
+    assert.deepEqual(r2.data.symbols, ["GBPUSD"]);
+
+    const off = await c.ask("unsubscribe_symbols", { reqId: "w2" }, "subscribed_symbols");
+    assert.deepEqual(off.data.symbols, []);
+    assert.equal(off.data.reqId, "w2");
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS quotes: a subscribed symbol is seeded with what makes its ticks pricable, then streams", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const seeded = collect(c, ["symbol_quote"], (s) => s.length >= 1);
+    await c.ask("subscribe_symbols", { symbols: ["EURUSD"] }, "subscribed_symbols");
+    const [q] = await seeded;
+    assert.equal(q.data.symbol, "EURUSD");
+    // A rate alone is unusable: the anchor is what turns it into a price.
+    assert.equal(q.data.instrument.symbol, "EURUSD");
+    assert.equal(q.data.instrument.digits, 5);
+    assert.ok(q.data.anchor.base > 0.5 && q.data.anchor.base < 2, `base ${q.data.anchor.base}`);
+    assert.equal(typeof q.data.anchor.tradeDate, "string");
+    assert.equal(typeof q.data.anchor.openValue, "number");
+    assert.ok(Number.isFinite(q.data.rate));
+    // And the quote really does price on that axis.
+    const price = q.data.anchor.base + q.data.instrument.scale * (valueOfRate(q.data.rate) - q.data.anchor.openValue);
+    assert.ok(price > 0.5 && price < 2, `EURUSD priced at ${price}`);
+
+    // Then the live stream, carrying only what changes.
+    const ticks = await collect(c, ["symbol_ticks"], (s) => s.length >= 3);
+    for (const m of ticks) {
+      assert.equal(m.data.quotes.length, 1);
+      assert.equal(m.data.quotes[0].symbol, "EURUSD");
+      assert.ok(Number.isFinite(m.data.quotes[0].rate));
+      assert.ok(Number.isFinite(m.data.quotes[0].delta));
+      // The stream does not repeat the instrument or the anchor: those came with the seed.
+      assert.equal(m.data.quotes[0].instrument, undefined);
+      assert.equal(m.data.quotes[0].anchor, undefined);
+    }
+    // The rate moves, so this is a feed rather than a constant.
+    assert.ok(new Set(ticks.map((m) => m.data.quotes[0].rate)).size > 1);
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS quotes: the default symbol's quote is the same number the brand's own tick carries", async () => {
+  // The invariant that matters most. A terminal shows the brand tick in one place (the price header)
+  // and the watch list in another; if the two derived their rate differently the same instrument
+  // would show two prices on one screen.
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    await c.ask("subscribe_symbols", { symbols: ["XAUUSD"] }, "subscribed_symbols");
+    const pair = await collect(c, ["tick", "symbol_ticks"], (seen) => {
+      // Enough once some brand tick and some symbol_ticks share a timestamp.
+      const ts = new Set(seen.filter((m) => m.type === "tick").map((m) => m.data.t));
+      return seen.some((m) => m.type === "symbol_ticks" && ts.has(m.data.t));
+    });
+    const quotes = pair.filter((m) => m.type === "symbol_ticks");
+    const byT = new Map(pair.filter((m) => m.type === "tick").map((m) => [m.data.t, m.data.rate]));
+    const matched = quotes.filter((m) => byT.has(m.data.t));
+    assert.ok(matched.length >= 1, "no symbol_ticks shared a timestamp with a brand tick");
+    for (const m of matched) {
+      assert.equal(m.data.quotes[0].symbol, "XAUUSD");
+      assert.equal(m.data.quotes[0].rate, byT.get(m.data.t));
+    }
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS quotes: a line brand is told it has none, and unsubscribing stops the stream", async () => {
+  const { handle, url } = await boot();
+  const line = new Client(url(LINE_SITE));
+  const candle = new Client(url(CANDLE_SITE));
+  try {
+    await line.open();
+    const m = await line.ask("subscribe_symbols", { symbols: ["EURUSD"], reqId: "l1" }, "subscribed_symbols");
+    assert.equal(m.type, "error");
+    assert.equal(m.data.code, "NO_CANDLES");
+    assert.equal(m.data.reqId, "l1");
+
+    await candle.open();
+    await candle.ask("subscribe_symbols", { symbols: ["XAUUSD"] }, "subscribed_symbols");
+    await collect(candle, ["symbol_ticks"], (s) => s.length >= 1);
+    await candle.ask("unsubscribe_symbols", {}, "subscribed_symbols");
+    // Nothing more should arrive. The brand keeps ticking, so this is a real silence rather than a
+    // stopped clock: wait for several brand ticks and assert no quote came with them.
+    const after: any[] = [];
+    const h = (raw: any) => { try { const x = JSON.parse(String(raw)); if (x.type === "symbol_ticks") after.push(x); } catch { /* ignore */ } };
+    candle.ws.on("message", h);
+    await collect(candle, ["tick"], (s) => s.length >= 5);
+    candle.ws.off("message", h);
+    assert.deepEqual(after, []);
+  } finally { line.close(); candle.close(); await handle.close(); }
+});
+
+test("WS quotes: the watch cap stays below the resident cap, or no quote would ever warm", async () => {
+  // Not a protocol test but the reason the protocol's cap is the number it is. A watched symbol is
+  // touched every tick, so a list longer than the resident set would evict and rebuild every symbol
+  // on it continuously and none would ever be warm enough to quote.
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const m = await c.ask("subscribe_symbols", { symbols: [] }, "subscribed_symbols");
+    assert.ok(m.data.max < DEFAULT_MAX_RESIDENT, `watch cap ${m.data.max} vs resident cap ${DEFAULT_MAX_RESIDENT}`);
   } finally { c.close(); await handle.close(); }
 });

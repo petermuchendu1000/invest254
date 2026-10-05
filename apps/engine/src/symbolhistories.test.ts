@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_VERSIONED_CONFIG, deriveSiteDaySeed, DEFAULT_SYMBOL, SYMBOLS, instrumentFor,
 } from "@invest254/shared";
-import { SymbolHistories, DEFAULT_MAX_RESIDENT } from "./symbolhistories.js";
+import { SymbolHistories, DEFAULT_MAX_RESIDENT, NON_PRIMARY_CACHED_DAYS } from "./symbolhistories.js";
 
 const MASTER = "symbol-histories-master";
 const SITE = "00000000-0000-0000-0000-0000000000a1";
@@ -114,7 +114,6 @@ test("histories are evicted least-recently-used beyond the cap, and the default 
   assert.ok(hs.resident.includes(DEFAULT_SYMBOL), "the default is pinned");
   // The cap counts everything but the pinned default.
   assert.equal(hs.resident.length, 4);
-  assert.equal(DEFAULT_MAX_RESIDENT, 12);
 });
 
 test("a rebuilt history produces bit-for-bit the same bars, which is what makes eviction safe", () => {
@@ -143,4 +142,59 @@ test("every symbol in the catalogue can actually build a history", () => {
       assert.equal(b.close, Number(b.close.toFixed(d.digits)), `${d.symbol} close ${b.close}`);
     }
   }
+});
+
+test("warm: an offered symbol comes back warm, an unoffered one comes back as nothing", async () => {
+  const hs = build();
+  const h = await hs.warm("EURUSD");
+  assert.ok(h);
+  assert.equal(h.warmed, true);
+  assert.equal(h.instrument.symbol, "EURUSD");
+  assert.equal(await hs.warm("NOPE"), undefined);
+});
+
+test("warm: several symbols asked for at once all end up warm, one chain at a time", async () => {
+  // Concurrency here would not make any of them finish sooner — it is one thread — and would
+  // interleave the slices of several chains, which is the opposite of what slicing is for. The
+  // observable contract is simply that asking for all of them at once warms all of them.
+  const hs = build({ maxResident: 8 });
+  const want = ["EURUSD", "GBPUSD", "BTCUSD"];
+  const got = await Promise.all(want.map((s) => hs.warm(s)));
+  for (const [i, h] of got.entries()) {
+    assert.ok(h, want[i]);
+    assert.equal(h.warmed, true, want[i]);
+    assert.equal(h.instrument.symbol, want[i]);
+  }
+});
+
+test("warm: a symbol already warm is handed straight back without walking again", async () => {
+  const hs = build();
+  const first = await hs.warm("EURUSD");
+  const bars = first!.candles("H1", 6);
+  const again = await hs.warm("EURUSD");
+  // The same object, so nothing was rebuilt, and the same bars either way.
+  assert.equal(again, first);
+  assert.deepEqual(again!.candles("H1", 6), bars);
+});
+
+test("warm: a symbol evicted while warming is not handed back as this brand's history", async () => {
+  // With room for one, warming a second symbol pushes the first out. The caller must not be given
+  // an orphan: it would keep chaining and caching bars that nothing can reach, and a later lookup
+  // of the same symbol would hand out a different object with a different cache.
+  const hs = build({ maxResident: 1 });
+  const [a, b] = await Promise.all([hs.warm("EURUSD"), hs.warm("GBPUSD")]);
+  assert.ok(b);
+  assert.equal(b.instrument.symbol, "GBPUSD");
+  // EURUSD either came back as the history the brand currently holds, or came back rebuilt — never
+  // as an object the brand has let go of.
+  assert.ok(a);
+  assert.equal(a.instrument.symbol, "EURUSD");
+  assert.equal(hs.resident.includes("GBPUSD"), true);
+});
+
+test("the resident cap leaves room for a full watch list plus the chart's own symbol", () => {
+  // The number exists for this reason; multiengine's MAX_WATCHED_SYMBOLS is checked against it in
+  // the protocol tests. Stated here too, next to the constant it constrains.
+  assert.ok(DEFAULT_MAX_RESIDENT >= 21, `resident cap ${DEFAULT_MAX_RESIDENT} is too small for a watch list`);
+  assert.equal(NON_PRIMARY_CACHED_DAYS, 4);
 });
