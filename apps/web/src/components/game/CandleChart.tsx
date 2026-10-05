@@ -106,13 +106,19 @@ interface Legend { o: number; h: number; l: number; c: number; changePct: number
 type Anchor = CandlesReply['anchor'];
 
 export function CandleChart({
-  getLastTick, requestCandles, status, initialType = 'candles',
+  getLastTick, requestCandles, status, initialType = 'candles', openPosition = null,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
   /** Connection state, so history can be refetched after a drop. */
   status: ConnStatus;
   initialType?: MainType;
+  /**
+   * The live position, so the chart can draw its level. MetaTrader's `CHART_SHOW_TRADE_LEVELS`
+   * draws "levels of open positions, Stop Loss, Take Profit and pending orders"; here only the
+   * open-position level exists, for the reason given where it is drawn.
+   */
+  openPosition?: { entryRate: number | null; direction: 'buy' | 'sell'; lots: string } | null;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -648,6 +654,45 @@ export function CandleChart({
   const active = 'bg-[#2b3543] text-white';
   const up = (legend?.changePct ?? 0) >= 0;
   const row = 'flex items-center gap-0.5';
+  /**
+   * MetaTrader's trade levels.
+   *
+   * `CHART_SHOW_TRADE_LEVELS` draws the levels of open positions, Stop Loss, Take Profit and
+   * pending orders. Only the first of those can exist here, and the reasons are worth stating
+   * because they are not laziness:
+   *   - there are no pending orders: every contract is market execution;
+   *   - the Stop Loss has no price level at all. A losing contract cannot be closed early, so the
+   *     whole downside is the stake and no price would ever trigger a stop;
+   *   - the Take Profit is an amount rather than a price, because the payout rises with elapsed
+   *     time rather than with price, so it has no line to sit on either.
+   * Drawing a stop line at a made-up price would be the exact invention this rebuild is undoing.
+   *
+   * Colour: MetaTrader draws position levels in the `Volumes` colour (CHART_COLOR_VOLUME is
+   * documented as "Color of volumes and position opening levels"), which is Green in the one
+   * scheme MetaQuotes publishes values for. The dark schemes' values are undocumented, so this
+   * uses the terminal's own green rather than inventing a hex and calling it MetaTrader's.
+   */
+  useEffect(() => {
+    const series = mainRef.current;
+    const anchor = anchorRef.current;
+    const lc = lcRef.current;
+    if (!series || !anchor || !lc) return;
+    const rate = openPosition?.entryRate ?? null;
+    if (rate === null || !openPosition) return;
+    const inst = instRef.current;
+    const price = anchor.base + inst.scale * (valueOfRate(rate) - anchor.openValue);
+    if (!Number.isFinite(price)) return;
+    const line = series.createPriceLine({
+      price,
+      color: TV.up,
+      lineWidth: 1,
+      lineStyle: lc.LineStyle.Solid,
+      axisLabelVisible: true,
+      title: `${openPosition.direction} ${openPosition.lots}`,
+    });
+    return () => { try { series.removePriceLine(line); } catch { /* series already gone */ } };
+  }, [openPosition?.entryRate, openPosition?.direction, openPosition?.lots, revision]);
+
   const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" aria-hidden />;
   const dp = instrument.digits;
 
