@@ -74,9 +74,11 @@ export function MT5OrderTicket() {
   const digits = market?.instrument.digits ?? 2;
   const symbol = market?.instrument.symbol ?? 'XAUUSD';
   const tick = getLastTick();
-  const price = market && tick
-    ? market.anchor.base + market.instrument.scale * (valueOfRate(tick.rate) - market.anchor.openValue)
-    : null;
+  const priceOfRate = (rate: number | null | undefined): number | null =>
+    market && rate !== null && rate !== undefined
+      ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue)
+      : null;
+  const price = tick ? priceOfRate(tick.rate) : null;
 
   // ── Volume ─────────────────────────────────────────────────────────────────────────────────────
   // Lots are the stake divided by the contract size. The brand's MINIMUM is the floor, so the
@@ -142,7 +144,7 @@ export function MT5OrderTicket() {
   if (activePosition) {
     return (
       <div className="flex flex-col gap-2 rounded border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
-        <MT5LivePosition pos={activePosition} symbol={symbol} />
+        <MT5LivePosition pos={activePosition} symbol={symbol} digits={digits} price={price} openPrice={priceOfRate(activePosition.entryRate)} />
       </div>
     );
   }
