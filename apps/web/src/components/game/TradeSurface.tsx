@@ -74,7 +74,7 @@ export function TradeSurface() {
      * and two sets of state.
      */
     <section className={cn('flex h-full min-h-0 flex-col gap-2 md:gap-3', terminal && 'lg:flex-row lg:gap-3')}>
-      {terminal ? <MarketWatch className="hidden lg:flex lg:w-56 lg:shrink-0 xl:w-64" /> : null}
+      {terminal ? <MarketWatch className="hidden lg:flex lg:w-60 lg:shrink-0 xl:w-72" /> : null}
 
       {/* `min-w-0` is load-bearing on the desktop row: without it this column refuses to shrink
           below the chart toolbar's min-content width, the row grows past the viewport and the order

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { quoteTone, QUOTE_TONE_COLOUR, STALE_AFTER_MS } from './quoteTone.js';
+import { quoteTone, QUOTE_TONE_COLOUR, STALE_AFTER_MS, gutterGlyph, GUTTER_GLYPH, GUTTER_COLOUR } from './quoteTone.js';
 
 /**
  * MetaQuotes' rule, verbatim: "Blue — the current price is higher than the previous one; Red — the
@@ -52,4 +52,25 @@ test('before any quote has arrived there is no tone at all', () => {
   assert.equal(quoteTone({ up: null, changedAt: null, now: 1 }), null);
   assert.equal(quoteTone({ up: true, changedAt: null, now: 1 }), null);
   assert.equal(quoteTone({ up: null, changedAt: 1, now: 1 }), null);
+});
+
+test("the gutter glyph is MetaTrader's three states, in its own colours", () => {
+  // Measured off en/market_watch_x2.png at 3x. The arrow is green and red while the price beside it
+  // is blue and red: MetaTrader being inconsistent with itself, which is the thing being copied.
+  const now = 1_000_000;
+  assert.equal(gutterGlyph({ up: true, changedAt: now, now }), 'up');
+  assert.equal(gutterGlyph({ up: false, changedAt: now, now }), 'down');
+  assert.equal(GUTTER_GLYPH.up, '↗');
+  assert.equal(GUTTER_GLYPH.down, '↘');
+  assert.equal(GUTTER_GLYPH.flat, '•');
+  assert.equal(GUTTER_COLOUR.up, '#00A91C');
+  assert.equal(GUTTER_COLOUR.down, '#D83933');
+  assert.equal(GUTTER_COLOUR.flat, '#A1A1A1');
+});
+
+test('the grey dot covers both a stale price and one that has never arrived', () => {
+  // MetaTrader shows the dot on exactly those rows: XAUUSD and USDRUB in its own screenshot are
+  // both stale by their Time column and both carry the dot.
+  assert.equal(gutterGlyph({ up: true, changedAt: 0, now: 60_000 }), 'flat');
+  assert.equal(gutterGlyph({ up: null, changedAt: null, now: 1 }), 'flat');
 });

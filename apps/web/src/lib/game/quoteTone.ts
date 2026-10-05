@@ -63,3 +63,40 @@ export const QUOTE_TONE_COLOUR: Record<QuoteTone, string> = {
   down: '#f23645',
   stale: 'currentColor',
 };
+
+/**
+ * MetaTrader's three-state gutter glyph, left of the symbol in Market Watch.
+ *
+ * Read off `en/market_watch_x2.png` at 3x (docs/mt5/10-market-watch.md section 2.4): a thin green
+ * arrow up, a thin red arrow down, or a grey filled dot where the price has not moved. MetaQuotes
+ * documents none of it, which is why the colours are recorded as measured values rather than as
+ * named tokens.
+ *
+ * Note the glyph's colours are NOT the quote's. The arrow is green and red; the price beside it is
+ * blue and red. That is MetaTrader being inconsistent with itself, and copying it is the point.
+ */
+export type GutterGlyph = 'up' | 'down' | 'flat';
+
+export const GUTTER_GLYPH: Record<GutterGlyph, string> = {
+  up: '↗',
+  down: '↘',
+  flat: '•',
+};
+
+export const GUTTER_COLOUR: Record<GutterGlyph, string> = {
+  up: '#00A91C',
+  down: '#D83933',
+  flat: '#A1A1A1',
+};
+
+/**
+ * Which glyph a row shows.
+ *
+ * The grey dot covers every case that is not a live up or down tick: no quote yet, and a price that
+ * has stopped moving. MetaTrader shows the dot on exactly those rows (XAUUSD and USDRUB in its own
+ * screenshot, both stale by their Time column), so one state covers both here too.
+ */
+export function gutterGlyph(input: QuoteToneInput): GutterGlyph {
+  const tone = quoteTone(input);
+  return tone === 'up' ? 'up' : tone === 'down' ? 'down' : 'flat';
+}

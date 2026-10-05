@@ -304,6 +304,36 @@ contracts and one price rather than two.
 `Show All` is the one place the cap shows through: MetaTrader shows everything, this shows as many
 as the feed quotes at once, and the dialog says how many that is rather than silently truncating.
 
+### 8a. The row itself, read off MetaTrader's own pixels
+
+A second pass took the row from "symbol, change, price" to MetaTrader's own shape, every detail from
+[10-market-watch.md](./10-market-watch.md) section 2:
+
+- **The three-state gutter glyph** — a thin green arrow up (`#00A91C`), a thin red arrow down
+  (`#D83933`), or a grey filled dot (`#A1A1A1`) where the price has not moved. It sits INSIDE the
+  Symbol column rather than in a column of its own, which is why MetaTrader gives it no header. Note
+  its colours are not the quote's: the arrow is green and red while the price beside it is blue and
+  red. MetaTrader is inconsistent with itself there, and copying it is the point.
+- **It replaced an invention.** A blue bar had marked which symbol the chart was on. MetaTrader's
+  Market Watch does not mark that, because the chart's own title says so.
+- **The Time column** — "the last quote arrival time" — in MetaTrader's column order, after the
+  prices and before Daily Change. MetaTrader drops Time and Daily Change off the right edge when the
+  window is narrow; this panel does the same with a breakpoint rather than by clipping, and a test
+  now asserts no column is ever cut off mid-number.
+- **Daily Change has no space before its `%`**, while the account summary strip writes
+  `1 076.68 %` WITH one. Both are copied as found.
+- **The add row** at the BOTTOM of the list: `+ click to add...` with the shown/available counter
+  right-aligned on the same row (`8 / 96`), both verbatim from the help. The `+` button that used to
+  sit in the panel header is gone, because MetaTrader has no such control there.
+
+**Drag a symbol onto the chart to chart it**, which is MetaTrader's own gesture: *"A symbol chart
+can be opened by dragging it to the chart viewing area using a mouse (Drag'n'Drop)."*
+
+Double-click charts it too, and that is a **deviation worth naming**. MetaTrader's double-click
+"opens a new position opening window"; this terminal's order ticket is permanently docked, so there
+is no window for it to open, and dropping the gesture would leave a phone — which has neither a
+right-click nor a drag — with no way to change the chart at all.
+
 ---
 
 ## 5. Decisions needed before building

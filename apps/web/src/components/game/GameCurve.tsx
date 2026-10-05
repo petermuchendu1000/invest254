@@ -11,7 +11,7 @@ import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { ActivePosition } from '@/lib/game/betting';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
-import { useChartSymbolStore } from '@/lib/game/chartSymbol';
+import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
 import type { Timeframe } from '@invest254/shared/candles';
 import type { Tick } from '@/lib/game/types';
 
@@ -48,12 +48,15 @@ function useMarketerBeat(active: ActivePosition | null): MarketerBeat {
  * so brands paid for a chart their players never saw. Both views share the authoritative tick stream.
  */
 export function GameCurve() {
-  const { getTicks, getLastTick, requestCandles, getSymbolQuote } = useGameSocketApi();
+  const { getTicks, getLastTick, requestCandles, getSymbolQuote, getMarket } = useGameSocketApi();
   /**
    * The symbol the chart is on. Null means the brand's own — the one it settles — so the default
    * path is byte-for-byte what it was before symbol switching existed.
    */
   const charted = useChartSymbolStore((s) => s.symbol);
+  const setCharted = useChartSymbolStore((s) => s.set);
+  /** The symbol this brand settles, which is what a drop of it means "back to the default". */
+  const defaultSymbol = getMarket()?.instrument.symbol ?? null;
   const symbol = charted ?? undefined;
   const chartCandles = useCallback(
     (tf: Timeframe, count: number, to?: number) => requestCandles(tf, count, to, symbol),
@@ -96,7 +99,27 @@ export function GameCurve() {
   const gearHere = !tvType;
 
   return (
-    <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface">
+    <div
+      /**
+       * The chart viewing area is a drop target, which is MetaTrader's own way of changing a
+       * chart's symbol: "A symbol chart can be opened by dragging it to the chart viewing area
+       * using a mouse (Drag'n'Drop)." Market Watch's rows are the drag source.
+       */
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(CHART_SYMBOL_DND)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(e) => {
+        const dropped = e.dataTransfer.getData(CHART_SYMBOL_DND);
+        if (!dropped) return;
+        e.preventDefault();
+        // Null for the brand's own symbol, so a brand changing its instrument does not strand the
+        // device on the old one. Same rule as Market Watch's own `openChart`.
+        setCharted(dropped === defaultSymbol ? null : dropped);
+      }}
+      className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-surface"
+    >
       {/* Candlestick/OHLC brands render the TradingView view; line brands render the wave. The wave's
           neutralized form (no price axis, labels or red/green) is now reached only by a player who
           chose Basic — a marketer sees the same wave a player does. */}

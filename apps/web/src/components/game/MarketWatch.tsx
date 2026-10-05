@@ -9,14 +9,14 @@ import {
 import { useDisplayMoney } from '@/lib/money';
 import { MT5Price } from '@/components/game/MT5Price';
 import { logJournal } from '@/lib/game/journal';
-import { quoteTone, QUOTE_TONE_COLOUR } from '@/lib/game/quoteTone';
+import { quoteTone, QUOTE_TONE_COLOUR, gutterGlyph, GUTTER_GLYPH, GUTTER_COLOUR } from '@/lib/game/quoteTone';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import {
   MT5Specification, MT5MarketWatchMenu, marketWatchMenu,
 } from '@/components/game/MT5Specification';
 import { MT5SymbolsDialog } from '@/components/game/MT5SymbolsDialog';
 import { useSymbolSetStore, MAX_WATCHED } from '@/lib/game/symbolSet';
-import { useChartSymbolStore } from '@/lib/game/chartSymbol';
+import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
 import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
 
@@ -177,7 +177,7 @@ export function MarketWatch({ className }: { className?: string }) {
     // Before a per-symbol quote has landed, the brand's own market axis still prices the DEFAULT
     // symbol, so that one row is never blank while the others fill in.
     if (market && market.instrument.symbol === symbol) {
-      return { instrument: market.instrument, price: null, up: null, changedAt: null, anchor: market.anchor };
+      return { instrument: market.instrument, price: null, up: null, changedAt: null, t: null, anchor: market.anchor };
     }
     return null;
   }, [getSymbolQuote, market]);
@@ -217,22 +217,16 @@ export function MarketWatch({ className }: { className?: string }) {
     <aside className={cn('flex flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] text-[#ffffff]', className)}>
       <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8fa2b8]">Market Watch</span>
-        <button
-          type="button"
-          onClick={() => setSymbolsOpen(true)}
-          title="Symbols (Ctrl+U)"
-          aria-label="Symbols"
-          className="ml-auto rounded-sm border border-[#2b3543] px-1.5 text-[10px] font-semibold text-[#8fa2b8] transition hover:border-[#3183ff] hover:text-white"
-        >
-          +
-        </button>
+        {/* No add button up here: MetaTrader puts its `+` at the BOTTOM of the list, on the add
+            row with the shown/available counter, and nowhere else. */}
+        <span className="ml-auto" />
         <span
           className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
           title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {tab === 'symbols' ? (
           visible.length === 0 ? (
             <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">
@@ -254,8 +248,10 @@ export function MarketWatch({ className }: { className?: string }) {
               {visible.map((symbol) => {
                 const q = quoteOf(symbol);
                 const digits = digitsOf(symbol);
-                const tone = quoteTone({ up: q?.up ?? null, changedAt: q?.changedAt ?? null, now: Date.now() });
+                const toneInput = { up: q?.up ?? null, changedAt: q?.changedAt ?? null, now: Date.now() };
+                const tone = quoteTone(toneInput);
                 const colour = tone === null ? '#ffffff' : QUOTE_TONE_COLOUR[tone];
+                const glyph = gutterGlyph(toneInput);
                 const open = q?.anchor.base ?? null;
                 const price = q?.price ?? null;
                 const changePct = price !== null && open ? ((price - open) / open) * 100 : null;
@@ -274,8 +270,26 @@ export function MarketWatch({ className }: { className?: string }) {
                      * impossible, because the first of its two clicks unmounted the row.
                      */
                     onClick={() => setSelected(symbol)}
-                    // MetaTrader opens a symbol's chart from this window; double-click is its own
-                    // shortcut for it, and the context menu's `Chart Window` is the long way round.
+                    /**
+                     * Drag a symbol onto the chart to chart it. MetaQuotes, verbatim: "A symbol
+                     * chart can be opened by dragging it to the chart viewing area using a mouse
+                     * (Drag'n'Drop)."
+                     */
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(CHART_SYMBOL_DND, symbol);
+                      e.dataTransfer.setData('text/plain', symbol);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    /**
+                     * Double-click charts it too, and that is a DEVIATION worth naming.
+                     *
+                     * MetaTrader's double-click "opens a new position opening window". This
+                     * terminal's order ticket is permanently docked, so there is no window for it
+                     * to open, and dropping the gesture entirely would leave a phone — which has
+                     * neither a right-click nor a drag — with no way to change the chart at all.
+                     * So it does what the drag does.
+                     */
                     onDoubleClick={() => openChart(symbol)}
                     onContextMenu={(e) => { e.preventDefault(); setSelected(symbol); setMenu({ x: e.clientX, y: e.clientY, symbol }); }}
                     className={cn(
@@ -284,22 +298,62 @@ export function MarketWatch({ className }: { className?: string }) {
                       symbol === active ? 'bg-[#202933]' : '',
                     )}
                   >
-                    {/* The symbol the chart is on, so the window says which one is on screen. */}
-                    <span aria-hidden className={cn('w-1 shrink-0 self-stretch rounded-sm', symbol === chartSymbol ? 'bg-[#3183ff]' : '')} />
-                    <span className="w-[68px] shrink-0 truncate text-[11px] font-bold text-white">{symbol}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#8fa2b8]">
-                      {changePct === null ? '' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
+                    {/* MetaTrader's gutter glyph: a thin green arrow, a thin red arrow, or a grey
+                        dot where the price has not moved. It sits INSIDE the Symbol column rather
+                        than in a column of its own, which is why there is no header above it.
+
+                        It replaced a blue bar marking the charted symbol. That bar was an invention:
+                        MetaTrader's Market Watch does not mark which symbol the chart is on, because
+                        the chart's own title says so. */}
+                    <span aria-hidden className="w-3 shrink-0 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
+                      {GUTTER_GLYPH[glyph]}
                     </span>
+                    <span className="w-[62px] shrink-0 truncate text-[11px] font-bold text-white">{symbol}</span>
                     {price === null ? (
                       /* Not a dash: the row is subscribed and its first quote is on its way. A
                          symbol's price chain takes a moment to build the first time it is asked for. */
-                      <span className="shrink-0 font-mono text-[10px] text-[#4a5666]">waiting</span>
+                      <span className="flex-1 text-right font-mono text-[10px] text-[#4a5666]">waiting</span>
                     ) : (
-                      <MT5Price value={price} digits={digits} className="shrink-0 text-[11px]" style={{ color: colour }} />
+                      <span className="flex-1 text-right">
+                        <MT5Price value={price} digits={digits} className="text-[11px]" style={{ color: colour }} />
+                      </span>
                     )}
+                    {/* Time: "the last quote arrival time", in MetaTrader's own column order, which
+                        puts it after the prices and before Daily Change. MetaTrader drops both off
+                        the right edge when the window is narrow; this panel does the same with a
+                        breakpoint rather than by clipping. */}
+                    <span className="hidden w-[52px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] xl:inline">
+                      {q?.t ? clockOf(q.t) : ''}
+                    </span>
+                    {/* Daily Change, last, as a signed percentage with NO space before the sign.
+                        The account summary strip writes "1 076.68 %" WITH a space; MetaQuotes is
+                        inconsistent between the two panels and both are copied as found. */}
+                    <span className="w-[46px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8]">
+                      {changePct === null ? '' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
+                    </span>
                   </button>
                 );
               })}
+              {/* MetaTrader's add row, verbatim: "To quickly add a symbol in the Market Watch, click
+                  + below the list and enter the name of the symbol." Its counter, right-aligned on
+                  the same row, is "the current number of symbols in the Market Watch and the total
+                  number of available symbols".
+
+                  MetaTrader turns the row itself into an inline field with an autocomplete list;
+                  this opens the Symbols dialog, which is the same search over the same catalogue in
+                  a window a phone can use. */}
+              <button
+                type="button"
+                data-quote-add=""
+                onClick={() => setSymbolsOpen(true)}
+                className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] transition hover:bg-[#202933]"
+              >
+                <span aria-hidden className="w-3 shrink-0 text-center text-[11px] leading-none text-[#41be56]">+</span>
+                <span className="flex-1 truncate text-[#8fa2b8]">click to add...</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-[#8fa2b8]">
+                  {visible.length} / {catalogue.length || visible.length}
+                </span>
+              </button>
             </div>
           )
         ) : tab === 'trading' || tab === 'ticks' ? (
@@ -397,6 +451,19 @@ export function MarketWatch({ className }: { className?: string }) {
     </aside>
   );
 }
+
+/**
+ * The Time column: `16:56:57`.
+ *
+ * MetaTrader's own caption is "the last quote arrival time, specified according to the time zone of
+ * the broker's trading server". There is no separate server time zone here, so it is the viewer's
+ * clock, which is the same instant named differently.
+ */
+const pad = (n: number) => String(n).padStart(2, '0');
+const clockOf = (ms: number): string => {
+  const d = new Date(ms);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
