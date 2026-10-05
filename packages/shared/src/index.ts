@@ -12,6 +12,7 @@ export * from "./config.js";
 export * from "./types.js";
 export * from "./curve.js";
 export * from "./candles.js";
+export * from "./livepnl.js";
 export * from "./symbols.js";
 export * from "./account.js";
 export * from "./chart.js";

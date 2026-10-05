@@ -5,7 +5,7 @@ import {
   InstrumentFeed, instrumentById, isKnownInstrument, DEFAULT_INSTRUMENT_ID, digitPayoutFactor,
   digitReturnCents, decisionDigit, withLastPip, poolMultiplierDurationMs,
   seededWin, decideDigitAtWinRate,
-  multiplierPnlCents, evaluateMultiplier, dealCancellationFeeCents,
+  multiplierPnlCents, evaluateMultiplier, dealCancellationFeeCents, livePriceMultiplier,
   type MultiplierState, type MultDir, type MultCloseReason,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
@@ -182,10 +182,47 @@ export class GameServer {
     } finally { this.stepping = false; }
   }
 
+  /**
+   * The floating value of an open contract, driven by the PRICE.
+   *
+   * It used to be a function of elapsed time and the seed alone: a winner rose monotonically on a
+   * smoothstep whatever the price did, a loser decayed the same way, and a pool contract followed a
+   * seeded reversing feint. None of the three took the trade's DIRECTION, so a buy and a sell
+   * opened in the same second drew the same shape. On a terminal that is wrong: a buy whose price
+   * is falling has to show a falling profit.
+   *
+   * `livePriceMultiplier` carries the argument in full. Two things decide what this method has to
+   * hand it:
+   *
+   *   `cap` — the committed multiplier, but only where a manual close can succeed. Closing early
+   *   locks whatever is displayed, and the settlement engine's guarantee is that it "can only
+   *   REDUCE player payout (house edge >= target)", so a price spike must not be shown or paid
+   *   above where the contract settles. Pool brands refuse every close, so they pass no cap and
+   *   their path may run above its endpoint and come back, which is the feint the old code faked.
+   *
+   *   The DAY. The live move is read off the active day's curve, and a position re-armed from an
+   *   earlier day (recovery across a UTC boundary) has an `entryT` measured against that day's
+   *   start. Reading today's curve at it would price a second that never happened for this
+   *   contract. Those positions keep the old time-only path, which is day-agnostic by design: see
+   *   ActiveContext. They expire within a contract's length of being re-armed.
+   */
   private liveMultiplier(p: Position, g: number, settlement: SettlementEngine): number {
+    const ctx = this.getActiveContext();
+    const ownDay = p.gameDayId === null || p.gameDayId === ctx.gameDayId;
+    if (ownDay) {
+      const elapsedS = Math.min(p.durationS, Math.max(0, g * p.durationS));
+      return livePriceMultiplier({
+        move: settlement.moveAt(p.direction, p.entryT, elapsedS),
+        gain: settlement.gainFor(p.direction),
+        endpoint: p.outcome.result === "win" ? p.outcome.multiplier : 0,
+        g,
+        maxMultiplier: this.cfg.maxMultiplier,
+        // No cap where a close is refused outright, which is every pool brand.
+        ...(this.pool?.enabled() ? {} : { cap: p.outcome.result === "win" ? p.outcome.multiplier : undefined }),
+      });
+    }
+    // ── Re-armed from an earlier day: the old, day-agnostic paths ──
     if (p.poolControlled && this.pool) {
-      const ctx = this.getActiveContext();
-      // Seeded reversing path to the decided endpoint (green->red on a loss, red->green on a win).
       return this.pool.controller.live(
         { result: p.outcome.result, multiplier: p.outcome.multiplier, payoutCents: p.outcome.payoutCents },
         ctx.seed ?? "", p.nonce, g);
