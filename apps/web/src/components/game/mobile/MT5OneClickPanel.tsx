@@ -92,7 +92,15 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
       onClick={() => tap(dir)}
       disabled={tradeDisabled || connecting}
       aria-label={`${dir === 'sell' ? 'Sell' : 'Buy'} ${lots.toFixed(volDigits)} ${symbol}${instant ? '' : ' (opens the order ticket)'}`}
-      className="flex min-w-0 flex-1 flex-col items-start justify-center gap-0.5 rounded px-2 py-1.5 text-left transition active:brightness-90 disabled:opacity-50"
+      /**
+       * `transition-[filter,opacity]`, not a blanket `transition`.
+       *
+       * The fill is this block's tick colour, and a blanket transition animates it: changing from
+       * the measured red to the documented blue cross-faded through a purple that is neither, and a
+       * colour sampled mid-flight was neither of MetaTrader's two states. MetaTrader's panel snaps.
+       * The press dim is a filter, so that is what keeps its transition.
+       */
+      className="flex min-w-0 flex-1 flex-col items-start justify-center gap-0.5 rounded px-2 py-1.5 text-left transition-[filter,opacity] active:brightness-90 disabled:opacity-50"
       style={{ background: fill }}
     >
       {/* "small and in the block's top-left corner" */}

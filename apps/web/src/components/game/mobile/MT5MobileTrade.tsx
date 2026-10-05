@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { accountSummary, mobileAccountRows, mtAmount, lotsOfStake } from '@invest254/shared/account';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { useWallet } from '@/lib/wallet/hooks';
@@ -47,11 +47,8 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   const { settledSymbol, digits, priceOfRate } = useOrderEntry();
 
   // The floating figures ride the tick stream, which does not re-render React on its own.
-  const [, force] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => force((n) => (n + 1) % 1_000_000), 250);
-    return () => clearInterval(id);
-  }, []);
+  // `useOrderEntry` already drives that re-render on its own 250ms timer, and a second one here
+  // only doubled the renders without showing a newer number.
 
   // MetaTrader reaches Close position and Modify position from the row's context menu, which is
   // what a press on the row opens. Same three sheets the desktop Toolbox uses.
