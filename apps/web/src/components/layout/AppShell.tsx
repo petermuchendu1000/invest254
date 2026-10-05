@@ -90,12 +90,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <TopBar />
         <NotificationBanners />
         <main className={cn(
-          'relative flex w-full min-h-0 flex-1 flex-col pt-2',
+          'relative flex w-full min-h-0 flex-1 flex-col',
           // A terminal brand has no bottom nav (MT5Drawer replaces it), so nothing is reserved for
           // one — and the gutters tighten, because this is the screen the chart lives on.
+          //
+          // Below `lg` a terminal brand renders MetaTrader's PHONE app (MT5MobileShell): five tabs
+          // with one full-screen view, which carries its own gutters, its own tab bar and its own
+          // safe-area inset. Any padding here would be a frame around a screen that is meant to go
+          // edge to edge, and the top padding alone was a visible band above MetaTrader's own chart
+          // bar. The desktop gutters start at the same `lg` the phone shell stops at, so the two
+          // cannot both apply.
           terminal
-            ? 'px-2 pb-[env(safe-area-inset-bottom)] md:px-4 md:pb-4 lg:px-3 xl:px-4'
-            : 'mx-auto max-w-app px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:px-4 md:pb-4',
+            ? 'px-0 pb-[env(safe-area-inset-bottom)] lg:px-3 lg:pb-4 lg:pt-2 xl:px-4'
+            : 'mx-auto max-w-app px-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] pt-2 md:px-4 md:pb-4',
         )}>
           {children}
         </main>

@@ -15,6 +15,8 @@ import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { useRestoreSymbolSet } from '@/lib/game/symbolSet';
 import { useRestoreChartSymbol, useQuoteSubscription } from '@/lib/game/chartSymbol';
+import { MT5MobileShell } from '@/components/game/mobile/MT5MobileShell';
+import { useIsPhone } from '@/lib/ui/useIsPhone';
 
 /**
  * Chooses the trade layout for the current brand:
@@ -54,6 +56,7 @@ export function TradeSurface() {
    * the next change to the list would stop the chart. Market Watch and the chart only write to
    * their stores; this screen is what talks to the socket.
    */
+  const phone = useIsPhone();
   useRestoreSymbolSet();
   useRestoreChartSymbol();
   useQuoteSubscription(isTerminalBrand && !isMarketer);
@@ -61,6 +64,21 @@ export function TradeSurface() {
   if (ui === 'digits') return <DigitsTradeScreen />;
 
   const terminal = isTerminalBrand && !isMarketer;
+
+  /**
+   * A phone gets MetaTrader's phone app, not MetaTrader's desktop squeezed into one column.
+   *
+   * They are different TREES — five tabs with one full-screen view, against four panels on screen
+   * together — which is why this is a branch rather than a set of breakpoints, and why `useIsPhone`
+   * is a media query read in JavaScript. See MT5MobileShell for what the desktop column measured at
+   * 360x800 before this existed.
+   *
+   * `useIsPhone` reports false on the server and until mount, so the first paint is always the
+   * layout below and the phone shell swaps in on the client. Everything above this line still runs
+   * for both: the symbol stores are restored and the socket subscription is sent in one place,
+   * whichever shell renders.
+   */
+  if (terminal && phone) return <MT5MobileShell />;
 
   return (
     /**

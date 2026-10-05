@@ -22,6 +22,11 @@ import { MT5ChartProperties } from '@/components/game/MT5ChartProperties';
 import { MT5ObjectMenu, type ObjectMenuAt } from '@/components/game/MT5ObjectMenu';
 import { MT5ObjectsList } from '@/components/game/MT5ObjectsList';
 import { MT5ObjectProperties } from '@/components/game/MT5ObjectProperties';
+import { useNavDrawer } from '@/lib/ui/drawer';
+import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
+import {
+  MOBILE_TF_GROUPS, MAX_QUICK_TF, mobileTfLabel, useQuickTfStore, useRestoreQuickTf,
+} from '@/lib/game/mobileTimeframes';
 import { TIMEFRAME_KEYS, TIMEFRAMES, bucketStartS, valueOfRate, XAUUSD, type MarketSymbol, type Timeframe } from '@invest254/shared/candles';
 import type { CandlesReply } from '@/lib/game/GameSocketProvider';
 import type { ConnStatus, Tick } from '@/lib/game/types';
@@ -176,6 +181,7 @@ type Anchor = CandlesReply['anchor'];
 
 export function CandleChart({
   getLastTick, requestCandles, status, initialType = 'candles', openPosition = null, symbol,
+  phone = false,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
@@ -198,6 +204,16 @@ export function CandleChart({
    * open-position level exists, for the reason given where it is drawn.
    */
   openPosition?: { entryRate: number | null; direction: 'buy' | 'sell'; lots: string } | null;
+  /**
+   * Draw MetaTrader's PHONE chrome instead of its desktop chrome.
+   *
+   * The two are different screens, not the same screen at two widths. MetaTrader's desktop chart
+   * carries a period strip of all 21 periods, a Tools menu and a left object rail; its phone chart
+   * carries six icons on one row (`☰ ✛ ∿ M30 ◐ ▭`) and NO object rail at all — on Android,
+   * graphical objects are reached only through the radial menu. The desktop bar on a 360px screen
+   * truncated at M5 and the rail took 40 of those 360 pixels, which is why this prop exists.
+   */
+  phone?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -1037,76 +1053,98 @@ export function CandleChart({
 
   return (
     <div className="flex h-full w-full flex-col bg-[#0f1720] text-[#ffffff]">
-      {/* Toolbar — symbol, the full MT5 period set, tools, and the interface gear. */}
-      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[#2b3543] px-2 text-[12px]">
-        <span className="shrink-0 pr-1 text-[13px] font-bold text-white">{instrument.symbol}</span>
-        {sep}
-        {/* All 21 MT5 periods. The row scrolls rather than wrapping, so the toolbar keeps one height
-            on a phone and the chart keeps its own. */}
-        <div className={cn(row, 'min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden')}>
-          {TIMEFRAME_KEYS.map((k) => (
-            <button key={k} type="button" onClick={() => chooseTf(k)} aria-pressed={tf === k} className={cn(pill, tf === k ? active : idle)}>{k}</button>
-          ))}
-        </div>
-        <div className={cn(row, 'shrink-0')} ref={menuWrapRef}>
-          <div className="relative">
-            <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} className={cn(pill, menuOpen ? active : idle, 'px-2')} title="Chart features">⚙ Tools</button>
-            {menuOpen ? (
-              <div className="absolute right-0 top-8 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
-                <Section title="Chart type">
-                  <div className="grid grid-cols-3 gap-1">
-                    {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === initialType)].map((c) => (
-                      <button key={c.id} type="button" onClick={() => setChartType(c.id)} className={cn(pill, 'w-full', chartType === c.id ? active : idle)}>{c.label}</button>
+      {/* MetaTrader draws a different chart screen on a phone, so this renders one or the other
+          rather than one squeezed. See the `phone` prop for what the two actually differ in. */}
+      {phone ? (
+        <MobileChartBar
+          tf={tf}
+          chooseTf={chooseTf}
+          crosshair={tool === 'crosshair'}
+          onCrosshair={() => { setSelectedDrawing(null); setTool(tool === 'crosshair' ? 'cursor' : 'crosshair'); }}
+          chartType={chartType}
+          setChartType={setChartType}
+          ind={ind}
+          toggleIndicator={toggleIndicator}
+          onProperties={() => setPropertiesOpen(true)}
+          onObjectsList={() => setObjectsListOpen(true)}
+        />
+      ) : (
+        /* Desktop: symbol, the full MT5 period set, the Tools menu and the interface gear. */
+          <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[#2b3543] px-2 text-[12px]">
+            <span className="shrink-0 pr-1 text-[13px] font-bold text-white">{instrument.symbol}</span>
+            {sep}
+            {/* All 21 MT5 periods. The row scrolls rather than wrapping, so the toolbar keeps one height
+                on a phone and the chart keeps its own. */}
+            <div className={cn(row, 'min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden')}>
+              {TIMEFRAME_KEYS.map((k) => (
+                <button key={k} type="button" onClick={() => chooseTf(k)} aria-pressed={tf === k} className={cn(pill, tf === k ? active : idle)}>{k}</button>
+              ))}
+            </div>
+            <div className={cn(row, 'shrink-0')} ref={menuWrapRef}>
+              <div className="relative">
+                <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} className={cn(pill, menuOpen ? active : idle, 'px-2')} title="Chart features">⚙ Tools</button>
+                {menuOpen ? (
+                  <div className="absolute right-0 top-8 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
+                    <Section title="Chart type">
+                      <div className="grid grid-cols-3 gap-1">
+                        {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === initialType)].map((c) => (
+                          <button key={c.id} type="button" onClick={() => setChartType(c.id)} className={cn(pill, 'w-full', chartType === c.id ? active : idle)}>{c.label}</button>
+                        ))}
+                      </div>
+                    </Section>
+                    <Section title="Chart">
+                      <button
+                        type="button"
+                        onClick={() => { setMenuOpen(false); setPropertiesOpen(true); }}
+                        className={cn(pill, idle, 'w-full')}
+                      >
+                        Properties… F8
+                      </button>
+                    </Section>
+                    {/* MetaTrader's Navigator tree: its groups, its order, its names. Scrolls because the
+                        list is long — which is the point of it. */}
+                    {/* All four of MetaTrader's Navigator groups, under its own names, carrying all 38
+                        of its built-in indicators. The seven that read traded volume are listed and
+                        DISABLED with the reason: omitting them hides the gap, and feeding them an
+                        invented volume would draw a confident line that means nothing. */}
+                    {INDICATOR_GROUPS.map((g) => (
+                      <Section key={g.group} title={g.label}>
+                        <div className="grid gap-1">
+                          {g.items.map((def) => (
+                            <Toggle
+                              key={def.id}
+                              on={ind.has(def.id)}
+                              disabled={def.unavailable !== undefined}
+                              title={def.unavailable}
+                              onClick={() => { if (!def.unavailable) toggleIndicator(def.id); }}
+                            >
+                              <span className="truncate">{def.name} <span className="text-[9px] opacity-70">{def.params}</span></span>
+                            </Toggle>
+                          ))}
+                        </div>
+                        {g.group === 'volumes' ? (
+                          <p className="px-0.5 pt-1 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
+                        ) : null}
+                      </Section>
                     ))}
                   </div>
-                </Section>
-                <Section title="Chart">
-                  <button
-                    type="button"
-                    onClick={() => { setMenuOpen(false); setPropertiesOpen(true); }}
-                    className={cn(pill, idle, 'w-full')}
-                  >
-                    Properties… F8
-                  </button>
-                </Section>
-                {/* MetaTrader's Navigator tree: its groups, its order, its names. Scrolls because the
-                    list is long — which is the point of it. */}
-                {/* All four of MetaTrader's Navigator groups, under its own names, carrying all 38
-                    of its built-in indicators. The seven that read traded volume are listed and
-                    DISABLED with the reason: omitting them hides the gap, and feeding them an
-                    invented volume would draw a confident line that means nothing. */}
-                {INDICATOR_GROUPS.map((g) => (
-                  <Section key={g.group} title={g.label}>
-                    <div className="grid gap-1">
-                      {g.items.map((def) => (
-                        <Toggle
-                          key={def.id}
-                          on={ind.has(def.id)}
-                          disabled={def.unavailable !== undefined}
-                          title={def.unavailable}
-                          onClick={() => { if (!def.unavailable) toggleIndicator(def.id); }}
-                        >
-                          <span className="truncate">{def.name} <span className="text-[9px] opacity-70">{def.params}</span></span>
-                        </Toggle>
-                      ))}
-                    </div>
-                    {g.group === 'volumes' ? (
-                      <p className="px-0.5 pt-1 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
-                    ) : null}
-                  </Section>
-                ))}
+                ) : null}
               </div>
-            ) : null}
+              <button type="button" onClick={() => zoom('out')} aria-label="Zoom out" className={cn(pill, idle, 'text-sm [@media(pointer:coarse)]:hidden')}>−</button>
+              <button type="button" onClick={() => zoom('in')} aria-label="Zoom in" className={cn(pill, idle, 'text-sm [@media(pointer:coarse)]:hidden')}>+</button>
+              <InterfaceModeToggle />
+            </div>
           </div>
-          <button type="button" onClick={() => zoom('out')} aria-label="Zoom out" className={cn(pill, idle, 'text-sm [@media(pointer:coarse)]:hidden')}>−</button>
-          <button type="button" onClick={() => zoom('in')} aria-label="Zoom in" className={cn(pill, idle, 'text-sm [@media(pointer:coarse)]:hidden')}>+</button>
-          <InterfaceModeToggle />
-        </div>
-      </div>
+      )}
+
 
       {/* Body = left drawing rail + plot (TradingView layout). */}
       <div className="flex min-h-0 flex-1">
-        <DrawRail
+        {/* MetaTrader's phone chart has NO object rail — on Android graphical objects are reached
+            through the radial menu only, and on a 360px screen this rail was taking 40 of those
+            pixels from the chart. The objects themselves are still reachable: the phone bar's
+            indicator sheet carries the Objects list. */}
+        {phone ? null : <DrawRail
           tool={tool}
           onPick={(id) => {
             if (id === 'trash') {
@@ -1122,7 +1160,7 @@ export function CandleChart({
           count={drawings.length}
           hasSelection={selectedDrawing !== null}
           onObjectsList={() => setObjectsListOpen(true)}
-        />
+        />}
         <div ref={plotRef} className="relative min-h-0 flex-1" style={{ background: TV.bg }}>
           {/* Behind the candles: objects the trader set to draw as background. */}
           <DrawingsBackdrop
@@ -1434,3 +1472,321 @@ function Toggle({ on, onClick, children, disabled, title }: {
     </button>
   );
 }
+
+/**
+ * MetaTrader's PHONE chart bar.
+ *
+ * Six controls on one row, which is what MetaQuotes' own Android screenshot carries, left to right
+ * (docs/mt5/04-mobile-app.md section 3, where each glyph was identified by downloading the icon
+ * asset and matching it against the screenshot):
+ *
+ *   ☰   the navigation drawer (Android has one; iOS has no drawer at all)
+ *   ✛   crosshair — "tap the crosshair button in the top bar", not a long press
+ *   ∿   Indicators (a zig-zag crossed by a sine curve: `chart_indicators_button.png`)
+ *   M30 the current period, which opens the quick strip
+ *   ◐   the pending-order button
+ *   ▭   the one-click trading panel toggle
+ *
+ * The period button sits in the middle-right because Android's far left is the drawer; iOS, with no
+ * drawer, puts it at the far left instead. This shell has the drawer, so it is Android's order.
+ *
+ * The pending-order button is present and DISABLED, with the reason on it. Every contract here is
+ * market execution, so there is no pending order to place — and a button drawn as if it worked
+ * would be worse than one that says why it cannot.
+ */
+function MobileChartBar({
+  tf, chooseTf, crosshair, onCrosshair, chartType, setChartType, ind, toggleIndicator,
+  onProperties, onObjectsList,
+}: {
+  tf: Timeframe;
+  chooseTf: (tf: Timeframe) => void;
+  crosshair: boolean;
+  onCrosshair: () => void;
+  chartType: MainType;
+  setChartType: (t: MainType) => void;
+  ind: ReadonlySet<string>;
+  toggleIndicator: (id: string) => void;
+  onProperties: () => void;
+  onObjectsList: () => void;
+}) {
+  const toggleDrawer = useNavDrawer((s) => s.toggle);
+  const quick = useQuickTfStore((s) => s.quick);
+  const toggleQuick = useQuickTfStore((s) => s.toggle);
+  useRestoreQuickTf();
+  const shown = useOneClickStore((s) => s.shown);
+  const setShown = useOneClickStore((s) => s.setShown);
+  useRestoreOneClick();
+
+  /** One sheet at a time, as MetaTrader's are: the strip, the full period sheet, or indicators. */
+  const [open, setOpen] = useState<null | 'strip' | 'periods' | 'indicators'>(null);
+  /**
+   * A long press adds or removes a period from the quick strip, which is MetaTrader's own gesture
+   * for it. A phone has no right-click, so this is the only way to reach that behaviour.
+   */
+  const held = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didHold = useRef(false);
+  const holdStart = (tfKey: Timeframe) => {
+    didHold.current = false;
+    held.current = setTimeout(() => { didHold.current = true; toggleQuick(tfKey); }, 600);
+  };
+  const holdEnd = () => { if (held.current) clearTimeout(held.current); held.current = null; };
+
+  const btn = 'grid h-9 w-9 shrink-0 place-items-center rounded transition';
+  const on = 'bg-[#2b3543] text-[#3183ff]';
+  const off = 'text-[#8fa2b8]';
+
+  return (
+    <>
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-[#2b3543] px-1">
+        <button type="button" onClick={toggleDrawer} aria-label="Menu" className={cn(btn, off)}>
+          <BarIcon.Menu />
+        </button>
+        <button
+          type="button"
+          onClick={onCrosshair}
+          aria-pressed={crosshair}
+          aria-label="Crosshair"
+          className={cn(btn, crosshair ? on : off)}
+        >
+          <BarIcon.Crosshair />
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(open === 'indicators' ? null : 'indicators')}
+          aria-expanded={open === 'indicators'}
+          aria-label="Indicators"
+          className={cn(btn, open === 'indicators' ? on : off)}
+        >
+          <BarIcon.Indicators />
+        </button>
+        {/* The period, which is also the button that opens the quick strip. */}
+        <button
+          type="button"
+          onClick={() => setOpen(open === 'strip' ? null : 'strip')}
+          aria-expanded={open === 'strip'}
+          aria-label={`Period ${mobileTfLabel(tf)}`}
+          className={cn(
+            'ml-auto h-9 shrink-0 rounded px-2 font-mono text-[13px] font-bold leading-none transition',
+            open === 'strip' ? on : 'text-white',
+          )}
+        >
+          {mobileTfLabel(tf)}
+        </button>
+        <button
+          type="button"
+          disabled
+          aria-label="Pending order"
+          title="Every contract here is market execution, so there is no pending order to place."
+          className={cn(btn, off, 'opacity-40')}
+        >
+          <BarIcon.Pending />
+        </button>
+        <button
+          type="button"
+          onClick={() => setShown(!shown)}
+          aria-pressed={shown}
+          aria-label="One-click trading panel"
+          className={cn(btn, shown ? on : off)}
+        >
+          <BarIcon.OneClick />
+        </button>
+      </div>
+
+      {/* The quick strip: "a horizontal quick strip across the top ... with the current one
+          highlighted in solid blue and a gear at the right end". */}
+      {open === 'strip' ? (
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#2b3543] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {quick.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => { if (!didHold.current) { chooseTf(k); setOpen(null); } }}
+              onPointerDown={() => holdStart(k)}
+              onPointerUp={holdEnd}
+              onPointerLeave={holdEnd}
+              onContextMenu={(e) => e.preventDefault()}
+              aria-pressed={tf === k}
+              className={cn(
+                'h-8 shrink-0 rounded px-2.5 font-mono text-[12px] font-semibold leading-none transition',
+                tf === k ? 'bg-[#3183ff] text-white' : 'bg-[#202933] text-[#8fa2b8]',
+              )}
+            >
+              {mobileTfLabel(k)}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setOpen('periods')}
+            aria-label="Set up timeframes"
+            className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded bg-[#202933] text-[#8fa2b8]"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden>
+              <circle cx="12" cy="12" r="3.2" />
+              <path d="M12 2.6v2.2M12 19.2v2.2M21.4 12h-2.2M4.8 12H2.6M18.6 5.4l-1.6 1.6M7 17l-1.6 1.6M18.6 18.6L17 17M7 7L5.4 5.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
+
+      {/* The gear's sheet: all 21 periods in MetaTrader's three groups. Short press switches the
+          chart; long press adds or removes the period from the strip above. */}
+      {open === 'periods' ? (
+        <MobileSheet title="Timeframes" onClose={() => setOpen(null)}>
+          <p className="px-1 pb-2 text-[10px] leading-snug text-[#8fa2b8]">
+            Tap to switch the chart. Press and hold to put a period on the quick strip, or take it
+            off. The strip holds {MAX_QUICK_TF}.
+          </p>
+          {MOBILE_TF_GROUPS.map((g) => (
+            <div key={g.label} className="mb-2 last:mb-0">
+              {/* Title case, not the uppercase the desktop Tools menu uses for its own sections:
+                  MetaTrader's phone period sheet heads its three groups "Minutes", "Hours" and
+                  "Days", and shouting them would be this shell's styling rather than its. */}
+              <div className="mb-1 text-[10px] font-semibold tracking-wide text-muted">{g.label}</div>
+              <div className="grid grid-cols-4 gap-1">
+                {g.items.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => { if (!didHold.current) { chooseTf(k); setOpen(null); } }}
+                    onPointerDown={() => holdStart(k)}
+                    onPointerUp={holdEnd}
+                    onPointerLeave={holdEnd}
+                    onContextMenu={(e) => e.preventDefault()}
+                    aria-pressed={tf === k}
+                    className={cn(
+                      'h-9 rounded font-mono text-[12px] font-semibold leading-none transition',
+                      // MetaTrader's own two states on this sheet: solid blue = the chart's current
+                      // period, outlined = on the quick strip.
+                      tf === k
+                        ? 'bg-[#3183ff] text-white'
+                        : quick.includes(k)
+                          ? 'border border-[#3183ff] text-[#3183ff]'
+                          : 'bg-[#202933] text-[#8fa2b8]',
+                    )}
+                  >
+                    {mobileTfLabel(k)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </MobileSheet>
+      ) : null}
+
+      {/* Indicators, chart type, properties and the objects list — the phone's equivalent of the
+          desktop Tools menu, minus the object rail it has no room for. */}
+      {open === 'indicators' ? (
+        <MobileSheet title="Indicators" onClose={() => setOpen(null)}>
+          <Section title="Chart type">
+            <div className="grid grid-cols-3 gap-1">
+              {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === chartType)].map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setChartType(c.id)}
+                  className={cn(
+                    'h-9 rounded text-[11px] font-semibold transition',
+                    chartType === c.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8]',
+                  )}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Chart">
+            <div className="grid grid-cols-2 gap-1">
+              <button type="button" onClick={() => { setOpen(null); onProperties(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Properties</button>
+              <button type="button" onClick={() => { setOpen(null); onObjectsList(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Objects list</button>
+            </div>
+          </Section>
+          {INDICATOR_GROUPS.map((g) => (
+            <Section key={g.group} title={g.label}>
+              <div className="grid gap-1">
+                {g.items.map((def) => (
+                  <Toggle
+                    key={def.id}
+                    on={ind.has(def.id)}
+                    disabled={def.unavailable !== undefined}
+                    title={def.unavailable}
+                    onClick={() => { if (!def.unavailable) toggleIndicator(def.id); }}
+                  >
+                    <span className="truncate">{def.name} <span className="text-[9px] opacity-70">{def.params}</span></span>
+                  </Toggle>
+                ))}
+              </div>
+              {g.group === 'volumes' ? (
+                <p className="px-0.5 pt-1 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
+              ) : null}
+            </Section>
+          ))}
+        </MobileSheet>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * MetaTrader's phone sheets come up from the bottom edge over the chart, so this one does. It is
+ * dismissed by the backdrop or by its own close button, and it never takes more than two-thirds of
+ * the screen, because the chart under it is the thing being configured.
+ */
+function MobileSheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <>
+      <button type="button" aria-label={`Close ${title}`} onClick={onClose} className="fixed inset-0 z-40 bg-black/60" />
+      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[68vh] overflow-y-auto overscroll-contain rounded-t-xl border-t border-[#2b3543] bg-[#0f1720] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl">
+        <div className="mb-2 flex items-center">
+          <span className="text-[12px] font-semibold text-white">{title}</span>
+          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto grid h-7 w-7 place-items-center rounded text-[#8fa2b8]">✕</button>
+        </div>
+        {children}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The phone bar's six glyphs, drawn rather than typed.
+ *
+ * They were Unicode characters first (`☰ ✛ ∿ ◐ ▭`), and two of them came out as blank boxes on a
+ * real Android device because the character is not in the system font. A toolbar with invisible
+ * buttons is worse than no toolbar, so each is an inline SVG matched to the icon asset described in
+ * docs/mt5/04-mobile-app.md section 3.
+ */
+const BarIcon = {
+  Menu: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-5 w-5" aria-hidden>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </svg>
+  ),
+  /** A crosshair: a full-width and a full-height rule crossing at the centre, with a gap at it. */
+  Crosshair: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="h-5 w-5" aria-hidden>
+      <path d="M12 3v6M12 15v6M3 12h6M15 12h6" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  /** Android's indicators glyph: "a zig-zag crossed by a sine curve". */
+  Indicators: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
+      <path d="M3 17l4-7 4 4 4-8 4 6" />
+      <path d="M3 11c3-5 6 5 9 0s6-5 9 0" opacity="0.55" />
+    </svg>
+  ),
+  /** The pending-order button: a half-filled circle with a white clock hand. */
+  Pending: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 3.5a8.5 8.5 0 010 17z" fill="currentColor" stroke="none" opacity="0.45" />
+      <path d="M12 7.5V12l3 1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  /** The one-click panel toggle: a rounded rectangle with a pill inside it. */
+  OneClick: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden>
+      <rect x="3" y="7" width="18" height="10" rx="2.5" />
+      <rect x="6.5" y="10.5" width="11" height="3" rx="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+};

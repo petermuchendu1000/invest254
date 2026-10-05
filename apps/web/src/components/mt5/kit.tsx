@@ -20,16 +20,26 @@ import { cn } from '@/lib/cn';
  * controls on the right. Sticky under the app bar (h-14) so it behaves as one blue band.
  */
 export function MT5TitleBar({
-  title, subtitle, actions, children,
+  title, subtitle, actions, children, embedded = false,
 }: {
   title: string;
   subtitle?: string | undefined;
   actions?: React.ReactNode;
   /** Tabs, which MetaTrader draws inside the bar rather than under it. */
   children?: React.ReactNode;
+  /**
+   * The bar is inside a scroller of its own rather than on a page that scrolls under the app bar.
+   *
+   * On a ROUTE the whole page scrolls beneath a 56px fixed app bar, so the bar sticks 56px down.
+   * Inside the phone shell's tab the screen has its own scroll container that already starts below
+   * the app bar, and the same offset pushed the blue band down by a 56px strip of empty black on
+   * first paint — a sticky element whose natural position is above its threshold is shifted to it
+   * immediately, before any scrolling happens.
+   */
+  embedded?: boolean;
 }) {
   return (
-    <div className="sticky top-14 z-20 bg-[#3183ff]">
+    <div className={cn('sticky z-20 bg-[#3183ff]', embedded ? 'top-0' : 'top-14')}>
       <div className={cn('flex items-center gap-3 px-3', subtitle ? 'pb-1 pt-2' : 'py-2.5')}>
         <div className="min-w-0">
           {subtitle ? <div className="text-[11px] leading-tight text-white/75">{title}</div> : null}

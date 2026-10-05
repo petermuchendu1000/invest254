@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountSummary, exposureRows, lotsOfStake, LOT_STAKE_CENTS, accountStripFields, mtAmount } from "./account.js";
+import { accountSummary, exposureRows, lotsOfStake, LOT_STAKE_CENTS, accountStripFields, mtAmount, mobileAccountRows } from "./account.js";
 
 test("a flat account: equity is the balance and there is no margin level", () => {
   const a = accountSummary({ balanceCents: 500_000, openStakeCents: 0, floatingPnlCents: 0 });
@@ -155,4 +155,40 @@ test('the thousands separator is a space at every magnitude, and survives a nega
   // Not a locale's separator: `Intl` would give a comma here on en and a point on de, and the
   // Russian build of MetaTrader uses the same space the English one does.
   assert.ok(!mtAmount(1000).includes(','));
+});
+
+test("the mobile block reproduces MetaTrader's published Android screen", () => {
+  // .../android/en/trade.png, verbatim.
+  const rows = mobileAccountRows({
+    balance: 9862.16, equity: 9897.11, margin: 2165.03, freeMargin: 7732.08, marginLevelPct: 457.14,
+  });
+  assert.deepEqual(rows.map((r) => `${r.label} ${r.value}`), [
+    'Balance: 9 862.16',
+    'Equity: 9 897.11',
+    'Margin: 2 165.03',
+    'Free margin: 7 732.08',
+    'Margin Level (%): 457.14',
+  ]);
+});
+
+test('the mobile block differs from the desktop strip in three specific ways', () => {
+  const m = mobileAccountRows({ balance: 1000, equity: 1200, margin: 100, freeMargin: 1100, marginLevelPct: 1200 });
+  const d = accountStripFields({ balance: 1000, equity: 1200, margin: 100, freeMargin: 1100, marginLevelPct: 1200, currency: 'USD' });
+  // 1. No currency code anywhere on mobile.
+  assert.ok(!m.some((r) => r.value.includes('USD')));
+  assert.ok(d[0]!.value.includes('USD'));
+  // 2. The percent sign is in the mobile LABEL and in the desktop VALUE.
+  assert.equal(m[4]!.label, 'Margin Level (%):');
+  assert.ok(!m[4]!.value.includes('%'));
+  assert.ok(d[4]!.value.includes('%'));
+  // 3. Android lower-cases the m in Free margin; the desktop strip capitalises it.
+  assert.equal(m[3]!.label, 'Free margin:');
+  assert.equal(d[3]!.label, 'Free Margin:');
+  // The space thousands separator survives on both.
+  assert.equal(m[0]!.value, '1 000.00');
+});
+
+test('the mobile block shows a dash for an undefined margin level, as the strip does', () => {
+  const rows = mobileAccountRows({ balance: 1, equity: 1, margin: 0, freeMargin: 1, marginLevelPct: null });
+  assert.equal(rows[4]!.value, '-');
 });

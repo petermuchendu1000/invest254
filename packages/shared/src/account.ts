@@ -180,3 +180,37 @@ export function accountStripFields(a: {
     { label: 'Margin Level:', value: a.marginLevelPct === null ? '-' : `${mtAmount(a.marginLevelPct)} %` },
   ];
 }
+
+/**
+ * The account summary block on MetaTrader's MOBILE Trade screen.
+ *
+ * It is not the desktop strip with different spacing — the labels, the number format and the field
+ * set all differ, and the differences are sourced rather than smoothed over
+ * (docs/mt5/04-mobile-app.md section 4):
+ *
+ *   - **No currency code anywhere.** The desktop strip writes `Balance: 3 370.75 USD`; mobile writes
+ *     `Balance: 9 862.16` and leaves the currency to the account header.
+ *   - **The percent sign is in the LABEL**: `Margin Level (%):` with a bare number, where the desktop
+ *     strip writes `Margin Level: 1 076.68 %`.
+ *   - **Android lower-cases the m in `Free margin:`**, where desktop and iOS both capitalise it.
+ *     Android's casing is used here because this is a phone and the drawer is Android's pattern; the
+ *     divergence is MetaQuotes' own, between its two mobile builds.
+ *
+ * The space thousands separator survives everywhere, which is why this shares `mtAmount` with the
+ * desktop strip.
+ */
+export function mobileAccountRows(a: {
+  balance: number;
+  equity: number;
+  margin: number;
+  freeMargin: number;
+  marginLevelPct: number | null;
+}): AccountStripField[] {
+  return [
+    { label: 'Balance:', value: mtAmount(a.balance) },
+    { label: 'Equity:', value: mtAmount(a.equity) },
+    { label: 'Margin:', value: mtAmount(a.margin) },
+    { label: 'Free margin:', value: mtAmount(a.freeMargin) },
+    { label: 'Margin Level (%):', value: a.marginLevelPct === null ? '-' : mtAmount(a.marginLevelPct) },
+  ];
+}
