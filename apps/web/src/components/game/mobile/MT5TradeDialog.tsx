@@ -85,12 +85,25 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
    * stop crawl with the market, and made this dialog and the chart disagree about the same level,
    * because the two sampled the price a fraction of a second apart. See levelsStore.
    */
-  const ref = levelRef ?? price ?? 0;
+  const anchor = levelRef ?? price;
+  /**
+   * Zero ONLY as the arithmetic's last resort, never as a level a trader can set against.
+   *
+   * With no quote yet there is no price for a distance to be measured from, and anchoring at zero
+   * put a stop at 0.00050 and KEPT it there, because the store holds the first anchor it is given.
+   * `levelsSettable` below is what stops that happening; this stays so the conversions are total.
+   */
+  const ref = anchor ?? 0;
+  /** A level is a price, so there has to be a price. MetaTrader offers no trading controls without
+   *  one either: it hides New order outright while the terminal is not connected. */
+  const levelsSettable = anchor !== null;
   const sides = sidesEnabled(levels);
   const refused = tradeDisabled || connecting;
 
   /** One point in the unit currently selected, so the stepper moves by a sensible amount in each. */
   const edit = (field: 'sl' | 'tp', points: number | null) => {
+    // Clearing a level needs no anchor; setting one does, and there is none before the first quote.
+    if (!levelsSettable && points !== null) return;
     const next: Levels = field === 'sl' ? { ...levels, slPoints: points } : { ...levels, tpPoints: points };
     // The live price is offered as the anchor; the store keeps the first one it is given.
     setLevels(locked ? applyRatioLock(levels, next, field) : next, price);
@@ -276,6 +289,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
               label="SL"
               colour="#DD5B4E"
               value={levelText('sl', levels.slPoints)}
+              settable={levelsSettable}
               set={levels.slPoints !== null}
               onDown={() => step('sl', -1)}
               onUp={() => step('sl', 1)}
@@ -292,6 +306,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
               label="TP"
               colour="#0EB52E"
               value={levelText('tp', levels.tpPoints)}
+              settable={levelsSettable}
               set={levels.tpPoints !== null}
               onDown={() => step('tp', -1)}
               onUp={() => step('tp', 1)}
@@ -390,7 +405,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function Stepper({
-  value, ariaLabel, onDown, onUp, downDisabled, upDisabled, typing, onType, onStartTyping, onCommit,
+  value, ariaLabel, onDown, onUp, downDisabled, upDisabled, disabled, typing, onType, onStartTyping, onCommit,
 }: {
   value: string;
   ariaLabel: string;
@@ -398,6 +413,8 @@ function Stepper({
   onUp: () => void;
   downDisabled?: boolean;
   upDisabled?: boolean;
+  /** The whole control is inert: there is nothing yet to set a value against. */
+  disabled?: boolean;
   typing: string | null;
   onType: (text: string) => void;
   onStartTyping: () => void;
@@ -409,13 +426,14 @@ function Stepper({
   const btn = 'grid h-8 shrink-0 place-items-center rounded px-1 text-[16px] font-semibold leading-none text-[#3183ff] disabled:opacity-30';
   return (
     <span className="flex min-w-0 flex-1 items-center rounded bg-[#202933]">
-      <button type="button" onClick={onDown} disabled={downDisabled} aria-label={`Decrease ${ariaLabel}`} className={btn}>−</button>
+      <button type="button" onClick={onDown} disabled={downDisabled === true || disabled === true} aria-label={`Decrease ${ariaLabel}`} className={btn}>−</button>
       {typing === null ? (
         <button
           type="button"
           onClick={onStartTyping}
+          disabled={disabled}
           aria-label={ariaLabel}
-          className="min-w-0 flex-1 whitespace-nowrap px-0.5 text-center font-mono text-[13px] font-bold tabular-nums"
+          className="min-w-0 flex-1 whitespace-nowrap px-0.5 text-center font-mono text-[13px] font-bold tabular-nums disabled:text-[#8fa2b8]"
         >
           {value}
         </button>
@@ -431,7 +449,7 @@ function Stepper({
           className="w-0 min-w-0 flex-1 bg-transparent px-0.5 text-center font-mono text-[13px] font-bold text-white outline-none tabular-nums"
         />
       )}
-      <button type="button" onClick={onUp} disabled={upDisabled} aria-label={`Increase ${ariaLabel}`} className={btn}>+</button>
+      <button type="button" onClick={onUp} disabled={upDisabled === true || disabled === true} aria-label={`Increase ${ariaLabel}`} className={btn}>+</button>
     </span>
   );
 }
@@ -449,12 +467,14 @@ function Stepper({
  * at any phone size, with the chip and its money note sharing the line above.
  */
 function LevelChip({
-  label, colour, value, set, onDown, onUp, onClear, note, detail, typing, onType, onStartTyping, onCommit,
+  label, colour, value, set, settable, onDown, onUp, onClear, note, detail, typing, onType, onStartTyping, onCommit,
 }: {
   label: string;
   colour: string;
   value: string;
   set: boolean;
+  /** False before the first quote: a level is a price, and there is no price to measure from. */
+  settable: boolean;
   onDown: () => void;
   onUp: () => void;
   onClear: () => void;
@@ -485,8 +505,9 @@ function LevelChip({
         ) : null}
       </div>
       <Stepper
-        value={value}
-        ariaLabel={`${label} ${value}`}
+        value={settable ? value : 'waiting'}
+        ariaLabel={`${label} ${settable ? value : 'waiting'}`}
+        disabled={!settable}
         onDown={onDown}
         onUp={onUp}
         typing={typing}

@@ -19,6 +19,9 @@ import { useSymbolSetStore, MAX_WATCHED } from '@/lib/game/symbolSet';
 import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
 import { detailRows, sessionSoFar } from '@/lib/game/symbolDetails';
 import { MT5MobileQuoteMenu } from '@/components/game/mobile/MT5MobileQuoteMenu';
+import {
+  MT5SwipeRow, SwipePlusIcon, SwipeChartIcon, type SwipeCommand,
+} from '@/components/game/mobile/MT5SwipeRow';
 import { useQuotesViewStore, useRestoreQuotesView } from '@/lib/game/quotesView';
 import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
@@ -361,7 +364,35 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                 const changePct = price !== null && open
                   ? (points === 0 ? 0 : ((price - open) / open) * 100)
                   : null;
-                return (
+                /**
+                 * iOS documents swipe-left on a Quotes row: "Swipe left on the symbol line to open
+                 * the quick commands menu" → TWO icons, new trade operation and open chart, and
+                 * "dragging further left jumps straight to the chart"
+                 * (docs/mt5/04-mobile-app.md section 2).
+                 *
+                 * Two, not the Trade row's six, because that is what MetaTrader puts here; and
+                 * taken from the iOS help because Android's Quotes page documents only the tap
+                 * menu and no swipe. The tap menu is still the full six items, so the swipe is an
+                 * accelerator for the two commands a trader actually repeats, which is what it is
+                 * on MetaTrader too.
+                 *
+                 * `New order` carries the same rule as the menu item: MetaTrader HIDES it while
+                 * disconnected rather than disabling it, and this brand settles one symbol, so a
+                 * row for another says so instead of opening a ticket it cannot fill.
+                 */
+                const swipe: readonly SwipeCommand[] = [
+                  ...(status === 'open'
+                    ? [{
+                        label: 'New order',
+                        icon: SwipePlusIcon,
+                        ...(symbol === defaultSymbol
+                          ? { onPick: () => { openChart(symbol); onNewOrder?.(); } }
+                          : { unavailable: `This brand settles ${defaultSymbol ?? 'one symbol'} only, so an order cannot be placed on ${symbol}.` }),
+                      } satisfies SwipeCommand]
+                    : []),
+                  { label: 'Chart', icon: SwipeChartIcon, onPick: () => { openChart(symbol); onChart?.(); } },
+                ];
+                const row = (
                   <button
                     key={symbol}
                     type="button"
@@ -387,7 +418,14 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                      * chart can be opened by dragging it to the chart viewing area using a mouse
                      * (Drag'n'Drop)."
                      */
-                    draggable
+                    /**
+                     * Desktop only, and that is not a tidy-up: a native HTML5 drag on a phone row
+                     * CANCELS the pointer gesture that starts it, so the row's swipe-left quick
+                     * commands could never open. MetaTrader's phone has no drag-to-chart either --
+                     * the comment below says as much -- so the attribute was only ever doing harm
+                     * there.
+                     */
+                    draggable={!phone}
                     onDragStart={(e) => {
                       e.dataTransfer.setData(CHART_SYMBOL_DND, symbol);
                       e.dataTransfer.setData('text/plain', symbol);
@@ -543,6 +581,9 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                     )}
                   </button>
                 );
+                return phone ? (
+                  <MT5SwipeRow key={symbol} label={symbol} commands={swipe}>{row}</MT5SwipeRow>
+                ) : row;
               })}
               {/* MetaTrader's add row, verbatim: "To quickly add a symbol in the Market Watch, click
                   + below the list and enter the name of the symbol." Its counter, right-aligned on
