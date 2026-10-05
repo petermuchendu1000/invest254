@@ -109,13 +109,27 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
     for (const ws of sockets) {
       const sub = watched.get(ws);
       if (!sub || sub.symbols.length === 0) continue;
-      const quotes: Array<{ symbol: string; rate: number; delta: number }> = [];
+      const quotes: Array<{ symbol: string; rate: number; delta: number; high: number; low: number }> = [];
       for (const symbol of sub.symbols) {
         const h = rt.histories.for(symbol);
         if (!h || !h.warmed) continue;
         const tick = h.liveTick(tMs, sub.last.get(symbol));
         sub.last.set(symbol, tick.rate);
-        quotes.push({ symbol, rate: tick.rate, delta: tick.delta });
+        /**
+         * The day's range rides the quote, because MetaTrader's phone Quotes row prints `L:` and
+         * `H:` under the Bid and the Ask and the engine is the only side that can know them. The
+         * alternative was a phone fetching a day of bars for each of twenty watched symbols to
+         * print two numbers each.
+         *
+         * It is a PRICE, not a rate: the two extremes are mapped through the day's anchor here,
+         * where that anchor lives, rather than being sent as raw curve values for every client to
+         * map again against an anchor it may not have yet.
+         *
+         * The call extends a walk the history keeps rather than rebuilding it, so this costs the
+         * seconds since the last tick per symbol, not a day's.
+         */
+        const range = h.dayRange(tMs);
+        quotes.push({ symbol, rate: tick.rate, delta: tick.delta, high: range.high, low: range.low });
       }
       if (quotes.length > 0) send(ws, "symbol_ticks", { t: tMs, quotes });
     }

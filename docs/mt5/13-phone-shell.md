@@ -44,6 +44,7 @@ Measured again on the same 360x800 phone, after:
 | Phone Quotes row + its context menu | `components/game/MarketWatch.tsx` (`phone`), `mobile/MT5MobileQuoteMenu.tsx` |
 | Advanced / Simple view mode | `lib/game/quotesView.ts` |
 | The phone order ticket (section 5a) | `components/game/mobile/MT5MobileOrder.tsx` |
+| The day's range on the quote | `packages/shared/src/candles.ts` (`dayExtremes`), `apps/engine/src/markethistory.ts` (`dayRange`) |
 | Its adaptive seven-cell volume stepper | `lib/game/volumeSteps.ts` |
 | Messages (Broker chat) | `components/game/mobile/MT5MobileMessages.tsx` |
 | Order logic shared by both tickets | `lib/game/useOrderEntry.ts` |
@@ -90,7 +91,7 @@ under a quote of 3081.42 reads as a second price that disagrees with the first.
 | Opens on the tab last used; a fresh install opens on Quotes | Opens on **Charts** | A trader arriving from a link has come to see the price. The last tab is still remembered. |
 | One-click panel sits under the top bar by default | Sits along the **bottom** | MetaTrader's own "One Click panel at the bottom" setting. The phone screen already ends in the tab bar, and the panel wants to be where the thumb is. |
 | SELL carries the bid, BUY the ask | Both carry **one price** | There is no spread: a contract opens and settles on the same seeded number. Two different prices would say the player buys at one and sells at the other. |
-| Quotes row shows Bid and Ask with `L:`/`H:` beneath | One price, no `L:`/`H:` | One price, as above. The day range is a **gap**, not a decision — see below. |
+| Quotes row shows Bid and Ask with `L:`/`H:` beneath | One price, with `L:`/`H:` beneath it | One price, as above, so the pair sits under it together rather than one under each. |
 | Trade screen has an `Orders` section | Absent | Every contract is market execution, so there are no pending orders. An empty section headed "Orders" promises a feature. |
 | Position menu offers `New order` | Absent | The engine holds one position at a time, so there is nothing to pre-fill a second from. |
 | Messages has six chat categories | One, `Broker` | The other five are MQL5.community, VPS rental and a code marketplace. Five empty rows would be a menu of things this product does not have. |
@@ -118,14 +119,27 @@ control carries one of those characters as text.
 
 ## Still missing
 
-1. **`L:` and `H:` on the Quotes row.** MetaTrader prints the day's low and high under the Bid and
-   Ask. The engine's quote fan-out (`symbol_ticks`) carries no day range, and fetching a day of bars
-   per watched symbol from a phone to derive one would be the wrong way to get it: the engine
-   already holds the day. The range belongs on the quote message.
-2. **Unread state on Messages.** MetaTrader shows an unread count beside the category title, a blue
+1. **Unread state on Messages.** MetaTrader shows an unread count beside the category title, a blue
    circle on a chat with new messages, and a red badge on the Messages tab. The notifications API
    gives a notification no read state, so all three would be decoration. `MT5MobileTabs` already
    takes an `unread` prop for when it exists.
-3. **Swipe actions.** Android documents a six-icon swipe menu on a Trade row; iOS documents a
+2. **Swipe actions.** Android documents a six-icon swipe menu on a Trade row; iOS documents a
    three-icon one and a swipe on a Quotes row. Only the tap menus are built.
-4. **Landscape full-screen.** "Rotate to landscape = full-screen mode, automatically."
+3. **Landscape full-screen.** "Rotate to landscape = full-screen mode, automatically."
+
+## The day's range, which used to be missing
+
+`L:` and `H:` are now on the row, and they come from the engine. The reason is worth keeping:
+
+MetaTrader prints the session's low and high under the Bid and the Ask. The quote fan-out carried no
+day range, and the obvious client-side fix — fold the day's bars for each watched symbol — is wrong
+twice over. It would have a phone fetch a day of bars for each of twenty rows to print two numbers
+each; and, worse, **this curve is deterministic for the whole day the moment its seed is known**, so
+folding the day's bars returns the extremes of a day that has not happened yet. A high the price
+will reach this evening, printed at breakfast as though it had.
+
+So `symbol_ticks` carries `high` and `low`, already mapped through the day's anchor into prices, and
+`MarketHistory.dayRange` walks the curve only as far as the current second. It keeps the walk's
+position, so the fan-out extends it by the seconds since the last tick rather than rebuilding it;
+`dayExtremes` in the shared package is the walk itself, and its tests pin that extending in steps
+gives exactly the answer walking from zero does, and that the full day's high beats noon's.

@@ -316,3 +316,73 @@ test("liveTick: the quote lands on the same price axis as the bars", () => {
   assert.ok(Math.abs(price - lastBar.close) < 50, `quote ${price} vs last bar ${lastBar.close}`);
   assert.equal(a.instrument.symbol, "XAUUSD");
 });
+
+// ── The day's range so far, which MetaTrader's phone Quotes row prints as `L:` and `H:` ──────────
+
+test("the day range brackets the live price, and both sit on the price axis", () => {
+  const h = build();
+  const r = h.dayRange();
+  // `priceAtRate` takes the moment the rate was recorded, so it can pick that day's anchor.
+  const live = priceAtRate(h.axis(), NOW, h.liveTick().rate)!;
+  assert.ok(r.low <= live && live <= r.high, `${r.low} <= ${live} <= ${r.high}`);
+  // Prices, not curve values: a client must be able to print them beside the quote unchanged.
+  assert.ok(Math.abs(r.high - XAUUSD.anchor) < XAUUSD.anchor, `${r.high} is not on the price axis`);
+});
+
+test("it reports the day SO FAR, never a high the price has not reached yet", () => {
+  // This is the trap the whole thing exists around: the curve is deterministic for the full day the
+  // moment its seed is known, so folding the day's bars would hand back the evening's high at
+  // breakfast and print it as though it had happened.
+  const key = dateKeyUTC(NOW);
+  const dayStart = dayStartMs(key);
+  const early = build(SITE_A, () => dayStart + 60_000).dayRange();
+  const later = build(SITE_A, () => dayStart + 12 * 3600_000).dayRange();
+  const whole = build(SITE_A, () => dayStart + DAY_S * 1000 - 1000).dayRange();
+  assert.ok(later.high >= early.high && later.low <= early.low, "an hour later cannot narrow the range");
+  assert.ok(whole.high >= later.high && whole.low <= later.low, "the full day cannot narrow it either");
+  // And it genuinely moves: a range that never widened would pass the two lines above vacuously.
+  assert.ok(whole.high > early.high || whole.low < early.low, "the range never widened at all");
+});
+
+test("extending it tick by tick gives the same answer as asking once at the end", () => {
+  // The fan-out asks on every tick for every watched symbol, so the walk is extended rather than
+  // rebuilt. The two paths must not disagree, or a row's range would depend on when it was opened.
+  const dayStart = dayStartMs(dateKeyUTC(NOW));
+  let clock = dayStart;
+  const stepped = new MarketHistory(
+    (dateKey) => deriveSiteDaySeed(MASTER, SITE_A, dateKey, 0),
+    () => DEFAULT_VERSIONED_CONFIG,
+    { now: () => clock },
+  );
+  let last = stepped.dayRange();
+  for (let i = 0; i < 40; i++) {
+    clock += 137_000;
+    last = stepped.dayRange();
+  }
+  const atOnce = build(SITE_A, () => clock).dayRange();
+  assert.deepEqual(last, atOnce);
+});
+
+test("two sites get different ranges, because they are different series", () => {
+  const a = build(SITE_A).dayRange();
+  const b = build(SITE_B).dayRange();
+  assert.notDeepEqual(a, b);
+});
+
+test("the range survives the UTC day turning, by starting the new day over", () => {
+  const key = dateKeyUTC(NOW);
+  const nextDayStart = dayStartMs(key) + DAY_S * 1000;
+  let clock = nextDayStart - 1000; // one second before midnight
+  const h = new MarketHistory(
+    (dateKey) => deriveSiteDaySeed(MASTER, SITE_A, dateKey, 0),
+    () => DEFAULT_VERSIONED_CONFIG,
+    { now: () => clock },
+  );
+  const lastNight = h.dayRange();
+  clock = nextDayStart + 1000; // one second after
+  const morning = h.dayRange();
+  // A second into a new day the range is a second wide, not yesterday's whole span carried over.
+  assert.ok(morning.high - morning.low < lastNight.high - lastNight.low,
+    `${morning.high - morning.low} should be far narrower than ${lastNight.high - lastNight.low}`);
+  assert.ok(morning.high >= morning.low);
+});

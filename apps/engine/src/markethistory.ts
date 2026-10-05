@@ -1,5 +1,5 @@
 import {
-  CurveGenerator, XAUUSD, DAY_S, TIMEFRAMES, aggregate, minuteBars, nextBase, nextBucketS,
+  CurveGenerator, XAUUSD, DAY_S, TIMEFRAMES, aggregate, dayExtremes, minuteBars, nextBase, nextBucketS,
   dateKeyUTC, dayStartMs, type Candle, type DayAnchor, type MarketSymbol, type PriceAxis,
   type Tick, type Timeframe, type VersionedGameConfig,
 } from "@invest254/shared";
@@ -108,6 +108,15 @@ export class MarketHistory {
   private chainedTo: string | null = null;
   /** Today's curve, kept so a live quote is a lookup rather than a rebuild. */
   private liveCurve: { dateKey: string; curve: CurveGenerator } | null = null;
+  /**
+   * Today's high and low SO FAR, and the second the walk has reached.
+   *
+   * Carried rather than recomputed because `dayRange` is called on every fan-out tick for every
+   * watched symbol: holding the walk's position lets each call extend it by the seconds that have
+   * passed, which is sixty samples rather than a day's worth. Dropped when the UTC day turns, which
+   * is also when the price axis re-anchors.
+   */
+  private range: { dateKey: string; throughS: number; high: number; low: number } | null = null;
 
   constructor(
     private readonly seedFor: (dateKey: string) => string,
@@ -298,6 +307,46 @@ export class MarketHistory {
       this.liveCurve = { dateKey: key, curve: this.curveFor(key) };
     }
     return this.liveCurve.curve.tick(ms, dayStartMs(key), prevRate);
+  }
+
+  /**
+   * The highest and lowest price TODAY has reached so far, on this instrument's own price axis.
+   *
+   * MetaTrader's phone Quotes row prints `L:` and `H:` beneath the Bid and the Ask, and its Details
+   * tab carries the same pair. They belong on the quote rather than being derived on the client:
+   * the engine already holds the day, and a phone deriving them would have to fetch a day of bars
+   * per watched symbol to print two numbers each.
+   *
+   * SO FAR is the whole point. This curve is deterministic for the entire day the moment its seed
+   * is known, so folding the day's bars would return the extremes of a day that has not happened
+   * yet: a high the price will reach this evening, printed at breakfast as though it had. The walk
+   * stops at the current second, and `dayExtremes` documents the same trap from the other side.
+   */
+  dayRange(nowMs?: number): { high: number; low: number } {
+    const ms = nowMs ?? this.now();
+    const key = dateKeyUTC(ms);
+    this.chainThrough(key);
+    const slice = this.days.get(key);
+    if (!this.liveCurve || this.liveCurve.dateKey !== key) {
+      this.liveCurve = { dateKey: key, curve: this.curveFor(key) };
+    }
+    const base = slice?.base ?? this.inst.anchor;
+    const curve = this.liveCurve.curve;
+    const sample = (t: number) => curve.value(t);
+    // Clamped to the day: a clock skewed past midnight must not walk into tomorrow's seconds on
+    // today's curve, which would price a second that belongs to a different seed.
+    const elapsedS = Math.min(DAY_S, Math.max(0, Math.floor((ms - dayStartMs(key)) / 1000)));
+
+    if (this.range === null || this.range.dateKey !== key) {
+      const e = dayExtremes(this.inst, base, sample, 0, elapsedS);
+      this.range = { dateKey: key, throughS: elapsedS, ...e };
+    } else if (elapsedS > this.range.throughS) {
+      const e = dayExtremes(this.inst, base, sample, this.range.throughS + 1, elapsedS, {
+        high: this.range.high, low: this.range.low,
+      });
+      this.range = { dateKey: key, throughS: elapsedS, ...e };
+    }
+    return { high: this.range.high, low: this.range.low };
   }
 
   /**
