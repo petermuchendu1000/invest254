@@ -1,0 +1,160 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import type { SymbolRow } from '@/lib/game/GameSocketProvider';
+import { MAX_WATCHED } from '@/lib/game/symbolSet';
+import { cn } from '@/lib/cn';
+
+/**
+ * MetaTrader's Symbols dialog, reached with Ctrl+U or from the Market Watch context menu.
+ *
+ * MetaQuotes describes it as the place where "the full list of symbols provided by the broker" is
+ * shown as a tree of groups, and where symbols are added to or removed from Market Watch. The tree
+ * is the broker's own grouping — `Forex\Majors`, `Metals` and so on — which is why the engine sends
+ * each symbol's group rather than letting the client invent one.
+ *
+ * Two departures from MetaTrader, both forced and both stated in the dialog itself rather than left
+ * for the trader to discover:
+ *
+ *   - There is a CAP on how many symbols may be shown at once. MetaTrader has no such limit; this
+ *     engine holds a bounded number of price chains resident and quotes only the warm ones, so a
+ *     longer list would contain rows that never quote. Stopping the trader at the point of asking
+ *     is better than a window of silent rows.
+ *   - MetaTrader's left pane also carries Custom symbols and a search box. Custom symbols mean
+ *     synthesising an instrument from a formula over others, which this platform has no concept of.
+ */
+export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
+  catalogue: readonly SymbolRow[];
+  watched: readonly string[];
+  onApply: (symbols: readonly string[]) => void;
+  onDismiss: () => void;
+}) {
+  const [picked, setPicked] = useState<readonly string[]>(watched);
+  const [query, setQuery] = useState('');
+  /** Groups start collapsed except the ones the trader already has symbols from. */
+  const [open, setOpen] = useState<readonly string[]>(() => {
+    const has = new Set(catalogue.filter((s) => watched.includes(s.symbol)).map((s) => s.group));
+    return [...has];
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onDismiss]);
+
+  const groups = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    const rows = q === ''
+      ? catalogue
+      : catalogue.filter((s) => s.symbol.includes(q) || s.description.toUpperCase().includes(q));
+    const by = new Map<string, SymbolRow[]>();
+    for (const r of rows) (by.get(r.group) ?? by.set(r.group, []).get(r.group)!).push(r);
+    return [...by.entries()];
+  }, [catalogue, query]);
+
+  const full = picked.length >= MAX_WATCHED;
+  const toggle = (symbol: string) => setPicked((prev) =>
+    prev.includes(symbol) ? prev.filter((s) => s !== symbol) : prev.length >= MAX_WATCHED ? prev : [...prev, symbol]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Symbols"
+      className="fixed inset-0 z-[86] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+    >
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-[78vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
+        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+          <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[2px] bg-[#3183ff] text-[10px] font-black text-white">S</span>
+          <span className="flex-1 truncate text-[15px] font-semibold leading-tight">Symbols</span>
+          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white">×</button>
+        </div>
+
+        <div className="shrink-0 border-b border-[#2b3543] px-3 py-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Find symbol"
+            aria-label="Find symbol"
+            className="h-7 w-full rounded-sm border border-[#2b3543] bg-[#202933] px-2 text-[11px] text-white outline-none placeholder:text-[#4a5666] focus:border-[#3183ff]"
+          />
+          <p className={cn('mt-1.5 text-[10px] leading-snug', full ? 'text-[#f0b90b]' : 'text-[#8fa2b8]')}>
+            {picked.length} of {MAX_WATCHED} shown.
+            {full ? ' That is the most this feed quotes at once; hide one to add another.' : ''}
+          </p>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {groups.length === 0 ? (
+            <p className="px-3 py-4 text-center text-[11px] text-[#8fa2b8]">No symbol matches that.</p>
+          ) : groups.map(([group, rows]) => {
+            const expanded = open.includes(group) || query.trim() !== '';
+            return (
+              <div key={group}>
+                <button
+                  type="button"
+                  onClick={() => setOpen((p) => (p.includes(group) ? p.filter((g) => g !== group) : [...p, group]))}
+                  aria-expanded={expanded}
+                  className="flex w-full items-center gap-2 border-b border-[#2b3543]/60 bg-[#202933] px-3 py-1.5 text-left text-[11px] font-semibold text-white"
+                >
+                  <span aria-hidden className="w-3 text-[#8fa2b8]">{expanded ? '−' : '+'}</span>
+                  {/* MetaTrader prints the tree path with a backslash; the leaf is what reads as a heading. */}
+                  <span className="flex-1 truncate">{group.replace('\\', ' › ')}</span>
+                  <span className="shrink-0 font-mono text-[10px] text-[#8fa2b8]">{rows.length}</span>
+                </button>
+                {expanded ? rows.map((r) => {
+                  const on = picked.includes(r.symbol);
+                  return (
+                    <label
+                      key={r.symbol}
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2 border-b border-[#2b3543]/40 px-3 py-1.5 text-[11px] transition hover:bg-[#202933]',
+                        !on && full ? 'opacity-50' : '',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        disabled={!on && full}
+                        onChange={() => toggle(r.symbol)}
+                        className="h-3 w-3 shrink-0 accent-[#3183ff]"
+                      />
+                      <span className="w-20 shrink-0 font-semibold text-white">{r.symbol}</span>
+                      <span className="min-w-0 flex-1 truncate text-[#8fa2b8]">{r.description}</span>
+                    </label>
+                  );
+                }) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2 border-t border-[#2b3543] px-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => setPicked([])}
+            className="h-8 rounded-sm border border-[#2b3543] px-3 text-[11px] font-semibold text-[#8fa2b8] transition hover:text-white"
+          >
+            Hide all
+          </button>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="h-8 rounded-sm border border-[#2b3543] px-3 text-[11px] font-semibold text-[#8fa2b8] transition hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => { onApply(picked); onDismiss(); }}
+            className="h-8 rounded-sm bg-[#3183ff] px-5 text-[11px] font-semibold text-white transition hover:brightness-110"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

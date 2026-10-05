@@ -39,7 +39,15 @@ import { cn } from '@/lib/cn';
  * are the existing ones — this is the same order the old panel placed, wearing MetaTrader's controls.
  */
 
-const DURATION_OPTIONS = [10, 30, 60, 120];
+/**
+ * The contract terms this ticket offers, in seconds. Exported because the Specification dialog
+ * states them as the instrument's Expiration: none of MetaTrader's four expiration values describes
+ * a contract that runs on a timer the trader picks, so the timers themselves are the honest answer.
+ */
+export const DURATION_OPTIONS = [10, 30, 60, 120];
+
+/** "10s", "1m", "2m" — the same labels the Expiry row prints. */
+export const durationLabel = (s: number): string => (s < 60 ? `${s}s` : `${s / 60}m`);
 /** MetaTrader's own volume increments, offered as the two "+" buttons. */
 const VOLUME_STEPS = [0.01, 0.1] as const;
 

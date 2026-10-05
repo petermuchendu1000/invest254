@@ -1,0 +1,65 @@
+/**
+ * MetaTrader's Market Watch quote colours.
+ *
+ * Verbatim, from MetaQuotes' own help:
+ *
+ *   "Prices in the 'Market Watch' window have different colors: Blue — the current price is higher
+ *    than the previous one; Red — the current price is lower than the previous one; Gray — the
+ *    price has not changed for the last 15 seconds. If the depth of market and the Last trade price
+ *    is available for a symbol, the color is determined by the Last price. Otherwise, the color is
+ *    determined by the Bid price."
+ *
+ * Two things in that sentence are easy to read past, and both were wrong here before:
+ *
+ *   The third state is STALENESS, not an unchanged tick. A quote that keeps arriving at the same
+ *   number does not lose its colour; a quote that stops CHANGING for fifteen seconds does. This
+ *   panel used to hold its last direction colour for ever, so a dead feed looked exactly like a
+ *   live one that had ticked up.
+ *
+ *   MetaQuotes' word "Gray" is wrong, and its own screenshots prove it. The unchanged price is
+ *   sampled at #000000 on the white Market Watch and at #FFFFFF on the black Popup Prices, which is
+ *   the window's normal FOREGROUND colour rather than a grey. Only the gutter glyph is literally
+ *   grey. So the third state drops back to the panel's own text colour, which on this dark terminal
+ *   is white; painting it grey would have dimmed a perfectly current quote that simply had not
+ *   moved.
+ *
+ *   The colour follows the LAST price where a symbol has one, and only falls back to Bid where it
+ *   does not. This platform quotes one price per symbol, which IS the last traded price, so the
+ *   first branch applies and there is no bid to fall back to.
+ */
+
+/**
+ * Blue, red, or the window's own foreground. `null` means no quote has arrived yet, which is not
+ * one of MetaTrader's three.
+ */
+export type QuoteTone = 'up' | 'down' | 'stale';
+
+/** MetaTrader's own timeout, in milliseconds. */
+export const STALE_AFTER_MS = 15_000;
+
+export interface QuoteToneInput {
+  /** Direction of the last change, or null before any change has been seen. */
+  up: boolean | null;
+  /** When the quote last CHANGED, in epoch ms. Null before the first change. */
+  changedAt: number | null;
+  now: number;
+}
+
+export function quoteTone({ up, changedAt, now }: QuoteToneInput): QuoteTone | null {
+  if (up === null || changedAt === null) return null;
+  // "the price has not changed for the last 15 seconds" — measured from the last CHANGE, so a
+  // repeated identical quote does not refresh it.
+  if (now - changedAt >= STALE_AFTER_MS) return 'stale';
+  return up ? 'up' : 'down';
+}
+
+/**
+ * The colours themselves. MetaTrader's blue and red are the same pair it uses for its buy and sell
+ * sides; the stale state is `currentColor`, which is the window's foreground, as measured from
+ * MetaQuotes' own light and dark renders of the same grid.
+ */
+export const QUOTE_TONE_COLOUR: Record<QuoteTone, string> = {
+  up: '#3183ff',
+  down: '#f23645',
+  stale: 'currentColor',
+};

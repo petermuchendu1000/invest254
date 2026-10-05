@@ -22,6 +22,8 @@ does.
 | `07-objects-list-and-properties.md` | Objects List (Ctrl+B) columns and buttons, Object Properties tabs and fields, on-chart selection and context menu, mobile objects. |
 | `08-chart-properties.md` | Chart Properties (F8): the three tabs, 13 colours, 4 schemes, 13 Show checkboxes, the scale-fixing controls, the chart context menu, chart shift. **MT5 has no logarithmic scale.** |
 | `09-toolbox.md` | The Toolbox window (Ctrl+T), its docking, the twelve tabs in order plus the conditional `Search` tab, exact columns and context menus per tab, the account summary line measured character by character, Margin Call behaviour, mobile equivalents. |
+| `10-market-watch.md` | Market Watch (Ctrl+M), its four tabs `Symbols/Details/Trading/Ticks`, the six Symbols columns, tick-direction colouring measured to the hex value, both published context menus, Depth of Market, the complete Symbol Specification field list, the Symbols dialog, mobile `Quotes`. |
+| `11-market-data-sources.md` | Where prices and symbol metadata may lawfully come from. **TradingView has no public data API and its ToS forbids redistribution.** Binance / Coinbase / Kraken / Bitstamp, ECB + Frankfurter, Alpha Vantage / Twelve Data / Finnhub / Massive (ex Polygon.io) / Marketstack free tiers, Yahoo, open data, and open symbol-reference datasets — each with its licence clause quoted. Ranked for metadata vs. redistributed prices. |
 
 ## Settled facts that contradicted our build
 
@@ -40,8 +42,19 @@ does.
 - **The mobile app has five bottom tabs**, not six, and no Messages tab:
   Quotes · Chart · Trade · History · Settings.
 - **The Options dialog has twelve tabs**, not eight.
-- **Market Watch prices are coloured by tick direction**, blue up / red down / grey after 15
-  seconds unchanged. Not by buy/sell.
+- **There is no free, licence-clean source of redistributable intraday FX or metals prices.**
+  Every free FX source checked is either end-of-day only (ECB), non-redistributable
+  (open.er-api.com) or personal-use-only (Alpha Vantage, Finnhub, Twelve Data, Marketstack,
+  Massive). XAUUSD benchmarks need a paid ICE Benchmark Administration licence. Crypto is the
+  exception: CoinGecko's free Demo API may be redistributed commercially with attribution.
+  See `11-market-data-sources.md`.
+- **TradingView is a charting library, not a data source.** Lightweight Charts is Apache 2.0
+  and free; TradingView's *data* is licensed "for exclusive display-only use" and its ToS
+  says "we do not permit commercial usage of any of our services or APIs".
+- **Market Watch prices are coloured by tick direction**, `#0000FF` up / `#FF0000` down, and
+  back to the normal foreground colour after 15 seconds unchanged. Not by buy/sell, and **not
+  grey** — MetaQuotes writes "Gray" but renders black on white and white on black. **Bid and Ask
+  are coloured independently of each other.** See `10-market-watch.md`.
 
 ## Confirmed correct in our build
 
@@ -74,8 +87,9 @@ one above it is merged.
 9. **Toolbox tabs** — Exposure, Calendar, Articles, Code Base, Experts. **Done.** All twelve,
    in MetaTrader's order, built to [09-toolbox.md](./09-toolbox.md). Exposure carries real
    numbers; Company is hidden exactly as MetaTrader hides it.
-10. **Market Watch** — bid/ask/spread columns, tick-direction colouring, Depth of Market,
-    Symbol Specification.
+10. **Market Watch** — `Symbol | Bid | Ask | Spread | Time | Daily Change`, the four bottom
+    tabs, tick-direction colouring, Depth of Market, Symbol Specification. Researched: build to
+    [10-market-watch.md](./10-market-watch.md).
 11. **Account summary line** — MT5's exact labels, spacing and Margin Call highlighting.
 12. **Residual non-MT5 surfaces** — the welcome-bonus celebration still fires on a terminal
     brand, and "Bets" / "No bets yet" / "Won ×1.95" are still in player-facing history.

@@ -1,8 +1,12 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
-import { type Direction, instrumentById, isKnownInstrument, isTimeframe, type DigitKind, type MultDir } from "@invest254/shared";
+import {
+  type Direction, instrumentById, isKnownInstrument, isTimeframe, symbolDef,
+  type DigitKind, type MultDir,
+} from "@invest254/shared";
 import type { SiteRegistry } from "./siteregistry.js";
 import { MAX_ANCHORS } from "./markethistory.js";
+import type { SymbolHistories } from "./symbolhistories.js";
 import { MarketNews } from "./marketnews.js";
 import type { GameRepository } from "./wallet.js";
 import type { Verifier } from "./auth.js";
@@ -67,6 +71,55 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
   const toSiteUser = (siteId: string, userId: string, type: string, data: unknown) =>
     perSiteUser.get(siteId)?.get(userId)?.forEach((ws) => send(ws, type, data));
   const onlineCount = (siteId: string) => Math.max(perSiteSockets.get(siteId)?.size ?? 0, opts.onlineFloor ?? 0);
+
+  /**
+   * How many symbols one socket may watch at once.
+   *
+   * MetaTrader's Market Watch holds a list this size in practice, and the cap is not arbitrary: it
+   * must stay BELOW a brand's resident-history cap, or every watched symbol would be evicted and
+   * rebuilt on every tick and none of them would ever be warm enough to quote. The assertion below
+   * is in the test suite rather than here, but the dependency is the reason this number exists.
+   */
+  const MAX_WATCHED_SYMBOLS = 20;
+
+  /**
+   * Which symbols each socket is watching, and the last rate it was sent for each.
+   *
+   * A real Map rather than a WeakMap because the tick loop iterates it; the close handler deletes
+   * the entry, which is also what stops a closed socket's symbols being kept resident.
+   */
+  const watched = new Map<WebSocket, { symbols: string[]; last: Map<string, number> }>();
+
+  /**
+   * One message per socket per tick carrying every symbol it watches.
+   *
+   * Per socket rather than per symbol because two clients rarely watch the same list, and a message
+   * per symbol per tick would be twenty messages a tick for one Market Watch. Per TICK rather than
+   * on its own timer so a symbol's quote cannot drift out of step with the brand's own `tick`: for
+   * the default symbol the two are the same number, and a client showing both would otherwise see
+   * them disagree.
+   *
+   * A symbol whose chain is not warm yet is skipped rather than quoted. Its rate is available (that
+   * only needs today's curve) but its ANCHOR is not, and a rate without the anchor it belongs to
+   * cannot be turned into a price — so sending it would be a number the client could only misplot.
+   */
+  function fanOutQuotes(siteId: string, rt: { histories?: SymbolHistories }, tMs: number): void {
+    const sockets = perSiteSockets.get(siteId);
+    if (!sockets || !rt.histories) return;
+    for (const ws of sockets) {
+      const sub = watched.get(ws);
+      if (!sub || sub.symbols.length === 0) continue;
+      const quotes: Array<{ symbol: string; rate: number; delta: number }> = [];
+      for (const symbol of sub.symbols) {
+        const h = rt.histories.for(symbol);
+        if (!h || !h.warmed) continue;
+        const tick = h.liveTick(tMs, sub.last.get(symbol));
+        sub.last.set(symbol, tick.rate);
+        quotes.push({ symbol, rate: tick.rate, delta: tick.delta });
+      }
+      if (quotes.length > 0) send(ws, "symbol_ticks", { t: tMs, quotes });
+    }
+  }
 
   // ── Phase 2: per-(site, instrument) authoritative DIGIT feed streamer ─────────────────────────
   // Each distinct instrument a brand is using runs ONE deterministic ticker at the instrument's
@@ -255,7 +308,10 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
     if (!wired.has(siteId)) {
       wired.add(siteId);
       rt.game.subscribe({
-        onTick: (t) => toSite(siteId, "tick", t),
+        onTick: (t) => {
+          toSite(siteId, "tick", t);
+          fanOutQuotes(siteId, rt, t.t);
+        },
         onUpdate: (u) => {
           const p = rt.game.getPosition(u.positionId);
           if (p) toSiteUser(siteId, p.userId, "position_update", u);
@@ -425,6 +481,17 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                 send(ws, "error", { code, ...(message === undefined ? {} : { message }), ...rid });
 
               if (!rt.history) return fail("NO_CANDLES", "this brand draws a line chart, not candles");
+              // Which symbol's bars. Absent means the brand's default, which is every client written
+              // before multi-symbol. A symbol the brand does not offer is refused rather than
+              // quietly served the default's bars under the requested name.
+              const want = msg.data?.symbol === undefined || msg.data?.symbol === null
+                ? undefined : String(msg.data.symbol);
+              // Warmed rather than chained inline. A cold symbol is ~2.2s of CPU, and spending it
+              // inside this handler is 2.2s during which the process serves no other brand; warming
+              // slices it and yields between the slices. The reply is no later for it, because the
+              // work is the same work.
+              const hist = await rt.histories?.warm(want ?? rt.history.instrument.symbol);
+              if (!hist) return fail("UNKNOWN_SYMBOL", want);
               const tf = String(msg.data?.tf ?? "");
               if (!isTimeframe(tf)) return fail("BAD_TIMEFRAME", tf);
               const count = Number(msg.data?.count ?? 500);
@@ -433,10 +500,10 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               const rawTo = msg.data?.to;
               const to = rawTo === undefined || rawTo === null ? undefined : Number(rawTo);
               if (to !== undefined && !Number.isFinite(to)) return fail("BAD_TO");
-              const anchor = rt.history.liveAnchor();
+              const anchor = hist.liveAnchor();
               return send(ws, "candles", {
                 ...rid, tf, instrument: anchor.instrument,
-                bars: rt.history.candles(tf, count, to),
+                bars: hist.candles(tf, count, to),
                 // How to place live ticks on the same axis: price = base + scale*(value - openValue),
                 // where value = (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE.
                 anchor: { tradeDate: anchor.dateKey, base: anchor.base, openValue: anchor.openValue },
@@ -451,14 +518,108 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               if (!rt.history) {
                 return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles", ...rid });
               }
+              const want = msg.data?.symbol === undefined || msg.data?.symbol === null
+                ? undefined : String(msg.data.symbol);
+              const hist = await rt.histories?.warm(want ?? rt.history.instrument.symbol);
+              if (!hist) return send(ws, "error", { code: "UNKNOWN_SYMBOL", message: want, ...rid });
               const raw = msg.data?.days;
               if (!Array.isArray(raw)) return send(ws, "error", { code: "BAD_DAYS", ...rid });
               const days = raw.slice(0, MAX_ANCHORS).map((d: unknown) => String(d));
               return send(ws, "anchors", {
                 ...rid,
-                instrument: rt.history.instrument,
-                days: rt.history.anchors(days),
+                instrument: hist.instrument,
+                days: hist.anchors(days),
               });
+            }
+            case "symbols": {
+              // The brand's tradable list, for Market Watch and the Symbols dialog.
+              //
+              // Unauthenticated for the same reason the candles are: which instruments a brand
+              // offers is public, identical for every player on it, and reveals nothing about any
+              // account. It carries no prices — a quote is the tick stream's job — only what each
+              // instrument IS, which is what a list has to print beside it.
+              const reqId = msg.data?.reqId === undefined ? undefined : String(msg.data.reqId);
+              const rid = reqId === undefined ? {} : { reqId };
+              if (!rt.histories) {
+                return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles", ...rid });
+              }
+              return send(ws, "symbols", {
+                ...rid,
+                // The symbol the chart draws when a client asks for none, so a client need not know
+                // which of the list that is.
+                defaultSymbol: rt.history!.instrument.symbol,
+                symbols: rt.histories.symbols.flatMap((sym) => {
+                  const d = symbolDef(sym);
+                  // A brand configured with a symbol the catalogue does not carry is a
+                  // misconfiguration, not a client error: leave it out rather than send a row
+                  // nothing can describe or chart.
+                  return d ? [{
+                    symbol: d.symbol, description: d.description, group: d.group,
+                    digits: d.digits,
+                  }] : [];
+                }),
+              });
+            }
+            case "subscribe_symbols": {
+              // The socket's Market Watch list. It REPLACES the previous list rather than adding to
+              // it, because that is what the list is: a set the client owns and re-sends when the
+              // trader changes it.
+              const reqId = msg.data?.reqId === undefined ? undefined : String(msg.data.reqId);
+              const rid = reqId === undefined ? {} : { reqId };
+              if (!rt.histories) {
+                return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles", ...rid });
+              }
+              const raw = msg.data?.symbols;
+              if (!Array.isArray(raw)) return send(ws, "error", { code: "BAD_SYMBOLS", ...rid });
+              const accepted: string[] = [];
+              const rejected: string[] = [];
+              for (const sym of raw.map((x: unknown) => String(x))) {
+                if (accepted.includes(sym)) continue;  // a duplicate is one subscription, not two
+                if (accepted.length >= MAX_WATCHED_SYMBOLS) { rejected.push(sym); continue; }
+                if (rt.histories.has(sym)) accepted.push(sym); else rejected.push(sym);
+              }
+              // Rates already sent for symbols still on the list are kept, so changing the list
+              // does not reset every delta to zero and flash the whole watch window one colour.
+              const prev = watched.get(ws);
+              const last = new Map<string, number>();
+              for (const sym of accepted) {
+                const v = prev?.last.get(sym);
+                if (v !== undefined) last.set(sym, v);
+              }
+              watched.set(ws, { symbols: accepted, last });
+              send(ws, "subscribed_symbols", { ...rid, symbols: accepted, rejected, max: MAX_WATCHED_SYMBOLS });
+
+              // Then warm each one and seed the client with what it needs to price that symbol's
+              // ticks: the instrument, its day anchor, and a first quote. Queued inside
+              // SymbolHistories, so a list of twenty cold symbols is twenty warms in order rather
+              // than twenty concurrent chain walks.
+              const hists = rt.histories;
+              void (async () => {
+                for (const symbol of accepted) {
+                  try {
+                    const h = await hists.warm(symbol);
+                    if (!h) continue;
+                    // The trader may have changed the list, or left, while this was warming.
+                    if (!watched.get(ws)?.symbols.includes(symbol)) return;
+                    if (ws.readyState !== ws.OPEN) return;
+                    const a = h.liveAnchor();
+                    const tick = h.liveTick();
+                    watched.get(ws)?.last.set(symbol, tick.rate);
+                    send(ws, "symbol_quote", {
+                      symbol, instrument: a.instrument,
+                      anchor: { tradeDate: a.dateKey, base: a.base, openValue: a.openValue },
+                      rate: tick.rate, t: tick.t,
+                    });
+                  } catch (err) { report(err as Error, `${siteId}:warm ${symbol}`); }
+                }
+              })();
+              return;
+            }
+            case "unsubscribe_symbols": {
+              const reqId = msg.data?.reqId === undefined ? undefined : String(msg.data.reqId);
+              const rid = reqId === undefined ? {} : { reqId };
+              watched.delete(ws);
+              return send(ws, "subscribed_symbols", { ...rid, symbols: [], rejected: [], max: MAX_WATCHED_SYMBOLS });
             }
             case "news": {
               // The terminal's newswire. Public market copy, shared by every brand — one poll serves
@@ -478,6 +639,7 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
       ws.on("close", () => {
         unsubInstrument(ws);
         perSiteSockets.get(siteId)?.delete(ws);
+        watched.delete(ws);
         const u = userOf.get(ws);
         if (u) perSiteUser.get(siteId)?.get(u)?.delete(ws);
         toSite(siteId, "online", { count: onlineCount(siteId) });

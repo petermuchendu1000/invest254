@@ -15,15 +15,20 @@ import { cn } from '@/lib/cn';
  *   otherwise      there is none, and the pip is the last two digits   3134. 85
  */
 export function MT5Price({
-  value, digits, className, tone,
+  value, digits, className, tone, style,
 }: {
   value: number | null | undefined;
   digits: number;
   className?: string;
   tone?: 'sell' | 'buy' | undefined;
+  /**
+   * For a colour that is computed rather than chosen from a fixed set, which is what Market Watch's
+   * quote needs: MetaTrader colours it blue, red or grey from the tick's direction and age.
+   */
+  style?: React.CSSProperties | undefined;
 }) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
-    return <span className={cn('font-mono tabular-nums', className)}>-</span>;
+    return <span className={cn('font-mono tabular-nums', className)} style={style}>-</span>;
   }
   const text = value.toFixed(digits);
   // A fractional pip exists only on the odd-digit quotes (3 and 5), exactly as in MetaTrader.
@@ -38,6 +43,7 @@ export function MT5Price({
   return (
     <span
       className={cn('font-mono tabular-nums leading-none', className)}
+      style={style}
       // Screen readers and copy/paste get the plain number, not the three fragments.
       aria-label={text}
     >

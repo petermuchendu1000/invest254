@@ -15,7 +15,7 @@ import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
 import { env } from '@/lib/env';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { curveProfileForChartStyle, chartStyleOf, type Candle } from '@invest254/shared/chart';
-import type { Timeframe, MarketSymbol } from '@invest254/shared/candles';
+import { valueOfRate, type Timeframe, type MarketSymbol } from '@invest254/shared/candles';
 import { wsUrlForSite } from '@/lib/brand/brand';
 import { useSession } from '@/lib/auth/session';
 import { useToast } from '@/lib/toast/ToastProvider';
@@ -108,7 +108,23 @@ interface GameSocketValue {
    *
    * Rejects rather than resolving empty, so the chart can tell "no history here" from "ask again".
    */
-  requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
+  requestCandles: (tf: Timeframe, count: number, to?: number, symbol?: string) => Promise<CandlesReply>;
+  /**
+   * The brand's tradable list, for Market Watch and the Symbols dialog.
+   *
+   * Carries no prices. What each symbol IS is static; what it costs comes off the quote stream, and
+   * a price embedded here would be one nothing could age.
+   */
+  requestSymbols: () => Promise<SymbolsReply>;
+  /**
+   * Replace the set of symbols this client wants live quotes for.
+   *
+   * A SET, not an addition, because that is what a Market Watch list is: the client owns it and
+   * re-sends it when the trader changes it. Re-armed automatically after a reconnect.
+   */
+  subscribeSymbols: (symbols: readonly string[]) => void;
+  /** A watched symbol's live quote, or null before its first one lands. */
+  getSymbolQuote: (symbol: string) => SymbolQuote | null;
   /**
    * Instrument and day anchor from the most recent candle reply, or null before one has landed.
    *
@@ -140,6 +156,28 @@ export interface NewsReply { items: NewsItemDto[]; fetchedAtMs: number }
 /** One UTC day's price anchor: price = base + instrument.scale * (value(t) - openValue). */
 export interface DayAnchor { dateKey: string; base: number; openValue: number }
 export interface AnchorsReply { instrument: MarketSymbol; days: DayAnchor[] }
+
+/** One row of the brand's tradable list. `group` is MetaTrader's tree path, e.g. `Forex\\Majors`. */
+export interface SymbolRow { symbol: string; description: string; group: string; digits: number }
+export interface SymbolsReply { defaultSymbol: string; symbols: SymbolRow[] }
+
+/**
+ * A watched symbol's live state: enough to print its price and colour it the way MetaTrader does.
+ *
+ * `price` is kept alongside `rate` because every consumer would otherwise redo the same arithmetic
+ * against the same anchor, and one of them would eventually use the wrong symbol's anchor.
+ */
+export interface SymbolQuote {
+  symbol: string;
+  instrument: MarketSymbol;
+  anchor: { tradeDate: string; base: number; openValue: number };
+  rate: number;
+  price: number;
+  /** Direction of the last price CHANGE, and when it changed. See lib/game/quoteTone. */
+  up: boolean | null;
+  changedAt: number | null;
+  t: number;
+}
 
 export interface CandlesReply {
   tf: Timeframe;
@@ -351,7 +389,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
    * unavailable" for the whole session; holding the frame costs nothing and the per-request deadline
    * still applies.
    */
-  const candleOutboxRef = useRef<Array<{ reqId: string; tf: Timeframe; count: number; to?: number }>>([]);
+  const candleOutboxRef = useRef<Array<{ reqId: string; tf: Timeframe; count: number; to?: number; symbol?: string }>>([]);
 
   const settleCandleWaiter = useCallback((reqId: string, outcome: { ok: CandlesReply } | { err: Error }): void => {
     const w = candleWaitersRef.current.get(reqId);
@@ -366,10 +404,13 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     for (const [id] of candleWaitersRef.current) settleCandleWaiter(id, { err: new Error(reason) });
   }, [settleCandleWaiter]);
 
-  const requestCandles = useCallback((tf: Timeframe, count: number, to?: number): Promise<CandlesReply> => {
+  const requestCandles = useCallback((tf: Timeframe, count: number, to?: number, symbol?: string): Promise<CandlesReply> => {
     const reqId = `c${++candleSeqRef.current}`;
     return new Promise<CandlesReply>((resolve, reject) => {
-      const frame = { reqId, tf, count, ...(to === undefined ? {} : { to }) };
+      // No symbol means the brand's default, which is what every caller written before multi-symbol
+      // asks for. Naming one that the brand does not offer is refused by the engine rather than
+      // answered with the default's bars under the requested name.
+      const frame = { reqId, tf, count, ...(to === undefined ? {} : { to }), ...(symbol === undefined ? {} : { symbol }) };
       if (!send('candles', frame)) candleOutboxRef.current.push(frame);
       // Without a deadline a dropped reply would leave the chart spinning for ever.
       const timer = setTimeout(() => settleCandleWaiter(reqId, { err: new Error('CANDLES_TIMEOUT') }), 20_000);
@@ -401,6 +442,36 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       anchorWaitersRef.current.set(reqId, { resolve, reject, timer });
     });
   }, [send, settleAnchorWaiter]);
+
+  // ── The brand's symbol list, and live quotes for the ones this client watches ──────────────────
+  /**
+   * Queued rather than request-id matched, like the newswire and unlike the candles: there is one
+   * list per brand and one shape of answer, so the next `symbols` frame belongs to everyone waiting.
+   */
+  const symbolsWaitersRef = useRef<Array<{ resolve: (r: SymbolsReply) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
+  const symbolsOutboxRef = useRef(false);
+  const requestSymbols = useCallback((): Promise<SymbolsReply> => new Promise<SymbolsReply>((resolve, reject) => {
+    // Asked for before the socket is ready (Market Watch mounts with the page), the request is held
+    // and flushed on open: failing outright would leave the list permanently empty.
+    if (!send('symbols', {})) symbolsOutboxRef.current = true;
+    const timer = setTimeout(() => {
+      const i = symbolsWaitersRef.current.findIndex((w) => w.timer === timer);
+      if (i >= 0) symbolsWaitersRef.current.splice(i, 1)[0]!.reject(new Error('SYMBOLS_TIMEOUT'));
+    }, 20_000);
+    symbolsWaitersRef.current.push({ resolve, reject, timer });
+  }), [send]);
+
+  /** The symbols asked for, kept so the subscription can be re-armed after a reconnect. */
+  const watchedRef = useRef<readonly string[]>([]);
+  const quotesRef = useRef(new Map<string, SymbolQuote>());
+  const subscribeSymbols = useCallback((symbols: readonly string[]) => {
+    watchedRef.current = [...symbols];
+    // Quotes for symbols no longer watched are dropped: keeping them would let a stale price from
+    // minutes ago be printed as if it were live.
+    for (const sym of [...quotesRef.current.keys()]) if (!symbols.includes(sym)) quotesRef.current.delete(sym);
+    send('subscribe_symbols', { symbols: [...symbols] }); // no-op while closed; re-sent on hello
+  }, [send]);
+  const getSymbolQuote = useCallback((symbol: string) => quotesRef.current.get(symbol) ?? null, []);
 
   const newsWaitersRef = useRef<Array<{ resolve: (r: NewsReply) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
   const newsOutboxRef = useRef<Array<{ limit: number }>>([]);
@@ -642,6 +713,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           setEarlyCloseEnabled(d?.gameConfig?.earlyCloseEnabled === true);
           // Re-arm the instrument subscription after a (re)connect so the digits chart keeps streaming.
           if (subscribedInstrumentRef.current) send('subscribe_instrument', { instrumentId: subscribedInstrumentRef.current });
+          // Same for the watch list: without this a reconnect left Market Watch frozen on the last
+          // prices it saw before the drop, with no indication they had stopped moving.
+          if (watchedRef.current.length > 0) send('subscribe_symbols', { symbols: [...watchedRef.current] });
+          if (symbolsOutboxRef.current) { symbolsOutboxRef.current = false; send('symbols', {}); }
           break;
         }
         case 'tick': {
@@ -788,9 +863,60 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           break;
         }
         case 'candles': {
-          const d = data as CandlesReply & { reqId?: string };
-          if (d.instrument && d.anchor) marketRef.current = { instrument: d.instrument, anchor: d.anchor };
+          const d = data as CandlesReply & { reqId?: string; symbol?: string };
+          // Only the brand's DEFAULT symbol may set the shared market axis. A chart that has been
+          // switched to another symbol would otherwise re-anchor the price strip, the order ticket
+          // and every open position's P/L onto an instrument nothing was traded on.
+          if (d.instrument && d.anchor && (marketRef.current === null || d.instrument.symbol === marketRef.current.instrument.symbol)) {
+            marketRef.current = { instrument: d.instrument, anchor: d.anchor };
+          }
           if (d.reqId) settleCandleWaiter(d.reqId, { ok: d });
+          break;
+        }
+        case 'symbols': {
+          const d = data as SymbolsReply;
+          for (const w of symbolsWaitersRef.current.splice(0)) { clearTimeout(w.timer); w.resolve(d); }
+          break;
+        }
+        case 'subscribed_symbols': {
+          const d = data as { symbols?: string[]; rejected?: string[]; max?: number };
+          // A rejected symbol is worth saying out loud rather than leaving as a row that never
+          // quotes: the Journal is where this app explains itself.
+          if (d.rejected && d.rejected.length > 0) {
+            logJournal('warn', 'Quotes', `not quoted (${d.rejected.length} of ${(d.symbols?.length ?? 0) + d.rejected.length}, cap ${d.max ?? '?'}): ${d.rejected.slice(0, 6).join(', ')}`);
+          }
+          break;
+        }
+        case 'symbol_quote': {
+          // The seed for one symbol: what it is, where its axis sits, and a first price. Everything
+          // the tick stream sends afterwards is read against this.
+          const d = data as { symbol: string; instrument: MarketSymbol; anchor: SymbolQuote['anchor']; rate: number; t: number };
+          if (!d.symbol || !d.instrument || !d.anchor) break;
+          if (!watchedRef.current.includes(d.symbol)) break;
+          const price = d.anchor.base + d.instrument.scale * (valueOfRate(d.rate) - d.anchor.openValue);
+          const prev = quotesRef.current.get(d.symbol);
+          quotesRef.current.set(d.symbol, {
+            symbol: d.symbol, instrument: d.instrument, anchor: d.anchor, rate: d.rate, price, t: d.t,
+            // A re-seed after a reconnect keeps the colour it had, so the whole list does not flash.
+            up: prev?.up ?? null, changedAt: prev?.changedAt ?? null,
+          });
+          break;
+        }
+        case 'symbol_ticks': {
+          const d = data as { t: number; quotes?: Array<{ symbol: string; rate: number; delta: number }> };
+          for (const q of d.quotes ?? []) {
+            const prev = quotesRef.current.get(q.symbol);
+            // No seed yet means no anchor, and a rate without its anchor cannot be priced. Dropping
+            // it is right: the seed is on its way.
+            if (!prev) continue;
+            const price = prev.anchor.base + prev.instrument.scale * (valueOfRate(q.rate) - prev.anchor.openValue);
+            const moved = price !== prev.price;
+            quotesRef.current.set(q.symbol, {
+              ...prev, rate: q.rate, price, t: d.t,
+              up: moved ? price > prev.price : prev.up,
+              changedAt: moved ? Date.now() : prev.changedAt,
+            });
+          }
           break;
         }
         // ── Phase 2: instrument stream + digit settlements ────────────────────────────────────
@@ -1023,9 +1149,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
+    requestSymbols, subscribeSymbols, getSymbolQuote,
   }), [getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
-    requestCandles, getMarket, requestNews, requestAnchors]);
+    requestCandles, getMarket, requestNews, requestAnchors,
+    requestSymbols, subscribeSymbols, getSymbolQuote]);
   const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, earlyCloseEnabled }), [status, online, fairness, activePosition, earlyCloseEnabled]);
 
   return (

@@ -133,6 +133,18 @@ const WAVE_PARAMS: ProfileParams = {
   K: 14, baseFreq: 0.022, ratio: 1.4, ampExp: 0.5, freqJitter: [0.7, 1.35], ampJitter: [0.65, 1.4], driftScale: 0.18,
 };
 
+/**
+ * The seed domain a symbol's curve is drawn from.
+ *
+ * The default symbol keeps the bare `"curve"` domain so that every day already generated, and every
+ * position already settled against it, reconstructs unchanged. A named symbol gets its own.
+ */
+export const DEFAULT_CURVE_SYMBOL = "XAUUSD";
+
+export function curveDomain(symbol?: string): string {
+  return symbol === undefined || symbol === DEFAULT_CURVE_SYMBOL ? "curve" : `curve:${symbol}`;
+}
+
 export class CurveGenerator {
   /** Fourier components — populated for the `wave` profile only (empty for `market`). */
   readonly components: CurveComponent[];
@@ -141,13 +153,37 @@ export class CurveGenerator {
   /** Seeded random-walk samples at WALK_STEP_S — the `market` process (null for `wave`). */
   private readonly walk: Float64Array | null;
 
-  constructor(serverSeed: string, private readonly cfg: GameConfig, readonly profile: CurveProfile = "market") {
+  /**
+   * `symbol` gives each tradable instrument its OWN curve from the same day seed.
+   *
+   * It is a domain separator on the seed, exactly as the digits shell already separates its
+   * instruments with `inst:${id}` (see instrumentfeed.ts). Two symbols on one day therefore move
+   * independently rather than being affine transforms of one series, which is what a second symbol
+   * drawn from the same curve would have been.
+   *
+   * XAUUSD and any caller that passes nothing keep the bare `"curve"` domain they have always used,
+   * so every historical day and every settled position reconstructs bit-for-bit as before. That
+   * backwards compatibility is the reason the default is a literal rather than a formatted string.
+   *
+   * This does NOT change how a win, a loss or a payout is decided. In pool mode the curve is
+   * cosmetic by design (see game.ts). In the statistical path the curve does decide, through
+   * `signedMove` against `tau` — and a per-symbol curve is the same stochastic process with a
+   * different seed, so the calibration that pins targetWinRate and RTP is unaffected. That claim is
+   * tested across many symbol seeds in settle.calibration.test.ts rather than asserted here.
+   */
+  constructor(
+    serverSeed: string,
+    private readonly cfg: GameConfig,
+    readonly profile: CurveProfile = "market",
+    readonly symbol?: string,
+  ) {
+    const domain = curveDomain(symbol);
     if (profile === "market") {
       // Martingale: independent increments ⇒ no past-price strategy beats the base rate.
       // A day needs ~260k draws, so this uses the bulk keystream rather than the per-draw HMAC: same
       // uniforms, same unpredictability, ~170x faster — which is what makes reconstructing a year of
       // history for the candle chart practical (0.3s instead of 59s). See SeedKeystream.
-      const rng = new SeedKeystream(serverSeed, "curve", 1 + 3 * WALK_POINTS);
+      const rng = new SeedKeystream(serverSeed, domain, 1 + 3 * WALK_POINTS);
       const w = new Float64Array(WALK_POINTS);
       w[0] = rng.range(-WALK_START_SPREAD, WALK_START_SPREAD);
       for (let i = 1; i < WALK_POINTS; i++) {
@@ -167,7 +203,7 @@ export class CurveGenerator {
     }
     // `wave` draws only a few dozen values, so the per-draw HMAC stream costs nothing here and the
     // line brands' approved look stays byte-for-byte identical.
-    const rng = new SeededRng(serverSeed, "curve");
+    const rng = new SeededRng(serverSeed, domain);
     // `wave`: a dense, non-harmonic spectrum of pink-noise sinusoids. Each component's frequency is
     // jittered off the geometric ladder with an independent seed-derived phase, so no single period
     // dominates and the pattern never visibly repeats; the band stays well under ~2.5 Hz so the sum
