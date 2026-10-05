@@ -9,6 +9,10 @@ import { useOrderEntry } from '@/lib/game/useOrderEntry';
 import { MT5PositionMenu } from '@/components/game/MT5PositionMenu';
 import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
 import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
+import {
+  MT5SwipeRow, SwipeCloseIcon, SwipeEditIcon, SwipePlusIcon, SwipeChartIcon, SwipeDepthIcon,
+  type SwipeCommand,
+} from '@/components/game/mobile/MT5SwipeRow';
 import { cn } from '@/lib/cn';
 
 /**
@@ -75,6 +79,49 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
     return p === null ? '-' : p.toFixed(digits);
   };
 
+  /**
+   * MetaTrader Android's six swipe icons on a position row, in its documented order:
+   *
+   *   1. Close By   2. Close position   3. Edit position   4. Increase position
+   *   5. Open Chart   6. Depth of Market
+   *
+   * Five of them are here. `Close By` is not, and that is MetaTrader's own behaviour rather than a
+   * cut: it shows that icon "hedging accounts only, and only if an opposite position on the same
+   * symbol exists", and neither holds here, so MetaTrader would not draw it either.
+   *
+   * The two that cannot work are DIMMED and say why, not dropped. An icon bar is a map of what the
+   * platform does; a short bar teaches the wrong map, and an icon that silently does nothing is
+   * worse than one that says it cannot.
+   *
+   * `Chart` is last of the live ones, which makes it the command MetaTrader's "drag the menu
+   * further to the left" fires on its own. That is the right one to land on: it navigates and
+   * changes nothing, so a drag that goes further than intended cannot cost money.
+   */
+  const closeNote = !earlyCloseEnabled
+    ? 'This brand settles every contract at expiry.'
+    : live === null
+      ? undefined
+      : !live.sellable
+        ? 'This contract settles at expiry and cannot be closed at a loss.'
+        : live.phase !== 'open'
+          ? 'This contract is already settling.'
+          : undefined;
+  const swipeCommands: readonly SwipeCommand[] = [
+    { label: 'Close position', icon: SwipeCloseIcon, onPick: () => setSheet('close'), unavailable: closeNote },
+    { label: 'Edit position', icon: SwipeEditIcon, onPick: () => setSheet('modify') },
+    {
+      label: 'Increase position',
+      icon: SwipePlusIcon,
+      unavailable: 'This engine holds one contract at a time, so there is no position to add to.',
+    },
+    { label: 'Open Chart', icon: SwipeChartIcon, onPick: onChart },
+    {
+      label: 'Depth of Market',
+      icon: SwipeDepthIcon,
+      unavailable: 'This engine quotes one price per symbol and keeps no order book, so there is no depth to show.',
+    },
+  ];
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0f1720] text-white">
       {/* Android's top bar: the title small, with the total floating profit beneath it in blue, and
@@ -140,16 +187,20 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
         </div>
 
         {live ? (
-          <MobilePositionRow
-            symbol={settledSymbol}
-            direction={live.direction}
-            lots={lotsOfStake(live.stakeCents)}
-            from={px(live.entryRate)}
-            to={px(getLastTick()?.rate ?? null)}
-            profit={money.fmt(live.livePnlCents)}
-            profitCents={live.livePnlCents}
-            onOpenMenu={() => setSheet('menu')}
-          />
+          /* MetaTrader Android's swipe-left quick commands, over the row's right side. The order is
+             its documented one; what each icon does and does not do is argued below. */
+          <MT5SwipeRow label={`${settledSymbol} ${live.direction}`} commands={swipeCommands}>
+            <MobilePositionRow
+              symbol={settledSymbol}
+              direction={live.direction}
+              lots={lotsOfStake(live.stakeCents)}
+              from={px(live.entryRate)}
+              to={px(getLastTick()?.rate ?? null)}
+              profit={money.fmt(live.livePnlCents)}
+              profitCents={live.livePnlCents}
+              onOpenMenu={() => setSheet('menu')}
+            />
+          </MT5SwipeRow>
         ) : (
           <p className="px-3 py-6 text-center text-[11px] text-[#8fa2b8]">No open positions.</p>
         )}

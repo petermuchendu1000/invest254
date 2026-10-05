@@ -86,8 +86,11 @@ export function BottomNav() {
   const brand = useBrand();
   const mt5 = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null && !isMarketer;
   const setChat = useLiveChat((s) => s.setOpen);
-  if (mt5) return null;
+  // Every hook BEFORE the early return. React matches hooks by call order, so a hook after it is
+  // called on some renders and not others, and a brand that switched shells mid-session would hand
+  // this component another hook's state.
   const unread = useLiveChatUnread();
+  if (mt5) return null;
   return (
     <nav className={cn(
       'pb-safe fixed inset-x-0 bottom-0 z-30 border-t md:hidden',

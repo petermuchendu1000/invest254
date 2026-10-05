@@ -38,6 +38,8 @@ Measured again on the same 360x800 phone, after:
 | Five-tab bar, Android's set and order | `components/game/mobile/MT5MobileTabs.tsx` |
 | The shell and its view switching | `components/game/mobile/MT5MobileShell.tsx` |
 | Phone chart bar (`☰ ✛ ∿ M30 ◐ ▭`) | `components/game/CandleChart.tsx`, `phone` prop |
+| Swipe-left quick commands on a row | `components/game/mobile/MT5SwipeRow.tsx`, `lib/game/swipe.ts` |
+| On-chart draggable SL and TP | `components/game/mobile/MT5ChartLevels.tsx` |
 | Quick timeframe strip + the 21-period sheet | `lib/game/mobileTimeframes.ts` + the bar above |
 | One-click trading panel | `components/game/mobile/MT5OneClickPanel.tsx` |
 | Trade screen (account block + position rows) | `components/game/mobile/MT5MobileTrade.tsx` |
@@ -138,6 +140,17 @@ The dialog's scroller is `overflow-x-hidden`. The order-type strip bleeds past i
 edge, which made the scroller horizontally scrollable too, and once anything nudged it the whole
 sheet sat 14px off the left edge with the symbol, the SL chip and the money lines clipped.
 
+### A level needs a price, so it waits for one
+
+Before the first quote there is no price for a distance to be measured from. The dialog used to fall
+back to zero, which put a stop at 0.00050 and KEPT it there, because the store holds the first anchor
+it is given: by the time a real price arrived the pair was anchored on nothing and the chart could
+not draw it at all. The chips now read `waiting` and refuse to be set until a quote lands, which is
+also what MetaTrader does with trading controls it has no prices for: it hides New order outright
+while the terminal is not connected.
+
+Found by the phone probe, which opened the dialog within a second of the engine starting.
+
 ### Dragging them on the chart
 
 MetaTrader draws both levels on the chart and lets a finger move them: "Tap 'SL' / 'TP' then drag
@@ -212,13 +225,82 @@ control carries one of those characters as text.
 
 ## Still missing
 
+0. **The order execution result.** *"Once an order is sent, its execution results will appear in the
+   window: either confirmation of a successful trade or a rejection with the reason specified"*
+   (`04-mobile-app.md` section 5, both platforms). The ticket stays on the form after placing and
+   says nothing, which hides a real refusal: `openPosition` holds a single-open rule, and a contract
+   that is still SETTLING counts as open while the Trade screen already reports "No open positions".
+   Tap SELL then, and nothing whatever happens, for a reason nothing on screen states. Found by the
+   phone probe, which now has to retry a placement for exactly this reason.
+
 1. **Unread state on Messages.** MetaTrader shows an unread count beside the category title, a blue
    circle on a chat with new messages, and a red badge on the Messages tab. The notifications API
    gives a notification no read state, so all three would be decoration. `MT5MobileTabs` already
    takes an `unread` prop for when it exists.
-2. **Swipe actions.** Android documents a six-icon swipe menu on a Trade row; iOS documents a
-   three-icon one and a swipe on a Quotes row. Only the tap menus are built.
-3. **Landscape full-screen.** "Rotate to landscape = full-screen mode, automatically."
+2. **Landscape full-screen.** "Rotate to landscape = full-screen mode, automatically."
+
+## Swipe-left quick commands
+
+MetaTrader's phone reveals a command bar on a row dragged to the left, and it is the gesture a
+trader uses far more than the tap menu. `components/game/mobile/MT5SwipeRow.tsx` is the one bar, fed
+different commands per list, because the gesture is identical on Quotes, Trade and History rows and
+only the icons differ.
+
+### A position row: Android's six icons
+
+Its documented order (`04-mobile-app.md` section 4, confirmed against `android/en/position_menu.png`):
+
+| MetaTrader | Here |
+|---|---|
+| 1. Close By | **absent** — MetaTrader shows it on hedging accounts only, and only with an opposite position on the same symbol. Neither holds, so MetaTrader would not draw it either. |
+| 2. Close position | opens the Close position form; dimmed with the reason when the contract cannot be closed early |
+| 3. Edit position | opens Modify position |
+| 4. Increase position | **dimmed** — this engine holds one contract at a time |
+| 5. Open Chart | charts it |
+| 6. Depth of Market | **dimmed** — one price per symbol, no order book |
+
+The two that cannot work are dimmed and carry the reason, not dropped. An icon bar is a map of what
+the platform does: a short bar teaches the wrong map, and an icon that silently does nothing is
+worse than one that says it cannot. `Close By` is the exception because hiding it IS MetaTrader's
+behaviour, not a concession.
+
+### A Quotes row: iOS's two
+
+*"Swipe left on the symbol line to open the quick commands menu"* → **new trade operation** and
+**open chart**, and *"by dragging the menu further to the left, you can immediately switch to the
+chart"*. Taken from the iOS help because Android's Quotes page documents only the tap menu and no
+swipe at all; the tap menu is still Android's full six items, so the swipe is an accelerator for the
+two commands a trader repeats, which is what it is on MetaTrader.
+
+`New order` carries the same rule the menu item does: MetaTrader **hides** it while disconnected
+rather than disabling it.
+
+### The gesture, and the five things that broke it
+
+The arithmetic is `lib/game/swipe.ts`, unit-tested, because it is the half that can be wrong in a way
+no screenshot shows.
+
+- **`touch-action: pan-y`.** The browser keeps the vertical axis so the list still scrolls through a
+  row, and only the horizontal gesture is the row's own.
+- **The axis is decided once and held.** Re-deciding it per move made a diagonal flick alternate
+  between scrolling the list and dragging the row, and do neither. Equal travel counts as vertical,
+  so a gesture on the line goes to the list.
+- **The drag is tracked in refs, not state.** A fast flick emits its moves before React has
+  re-rendered from the `pointerdown`, and a handler reading state sees nothing.
+- **The pointer is captured LATE**, on the first horizontal move rather than on `pointerdown`. The
+  capture is needed, or a long drag stops being reported once the row has slid out from under the
+  finger and MetaTrader's drag-further-left shortcut can never be reached. But a captured pointer
+  retargets the **click** to the capturing element too: captured on `pointerdown`, an ordinary tap
+  never reached the row's own button and tapping a Quotes row stopped opening its context menu.
+- **The shortcut threshold is measured from the bar, not fixed.** A fixed figure short of the widest
+  bar meant a trader dragging that bar fully open tripped the shortcut just by reaching the last
+  icon; a figure past the widest bar made the shortcut on a two-icon row a drag most of the way
+  across the screen. It is now the open bar plus 60px, so a two-icon row needs 156px and a five-icon
+  row 300px.
+
+A swipe is also not a tap: a click following any real movement is swallowed in the capture phase, and
+while the bar is open a tap on the row closes it rather than reaching through. Without that, every
+swipe ended by opening the context menu over the bar it had just revealed.
 
 ## The day's range, which used to be missing
 
