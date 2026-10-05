@@ -48,10 +48,19 @@ function useMarketerBeat(active: ActivePosition | null): MarketerBeat {
  * (`CandleChart`) opening on THAT series type. ADDON-1: area/bars/baseline used to fall back to the line curve,
  * so brands paid for a chart their players never saw. Both views share the authoritative tick stream.
  */
-export function GameCurve({ phone = false, levelStakeCents = 0 }: {
+export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFullScreen }: {
   phone?: boolean;
   /** Phone only: the stake behind the chart's draggable Stop Loss. */
   levelStakeCents?: number;
+  /**
+   * Phone, landscape only: MetaTrader's full-screen, with the app's tab bar hidden.
+   *
+   * Undefined in portrait, where MetaTrader has no such mode and the chart's bar must not offer a
+   * control that does nothing.
+   */
+  fullScreen?: boolean | undefined;
+  /** Called with false to give the chrome back, which is iOS's full-screen/normal toggle. */
+  onFullScreen?: ((full: boolean) => void) | undefined;
 } = {}) {
   const { getTicks, getLastTick, requestCandles, getSymbolQuote, getMarket } = useGameSocketApi();
   /**
@@ -145,6 +154,8 @@ export function GameCurve({ phone = false, levelStakeCents = 0 }: {
           /* What a contract at the current volume risks, which is the money MetaTrader shows
              while a Stop Loss level is dragged on the chart. */
           levelStakeCents={levelStakeCents}
+          {...(fullScreen === undefined ? {} : { fullScreen })}
+          {...(onFullScreen === undefined ? {} : { onFullScreen })}
           openPosition={activePosition && activePosition.entryRate !== null
             ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents) }
             : null}

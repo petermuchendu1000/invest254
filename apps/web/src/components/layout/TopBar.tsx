@@ -7,6 +7,7 @@ import { MarketerLogoHotspot } from '@/components/marketer/MarketerHUD';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { useNavDrawer } from '@/lib/ui/drawer';
+import { useFullScreenStore } from '@/lib/ui/fullscreen';
 import { cn } from '@/lib/cn';
 
 export function TopBar() {
@@ -22,6 +23,15 @@ export function TopBar() {
    */
   const terminal = useTerminalSkin();
   const toggleDrawer = useNavDrawer((s) => s.toggle);
+  /**
+   * Gone in MetaTrader's full-screen, which a phone turned sideways enters by itself.
+   *
+   * This bar is 49px, and on a 360px-tall landscape phone that is 14% of the screen given to a
+   * logo. Hiding the tab bar alone left the chart 164px of 360; full-screen has to mean the app's
+   * chrome, or it means very little. The chart's own bar carries the way back (see MT5MobileShell).
+   */
+  const fullScreen = useFullScreenStore((s) => s.on);
+  if (fullScreen) return null;
 
   return (
     <header

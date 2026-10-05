@@ -182,7 +182,7 @@ type Anchor = CandlesReply['anchor'];
 
 export function CandleChart({
   getLastTick, requestCandles, status, initialType = 'candles', openPosition = null, symbol,
-  phone = false, levelStakeCents = 0,
+  phone = false, levelStakeCents = 0, fullScreen, onFullScreen,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
@@ -220,6 +220,14 @@ export function CandleChart({
    * Stop Loss level is dragged. Phone only; zero where the caller has no ticket behind it.
    */
   levelStakeCents?: number | undefined;
+  /**
+   * Phone, landscape only: MetaTrader's full-screen, with the app's tab bar hidden.
+   *
+   * Undefined in portrait, where MetaTrader has no such mode, so the bar does not offer a control
+   * that would do nothing.
+   */
+  fullScreen?: boolean | undefined;
+  onFullScreen?: ((full: boolean) => void) | undefined;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -1073,6 +1081,8 @@ export function CandleChart({
           toggleIndicator={toggleIndicator}
           onProperties={() => setPropertiesOpen(true)}
           onObjectsList={() => setObjectsListOpen(true)}
+          {...(fullScreen === undefined ? {} : { fullScreen })}
+          {...(onFullScreen === undefined ? {} : { onFullScreen })}
         />
       ) : (
         /* Desktop: symbol, the full MT5 period set, the Tools menu and the interface gear. */
@@ -1519,7 +1529,7 @@ function Toggle({ on, onClick, children, disabled, title }: {
  */
 function MobileChartBar({
   tf, chooseTf, crosshair, onCrosshair, chartType, setChartType, ind, toggleIndicator,
-  onProperties, onObjectsList,
+  onProperties, onObjectsList, fullScreen, onFullScreen,
 }: {
   tf: Timeframe;
   chooseTf: (tf: Timeframe) => void;
@@ -1531,6 +1541,9 @@ function MobileChartBar({
   toggleIndicator: (id: string) => void;
   onProperties: () => void;
   onObjectsList: () => void;
+  /** Landscape only: whether the app's chrome is hidden. Undefined in portrait. */
+  fullScreen?: boolean | undefined;
+  onFullScreen?: ((full: boolean) => void) | undefined;
 }) {
   const toggleDrawer = useNavDrawer((s) => s.toggle);
   const quick = useQuickTfStore((s) => s.quick);
@@ -1613,6 +1626,27 @@ function MobileChartBar({
         >
           <BarIcon.OneClick />
         </button>
+        {/**
+          * MetaTrader's full-screen toggle, LANDSCAPE ONLY, which is the only orientation it has
+          * one in: "Rotate to landscape = full-screen mode, automatically. On iOS you can then
+          * toggle full-screen/normal by tapping the chart."
+          *
+          * A button rather than that tap, because a tap on the plot is already the crosshair and
+          * the drawing tools here: one gesture meaning two things would resolve as whichever the
+          * chart read first. It is absent in portrait rather than disabled, because MetaTrader has
+          * no full-screen mode there to be in or out of.
+          */}
+        {fullScreen === undefined || onFullScreen === undefined ? null : (
+          <button
+            type="button"
+            onClick={() => onFullScreen(!fullScreen)}
+            aria-pressed={!fullScreen}
+            aria-label={fullScreen ? 'Leave full screen' : 'Full screen'}
+            className={cn(btn, fullScreen ? off : on)}
+          >
+            {fullScreen ? <BarIcon.ExitFull /> : <BarIcon.EnterFull />}
+          </button>
+        )}
       </div>
 
       {/* The quick strip: "a horizontal quick strip across the top ... with the current one
@@ -1778,6 +1812,18 @@ function MobileSheet({ title, onClose, children }: { title: string; onClose: () 
  * docs/mt5/04-mobile-app.md section 3.
  */
 const BarIcon = {
+  /** Four arrows out: MetaTrader's full-screen. */
+  EnterFull: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </svg>
+  ),
+  /** And four arrows in, for the way back to the tabs. */
+  ExitFull: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
+      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+    </svg>
+  ),
   Menu: () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-5 w-5" aria-hidden>
       <path d="M4 7h16M4 12h16M4 17h16" />

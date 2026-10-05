@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { GameCurve } from '@/components/game/GameCurve';
 import { MarketWatch } from '@/components/game/MarketWatch';
 import { MT5History } from '@/components/history/MT5History';
@@ -14,6 +14,8 @@ import { useMobileTabStore, useRestoreMobileTab } from '@/lib/game/mobileTab';
 import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
 import { useRestoreLevels } from '@/lib/game/levelsStore';
 import { useOrderEntry } from '@/lib/game/useOrderEntry';
+import { useIsLandscape } from '@/lib/ui/useIsPhone';
+import { useDeclareFullScreen } from '@/lib/ui/fullscreen';
 
 /**
  * MetaTrader's phone app, as a shell.
@@ -73,6 +75,37 @@ export function MT5MobileShell() {
    */
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  /**
+   * MetaTrader's landscape full-screen: "Rotate to landscape = full-screen mode, AUTOMATICALLY."
+   *
+   * Turning a phone sideways at a chart is a request for more chart, and MetaTrader reads it that
+   * way without being asked twice. Measured at 800x360, the five-tab bar is 57px of 360 — 16% of
+   * the screen, against 7% held upright — so the bar goes and the chart takes the room.
+   *
+   * ── Two deviations, both deliberate ──────────────────────────────────────────────────────────
+   *
+   * The CHART'S OWN top bar stays. MetaTrader's full-screen hides the app's chrome; this shell has
+   * no radial menu and no iOS context menu, so that bar is the only way to reach the period strip,
+   * the crosshair, the chart type and the one-click panel. Hiding it would make full-screen a mode
+   * a trader could change nothing from.
+   *
+   * iOS's "toggle full-screen/normal by TAPPING THE CHART" is a button on that bar instead. A tap
+   * on the plot is already the crosshair and the drawing tools here, so the same gesture would mean
+   * two things at once, and the one it happened to mean would be whichever the chart read first.
+   */
+  const landscape = useIsLandscape();
+  /** Full-screen is given back by the bar's own button, until the phone is turned upright again. */
+  const [showChrome, setShowChrome] = useState(false);
+  const fullScreen = landscape && !showChrome;
+  // The app's title bar is above this route, so it is told rather than passed a prop.
+  useDeclareFullScreen(fullScreen);
+  // Rotating back to portrait is not a decision to keep the chrome hidden: each rotation starts
+  // from MetaTrader's own answer for that orientation.
+  useEffect(() => { setShowChrome(false); }, [landscape]);
+  // Landscape is a chart gesture. Whatever tab was showing, a sideways phone shows the chart, and
+  // the tab it was on is still remembered for when it is turned back.
+  useEffect(() => { if (landscape) setTab('charts'); }, [landscape, setTab]);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0f1720]">
       <div className="relative min-h-0 flex-1">
@@ -88,7 +121,20 @@ export function MT5MobileShell() {
             {/* The stake behind the chart's draggable Stop Loss: what a contract at the volume
                 currently set would risk. The levels themselves come from the shared store, so the
                 chart and the trading dialog are two views of one pair. */}
-            <GameCurve phone levelStakeCents={stakeCents} />
+            <GameCurve
+              phone
+              levelStakeCents={stakeCents}
+              {...(landscape
+                ? {
+                    fullScreen,
+                    /* The bar asks for a FULL-SCREEN state; this holds the opposite, so it is
+                       inverted here rather than at the bar. Wired straight to the setter, the
+                       "leave full screen" tap asked to hide the chrome that was already hidden and
+                       the button did nothing at all. */
+                    onFullScreen: (full: boolean) => setShowChrome(!full),
+                  }
+                : {})}
+            />
           </div>
           {/* MetaTrader's one-click panel, in its "panel at the bottom" placement. The `▭` button on
               the chart's own top bar is what shows and hides it. */}
@@ -117,7 +163,8 @@ export function MT5MobileShell() {
         {tab === 'messages' ? <MT5MobileMessages /> : null}
       </div>
 
-      <MT5MobileTabs />
+      {/* Hidden in landscape, which is MetaTrader's full-screen. */}
+      {fullScreen ? null : <MT5MobileTabs />}
 
       {ticketOpen ? (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0f1720]">
