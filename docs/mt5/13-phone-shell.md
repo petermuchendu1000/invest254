@@ -138,6 +138,42 @@ The dialog's scroller is `overflow-x-hidden`. The order-type strip bleeds past i
 edge, which made the scroller horizontally scrollable too, and once anything nudged it the whole
 sheet sat 14px off the left edge with the symbol, the SL chip and the money lines clipped.
 
+### Dragging them on the chart
+
+MetaTrader draws both levels on the chart and lets a finger move them: "Tap 'SL' / 'TP' then drag
+those levels; as you drag, potential P/L shows in points and in money" (section 3), and the dialog's
+row 13 has the same lines under it. `components/game/mobile/MT5ChartLevels.tsx` is that surface, and
+it is the SAME pair the dialog holds: dragging the line moves the dialog's figure and stepping the
+dialog's figure moves the line, because both read `levelsStore`. The ratio lock applies here too,
+which is MetaTrader's own wording: it holds "including while dragging on the chart".
+
+The money the drag label shows is the stop's stake and the target's `varies`, for the reason above.
+The distance in points is real and is shown.
+
+Four things had to be got right, each of which was wrong first:
+
+- **A level is a price, not a distance from the live price.** Rendered against whatever the price
+  happened to be when each surface read it, a stop 100 points below the market crawled down with the
+  market and never sat anywhere, and the chart and the dialog disagreed about the same stop because
+  they sampled the price a fraction of a second apart. The store now holds the `ref` the distances
+  were anchored at. Points are still what survives to the next order, which is what MetaTrader keeps
+  pips for.
+- **The anchor is read from storage once per page load, not once per mounting component.** The
+  restore deliberately clears the anchor so the first surface to render a restored pair re-bases it
+  on the live price. Running that twice throws away an anchor a live level is being measured from:
+  the dialog restored on every open, so reopening it moved a stop the trader had just dragged.
+- **The drag is decided by a ref, not by state.** A pointer that moves fast emits moves before React
+  has re-rendered from the `pointerdown`, so a handler reading state saw `null` and did nothing: a
+  slow drag worked and a flick was ignored, which on a touch screen is most of them.
+- **The tags are pushed apart when they would collide.** They are 44px tall, this app's minimum tap
+  target on a control that moves money, so a tight stop and target produced overlapping tags and the
+  one drawn second swallowed the other's taps entirely. The tags move; the dashed rules stay on the
+  exact prices, so the levels still read where they are set.
+
+The layer is `pointer-events-none` with only the two tags `pointer-events-auto`, because the plot is
+the chart's own pan and pinch surface and a full-size overlay that took pointer events swallowed
+every gesture on the chart.
+
 ## Deviations, and the reason for each
 
 | MetaTrader | Here | Why |
