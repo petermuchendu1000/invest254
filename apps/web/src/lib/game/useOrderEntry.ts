@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Direction } from '@invest254/shared';
 import { valueOfRate } from '@invest254/shared/candles';
 import { LOT_STAKE_CENTS } from '@invest254/shared/account';
+import { effectiveVolume, volumeSpecOf, volumeDigitsOf } from '@invest254/shared/symbols';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { useChartSymbolStore } from '@/lib/game/chartSymbol';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
@@ -49,8 +50,10 @@ export interface OrderEntry {
   lots: number;
   minLots: number;
   maxLots: number;
-  /** Decimals the volume prints to: 3 where the brand's minimum is not a whole 0.01 lots. */
+  /** Decimals the volume prints to: one more than the step's where the brand's minimum is off-grid. */
   volDigits: number;
+  /** This symbol's own volume step, which the stepper and the slider move by. */
+  volStep: number;
   setLots: (lots: number) => void;
   /** Add to the volume and clamp it to the brand's limits. */
   bump: (delta: number) => void;
@@ -138,15 +141,35 @@ export function useOrderEntry(): OrderEntry {
   const price = charted === null ? (tick ? priceOfRate(tick.rate) : null) : quote?.price ?? null;
 
   // ── Volume ─────────────────────────────────────────────────────────────────────────────────────
-  // Lots are the stake divided by the contract size. The brand's MINIMUM is the floor, so the
-  // smallest selectable volume is whatever that minimum is worth — exactly how MetaTrader derives a
-  // symbol's minimum volume — rather than a round number that would sit under it.
-  const minLots = limits.minCents / LOT_STAKE_CENTS;
-  // A brand may set no ceiling; the wallet is then the only limit, so volume is left open.
-  const maxLots = (limits.maxCents ?? Number.MAX_SAFE_INTEGER) / LOT_STAKE_CENTS;
-  // If the minimum is not a whole number of 0.01 lots, show the extra decimal rather than print a
-  // rounded volume that does not match the stake actually sent.
-  const volDigits = Math.abs(minLots * 100 - Math.round(minLots * 100)) < 1e-9 ? 2 : 3;
+  /**
+   * The symbol's OWN volume spec, intersected with the brand's money limits.
+   *
+   * MetaTrader carries min, max and step on every symbol and the ticket obeys that symbol's three
+   * numbers: a book is not one setting. The brand's limits still win where they are tighter,
+   * because they are what the engine enforces, and the step is always the symbol's, because
+   * granularity is not a limit. See `conventionalVolume` in the shared package.
+   *
+   * It follows the symbol the SURFACE is on, which is the charted one, exactly as the digits and
+   * the price above do: a ticket opened on an index has to offer an index's volumes.
+   */
+  const brandMinLots = limits.minCents / LOT_STAKE_CENTS;
+  // A brand may set no ceiling; the symbol's own then stands.
+  const brandMaxLots = limits.maxCents === undefined ? null : limits.maxCents / LOT_STAKE_CENTS;
+  const vol = effectiveVolume(volumeSpecOf(symbol), brandMinLots, brandMaxLots);
+  const minLots = vol.min;
+  const maxLots = vol.max;
+  const volStep = vol.step;
+  /**
+   * Decimals the volume prints to.
+   *
+   * The symbol's step decides it, EXCEPT where the brand's minimum is not a whole number of steps:
+   * a minimum of 0.025 lots on a hundredth step has to print three places or the ticket shows a
+   * rounded volume that does not match the stake actually sent.
+   */
+  const stepDigits = volumeDigitsOf(vol);
+  const volDigits = Math.abs(minLots / volStep - Math.round(minLots / volStep)) < 1e-9
+    ? stepDigits
+    : stepDigits + 1;
   /**
    * The volume lives in a shared store, not in this hook's own state.
    *
@@ -164,6 +187,17 @@ export function useOrderEntry(): OrderEntry {
     return Math.min(maxLots, Math.max(minLots, snapped));
   };
   /**
+   * Snapped to the SYMBOL's step, measured from its minimum.
+   *
+   * An index steps in tenths, so 0.15 is not a volume on one; and a brand minimum of 0.025 puts
+   * the whole grid on 0.025, 0.035, 0.045 rather than on round hundredths. Stepping without this
+   * let a stepper walk off the grid and stay off it.
+   */
+  const snapToStep = (v: number): number => {
+    const steps = Math.round((v - minLots) / volStep);
+    return clampLots(Number((minLots + steps * volStep).toFixed(volDigits + 2)));
+  };
+  /**
    * Clamped on READ as well as on write, so a volume remembered from a session when the brand
    * allowed more cannot survive the brand lowering its ceiling, and a stake below a raised minimum
    * cannot be sent.
@@ -176,8 +210,10 @@ export function useOrderEntry(): OrderEntry {
     useVolumeStore.setState({ lots: minLots });
   }, [limits.ready, minLots]);
 
-  const bump = (delta: number) => setStored(clampLots(lots + delta));
-  const setLots = (v: number) => setStored(clampLots(v));
+  // Stepped ON the symbol's grid: a +0.01 on an index that steps in tenths is not a step at all,
+  // and MetaTrader's own stepper moves by the symbol's step.
+  const bump = (delta: number) => setStored(snapToStep(lots + delta));
+  const setLots = (v: number) => setStored(snapToStep(v));
 
   const stakeCents = Math.round(lots * LOT_STAKE_CENTS);
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
@@ -209,7 +245,7 @@ export function useOrderEntry(): OrderEntry {
   return {
     ready: hydrated,
     symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, setLots, bump, stakeCents, overBalance, signedIn: !!token,
+    lots, minLots, maxLots, volDigits, volStep, setLots, bump, stakeCents, overBalance, signedIn: !!token,
     durationS, setDurationS, durations,
     place,
     activePosition, earlyCloseEnabled, tick, priceOfRate, market,
