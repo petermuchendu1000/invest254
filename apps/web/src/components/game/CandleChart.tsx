@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   IChartApi, ISeriesApi, UTCTimestamp, CandlestickData, BarData, LineData, Time, SeriesType, LogicalRange,
 } from 'lightweight-charts';
@@ -13,6 +13,12 @@ import {
   TOOLS, parseDrawings, serializeDrawings, storageKey, type Drawing, type DrawingKind, type ToolId,
 } from '@/lib/chart/drawings';
 import { OBJECT_GROUPS, objectOf } from '@/lib/chart/objects';
+import type { Colours } from '@/lib/chart/chartProperties';
+import {
+  DEFAULT_PROPERTIES, parseProperties, serializeProperties, storageKey as propsKey,
+  type ChartKind, type ChartProperties,
+} from '@/lib/chart/chartProperties';
+import { MT5ChartProperties } from '@/components/game/MT5ChartProperties';
 import { MT5ObjectMenu, type ObjectMenuAt } from '@/components/game/MT5ObjectMenu';
 import { MT5ObjectsList } from '@/components/game/MT5ObjectsList';
 import { MT5ObjectProperties } from '@/components/game/MT5ObjectProperties';
@@ -36,9 +42,11 @@ import { cn } from '@/lib/cn';
  * them, so the bar being built sits on exactly the axis of the bars beside it.
  *
  * Feature set (the ⚙ Tools menu exposes the pro tools):
- *   - periods M1…MN1 · chart type Candles · Bars · Line · Area · Baseline
- *   - price scale Normal · Logarithmic · Percent
- *   - indicators (off by default): MA(7) · MA(25) · MA(99) · Bollinger(20,2)
+ *   - periods M1…MN1 · chart type Bars · Candlesticks · Line · Heikin Ashi
+ *   - Chart Properties (F8): Common, Show and Colors, which is where the scale is pinned. There is
+ *     no price-scale TYPE, because MetaTrader has neither a logarithmic nor a percentage scale.
+ *   - all 38 MetaTrader indicators, in its four Navigator groups
+ *   - all 44 MetaTrader objects, with the Objects List (Ctrl+B) and Object Properties
  *   - scroll back to load older history · −/+ zoom · live snap-back
  *   - wheel/pinch zoom · drag-to-pan · crosshair · OHLC legend (tracks the crosshair)
  *   - LOCAL-timezone time axis + crosshair · faint symbol watermark · left drawing rail
@@ -47,7 +55,6 @@ import { cn } from '@/lib/cn';
  */
 
 type MainType = 'candles' | 'bars' | 'line' | 'heikin' | 'area' | 'baseline';
-type ScaleMode = 'normal' | 'log' | 'percent';
 
 /**
  * MetaTrader's chart types, under MetaTrader's own names.
@@ -75,9 +82,16 @@ const CHART_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
 const ADDON_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
   { id: 'area', label: 'Area' }, { id: 'baseline', label: 'Baseline' },
 ];
-const SCALES: ReadonlyArray<{ id: ScaleMode; label: string }> = [
-  { id: 'normal', label: 'Linear' }, { id: 'log', label: 'Log' }, { id: 'percent', label: 'Percent' },
-];
+/**
+ * There is no price-scale TYPE here, and that is deliberate.
+ *
+ * MetaTrader has no logarithmic and no percentage price scale: `ENUM_CHART_PROPERTY_INTEGER` and
+ * `_DOUBLE` carry no such property, the Chart Settings dialog offers no such control, Options >
+ * Charts has none, and MQL5's own moderator states the terminal "always uses a linear scale for
+ * price representation". The `Linear | Log | Percent` row this menu used to carry was TradingView's,
+ * so it is gone rather than relabelled. What MetaTrader offers instead is three ways of PINNING the
+ * scale, and they live on Chart Properties' Common tab (see lib/chart/chartProperties).
+ */
 
 const DEFAULT_TF: Timeframe = 'M1';
 const TF_STORAGE_KEY = 'pp:chart:tf';
@@ -99,11 +113,40 @@ const RESUME_MS = 3000; // auto-return to the live edge after this idle time fol
  * what stop a copy reading as the real thing. Kept inline because the chart library wants plain
  * strings at construction, not Tailwind classes.
  */
-const TV = {
-  bg: '#0f1720', surface: '#0f1720', rail: '#202933', border: '#2b3543', grid: 'rgba(43,53,67,0.5)',
-  text: '#ffffff', muted: '#8fa2b8', up: '#41be56', down: '#f23645', accent: '#3183ff', info: '#3183ff',
-  cross: '#8fa2b8', crossLabel: '#2b3543',
-} as const;
+/**
+ * The chart's palette, resolved from MetaTrader's thirteen Chart Properties colours.
+ *
+ * It used to be a frozen constant, which made the Colors tab impossible: thirteen controls that
+ * stored a value and changed nothing. Each slot below now names which of MetaTrader's fields feeds
+ * it, and two of them carry MetaTrader's own extra meanings: `Volumes` also colours position opening
+ * levels, and `Line chart` also colours Doji candlesticks.
+ *
+ * `rail`, `accent` and `muted` are this terminal's chrome rather than chart colours; MetaTrader has
+ * no field for them, so they do not move with the scheme.
+ */
+function themeOf(c: Colours) {
+  return {
+    bg: c.background,
+    surface: c.background,
+    rail: '#202933',
+    border: '#2b3543',
+    grid: c.grid,
+    text: c.foreground,
+    muted: '#8fa2b8',
+    up: c.bullCandle,
+    down: c.bearCandle,
+    barUp: c.barUp,
+    barDown: c.barDown,
+    line: c.lineChart,
+    volumes: c.volumes,
+    lastLine: c.lastLine,
+    stopLevels: c.stopLevels,
+    accent: '#3183ff',
+    info: '#3183ff',
+    cross: c.foreground,
+    crossLabel: '#2b3543',
+  };
+}
 
 const pad = (n: number) => String(n).padStart(2, '0');
 /**
@@ -189,8 +232,12 @@ export function CandleChart({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chartType, setChartType] = useState<MainType>(initialType);
+  /**
+   * MetaTrader's Common tab carries three of the four chart types this chart draws. Picking one
+   * there and picking one on the toolbar must be the same act, so the dialog writes through to the
+   * chart type rather than keeping a second copy of it.
+   */
   const chartTypeRef = useRef<MainType>(initialType); chartTypeRef.current = chartType;
-  const [scaleMode, setScaleMode] = useState<ScaleMode>('normal');
   const [ind, setInd] = useState<Enabled>(() => new Set<string>());
   const indRef = useRef<Enabled>(ind); indRef.current = ind;
   /**
@@ -212,6 +259,12 @@ export function CandleChart({
   const [objectsListOpen, setObjectsListOpen] = useState(false);
   const [propertiesFor, setPropertiesFor] = useState<string | null>(null);
   const [objectMenu, setObjectMenu] = useState<ObjectMenuAt | null>(null);
+  /**
+   * Chart Properties (F8), per SYMBOL: MetaTrader titles the dialog "Properties of EURUSD,M1"
+   * because the settings belong to that chart window and not to the terminal.
+   */
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [props, setProps] = useState<ChartProperties>(DEFAULT_PROPERTIES);
   const [plotSize, setPlotSize] = useState({ w: 0, h: 0 });
   const [revision, setRevision] = useState(0);
   const plotRef = useRef<HTMLDivElement>(null);
@@ -245,7 +298,26 @@ export function CandleChart({
     // restorable onto this one.
     undoRef.current = [];
     setCanUndoDelete(false);
+    try { setProps(parseProperties(window.localStorage.getItem(propsKey(instrument.symbol)))); }
+    catch { setProps(DEFAULT_PROPERTIES); }
   }, [instrument.symbol]);
+
+  const changeProps = useCallback((next: ChartProperties) => {
+    setProps(next);
+    try { window.localStorage.setItem(propsKey(instRef.current.symbol), serializeProperties(next)); }
+    catch { /* private mode — the settings still hold for this session */ }
+  }, []);
+
+  // F8, which is MetaTrader's own shortcut for this dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el !== null && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.key === 'F8') { e.preventDefault(); setPropertiesOpen((v) => !v); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   /**
    * Every deletion is recorded so MetaTrader's "Undo Delete" can restore it.
    *
@@ -367,8 +439,15 @@ export function CandleChart({
   };
 
   const propertiesDrawing = propertiesFor === null ? null : drawings.find((d) => d.id === propertiesFor) ?? null;
+  const TV = themeOf(props.colours);
+  const shownKind: ChartKind = chartType === 'bars' || chartType === 'line' ? chartType : 'candles';
+  // Memoised: a fresh object on every tick would re-seed the dialog's draft out from under the
+  // trader, which is exactly the bug a live chart makes and a still one hides.
+  const propsForDialog = useMemo(() => ({ ...props, kind: shownKind }), [props, shownKind]);
 
   const setFollow = useCallback((v: boolean) => { followingRef.current = v; }, []);
+  // Chart auto scroll: with it off the chart stays where the trader left it as new bars arrive.
+  useEffect(() => { if (!props.autoScroll) followingRef.current = false; }, [props.autoScroll]);
   const legendOf = (c: Candle): Legend => ({ o: c.open, h: c.high, l: c.low, c: c.close, changePct: c.open ? ((c.close - c.open) / c.open) * 100 : 0 });
 
   const snapToLive = useCallback(() => {
@@ -534,11 +613,79 @@ export function CandleChart({
     chart.applyOptions({ crosshair: { mode: tool === 'crosshair' ? lc.CrosshairMode.Magnet : lc.CrosshairMode.Normal } });
   }, [tool]);
 
-  // Price-scale mode is applied live (no rebuild).
+
+  /**
+   * Chart Properties applied LIVE, without rebuilding the chart.
+   *
+   * Every one of these is a control MetaTrader has and this chart can honour. The ones it cannot are
+   * disabled in the dialog with the reason, rather than being accepted and ignored: there is no
+   * traded volume behind this feed and no separate bid and ask, so those four rows say so.
+   */
   useEffect(() => {
-    const chart = chartRef.current; if (!chart) return;
-    chart.priceScale('right').applyOptions({ mode: scaleMode === 'log' ? 1 : scaleMode === 'percent' ? 2 : 0 });
-  }, [scaleMode]);
+    const chart = chartRef.current, main = mainRef.current;
+    if (!chart) return;
+    const t = themeOf(props.colours);
+    chart.applyOptions({
+      layout: { textColor: t.text },
+      // Show grid. MetaTrader's Ctrl+G, and its own checkbox on the Show tab.
+      grid: {
+        vertLines: { color: t.grid, visible: props.showGrid },
+        horzLines: { color: t.grid, visible: props.showGrid },
+      },
+      crosshair: {
+        vertLine: { color: t.cross, labelBackgroundColor: t.crossLabel },
+        horzLine: { color: t.cross, labelBackgroundColor: t.crossLabel },
+      },
+      timeScale: {
+        // Chart shift holds the last bar off the right edge by 10 to 50 per cent of the window.
+        rightOffset: props.chartShift ? Math.round((props.shiftSize / 100) * visibleBarsRef.current) : RIGHT_OFFSET_BARS,
+        borderColor: t.border,
+      },
+      rightPriceScale: { borderColor: t.border },
+    });
+    if (main) {
+      const kind = chartTypeRef.current;
+      if (kind === 'line' || kind === 'area' || kind === 'baseline') {
+        main.applyOptions({ color: t.line } as never);
+      } else if (kind === 'bars') {
+        main.applyOptions({ upColor: t.barUp, downColor: t.barDown } as never);
+      } else {
+        main.applyOptions({
+          upColor: t.up, downColor: t.down,
+          borderUpColor: t.up, borderDownColor: t.down,
+          wickUpColor: t.up, wickDownColor: t.down,
+        } as never);
+      }
+      // Show last price line: MetaTrader's own row, drawn in its Last price line colour.
+      main.applyOptions({
+        priceLineVisible: props.showLastLine,
+        priceLineColor: t.lastLine,
+      } as never);
+    }
+    /**
+     * Scale fix pins the vertical scale between Fixed maximum and Fixed minimum; without it the
+     * scale follows the bars, which is MetaTrader's default. One to one is MetaTrader's third mode
+     * and this renderer has no equivalent of it, so it pins the scale the same way rather than
+     * claiming a square aspect it cannot hold.
+     */
+    chart.priceScale('right').applyOptions({ autoScale: !props.scaleFix });
+  }, [props]);
+
+  /**
+   * Fixed maximum / Fixed minimum. lightweight-charts has no "set this range" call, so the series
+   * declares the range it wants autoscaled to, which is the documented way to pin one.
+   */
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const hi = props.fixedMaximum, lo = props.fixedMinimum;
+    const pinned = props.scaleFix && hi !== null && lo !== null && hi > lo;
+    main.applyOptions({
+      autoscaleInfoProvider: pinned
+        ? () => ({ priceRange: { minValue: lo, maxValue: hi } })
+        : undefined,
+    } as never);
+  }, [props.scaleFix, props.fixedMaximum, props.fixedMinimum, revision]);
 
   // Close the features menu on outside click.
   useEffect(() => {
@@ -681,7 +828,6 @@ export function CandleChart({
           autoScale: true,
           borderColor: border,
           scaleMargins: { top: 0.08, bottom: 0.08 },
-          mode: scaleMode === 'log' ? 1 : scaleMode === 'percent' ? 2 : 0,
         },
         timeScale: {
           borderColor: border, timeVisible: true, secondsVisible: false, rightOffset: RIGHT_OFFSET_BARS, barSpacing: 6,
@@ -819,7 +965,7 @@ export function CandleChart({
       plotsRef.current.clear();
       markersRef.current.clear();
     };
-  }, [getLastTick, chartType, setFollow, snapToLive, refreshIndicators, paint, loadOlder, scaleMode]);
+  }, [getLastTick, chartType, setFollow, snapToLive, refreshIndicators, paint, loadOlder]);
 
   // TradingView Supercharts chrome — fixed palette so the whole view reads as a TV/MT5 terminal.
   const pill = 'h-6 min-w-[1.6rem] [@media(pointer:coarse)]:min-h-8 shrink-0 rounded px-1 text-[11px] font-semibold leading-none transition sm:px-1.5';
@@ -851,20 +997,24 @@ export function CandleChart({
     const lc = lcRef.current;
     if (!series || !anchor || !lc) return;
     const rate = openPosition?.entryRate ?? null;
-    if (rate === null || !openPosition) return;
+    // Show trade levels, which MetaTrader carries on its Show tab and in Options as a global.
+    if (rate === null || !openPosition || !props.showTradeLevels) return;
     const inst = instRef.current;
     const price = anchor.base + inst.scale * (valueOfRate(rate) - anchor.openValue);
     if (!Number.isFinite(price)) return;
     const line = series.createPriceLine({
       price,
-      color: TV.up,
+      // MetaTrader colours a position's opening level with its `Volumes:` colour. That reads like a
+      // mistake and is not: its own help says the Volumes field "also colours position opening
+      // levels", so the two move together.
+      color: themeOf(props.colours).volumes,
       lineWidth: 1,
       lineStyle: lc.LineStyle.Solid,
       axisLabelVisible: true,
       title: `${openPosition.direction} ${openPosition.lots}`,
     });
     return () => { try { series.removePriceLine(line); } catch { /* series already gone */ } };
-  }, [openPosition?.entryRate, openPosition?.direction, openPosition?.lots, revision]);
+  }, [openPosition?.entryRate, openPosition?.direction, openPosition?.lots, revision, props.showTradeLevels, props.colours]);
 
   const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" aria-hidden />;
   const dp = instrument.digits;
@@ -894,12 +1044,14 @@ export function CandleChart({
                     ))}
                   </div>
                 </Section>
-                <Section title="Price scale">
-                  <div className="grid grid-cols-3 gap-1">
-                    {SCALES.map((sm) => (
-                      <button key={sm.id} type="button" onClick={() => setScaleMode(sm.id)} className={cn(pill, 'w-full', scaleMode === sm.id ? active : idle)}>{sm.label}</button>
-                    ))}
-                  </div>
+                <Section title="Chart">
+                  <button
+                    type="button"
+                    onClick={() => { setMenuOpen(false); setPropertiesOpen(true); }}
+                    className={cn(pill, idle, 'w-full')}
+                  >
+                    Properties… F8
+                  </button>
                 </Section>
                 {/* MetaTrader's Navigator tree: its groups, its order, its names. Scrolls because the
                     list is long — which is the point of it. */}
@@ -981,6 +1133,7 @@ export function CandleChart({
             revision={revision}
             timeframe={tf}
             onProperties={setPropertiesFor}
+            showDescriptions={props.showObjectDescriptions}
             onContextMenu={(id, x, y) => setObjectMenu({ id, x, y })}
             onDeleteLatest={() => {
               const last = drawings[drawings.length - 1];
@@ -994,18 +1147,20 @@ export function CandleChart({
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
             <span className="select-none text-4xl font-black uppercase tracking-widest text-white/[0.04]">{instrument.symbol}</span>
           </div>
-          {legend ? (
+          {legend && (props.showTicker || props.showOHLC) ? (
             // One line, always. Wrapped onto two it covered the top of the plot on a phone, so the
             // full O/H/L/C set appears from `sm` up and a narrow screen gets close + change — which
             // is what MetaTrader's own mobile chart shows.
             <div className="pointer-events-none absolute left-2 top-1.5 z-20 flex items-baseline gap-x-2 overflow-hidden whitespace-nowrap font-mono text-[11px] tabular-nums">
-              <span className="font-semibold text-white">{instrument.symbol}</span>
-              <span className="text-[#8fa2b8]">{tf}</span>
-              <span className="hidden text-[#8fa2b8] sm:inline">O <span className="text-[#ffffff]">{legend.o.toFixed(dp)}</span></span>
-              <span className="hidden text-[#8fa2b8] sm:inline">H <span className="text-[#ffffff]">{legend.h.toFixed(dp)}</span></span>
-              <span className="hidden text-[#8fa2b8] sm:inline">L <span className="text-[#ffffff]">{legend.l.toFixed(dp)}</span></span>
-              <span className="text-[#8fa2b8]">C <span className="text-[#ffffff]">{legend.c.toFixed(dp)}</span></span>
-              <span className={cn('font-semibold', up ? 'text-[#41be56]' : 'text-[#f23645]')}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span>
+              {/* Show ticker is the symbol and period; Show OHLC is the four prices. MetaTrader
+                  couples them: unticking the ticker unticks OHLC, so OHLC never shows alone. */}
+              {props.showTicker ? <span className="font-semibold" style={{ color: TV.text }}>{instrument.symbol}</span> : null}
+              {props.showTicker ? <span className="text-[#8fa2b8]">{tf}</span> : null}
+              {props.showOHLC ? <span className="hidden text-[#8fa2b8] sm:inline">O <span style={{ color: TV.text }}>{legend.o.toFixed(dp)}</span></span> : null}
+              {props.showOHLC ? <span className="hidden text-[#8fa2b8] sm:inline">H <span style={{ color: TV.text }}>{legend.h.toFixed(dp)}</span></span> : null}
+              {props.showOHLC ? <span className="hidden text-[#8fa2b8] sm:inline">L <span style={{ color: TV.text }}>{legend.l.toFixed(dp)}</span></span> : null}
+              {props.showOHLC ? <span className="text-[#8fa2b8]">C <span style={{ color: TV.text }}>{legend.c.toFixed(dp)}</span></span> : null}
+              {props.showOHLC ? <span className="font-semibold" style={{ color: up ? TV.up : TV.down }}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span> : null}
             </div>
           ) : null}
           {loading ? (
@@ -1059,6 +1214,26 @@ export function CandleChart({
           onUnselect={() => setSelectedDrawing(null)}
           onUndoDelete={undoDelete}
           onDismiss={() => setObjectMenu(null)}
+        />
+      ) : null}
+
+      {propertiesOpen ? (
+        <MT5ChartProperties
+          symbol={instrument.symbol}
+          timeframe={tf}
+          /**
+           * The radio shows the chart's real type. MetaTrader has three and this chart draws four,
+           * so Heikin Ashi (and a brand's add-on system) shows as Candlesticks, the one it is drawn
+           * from. The type is then only written back if the trader actually moved the radio, so
+           * opening the dialog on a Heikin Ashi chart and pressing OK does not quietly flatten it
+           * to candlesticks.
+           */
+          value={propsForDialog}
+          onChange={(next) => {
+            changeProps(next);
+            if (next.kind !== shownKind) setChartType(next.kind as MainType);
+          }}
+          onDismiss={() => setPropertiesOpen(false)}
         />
       ) : null}
 

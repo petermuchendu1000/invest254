@@ -51,7 +51,18 @@ Ashi).
 
 ## 3. Chart Properties (F8) — three tabs
 
-Title: `Properties of <SYMBOL>,<TF>`. Buttons OK / Cancel / Help.
+Title: `Properties of <SYMBOL>,<TF>` (no space after the comma). Buttons OK / Cancel / Help,
+and no Apply. Specified field by field, from the screenshots, in
+[08-chart-properties.md](./08-chart-properties.md). Four corrections from that pass:
+
+- The Colors tab's labels carry a **trailing colon**; the Common and Show tabs' do not.
+- Field 2 is **`Foreground:`** in the dialog. MetaQuotes' prose calls it "Text" in English and
+  "Текст" in Russian; both are wrong, and `CHART_COLOR_FOREGROUND` agrees with the dialog.
+- **Show tick volumes and Show real volumes are mutually exclusive**: they are one property,
+  `CHART_SHOW_VOLUMES`, taking hide / tick / real. Show ticker and Show OHLC are coupled too,
+  asymmetrically.
+- **There is no logarithmic and no percentage price scale in MetaTrader**, confirmed four ways.
+  The scale is pinned instead, with Scale fix, Scale fix one to one and Scale points per bar.
 
 **Common** — radio: Bar chart / Candlesticks / Line chart. Checkboxes: Chart on foreground,
 Chart shift, Chart auto scroll. Then Scale (0-5, six steps), Scale fix one to one, Scale fix

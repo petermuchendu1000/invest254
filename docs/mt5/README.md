@@ -20,6 +20,7 @@ does.
 | `05-options-reports-tradingview.md` | Options (12 tabs), login, reports/statement, DoM, push behaviour. TradingView conventions and palette. |
 | `06-our-current-ui-inventory.md` | What this repository actually renders today, read from the source. |
 | `07-objects-list-and-properties.md` | Objects List (Ctrl+B) columns and buttons, Object Properties tabs and fields, on-chart selection and context menu, mobile objects. |
+| `08-chart-properties.md` | Chart Properties (F8): the three tabs, 13 colours, 4 schemes, 13 Show checkboxes, the scale-fixing controls, the chart context menu, chart shift. **MT5 has no logarithmic scale.** |
 
 ## Settled facts that contradicted our build
 
@@ -65,7 +66,10 @@ one above it is merged.
    tree, the `Objects on <SYMBOL>,<TF> (<count>)` list, the four-tab properties dialog and the
    eight-item object context menu are all built to
    [07-objects-list-and-properties.md](./07-objects-list-and-properties.md).
-8. **Chart Properties (F8)** — three tabs, 13 colours, four schemes.
+8. **Chart Properties (F8)** — three tabs, 13 colours, four schemes. **Done.** Common, Show
+   and Colors, built to [08-chart-properties.md](./08-chart-properties.md). The
+   `Linear | Log | Percent` price-scale control is deleted: MetaTrader has neither a
+   logarithmic nor a percentage scale.
 9. **Toolbox tabs** — Exposure, Calendar, Articles, Code Base, Experts.
 10. **Market Watch** — bid/ask/spread columns, tick-direction colouring, Depth of Market,
     Symbol Specification.

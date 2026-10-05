@@ -114,7 +114,7 @@ const newId = (): string => `d${Date.now().toString(36)}${Math.random().toString
 
 export function ChartDrawings({
   tool, project, drawings, onChange, onToolDone, selected, onSelect, width, height, revision,
-  timeframe, onProperties, onContextMenu, onDeleteLatest, onUndoDelete,
+  timeframe, onProperties, onContextMenu, onDeleteLatest, onUndoDelete, showDescriptions,
 }: {
   tool: ToolId;
   project: Projection;
@@ -132,6 +132,12 @@ export function ChartDrawings({
   timeframe: string;
   /** A double click on an object opens its properties, as it does in MetaTrader. */
   onProperties: (id: string) => void;
+  /**
+   * MetaTrader's "Show object descriptions" on Chart Properties' Show tab: an object's description
+   * is drawn beside it on the chart. Text and Text Label already draw theirs, because for those two
+   * the description IS the object.
+   */
+  showDescriptions: boolean;
   /** A right click on an object opens MetaTrader's object context menu. */
   onContextMenu: (id: string, x: number, y: number) => void;
   /** MetaTrader's Backspace deletes the LATEST object placed, not the selected one. */
@@ -348,6 +354,9 @@ export function ChartDrawings({
           // anchor rather than select it.
           {...(drawingTool ? {} : { onPick: () => onSelect(d.id) })}
         />
+        {showDescriptions && d.label && d.kind !== 'text' && d.kind !== 'textLabel'
+          ? <Description d={d} project={project} />
+          : null}
         </g>
       ))}
       {preview ? <Shape d={preview} project={project} selected={false} preview /> : null}
@@ -455,6 +464,24 @@ function Handle({ x, y, colour, centre, onDown, onMove, onUp }: {
       onPointerUp={onUp}
       onPointerCancel={onUp}
     />
+  );
+}
+
+/**
+ * An object's description, drawn beside its first anchor.
+ *
+ * MetaTrader draws it only when "Show object descriptions" is ticked on Chart Properties' Show tab,
+ * which is why it is a separate piece rather than part of every renderer.
+ */
+function Description({ d, project }: { d: Drawing; project: Projection }) {
+  const a = d.points[0];
+  if (!a) return null;
+  const x = project.xOf(a.time), y = project.yOf(a.price);
+  if (x === null || y === null) return null;
+  return (
+    <text x={x + 6} y={y - 6} fill={d.color} fontSize={10} fontFamily="monospace" pointerEvents="none">
+      {d.label}
+    </text>
   );
 }
 
