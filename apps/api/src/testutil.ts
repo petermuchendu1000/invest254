@@ -593,7 +593,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     },
     async test(_a, _r, _platformId, draft) {
       const ok = Boolean((draft.apiKey ?? "").trim() && (draft.apiUser ?? "").trim());
-      return { ok, detail: ok ? "Connected — Namecheap API responded successfully." : "Enter the Namecheap API user and API key first.", egressIp: "203.0.113.9" };
+      return { ok, detail: ok ? "Connected. Namecheap API responded successfully." : "Enter the Namecheap API user and API key first.", egressIp: "203.0.113.9" };
     },
   };
 

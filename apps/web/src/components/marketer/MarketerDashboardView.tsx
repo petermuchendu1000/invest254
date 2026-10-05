@@ -354,7 +354,7 @@ export function MarketerDashboardView() {
                             <span className="text-lg leading-none">{m.glyph}</span>
                             <span className="flex min-w-0 flex-1 flex-col leading-tight">
                               <span className="truncate text-sm font-medium text-fg">{m.label}</span>
-                              <span className="truncate text-[11px] text-muted">{e.note ?? '—'} · {new Date(e.createdAtMs).toLocaleDateString('en-KE')}</span>
+                              <span className="truncate text-[11px] text-muted">{e.note ?? '-'} · {new Date(e.createdAtMs).toLocaleDateString('en-KE')}</span>
                             </span>
                             <span className="shrink-0 text-sm font-semibold tabular-nums text-down">−{formatKes(e.amountCents)}</span>
                           </li>
@@ -420,7 +420,7 @@ export function MarketerDashboardView() {
                           <span className="flex min-w-0 flex-1 flex-col leading-tight">
                             <span className="shrink-0 whitespace-nowrap text-sm font-medium tabular-nums text-fg">{formatKes(a.amountCents)}</span>
                             <span className="truncate text-[11px] text-muted">
-                              {a.reason ?? '—'} · {new Date(a.createdAtMs).toLocaleDateString('en-KE')}
+                              {a.reason ?? '-'} · {new Date(a.createdAtMs).toLocaleDateString('en-KE')}
                               {a.decisionNote ? ` · ${a.decisionNote}` : ''}
                             </span>
                           </span>

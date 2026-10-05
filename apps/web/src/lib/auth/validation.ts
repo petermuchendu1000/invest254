@@ -52,5 +52,5 @@ export function referralError(v: string): string | undefined {
   if (!v.trim()) return undefined; // optional
   const r = validateReferralCode(v);
   if (r.ok) return undefined;
-  return 'Referral code looks wrong — it is 8 characters.';
+  return 'Referral code looks wrong. It is 8 characters.';
 }

@@ -239,7 +239,7 @@ export function MT5History() {
                       <Td>{r.symbol}</Td>
                       <Td className={sideClass(r.side)}>{r.side}</Td>
                       <Td>{r.lots} / {r.filledLots}</Td>
-                      <Td>{r.state === 'CANCELED' ? '—' : px(r.price)}</Td>
+                      <Td>{r.state === 'CANCELED' ? '-' : px(r.price)}</Td>
                       <Td className="text-[#8fa2b8]">{r.state}</Td>
                     </Row>
                   ))}
@@ -252,9 +252,9 @@ export function MT5History() {
                       <Td>{r.ticket}</Td>
                       <Td>{r.symbol}</Td>
                       <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
-                      <Td>{r.entry ?? '—'}</Td>
-                      <Td>{r.lots ?? '—'}</Td>
-                      <Td>{r.lots === null ? '—' : px(r.price)}</Td>
+                      <Td>{r.entry ?? '-'}</Td>
+                      <Td>{r.lots ?? '-'}</Td>
+                      <Td>{r.lots === null ? '-' : px(r.price)}</Td>
                       <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
                     </Row>
                   ))}
@@ -269,9 +269,9 @@ export function MT5History() {
                       <Td>{r.ticket}</Td>
                       <Td>{r.symbol}</Td>
                       <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
-                      <Td>{r.lots ?? '—'}</Td>
-                      <Td>{r.lots === null ? '—' : px(r.entryPrice)}</Td>
-                      <Td>{r.lots === null ? '—' : px(r.exitPrice)}</Td>
+                      <Td>{r.lots ?? '-'}</Td>
+                      <Td>{r.lots === null ? '-' : px(r.entryPrice)}</Td>
+                      <Td>{r.lots === null ? '-' : px(r.exitPrice)}</Td>
                       <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
                     </Row>
                   ))}

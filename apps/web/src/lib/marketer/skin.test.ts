@@ -16,7 +16,7 @@ test('a marketer sees the player interface, not the basic skin', () => {
   assert.equal(marketerSkinOn(true, false), false);
 });
 
-test('a player who chose Basic still gets Basic — that opt-in is what the skin is for now', () => {
+test('a player who chose Basic still gets Basic. That opt-in is what the skin is for now', () => {
   assert.equal(marketerSkinOn(false, true), true);
   // And a marketer who happens to have Basic stored gets it too: it is a per-device preference, so
   // it is theirs to set like anyone else's.
@@ -27,7 +27,7 @@ test('a player on Classic gets the full interface', () => {
   assert.equal(marketerSkinOn(false, false), false);
 });
 
-test('the role no longer decides the skin — only the preference does', () => {
+test('the role no longer decides the skin. Only the preference does', () => {
   // The property, rather than the four rows above: for either role, the answer is the preference.
   for (const basic of [false, true]) {
     assert.equal(

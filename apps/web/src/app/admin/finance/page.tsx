@@ -49,7 +49,7 @@ function UserCell({ userId, username }: { userId: string; username: string }) {
 
 /** A phone number that dials on tap (mobile) and is copy-friendly on desktop. */
 function PhoneCell({ phone }: { phone: string | null }) {
-  if (!phone) return <span className="text-muted">—</span>;
+  if (!phone) return <span className="text-muted">-</span>;
   return (
     <span className="tabular-nums text-fg">
       {phone}
@@ -231,9 +231,9 @@ function TxRow({ r, checked, onToggle }: { r: AdminTransactionRow; checked: bool
       <Td>
         <PhoneCell phone={r.phone} />
       </Td>
-      <Td className="text-xs capitalize text-muted">{r.provider ?? '—'}</Td>
+      <Td className="text-xs capitalize text-muted">{r.provider ?? '-'}</Td>
       <Td className="font-mono text-[11px] text-muted">
-        {r.mpesaReceipt ?? r.checkoutRequestId ?? '—'}
+        {r.mpesaReceipt ?? r.checkoutRequestId ?? '-'}
         {r.resultDesc ? <span className="block text-[10px] text-muted/70">{r.resultDesc}</span> : null}
       </Td>
       <Td className="text-right">

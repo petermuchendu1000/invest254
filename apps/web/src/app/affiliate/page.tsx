@@ -76,7 +76,7 @@ function OperatorNotice() {
   return (
     <EmptyState
       title="Not available for staff accounts"
-      description="Operator accounts (brand, platform and system admins) can't join the affiliate or referral programme — commission must never depend on the people who manage players' accounts. Use a separate player account if you want to refer friends."
+      description="Operator accounts (brand, platform and system admins) can't join the affiliate or referral programme. Commission must never depend on the people who manage players' accounts. Use a separate player account if you want to refer friends."
       action={
         <a href="/console" className="text-sm font-medium text-accent hover:underline">
           Back to your workspace
@@ -123,7 +123,7 @@ function ApplyCard() {
         <h2 className="text-base font-semibold">Join the affiliate programme</h2>
         <p className="text-sm leading-relaxed text-muted">
           Get a personal referral link and earn <strong className="text-fg">20%</strong> of the net
-          revenue from every player you bring to Invest254 — accrued daily, paid to your M-Pesa. You
+          revenue from every player you bring to Invest254. Accrued daily, paid to your M-Pesa. You
           keep your full player account and can carry on trading as normal.
         </p>
       </div>
@@ -134,7 +134,7 @@ function ApplyCard() {
       </div>
       <div className="rounded-xl border border-border bg-surface-2 p-3 text-xs leading-relaxed text-muted">
         Applications are reviewed before approval. By applying you agree to promote Invest254
-        responsibly and lawfully — 18+ audiences only, no misleading or non-compliant gambling ads,
+        responsibly and lawfully: 18+ audiences only, no misleading or non-compliant gambling ads,
         and no self-referrals. See{' '}
         <a href="/legal#terms" className="text-accent hover:underline">
           Terms

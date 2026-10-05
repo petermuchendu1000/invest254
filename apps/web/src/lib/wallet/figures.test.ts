@@ -174,7 +174,7 @@ test('a marketer and a player on their live account agree: neither is demo', () 
   assert.equal(walletFigures(marketerOnFunnyMoney).demo, player.demo);
 });
 
-test('a marketer DOES get a demo — their practice bucket — and it reads as one', () => {
+test('a marketer DOES get a demo (their practice bucket) and it reads as one', () => {
   const onPractice = walletFigures({ ...marketerOnFunnyMoney, marketerPractice: true, practiceBalance: 1_000_000 });
   assert.equal(onPractice.demo, true, 'the practice tab is the demo account');
   assert.equal(onPractice.canWithdraw, false, 'and it is play money, so there is no way out of it');

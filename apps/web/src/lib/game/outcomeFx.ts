@@ -21,6 +21,13 @@ export interface OutcomeFx {
   pnlCents: number;
   stakeCents: number;
   mode: 'auto' | 'manual';
+  /**
+   * Identity of the closed position, carried so a terminal can report the close the way MetaTrader
+   * does: by ticket and side. Optional because the classic shell's celebration never names them and
+   * a settle that arrives with no position in hand (a reconnect, say) still has a result to show.
+   */
+  ticket?: string | undefined;
+  direction?: 'buy' | 'sell' | undefined;
 }
 
 interface OutcomeFxState {

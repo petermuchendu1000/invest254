@@ -34,6 +34,9 @@ export interface PositionSettledData {
   pnlCents: number;
   balance: number; // new real balance, cents
   mode: 'auto' | 'manual';
+  /** The side the position was opened on, so a close can be reported by side without the client
+   *  having to still hold the position. Optional for servers that predate it. */
+  direction?: Direction;
   /** Engagement-layer presentation metadata (engine `presentOutcome`). Optional
    *  for backward-compat with servers that predate forwarding it. */
   presentation?: {

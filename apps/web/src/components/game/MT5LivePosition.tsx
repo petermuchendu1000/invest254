@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
+import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { cn } from '@/lib/cn';
 import type { ActivePosition } from '@/lib/game/betting';
 
@@ -20,6 +21,7 @@ import type { ActivePosition } from '@/lib/game/betting';
  */
 export function MT5LivePosition({ pos, symbol }: { pos: ActivePosition; symbol: string }) {
   const money = useDisplayMoney();
+  const { sell, earlyCloseEnabled } = useGameSocket();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -33,10 +35,23 @@ export function MT5LivePosition({ pos, symbol }: { pos: ActivePosition; symbol: 
   const isBuy = pos.direction === 'buy';
   const side = isBuy ? '#3183ff' : '#f23645';
   const pnl = pos.livePnlCents;
-  const pnlTone = pnl > 0 ? 'text-[#41be56]' : pnl < 0 ? 'text-[#f23645]' : 'text-white';
+  // MetaTrader paints a profit BLUE and a loss RED. Not green: green in MT5 belongs to a rising
+  // candle, and using it for money made the one figure a trader reads say "casino win" rather than
+  // "position in profit". The Trade tab, the Toolbox and this card now agree.
+  const pnlTone = pnl > 0 ? 'text-[#3183ff]' : pnl < 0 ? 'text-[#f23645]' : 'text-white';
 
   const state =
     pos.phase === 'pending' ? 'Opening…' : pos.phase === 'settling' ? 'Closing…' : `${secs}s`;
+
+  // MetaTrader closes a position from the position itself, so the control belongs here. It is shown
+  // only where the engine will honour it (see `earlyCloseEnabled`), and it says why it cannot be
+  // pressed rather than sitting there greyed and silent.
+  const closable = pos.phase === 'open' && pos.sellable && !!pos.positionId;
+  const closeWhy = pos.phase === 'settling'
+    ? 'Closing…'
+    : !pos.sellable
+      ? 'Closes at expiry'
+      : 'Close position';
 
   return (
     <div className="flex flex-col gap-2">
@@ -72,7 +87,28 @@ export function MT5LivePosition({ pos, symbol }: { pos: ActivePosition; symbol: 
           style={{ width: `${progress * 100}%`, background: side }}
         />
       </div>
-      <p className="text-[10px] text-[#8fa2b8]">Closes automatically at expiry — market execution.</p>
+      {earlyCloseEnabled ? (
+        <button
+          type="button"
+          onClick={sell}
+          disabled={!closable}
+          title={pos.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
+          className="h-9 w-full rounded-sm border border-[#2b3543] bg-[#202933] text-[12px] font-semibold text-white transition hover:border-[#3183ff] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {closeWhy}
+        </button>
+      ) : null}
+      <p className="text-[10px] text-[#8fa2b8]">
+        {earlyCloseEnabled
+          ? 'Market execution. Left alone, it closes itself at expiry.'
+          : 'Closes automatically at expiry: market execution.'}
+      </p>
+      {/* MetaTrader's S/L, stated rather than offered. The engine settles a losing contract at
+          expiry and will not close one early, so the stop is fixed at the stake: that is the most
+          this position can lose, whatever happens to the price. */}
+      <p className="text-[10px] text-[#8fa2b8]">
+        Max loss {money.fmt(pos.stakeCents)} (the stake). This contract cannot lose more.
+      </p>
     </div>
   );
 }

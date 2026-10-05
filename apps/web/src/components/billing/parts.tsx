@@ -58,7 +58,7 @@ export function InvoiceList({ invoices, showPlatform, onPay, emptyTitle, emptyTe
                 <Td className="whitespace-nowrap">{formatDate(i.dueAt)}</Td>
                 <Td><InvoicePill inv={i} /></Td>
                 <Td numeric>{formatKes(i.totalCents)}</Td>
-                <Td numeric className={cn(i.overdue && 'font-semibold text-down')}>{i.status === 'open' ? formatKes(i.amountDueCents) : '—'}</Td>
+                <Td numeric className={cn(i.overdue && 'font-semibold text-down')}>{i.status === 'open' ? formatKes(i.amountDueCents) : '-'}</Td>
                 {onPay ? <Td>{i.status === 'open' ? <Button size="sm" onClick={(e) => { e.stopPropagation(); onPay(i); }}>Pay</Button> : null}</Td> : null}
               </tr>
             ))}
@@ -118,7 +118,7 @@ export function PayNowModal({ invoiceId, open, onClose }: { invoiceId: string | 
       footer={step === 'phone' ? <>
         <Button variant="outline" onClick={onClose}>Cancel</Button>
         <Button onClick={send} disabled={!validPhone(phone) || pay.isPending || !inv.data}>{pay.isPending ? 'Sending…' : `Send prompt for ${formatKes(shown)}`}</Button>
-      </> : step === 'waiting' ? <Button variant="outline" onClick={onClose}>Close — it will update by itself</Button>
+      </> : step === 'waiting' ? <Button variant="outline" onClick={onClose}>Close. It will update by itself</Button>
         : step === 'failed' ? <><Button variant="outline" onClick={onClose}>Close</Button><Button onClick={() => { setSentAt(null); setPaymentId(null); }}>Try again</Button></>
           : <Button onClick={onClose}>Done</Button>}>
       {step === 'phone' ? (
@@ -145,7 +145,7 @@ export function PayNowModal({ invoiceId, open, onClose }: { invoiceId: string | 
       ) : (
         <div className="flex flex-col items-center gap-2 py-4 text-center" role="status">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-up/15 text-2xl text-up" aria-hidden>✓</span>
-          <p className="font-medium">Thank you — {inv.data?.number} is paid.</p>
+          <p className="font-medium">Thank you: {inv.data?.number} is paid.</p>
           {attempt?.reference ? <p className="text-sm text-muted">M-Pesa receipt {attempt.reference}</p> : null}
         </div>
       )}
@@ -177,7 +177,7 @@ export function RecordPaymentModal({ inv, open, onClose }: { inv: Invoice | Invo
         </Select>
         <Input label="Amount (KES)" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
           error={amount && bad ? (cents != null && cents > inv.amountDueCents ? 'More than the balance due.' : 'Enter an amount.') : undefined}
-          hint={cents != null && cents > 0 && cents < inv.amountDueCents ? `Part payment — ${formatKes(inv.amountDueCents - cents)} will still be due.` : undefined} />
+          hint={cents != null && cents > 0 && cents < inv.amountDueCents ? `Part payment: ${formatKes(inv.amountDueCents - cents)} will still be due.` : undefined} />
         <Input label="Reference" optional value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'mpesa' ? 'M-Pesa receipt, e.g. QK12AB34CD' : 'Bank reference or slip number'} />
         <Input label="Note" optional value={note} onChange={(e) => setNote(e.target.value)} />
       </div>

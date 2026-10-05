@@ -341,7 +341,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
           await deps.notifications.resolveByCategory(targetId, "account_limited");
           await deps.notifications.create({
             userId: targetId, level: "success", dismissible: true, category: "account_reactivated",
-            title: "Your account has been reactivated", body: "Welcome back — full access is restored.",
+            title: "Your account has been reactivated", body: "Welcome back, full access is restored.",
             createdBy: ctx.claims!.userId,
           });
         }
@@ -484,7 +484,7 @@ export function registerAdminRoutes(router: Router, deps: ApiDeps): void {
               await deps.notifications.resolveByCategory(id, "account_limited");
               await deps.notifications.create({
                 userId: id, level: "success", dismissible: true, category: "account_reactivated",
-                title: "Your account has been reactivated", body: "Welcome back — full access is restored.", createdBy: actor,
+                title: "Your account has been reactivated", body: "Welcome back, full access is restored.", createdBy: actor,
               });
             }
           } catch { /* non-fatal: status change already succeeded */ }

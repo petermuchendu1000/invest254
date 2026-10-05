@@ -503,7 +503,18 @@ export function CandleChart({
         autoSize: true,
         layout: { background: { type: ColorType.Solid, color: TV.bg }, textColor: TV.text, fontSize: 11, attributionLogo: true },
         grid: { vertLines: { color: TV.grid }, horzLines: { color: TV.grid } },
-        rightPriceScale: { borderColor: border, scaleMargins: { top: 0.08, bottom: 0.08 }, mode: scaleMode === 'log' ? 1 : scaleMode === 'percent' ? 2 : 0 },
+        // The price axis is MetaTrader's second control surface, not decoration: it is where the
+        // vertical scale is set. `visible` and `minimumWidth` are stated rather than left to the
+        // library's defaults so a narrow phone cannot be the one layout that drops it, and
+        // `autoScale` is the state the double-click below returns to.
+        rightPriceScale: {
+          visible: true,
+          minimumWidth: 56,
+          autoScale: true,
+          borderColor: border,
+          scaleMargins: { top: 0.08, bottom: 0.08 },
+          mode: scaleMode === 'log' ? 1 : scaleMode === 'percent' ? 2 : 0,
+        },
         timeScale: {
           borderColor: border, timeVisible: true, secondsVisible: false, rightOffset: RIGHT_OFFSET_BARS, barSpacing: 6,
           tickMarkFormatter: (t: Time) => labelFor(t as number, tfRef.current),
@@ -515,7 +526,15 @@ export function CandleChart({
           horzLine: { color: TV.cross, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TV.crossLabel },
         },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-        handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: false } },
+        // MT5's axis gestures, both of them. Dragging the PRICE axis stretches and compresses the
+        // vertical scale (`price: true`, which was off, so the y-axis was the one thing on this
+        // chart that could not be zoomed), and double-clicking either axis returns it to auto-fit.
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: { time: true, price: true },
+          axisDoubleClickReset: { time: true, price: true },
+        },
       });
       chartRef.current = chart;
 
@@ -745,7 +764,7 @@ export function CandleChart({
           ) : null}
           {loadError ? (
             <div className="absolute inset-x-0 top-8 z-20 mx-auto w-fit rounded-md border border-[#2b3543] bg-[#0f1720] px-3 py-1.5 text-[11px] text-[#8fa2b8]">
-              History unavailable ({loadError}) — the live bar is still updating.
+              History unavailable ({loadError}). The live bar is still updating.
             </div>
           ) : null}
         </div>

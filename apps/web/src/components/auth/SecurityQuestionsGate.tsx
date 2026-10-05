@@ -229,7 +229,7 @@ export function SecurityQuestionsGate() {
           })}
 
           <p className="text-xs leading-relaxed text-muted">
-            Answers are encrypted and matching is case-insensitive. Choose answers you&apos;ll remember —
+            Answers are encrypted and matching is case-insensitive. Choose answers you&apos;ll remember,
             you&apos;ll need them to recover your account.
           </p>
 

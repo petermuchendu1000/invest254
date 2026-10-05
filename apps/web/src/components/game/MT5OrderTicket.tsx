@@ -15,7 +15,7 @@ import { useHydrated } from '@/lib/useHydrated';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { api } from '@/lib/api/endpoints';
 import { MT5LivePosition } from '@/components/game/MT5LivePosition';
-import { useTakeProfitStore } from '@/lib/game/takeprofit';
+import { useRestoreTakeProfit, useTakeProfitStore } from '@/lib/game/takeprofit';
 import { MT5Price } from '@/components/game/MT5Price';
 import { cn } from '@/lib/cn';
 
@@ -51,7 +51,7 @@ export function MT5OrderTicket() {
   const money = useDisplayMoney();
   const limits = useStakeLimits();
   const { data: wallet } = useWallet();
-  const { status, activePosition, openPosition } = useGameSocket();
+  const { status, activePosition, openPosition, earlyCloseEnabled } = useGameSocket();
   const { getLastTick, getMarket } = useGameSocketApi();
   const { data: config } = useQuery({
     queryKey: ['gameConfig', brand.slug],
@@ -110,6 +110,9 @@ export function MT5OrderTicket() {
   // Toolbox row, which modifies it on an open contract exactly as MetaTrader does.
   const tpTarget = useTakeProfitStore((st) => st.targetCents);
   const setTp = useTakeProfitStore((st) => st.set);
+  // The saved target comes back after mount, never during the server render: a store seeded
+  // differently on the two sides is a hydration mismatch.
+  useRestoreTakeProfit();
   const tpStepCents = Math.max(10_000, Math.round(limits.minCents / 2)); // half the minimum stake
   const bumpTp = (dir: 1 | -1) => {
     const next = (tpTarget ?? 0) + dir * tpStepCents;
@@ -176,27 +179,34 @@ export function MT5OrderTicket() {
       {/* S/L and T/P, as MetaTrader's "− value +" rows rather than free-text fields. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>S / L</span>
-        {/* Present and visibly disabled. The engine refuses to close a losing contract early by
-            design, so a stop is not implementable without changing the money path — and the most
-            this contract can lose is its stake, always. A control that silently did nothing would
-            be worse than one that explains itself. */}
+        {/* MetaTrader's S/L, stated rather than offered, and now carrying the figure it stands for.
+            The engine settles a losing contract at expiry and refuses to close one early, so the
+            stop on this contract is fixed at the stake: that is the most it can lose, whatever the
+            price does. A number a trader can read beats a greyed box that only says "no". */}
         <span
-          className="flex h-8 flex-1 cursor-not-allowed items-center justify-center rounded border border-[#2b3543] bg-[#0f1720]/60 text-[11px] text-[#8fa2b8]/50"
-          title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
+          className="flex h-8 flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[12px] font-semibold text-[#8fa2b8] tabular-nums"
+          title="Fixed at the stake: this contract settles at expiry and cannot lose more."
         >
-          not available — max loss is the stake
+          {money.fmt(stakeCents)}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>T / P</span>
-        <button type="button" onClick={() => bumpTp(-1)} disabled={tpTarget === null} className={stepBtn} aria-label="Lower take profit">−</button>
-        <span className="flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[12px] font-semibold text-[#ffffff] tabular-nums">
-          {tpTarget === null ? 'none' : money.fmt(tpTarget)}
+        {/* A target that the engine can never act on is not a setting, so where early close is off
+            the steppers are off with it and the row states what actually happens. */}
+        <button type="button" onClick={() => bumpTp(-1)} disabled={!earlyCloseEnabled || tpTarget === null} className={stepBtn} aria-label="Lower take profit">−</button>
+        <span className={cn(
+          'flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[12px] font-semibold tabular-nums',
+          earlyCloseEnabled ? 'text-[#ffffff]' : 'text-[#8fa2b8]',
+        )}>
+          {!earlyCloseEnabled ? 'at expiry' : tpTarget === null ? 'none' : money.fmt(tpTarget)}
         </span>
-        <button type="button" onClick={() => bumpTp(1)} className={stepBtn} aria-label="Raise take profit">+</button>
+        <button type="button" onClick={() => bumpTp(1)} disabled={!earlyCloseEnabled} className={stepBtn} aria-label="Raise take profit">+</button>
       </div>
       <p className="pl-[4.25rem] text-[11px] text-[#8fa2b8] lg:pl-0">
-        Closes on PROFIT reaching this amount — not a price, because an open contract&apos;s payout rises with time.
+        {earlyCloseEnabled
+          ? <>Closes on PROFIT reaching this amount, not a price, because an open contract&apos;s payout rises with time.</>
+          : <>This brand settles every contract at expiry, so a profit target cannot close one early.</>}
       </p>
 
       {/* Expiry — not a MetaTrader control, because a MetaTrader position has no expiry. Ours does. */}
@@ -244,7 +254,7 @@ export function MT5OrderTicket() {
 
       {connecting ? <p className="text-center text-[11px] text-[#8fa2b8]">Connecting…</p> : null}
       {overBalance && token ? (
-        <p className="text-center text-[11px] text-[#f0b90b]">Not enough free margin — tap a side to top up.</p>
+        <p className="text-center text-[11px] text-[#f0b90b]">Not enough free margin: tap a side to top up.</p>
       ) : null}
     </div>
   );

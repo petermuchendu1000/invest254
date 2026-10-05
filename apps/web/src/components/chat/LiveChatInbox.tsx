@@ -83,7 +83,7 @@ function ThreadRow({ t, active, onClick }: { t: ChatThreadDto; active: boolean; 
             <span className="shrink-0 text-[10px] text-muted">{formatAgo(Date.parse(t.lastMessageAt))}</span>
           </span>
           <span className="mt-0.5 flex items-center justify-between gap-2">
-            <span className="truncate text-[12px] text-muted">{t.lastPreview ?? '—'}</span>
+            <span className="truncate text-[12px] text-muted">{t.lastPreview ?? '-'}</span>
             {t.agentUnread ? <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-fg">{t.agentUnread}</span>
               : t.status === 'resolved' ? <span className="shrink-0 text-[10px] text-muted">resolved</span> : null}
           </span>

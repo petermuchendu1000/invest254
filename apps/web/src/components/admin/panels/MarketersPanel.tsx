@@ -314,7 +314,7 @@ function DeleteMarketerAction({ m, onClose }: { m: AdminMarketerRow; onClose: ()
               <Link href={`/admin/users/${affiliateId}`} className="text-accent underline">manage roles here</Link>.
             </>
           ) : (
-            <>No linked website account — this is a standalone social-proof (demo) account.</>
+            <>No linked website account. This is a standalone social-proof (demo) account.</>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -575,7 +575,7 @@ function Statement({ id }: { id: string }) {
                 <Td className="font-medium">{r.entry_type}</Td>
                 <Td className="tabular-nums"><Money cents={r.amount_cents} /></Td>
                 <Td className="tabular-nums"><Money cents={r.balance_after_cents} /></Td>
-                <Td className="text-xs text-muted">{r.ref ?? '—'}</Td>
+                <Td className="text-xs text-muted">{r.ref ?? '-'}</Td>
                 <Td className="whitespace-nowrap text-xs text-muted">{formatDateTime(Date.parse(r.created_at))}</Td>
               </tr>
             ))}
@@ -619,7 +619,7 @@ function BulkCreditModal({ open, marketerIds, onClose, onDone }: { open: boolean
     <Modal open={open} onClose={onClose} title="Bulk credit">
       <div className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold tracking-tight">Credit {marketerIds.length} marketer{marketerIds.length === 1 ? '' : 's'}</h2>
-        <p className="text-xs text-muted">Each selected marketer is credited the SAME amount. A reference makes it idempotent (safe to retry) — each marketer gets a distinct <span className="font-mono">{'{ref}:{id}'}</span> key.</p>
+        <p className="text-xs text-muted">Each selected marketer is credited the SAME amount. A reference makes it idempotent (safe to retry). Each marketer gets a distinct <span className="font-mono">{'{ref}:{id}'}</span> key.</p>
         <Input label="Amount each (KES)" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required />
         <Input label="Reference" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. AUG-BONUS" optional />
         <div className="flex justify-end gap-2">

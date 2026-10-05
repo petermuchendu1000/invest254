@@ -94,7 +94,7 @@ export function DigitResultModal({ result, onClose }: { result: DigitResult | nu
           <Tile icon="dollar" label={isMarketer ? MK.cost : 'Stake'} value={amt.num(stakeCents)} prefix={amt.prefix} />
           <Tile icon="dollar" label={isMarketer ? MK.reward : 'Payout'} value={amt.num(payoutCents)} prefix={amt.prefix} />
           <Tile icon="hash" label="Digit" value={String(digit)} />
-          <Tile icon="clock" label="Duration" value={secs != null ? `${secs}s` : '—'} />
+          <Tile icon="clock" label="Duration" value={secs != null ? `${secs}s` : '-'} />
         </div>
 
         <span className={cn('mt-4 inline-block rounded-full px-3 py-1 font-mono text-[11px] font-bold uppercase', won ? 'bg-up/15 text-up' : 'bg-down/15 text-down')}>{label}</span>

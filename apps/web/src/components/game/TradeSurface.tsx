@@ -62,7 +62,11 @@ export function TradeSurface() {
     <section className={cn('flex h-full min-h-0 flex-col gap-2 md:gap-3', terminal && 'lg:flex-row lg:gap-3')}>
       {terminal ? <MarketWatch className="hidden lg:flex lg:w-56 lg:shrink-0 xl:w-64" /> : null}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 md:gap-3">
+      {/* `min-w-0` is load-bearing on the desktop row: without it this column refuses to shrink
+          below the chart toolbar's min-content width, the row grows past the viewport and the order
+          ticket docked to its right is clipped off the screen. A flex child's default
+          `min-width: auto` is the whole reason. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 md:gap-3">
         {/* MARKETER: the BTC/KES price strip and the scrolling crypto ticker are the two loudest
             "this is a trading terminal" signals — both are removed for marketers (Phase 1).
             TERMINAL: both go too, for the opposite reason. MetaTrader has no scrolling crypto

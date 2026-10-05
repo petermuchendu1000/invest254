@@ -24,7 +24,7 @@ function kindLabel(kind: string, target: number | null): string {
     case 'under': return `Under ${t}`.trim();
     case 'matches': return `Matches ${t}`.trim();
     case 'differs': return `Differs ${t}`.trim();
-    default: return kind || '—';
+    default: return kind || '-';
   }
 }
 

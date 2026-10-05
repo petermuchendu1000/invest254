@@ -24,7 +24,7 @@ test('About: every row points somewhere and says what it is', () => {
 test('Identity: each KYC status reads as a state, never as a raw code', () => {
   assert.equal(kycSub('approved'), 'Verified');
   assert.equal(kycSub('pending'), 'In review');
-  assert.equal(kycSub('rejected'), 'Not approved — try again');
+  assert.equal(kycSub('rejected'), 'Not approved: try again');
   assert.equal(kycSub('none'), 'Not verified');
   assert.equal(kycSub(null), 'Not verified');
   assert.equal(kycSub(undefined), 'Not verified');

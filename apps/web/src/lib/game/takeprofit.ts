@@ -26,10 +26,43 @@ interface TakeProfitState {
   set: (cents: number | null) => void;
 }
 
+/**
+ * The target outlives a reload, because MetaTrader's does: T/P is a property of the trade, not of
+ * the tab it was typed in, and a target silently forgotten on refresh is the kind of control that
+ * looks alive and is not. Per device, like every other ticket setting here.
+ */
+const STORAGE_KEY = 'pp-take-profit';
+
+function restore(): number | null {
+  try {
+    const raw = Number(window.localStorage.getItem(STORAGE_KEY));
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  } catch { return null; }
+}
+
 export const useTakeProfitStore = create<TakeProfitState>()((set) => ({
   targetCents: null,
-  set: (targetCents) => set({ targetCents }),
+  set: (targetCents) => {
+    try {
+      if (targetCents === null) window.localStorage.removeItem(STORAGE_KEY);
+      else window.localStorage.setItem(STORAGE_KEY, String(targetCents));
+    } catch { /* blocked storage: the target still works for this session */ }
+    set({ targetCents });
+  },
 }));
+
+/**
+ * Read the saved target back into the store once the client has mounted. Not done in the store's
+ * initialiser: that runs during the server render too, where there is no localStorage, and a store
+ * seeded differently on the two sides is a hydration mismatch.
+ */
+export function useRestoreTakeProfit(): void {
+  const set = useTakeProfitStore((s) => s.set);
+  useEffect(() => {
+    const saved = restore();
+    if (saved !== null) set(saved);
+  }, [set]);
+}
 
 /**
  * Close the open contract once its floating profit reaches the target.
@@ -37,7 +70,12 @@ export const useTakeProfitStore = create<TakeProfitState>()((set) => ({
  * Fires at most once per position: `sell` is not instantaneous, and a second call against a
  * position already closing is an error the player would see.
  */
-export function useTakeProfitWatch(position: ActivePosition | null, sell: () => void, fmt: (cents: number) => string): void {
+export function useTakeProfitWatch(
+  position: ActivePosition | null,
+  sell: () => void,
+  fmt: (cents: number) => string,
+  enabled = true,
+): void {
   const firedRef = useRef<string | null>(null);
   const sellRef = useRef(sell);
   sellRef.current = sell;
@@ -55,11 +93,13 @@ export function useTakeProfitWatch(position: ActivePosition | null, sell: () => 
   }, [positionId]);
 
   useEffect(() => {
-    if (!positionId || target === null || !sellable) return;
+    // `enabled` is the engine's own answer to "can a manual close succeed here": in pool mode it
+    // cannot, so firing would only produce a SELL_DISABLED the player never asked for.
+    if (!enabled || !positionId || target === null || !sellable) return;
     if (pnl < target) return;
     if (firedRef.current === positionId) return;
     firedRef.current = positionId;
-    logJournal('ok', 'Trade', `#${positionId.slice(0, 8)} take-profit hit at ${fmt(pnl)} — closing`);
+    logJournal('ok', 'Trade', `#${positionId.slice(0, 8)} take-profit hit at ${fmt(pnl)}, closing`);
     sellRef.current();
-  }, [positionId, pnl, sellable, target, fmt]);
+  }, [enabled, positionId, pnl, sellable, target, fmt]);
 }

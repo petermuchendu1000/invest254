@@ -53,7 +53,7 @@ const PAYOUT_STATUSES = [
 ];
 
 function fmtDate(ms: number | null | undefined): string {
-  if (!ms) return '—';
+  if (!ms) return '-';
   return formatDateTime(ms);
 }
 
@@ -145,11 +145,11 @@ function ReferralPayouts() {
           {rows.map((r) => (
             <tr key={r.id} className="border-t border-border">
               <Td><span className="font-medium text-fg">{r.username ?? r.beneficiaryUser.slice(0, 8)}</span></Td>
-              <Td className="text-muted">{r.phone ?? '—'}</Td>
+              <Td className="text-muted">{r.phone ?? '-'}</Td>
               <Td className="text-right"><Money cents={r.amountCents} /></Td>
               <Td><StatusPill status={r.status} /></Td>
               <Td className="text-muted">{fmtDate(r.requestedAtMs)}</Td>
-              <Td className="text-muted">{r.paidRef ?? '—'}</Td>
+              <Td className="text-muted">{r.paidRef ?? '-'}</Td>
               <Td className="text-right">
                 <span className="flex justify-end gap-1.5">
                   {r.status === 'requested' ? (
@@ -163,7 +163,7 @@ function ReferralPayouts() {
                       <Button size="sm" variant="down" disabled={action.isPending} onClick={() => setRejecting(r)}>Reject</Button>
                     </>
                   ) : (
-                    <span className="text-xs text-muted">—</span>
+                    <span className="text-xs text-muted">-</span>
                   )}
                 </span>
               </Td>
@@ -261,7 +261,7 @@ function Expenses() {
                 <tr key={e.id} className="border-t border-border">
                   <Td className="capitalize">{e.category.replace(/_/g, ' ')}</Td>
                   <Td className="text-right"><Money cents={e.amountCents} /></Td>
-                  <Td className="text-muted">{e.note ?? '—'}</Td>
+                  <Td className="text-muted">{e.note ?? '-'}</Td>
                   <Td className="text-muted">{fmtDate(e.createdAtMs)}</Td>
                 </tr>
               ))}
@@ -328,12 +328,12 @@ function Advances() {
           {rows.map((r) => (
             <tr key={r.id} className="border-t border-border">
               <Td><span className="font-medium text-fg">{r.username ?? r.marketerUserId.slice(0, 8)}</span></Td>
-              <Td className="text-muted">{r.phone ?? '—'}</Td>
+              <Td className="text-muted">{r.phone ?? '-'}</Td>
               <Td className="text-right"><Money cents={r.amountCents} /></Td>
-              <Td className="text-muted">{r.reason ?? '—'}</Td>
+              <Td className="text-muted">{r.reason ?? '-'}</Td>
               <Td><StatusPill status={r.status} /></Td>
               <Td className="text-muted">{fmtDate(r.createdAtMs)}</Td>
-              <Td className="text-muted">{r.decisionNote ?? (r.decidedAtMs ? fmtDate(r.decidedAtMs) : '—')}</Td>
+              <Td className="text-muted">{r.decisionNote ?? (r.decidedAtMs ? fmtDate(r.decidedAtMs) : '-')}</Td>
               <Td className="text-right">
                 <span className="flex justify-end gap-1.5">
                   {r.status === 'requested' ? (
@@ -342,7 +342,7 @@ function Advances() {
                       <Button size="sm" variant="down" disabled={decide.isPending} onClick={() => setRejecting(r)}>Reject</Button>
                     </>
                   ) : (
-                    <span className="text-xs text-muted">—</span>
+                    <span className="text-xs text-muted">-</span>
                   )}
                 </span>
               </Td>

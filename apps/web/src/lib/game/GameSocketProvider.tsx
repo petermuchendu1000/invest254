@@ -71,6 +71,12 @@ interface GameSocketValue {
   openPosition: (input: OpenPositionInput) => void;
   /** Manually cash out the open position (only valid while `sellable`). */
   sell: () => void;
+  /**
+   * Whether `sell` can succeed on this brand at all. The engine refuses every manual close while
+   * the brand runs in pool mode, so a Close control, and anything built on it (take profit), is
+   * only honest where this is true. False until the engine has said otherwise.
+   */
+  earlyCloseEnabled: boolean;
 
   // ── Phase 2: Deriv-style digits/instrument stream (isolated from the rise/fall path above) ──────
   /** Authoritative per-instrument tick buffer (quote as `rate`), for the digits chart. */
@@ -144,8 +150,8 @@ export interface CandlesReply {
 }
 
 /** Stable functions (never change identity) — consumers that only trade/read buffers never re-render. */
-type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'instrumentResetKey'>;
-type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition'>;
+type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled' | 'instrumentResetKey'>;
+type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled'>;
 const ApiCtx = createContext<GameSocketApi | null>(null);
 const StateCtx = createContext<GameSocketState | null>(null);
 const InstKeyCtx = createContext<string>('');
@@ -201,7 +207,7 @@ function errorTitle(code: string): string {
     case 'AUTH_REQUIRED':
       return 'Log in to trade';
     case 'AUTH_INVALID':
-      return 'Session expired — log in again';
+      return 'Session expired: log in again';
     case 'INSUFFICIENT_FUNDS':
       return 'Insufficient balance';
     case 'SYSTEM_DISABLED':
@@ -275,6 +281,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [online, setOnline] = useState(0);
   const [fairness, setFairness] = useState<FairnessData | null>(null);
+  // Set from the engine's hello. False until then: the close affordances stay away rather than
+  // appearing and then failing.
+  const [earlyCloseEnabled, setEarlyCloseEnabled] = useState(false);
   const [activePosition, setActivePosition] = useState<ActivePosition | null>(null);
   const activeRef = useRef<ActivePosition | null>(null);
 
@@ -463,7 +472,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         return;
       }
       if (!sendTrade('open_position', input)) {
-        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — try again shortly.' });
+        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: try again shortly.' });
         return;
       }
       const last = ticksRef.current[ticksRef.current.length - 1] ?? null;
@@ -494,7 +503,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     const a = activeRef.current;
     if (!a || !a.positionId || a.phase !== 'open' || !a.sellable) return;
     if (!send('sell', { positionId: a.positionId })) {
-      toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — your position auto-settles at expiry.' });
+      toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting. Your position auto-settles at expiry.' });
       return;
     }
     setActive({ ...a, phase: 'settling' });
@@ -518,7 +527,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         return false;
       }
       if (!sendTrade('open_digit', input)) {
-        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — try again shortly.' });
+        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: try again shortly.' });
         return false;
       }
       digitAwaitingRef.current += 1;
@@ -549,7 +558,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         return;
       }
       if (!sendTrade('open_multiplier', input)) {
-        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — try again shortly.' });
+        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: try again shortly.' });
       }
     },
     [send, toast],
@@ -558,7 +567,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const closeMultiplier = useCallback(
     (positionId: string) => {
       if (!send('close_multiplier', { positionId })) {
-        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting — try again shortly.' });
+        toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: try again shortly.' });
       }
     },
     [send, toast],
@@ -626,10 +635,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         case 'hello': {
           {
             const h = data as { tradeDate?: string; serverSeedHash?: string };
-            logJournal('info', 'Network', `server ready — trade date ${h.tradeDate ?? '?'}, seed ${(h.serverSeedHash ?? '').slice(0, 12)}`);
+            logJournal('info', 'Network', `server ready: trade date ${h.tradeDate ?? '?'}, seed ${(h.serverSeedHash ?? '').slice(0, 12)}`);
           }
           const d = data as HelloData;
           if (d?.serverSeedHash) setFairness({ serverSeedHash: d.serverSeedHash, tradeDate: d.tradeDate });
+          setEarlyCloseEnabled(d?.gameConfig?.earlyCloseEnabled === true);
           // Re-arm the instrument subscription after a (re)connect so the digits chart keeps streaming.
           if (subscribedInstrumentRef.current) send('subscribe_instrument', { instrumentId: subscribedInstrumentRef.current });
           break;
@@ -730,6 +740,12 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
               `#${(d2.positionId ?? '').slice(0, 8)} closed ${d2.result} (${d2.mode}) p/l ${((d2.pnlCents ?? 0) / 100).toFixed(2)}`);
           }
           const d = data as PositionSettledData;
+          // The side, for the close report. The engine states it on the settle; the local position
+          // is only a fallback for an engine that predates that field, and it may itself be gone
+          // (a settle arriving after a reconnect has no local position at all).
+          const local = activeRef.current;
+          const closedDirection = d.direction
+            ?? (local && local.positionId === d.positionId ? local.direction : undefined);
           setActive((cur) => (cur && cur.positionId === d.positionId ? null : cur));
           if (typeof d.balance === 'number') setWalletReal(d.balance);
           void qc.invalidateQueries({ queryKey: ['positions'] });
@@ -756,6 +772,8 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             pnlCents: d.pnlCents,
             stakeCents,
             mode: d.mode,
+            ticket: d.positionId,
+            direction: closedDirection,
           });
           break;
         }
@@ -944,7 +962,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         digitAwaitingRef.current = 0;
         if (!closedRef.current) {
           setStatus('closed');
-          logJournal('warn', 'Network', 'disconnected — reconnecting');
+          logJournal('warn', 'Network', 'disconnected: reconnecting');
           scheduleReconnect();
         }
       };
@@ -1008,7 +1026,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   }), [getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors]);
-  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition }), [status, online, fairness, activePosition]);
+  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, earlyCloseEnabled }), [status, online, fairness, activePosition, earlyCloseEnabled]);
 
   return (
     <ApiCtx.Provider value={apiValue}>

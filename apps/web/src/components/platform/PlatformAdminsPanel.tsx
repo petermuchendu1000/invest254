@@ -30,7 +30,7 @@ function useDebounced(value: string, ms = 300): string {
 /** Why this person cannot be appointed (mirrors fn_platform_appoint_platform_admin), or null. */
 export function appointBlocker(u: DirectoryUserDto, platformId: string): string | null {
   if (u.role === 'platform_superadmin') return 'The System owner cannot be appointed.';
-  if (u.isDefaultMarketer) return "A brand's default marketer — reassign that brand's default marketer first.";
+  if (u.isDefaultMarketer) return "A brand's default marketer: reassign that brand's default marketer first.";
   if (platformId && u.role === 'platform_admin' && u.platformId === platformId) return 'Already runs this platform.';
   return null;
 }
@@ -83,14 +83,14 @@ export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] })
       <section className="flex flex-col gap-2" aria-labelledby="pa-current">
         <h3 id="pa-current" className="text-sm font-semibold">Current platform admins</h3>
         {adminsQ.isLoading ? <p className="text-sm text-muted">Loading…</p>
-          : admins.length === 0 ? <p className="text-sm text-muted">No platform admins yet — appoint one below.</p>
+          : admins.length === 0 ? <p className="text-sm text-muted">No platform admins yet: appoint one below.</p>
           : (
           <ul className="flex flex-col divide-y divide-border rounded-xl border border-border">
             {admins.map((a) => (
               <li key={a.userId} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
                 <div className="flex min-w-0 flex-col">
                   <span className="font-medium">{who(a)}</span>
-                  <span className="text-xs text-muted">{a.phone ?? '—'} · runs <strong className="text-fg">{a.platformName ?? '—'}</strong>{a.homeSiteName ? ` · home brand ${a.homeSiteName}` : ''}</span>
+                  <span className="text-xs text-muted">{a.phone ?? '-'} · runs <strong className="text-fg">{a.platformName ?? '-'}</strong>{a.homeSiteName ? ` · home brand ${a.homeSiteName}` : ''}</span>
                 </div>
                 {revoking?.userId === a.userId ? (
                   <div className="flex flex-wrap items-end gap-2">
@@ -145,7 +145,7 @@ export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] })
                       className={`flex w-full flex-col items-start gap-0.5 p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60 ${selected ? 'bg-accent/10' : 'hover:bg-surface-2'}`}
                     >
                       <span className="font-medium">{who(u)} <span className="text-xs font-normal text-muted">· {ROLE_LABEL[u.role] ?? u.role}</span></span>
-                      <span className="text-xs text-muted">{u.phone ?? '—'} · {u.siteName ?? 'no brand'}{u.platformName ? ` · ${u.platformName}` : ''}</span>
+                      <span className="text-xs text-muted">{u.phone ?? '-'} · {u.siteName ?? 'no brand'}{u.platformName ? ` · ${u.platformName}` : ''}</span>
                       {blocker ? <span className="text-xs text-warn">{blocker}</span> : null}
                     </button>
                   </li>

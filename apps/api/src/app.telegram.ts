@@ -115,7 +115,7 @@ export async function processTelegramUpdate(update: any, deps: TelegramUpdateDep
       const actor = await deps.resolveActor();
       if (!actor) { await deps.telegram.answerCallback(cb.id, "No admin actor configured."); return { handled: "callback_no_actor" }; }
       const rejected = await executeReject(parsed.kind, parsed.id, actor, deps);
-      await deps.telegram.answerCallback(cb.id, rejected ? "Rejected — funds returned." : "Already actioned or no longer pending.");
+      await deps.telegram.answerCallback(cb.id, rejected ? "Rejected. Funds returned." : "Already actioned or no longer pending.");
       if (rejected) await finalizeDecision(deps, chatId, cb.message?.message_id, parsed.kind, parsed.id, "rejected");
       return { handled: rejected ? `callback_${parsed.kind}_reject_done` : "callback_noop" };
     }

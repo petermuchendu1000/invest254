@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ANCHORS_NEEDED, FIB_LEVELS, TOOLS, distanceToSegment, fibLines, hitTest, humanDuration,
+  ANCHORS_NEEDED, FIB_LEVELS, TOOLS, fibLines, humanDuration,
   measure, parseDrawings, pitchforkLines, serializeDrawings, storageKey, type Anchor, type Drawing,
 } from './drawings.js';
 
@@ -38,7 +38,7 @@ test('fib: the midpoint really is the midpoint, and every ratio is proportional'
   near(lines.find((l) => l.ratio === 0.236)!.price, 76.4, 1e-9);
 });
 
-test('fib: works downward too — the tool does not assume which way you dragged', () => {
+test('fib: works downward too. The tool does not assume which way you dragged', () => {
   const lines = fibLines(at(0, 200), at(10, 100));
   near(lines.find((l) => l.ratio === 0)!.price, 100);
   near(lines.find((l) => l.ratio === 1)!.price, 200);
@@ -61,7 +61,7 @@ test('pitchfork: the handle runs to the MIDPOINT of the second and third pivots'
   near(median.to.price, 45, 1e-9);
 });
 
-test('pitchfork: the tines are PARALLEL to the handle — the defining property', () => {
+test('pitchfork: the tines are PARALLEL to the handle. The defining property', () => {
   const { median, upper, lower } = pitchforkLines(at(100, 5), at(200, 9), at(240, 3));
   const slope = (l: { from: Anchor; to: Anchor }) => (l.to.price - l.from.price) / (l.to.time - l.from.time);
   near(slope(upper), slope(median), 1e-9, 'upper tine');
@@ -80,7 +80,7 @@ test('pitchfork: each tine starts on its own pivot, and all three extend forward
 
 // ───────────────────────────── measure ─────────────────────────────
 
-test('measure: reports the move, the percentage, and the time — signed by direction', () => {
+test('measure: reports the move, the percentage, and the time, signed by direction', () => {
   const m = measure(at(1000, 200), at(1600, 250));
   near(m.delta, 50);
   near(m.percent, 25);
@@ -110,30 +110,6 @@ test('humanDuration: the unit a trader would say out loud', () => {
   assert.equal(humanDuration(7200), '2h');
   assert.equal(humanDuration(5400), '1.5h');
   assert.equal(humanDuration(172_800), '2d');
-});
-
-// ───────────────────────────── selection ─────────────────────────────
-
-test('distanceToSegment: perpendicular when alongside, to the nearer END when past it', () => {
-  const a = { x: 0, y: 0 }, b = { x: 10, y: 0 };
-  near(distanceToSegment({ x: 5, y: 3 }, a, b), 3, 1e-9, 'alongside');
-  near(distanceToSegment({ x: -4, y: 0 }, a, b), 4, 1e-9, 'before the start');
-  near(distanceToSegment({ x: 14, y: 0 }, a, b), 4, 1e-9, 'past the end');
-  // A degenerate segment is a point, not a division by zero.
-  near(distanceToSegment({ x: 3, y: 4 }, a, a), 5, 1e-9, 'zero-length');
-});
-
-test('hitTest: picks the NEAREST drawing within tolerance, and nothing outside it', () => {
-  const segs = [
-    { id: 'far', a: { x: 0, y: 50 }, b: { x: 100, y: 50 } },
-    { id: 'near', a: { x: 0, y: 10 }, b: { x: 100, y: 10 } },
-  ];
-  assert.equal(hitTest({ x: 50, y: 12 }, segs), 'near');
-  assert.equal(hitTest({ x: 50, y: 45 }, segs), 'far');
-  assert.equal(hitTest({ x: 50, y: 30 }, segs), null, 'a tap in open space selects nothing');
-  // Tolerance is in PIXELS, so a tap is forgiving enough for a finger.
-  assert.equal(hitTest({ x: 50, y: 17 }, segs, 8), 'near');
-  assert.equal(hitTest({ x: 50, y: 17 }, segs, 2), null);
 });
 
 // ───────────────────────────── persistence ─────────────────────────────

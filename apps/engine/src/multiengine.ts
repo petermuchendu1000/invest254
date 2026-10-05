@@ -264,6 +264,10 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
           toSiteUser(siteId, e.position.userId, "position_settled", {
             positionId: e.position.id, result: e.position.outcome.result, lockedMultiplier: e.lockedMultiplier,
             payoutCents: e.payoutCents, pnlCents: e.pnlCents, balance: e.balance, mode: e.mode, presentation: e.presentation,
+            // The side, so a terminal can name the deal the way MetaTrader names one. Taken from the
+            // position itself rather than left to the client to remember: the client may have
+            // dropped it, or never had it (a settle after a reconnect).
+            direction: e.position.direction,
           });
           // A settle can convert wagered bonus into real cash (0094 FIFO conversion) — push the
           // full wallet snapshot so the client's bonus figure updates live, not on next refetch.

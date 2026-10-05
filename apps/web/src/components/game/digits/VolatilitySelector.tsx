@@ -105,7 +105,7 @@ export function VolatilitySelector({
             {/* MARKETER: no live price / change % (the trading numbers). */}
             {isMarketer ? null : (
               <span className="truncate text-[10px] font-medium tabular-nums text-muted">
-                {price != null ? price.toFixed(2) : '—'}
+                {price != null ? price.toFixed(2) : '-'}
                 <span className={cn('ml-1 font-semibold', chgPos ? 'text-up' : 'text-down')}>
                   {chgPos ? '+' : ''}{changePct.toFixed(2)}%
                 </span>

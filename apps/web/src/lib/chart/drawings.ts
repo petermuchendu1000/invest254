@@ -137,39 +137,7 @@ export function humanDuration(seconds: number): string {
   return `${(seconds / 86_400).toFixed(seconds % 86_400 === 0 ? 0 : 1)}d`;
 }
 
-// ───────────────────────────── selection ─────────────────────────────
-
 export interface Point { x: number; y: number }
-
-/** Shortest distance from `p` to the segment `a`–`b`, in pixels. */
-export function distanceToSegment(p: Point, a: Point, b: Point): number {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
-  // Project p onto the segment, clamped to its ends.
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-}
-
-/**
- * Which drawing is under the pointer, if any — the nearest within `tolerance` pixels.
- *
- * Takes already-projected segments rather than chart coordinates, because hit-testing has to happen
- * in the space the finger is in: a line that is 2px away on screen is 2px away whatever price scale
- * it was drawn on.
- */
-export function hitTest(
-  p: Point,
-  segments: ReadonlyArray<{ id: string; a: Point; b: Point }>,
-  tolerance = 8,
-): string | null {
-  let best: { id: string; d: number } | null = null;
-  for (const s of segments) {
-    const d = distanceToSegment(p, s.a, s.b);
-    if (d <= tolerance && (best === null || d < best.d)) best = { id: s.id, d };
-  }
-  return best?.id ?? null;
-}
 
 // ───────────────────────────── persistence ─────────────────────────────
 

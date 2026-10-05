@@ -47,7 +47,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
           <Section title="Balances">
             {q.data.isMarketer && (
               <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                Demo / social-proof account — plays on a non-withdrawable <strong>demo balance</strong>; its
+                Demo / social-proof account, plays on a non-withdrawable <strong>demo balance</strong>; its
                 winnings are excluded from real cash (GGR/RTP) and can never be withdrawn to M-Pesa.
               </p>
             )}
@@ -75,10 +75,10 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
           <Section title="Profile">
             <Card className="flex flex-col gap-2 text-sm">
               <Row label="User ID" value={q.data.userId} mono />
-              <Row label="Phone" value={q.data.phone || '—'} />
-              <Row label="Referred by" value={q.data.referredBy ? `${q.data.referredBy.slice(0, 8)}…` : '—'} mono />
-              <Row label="Last transaction" value={q.data.lastTxAtMs ? `${q.data.lastTxKind ?? ''} · ${formatDateTime(q.data.lastTxAtMs)}` : '—'} />
-              <Row label="Last active" value={q.data.lastActiveAtMs ? formatDateTime(q.data.lastActiveAtMs) : '—'} />
+              <Row label="Phone" value={q.data.phone || '-'} />
+              <Row label="Referred by" value={q.data.referredBy ? `${q.data.referredBy.slice(0, 8)}…` : '-'} mono />
+              <Row label="Last transaction" value={q.data.lastTxAtMs ? `${q.data.lastTxKind ?? ''} · ${formatDateTime(q.data.lastTxAtMs)}` : '-'} />
+              <Row label="Last active" value={q.data.lastActiveAtMs ? formatDateTime(q.data.lastActiveAtMs) : '-'} />
             </Card>
           </Section>
 
@@ -91,7 +91,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <Card className="flex flex-col gap-1">
                 <span className="text-sm font-medium text-fg">Protected account</span>
                 <span className="text-sm text-muted">
-                  This is the system owner. Their role and status are locked and their wallet can&apos;t be adjusted — no
+                  This is the system owner. Their role and status are locked and their wallet can&apos;t be adjusted. No
                   account can demote, suspend, ban, or modify the owner.
                 </span>
               </Card>
@@ -222,7 +222,7 @@ function ActivityRow({ r }: { r: AdminUserActivityRow }) {
           {KIND_LABEL[r.kind]}
         </span>
       </Td>
-      <Td className="text-xs text-muted">{detail || '—'}</Td>
+      <Td className="text-xs text-muted">{detail || '-'}</Td>
       <Td className="text-right font-medium tabular-nums">
         <Money cents={r.amountCents} />
         {isBet && r.pnlCents != null ? (
@@ -511,7 +511,7 @@ function DefaultMarketerControl({ id, isDefault, username, role }: { id: string;
         ) : role === 'marketer' ? (
           <ConfirmButton
             label="Make brand default"
-            confirmLabel="Confirm — earns 25% of deposits"
+            confirmLabel="Confirm: earns 25% of deposits"
             size="md"
             variant="primary"
             busy={m.isPending}
@@ -568,7 +568,7 @@ function ResetBalance({ id }: { id: string }) {
         <input
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Reason (required, audited) — e.g. settlement bug correction"
+          placeholder="Reason (required, audited), e.g. settlement bug correction"
           className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent"
         />
         <ConfirmButton
@@ -581,7 +581,7 @@ function ResetBalance({ id }: { id: string }) {
           onConfirm={run}
         />
         <p className="text-xs text-muted">
-          Sets the REAL wallet to the amount of the user&apos;s most recent successful deposit (their last funded amount) —
+          Sets the REAL wallet to the amount of the user&apos;s most recent successful deposit (their last funded amount),
           use when a system issue corrupted the balance. Writes a reconciling ledger entry and an audit record. The bonus
           wallet is untouched. {canReset ? '' : 'This user has no successful deposit to reset to.'}
         </p>
@@ -776,7 +776,7 @@ function NotificationSend({ id }: { id: string }) {
       {
         onSuccess: () => {
           setTitle(''); setBody(''); setCategory(''); setLevel('info'); setDismissible(true);
-          toast.push({ tone: 'success', title: 'Notification sent', description: dismissible ? 'The player can dismiss it.' : 'Blocking — stays until resolved.' });
+          toast.push({ tone: 'success', title: 'Notification sent', description: dismissible ? 'The player can dismiss it.' : 'Blocking: stays until resolved.' });
         },
         onError: (e) => toast.push({ tone: 'error', title: 'Send failed', description: e instanceof ApiError ? e.message : 'Try again.' }),
       },

@@ -154,7 +154,7 @@ export function LipwaDeposit() {
 
       <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-2.5">
         <ShieldIcon />
-        <p className="text-xs text-muted">Pay by <span className="font-medium text-fg">card, bank or mobile money</span> — securely, without leaving the app.</p>
+        <p className="text-xs text-muted">Pay by <span className="font-medium text-fg">card, bank or mobile money</span>, securely, without leaving the app.</p>
       </div>
 
       {serverError ? <p className="rounded-xl border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">{serverError}</p> : null}

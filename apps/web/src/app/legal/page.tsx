@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 export const metadata: Metadata = {
-  title: 'Legal & Responsible Gaming — Invest254',
+  title: 'Legal & Responsible Gaming | Invest254',
   description: 'Invest254 licence, terms of service, responsible gaming commitment and privacy.',
 };
 
@@ -85,7 +85,7 @@ export default function LegalPage() {
               <a className="text-accent hover:underline" href="tel:1190">
                 1190
               </a>
-              , or reach a counsellor through your nearest health facility. You are not alone.
+              or reach a counsellor through your nearest health facility. You are not alone.
             </p>
           </Section>
 

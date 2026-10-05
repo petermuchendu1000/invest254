@@ -58,7 +58,7 @@ export default function ReferralLandingPage({ params }: { params: { code: string
       )}
 
       <p className="text-xs text-muted">
-        18+ only. Play responsibly —{' '}
+        18+ only. Play responsibly,{' '}
         <Link href="/legal#responsible-gaming" className="text-accent hover:underline">
           learn more
         </Link>
