@@ -165,8 +165,9 @@ That is reference data, it is static, and it is the low-risk half of the licensi
 | 1 | Symbol catalogue: `MarketSymbol[]` with digits/anchor/scale + MT5 metadata (description, path, category) | `packages/shared/src/candles.ts` (+ a new `symbols.ts`) | S |
 | 2 | Per-symbol curve domain separator, XAUUSD keeping the current literal for compatibility | `packages/shared/src/curve.ts` | **XS** |
 | 3 | Calibration test across many symbol seeds | `packages/shared/src/settle.calibration.test.ts` | S |
-| 4 | `MarketHistory` per symbol, cached per `(site, symbol)` | `apps/engine/src/siteregistry.ts`, `markethistory.ts` | M |
-| 5 | Socket protocol: symbol list, per-symbol subscribe, symbol on the candles request | `apps/engine/src/server.ts`, `GameSocketProvider` | M |
+| 4 | ~~`MarketHistory` per symbol, cached per `(site, symbol)`~~ **DONE** | `apps/engine/src/symbolhistories.ts` (new), `siteregistry.ts`, `markethistory.ts` | M |
+| 5a | ~~Socket protocol: symbol list, symbol on the candles and anchors requests~~ **DONE (engine)** | `apps/engine/src/multiengine.ts` | S |
+| 5b | Per-symbol LIVE quotes: a quote streamer per `(site, symbol)`, subscribe/unsubscribe | `apps/engine/src/multiengine.ts`, `GameSocketProvider` | M |
 | 6 | Position records its symbol (migration + repo + receipts) | `packages/db/migrations/0182_*`, repo | M |
 | 7 | Per-brand symbol assignment, so a brand can offer a subset | DB + admin | M |
 | 8 | Market Watch becomes a real list; the context menu's `Symbols`, `Sets`, `Sort`, `Hide` become live | `MarketWatch.tsx` | M |
@@ -176,6 +177,74 @@ Items 8 and 9 are the only UI work; 1 to 7 are platform.
 
 **Order:** 2 and 3 first. They are small, and 3 is the gate: if the win rate does not hold across
 symbol seeds, the whole plan changes and nothing after it is worth building.
+
+### 4a. What item 4 turned out to cost, measured
+
+A `MarketHistory` is one instrument's chain of days walked forward from genesis, so multi-symbol
+means one history object per symbol. `SymbolHistories` owns the set: built on first use, evicted
+least-recently-used past a cap, with the default symbol pinned because it is also the brand's price
+axis and a cold rebuild of it would sit in the path of a trade rather than a chart request.
+
+Eviction is safe for a reason worth stating: the chain is deterministic from the day seeds, so a
+rebuilt history produces bit-for-bit the same bars. That is tested, not assumed.
+
+**The cost is real and it is CPU, not memory.** Measured on this container, EURUSD, 400-day window:
+
+| Request | Cold | Warm |
+|---|---|---|
+| `liveAnchor()` | 2.2 s | 0 ms |
+| `candles("H1", 48)` | 2.3 s | 0 ms |
+| `candles("M15", 200)` | 2.4 s | 3 ms |
+| `candles("D1", 365)` | 8.1 s | 10 ms |
+
+Nearly all of the cold figure is the chain itself: one `CurveGenerator` per day at ~8ms each, and
+the generator is expensive because it materialises an 86,402-step walk from the keystream up front.
+There is no shortcut — the day's closing value IS the end of that walk — so ~2.2 s per symbol is the
+floor for a 400-day window.
+
+Two things were fixed on the way, and both help the single-symbol brand that exists today:
+
+- **Hourly bars are no longer built in the chaining pass.** The chain needs exactly two numbers from
+  each day, its opening and closing curve value; it was also sampling 1440 points and folding them
+  on all 400 days whether or not anything asked. Bars are now built when something asks for them.
+- **The chain fills the days a request actually needs from the curve it is already holding.** Which
+  days are wanted is known before the walk starts, so the walk fills those and skips the rest,
+  instead of building each wanted day's curve a second time afterwards.
+
+Together those took a cold `H1` request from ~8.7 s to ~2.3 s, and a cold year of dailies from
+~8.7 s to ~8.1 s. Nothing got slower. There are now two code paths to a day's bars — the chain's own
+fill and the later fold — and a test asserts they agree, because otherwise which timeframe a client
+asked for FIRST would change the prices it saw.
+
+**What this means for item 5.** A ~2.2 s synchronous stall is fine for a chart request that was
+going to wait anyway, and not fine on the engine's event loop while it serves every other brand. So
+the socket protocol should warm a symbol when a client SUBSCRIBES to it, off the critical path,
+rather than discovering the cost inside the first candles request. That is item 5's problem and it
+is noted here so it is not rediscovered.
+
+`MarketHistoryOptions.historyDays` exists for the same reason: a caller that needs a short window
+can say so instead of paying for a year. It is not a free knob — a shorter chain re-anchors on a
+later day, so it changes that brand's prices — which is why production stays at 400.
+
+### 5a. What the protocol carries now
+
+`candles` and `anchors` take an optional `symbol`. Absent (or null) means the brand's default, which
+is every client written before multi-symbol, so nothing already shipped has to change. A symbol the
+brand does not offer is **refused** with `UNKNOWN_SYMBOL` rather than served the default's bars under
+the requested name — serving gold's prices labelled EURUSD is the worst failure available here,
+because the chart would look entirely right and be a different instrument.
+
+A new `symbols` request returns the brand's list: symbol, description, group and digits, plus
+`defaultSymbol` so a client need not work out which row that is. It is unauthenticated for the same
+reason the candles are, and it carries **no prices** — a quote is the tick stream's job, and a quote
+embedded in a list reply is one nothing can age.
+
+**Why the UI does not follow yet.** The chart could already draw any symbol's history, but the live
+tick stream is still the brand's single curve, so switching the chart's symbol would draw that
+symbol's bars with the default symbol's live edge: a chart that disagrees with itself at the right-
+hand edge. Market Watch has the same problem one step worse — a list of ninety-six rows with empty
+Bid and Ask columns. So 5b (per-symbol live quotes) comes before any of the UI work, and items 8 and
+9 wait on it rather than on 5a.
 
 ---
 

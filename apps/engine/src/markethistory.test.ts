@@ -239,3 +239,23 @@ test("axis: prices a rate against its OWN day, and refuses a day off the chain",
   assert.equal(axis.anchorFor(dateKeyUTC(NOW + DAY_S * 1000)), null);
   assert.equal(priceAtRate(axis, NOW + DAY_S * 1000, rate), null);
 });
+
+test("the chain's own bar-filling shortcut agrees with building them afterwards", () => {
+  // There are now two paths to a day's bars: the chaining walk fills the days a request needs from
+  // the curve it is already holding (the cold path), and `hoursFor` folds them from minute bars for
+  // a day the chain passed over (the warm path, and the path any later timeframe takes). They must
+  // produce the same bars, or which timeframe a client asked for FIRST would change the prices it
+  // sees — a bug no single-path test could see.
+  const viaChain = build().candles("H1", 72);
+  // Walk the chain for something that needs no bars at all, so every day is passed over, then ask.
+  const h = build();
+  h.liveAnchor();
+  const viaFold = h.candles("H1", 72);
+  assert.deepEqual(viaFold, viaChain);
+
+  // The same, across the hourly/minute boundary: a day whose minute bars were built by the chain
+  // for an M15 request must fold to the same H1 bars as a day the chain skipped.
+  const m = build();
+  m.candles("M15", 96);
+  assert.deepEqual(m.candles("H1", 24), build().candles("H1", 24));
+});

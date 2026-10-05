@@ -1,6 +1,9 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
-import { type Direction, instrumentById, isKnownInstrument, isTimeframe, type DigitKind, type MultDir } from "@invest254/shared";
+import {
+  type Direction, instrumentById, isKnownInstrument, isTimeframe, symbolDef,
+  type DigitKind, type MultDir,
+} from "@invest254/shared";
 import type { SiteRegistry } from "./siteregistry.js";
 import { MAX_ANCHORS } from "./markethistory.js";
 import { MarketNews } from "./marketnews.js";
@@ -425,6 +428,13 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                 send(ws, "error", { code, ...(message === undefined ? {} : { message }), ...rid });
 
               if (!rt.history) return fail("NO_CANDLES", "this brand draws a line chart, not candles");
+              // Which symbol's bars. Absent means the brand's default, which is every client written
+              // before multi-symbol. A symbol the brand does not offer is refused rather than
+              // quietly served the default's bars under the requested name.
+              const want = msg.data?.symbol === undefined || msg.data?.symbol === null
+                ? undefined : String(msg.data.symbol);
+              const hist = want === undefined ? rt.history : rt.histories?.for(want);
+              if (!hist) return fail("UNKNOWN_SYMBOL", want);
               const tf = String(msg.data?.tf ?? "");
               if (!isTimeframe(tf)) return fail("BAD_TIMEFRAME", tf);
               const count = Number(msg.data?.count ?? 500);
@@ -433,10 +443,10 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               const rawTo = msg.data?.to;
               const to = rawTo === undefined || rawTo === null ? undefined : Number(rawTo);
               if (to !== undefined && !Number.isFinite(to)) return fail("BAD_TO");
-              const anchor = rt.history.liveAnchor();
+              const anchor = hist.liveAnchor();
               return send(ws, "candles", {
                 ...rid, tf, instrument: anchor.instrument,
-                bars: rt.history.candles(tf, count, to),
+                bars: hist.candles(tf, count, to),
                 // How to place live ticks on the same axis: price = base + scale*(value - openValue),
                 // where value = (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE.
                 anchor: { tradeDate: anchor.dateKey, base: anchor.base, openValue: anchor.openValue },
@@ -451,13 +461,46 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               if (!rt.history) {
                 return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles", ...rid });
               }
+              const want = msg.data?.symbol === undefined || msg.data?.symbol === null
+                ? undefined : String(msg.data.symbol);
+              const hist = want === undefined ? rt.history : rt.histories?.for(want);
+              if (!hist) return send(ws, "error", { code: "UNKNOWN_SYMBOL", message: want, ...rid });
               const raw = msg.data?.days;
               if (!Array.isArray(raw)) return send(ws, "error", { code: "BAD_DAYS", ...rid });
               const days = raw.slice(0, MAX_ANCHORS).map((d: unknown) => String(d));
               return send(ws, "anchors", {
                 ...rid,
-                instrument: rt.history.instrument,
-                days: rt.history.anchors(days),
+                instrument: hist.instrument,
+                days: hist.anchors(days),
+              });
+            }
+            case "symbols": {
+              // The brand's tradable list, for Market Watch and the Symbols dialog.
+              //
+              // Unauthenticated for the same reason the candles are: which instruments a brand
+              // offers is public, identical for every player on it, and reveals nothing about any
+              // account. It carries no prices — a quote is the tick stream's job — only what each
+              // instrument IS, which is what a list has to print beside it.
+              const reqId = msg.data?.reqId === undefined ? undefined : String(msg.data.reqId);
+              const rid = reqId === undefined ? {} : { reqId };
+              if (!rt.histories) {
+                return send(ws, "error", { code: "NO_CANDLES", message: "this brand draws a line chart, not candles", ...rid });
+              }
+              return send(ws, "symbols", {
+                ...rid,
+                // The symbol the chart draws when a client asks for none, so a client need not know
+                // which of the list that is.
+                defaultSymbol: rt.history!.instrument.symbol,
+                symbols: rt.histories.symbols.flatMap((sym) => {
+                  const d = symbolDef(sym);
+                  // A brand configured with a symbol the catalogue does not carry is a
+                  // misconfiguration, not a client error: leave it out rather than send a row
+                  // nothing can describe or chart.
+                  return d ? [{
+                    symbol: d.symbol, description: d.description, group: d.group,
+                    digits: d.digits,
+                  }] : [];
+                }),
               });
             }
             case "news": {

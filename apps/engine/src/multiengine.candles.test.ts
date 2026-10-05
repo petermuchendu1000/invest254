@@ -224,3 +224,123 @@ test("WS anchors: a line brand is told it has none; bad input is rejected; the b
     assert.ok(big.data.days.length <= MAX_ANCHORS, `expected a cap, got ${big.data.days.length}`);
   } finally { line.close(); candle.close(); await handle.close(); }
 });
+
+/**
+ * Multi-symbol over the wire (docs/mt5/12-multi-symbol-scope.md item 5a).
+ *
+ * The protocol had no concept of a second instrument: one history per brand, and the symbol was
+ * whatever that history happened to be. These cover the three things that changed — a symbol may be
+ * named on a request, an unoffered one is refused rather than substituted, and the brand's list is
+ * fetchable so Market Watch has something real to show.
+ */
+
+test("WS symbols: a candlestick brand lists its catalogue, and names the one it draws by default", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const m = await c.ask("symbols", { reqId: "s1" }, "symbols");
+    assert.equal(m.type, "symbols");
+    assert.equal(m.data.reqId, "s1", "reqId must come back so concurrent requests can be told apart");
+    assert.equal(m.data.defaultSymbol, "XAUUSD");
+    assert.ok(Array.isArray(m.data.symbols) && m.data.symbols.length >= 90, `${m.data.symbols?.length} symbols`);
+    // The default is in the list, so a client need not special-case it.
+    assert.ok(m.data.symbols.some((s: any) => s.symbol === m.data.defaultSymbol));
+    // Every row carries what a list has to print beside a symbol, and no prices: a quote is the
+    // tick stream's job, and sending a stale one here would be a quote nothing could age.
+    for (const s of m.data.symbols) {
+      assert.equal(typeof s.symbol, "string");
+      assert.ok(s.description.length > 3, s.symbol);
+      assert.ok(String(s.group).length > 0, s.symbol);
+      assert.ok(s.digits >= 2 && s.digits <= 5, `${s.symbol} ${s.digits}`);
+      assert.equal(s.bid, undefined);
+      assert.equal(s.ask, undefined);
+    }
+    // The groups MetaTrader's Symbols tree shows, all present.
+    const groups = new Set(m.data.symbols.map((s: any) => s.group));
+    for (const g of ["Forex\\Majors", "Forex\\Minors", "Forex\\Exotics", "Metals", "Crypto", "Indices", "Energies"]) {
+      assert.ok(groups.has(g), `missing group ${g}`);
+    }
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS symbols: a line brand is told it has none, like the candles", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(LINE_SITE));
+  try {
+    await c.open();
+    const m = await c.ask("symbols", { reqId: "s2" }, "symbols");
+    assert.equal(m.type, "error");
+    assert.equal(m.data.code, "NO_CANDLES");
+    assert.equal(m.data.reqId, "s2");
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS candles: naming a symbol returns THAT instrument's bars, not the default's rescaled", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const gold = await c.ask("candles", { tf: "H1", count: 24 }, "candles");
+    const euro = await c.ask("candles", { tf: "H1", count: 24, symbol: "EURUSD" }, "candles");
+    assert.equal(gold.data.instrument.symbol, "XAUUSD");
+    assert.equal(euro.data.instrument.symbol, "EURUSD");
+    assert.equal(euro.data.instrument.digits, 5);
+    // The prices are in the named instrument's own units.
+    assert.ok(euro.data.bars.every((b: any) => b.close > 0.5 && b.close < 2), "EURUSD bars should sit near 1");
+    assert.ok(gold.data.bars.every((b: any) => b.close > 1000), "XAUUSD bars should sit near 2650");
+    // Same buckets, and a genuinely different shape rather than one series on two axes.
+    assert.deepEqual(euro.data.bars.map((b: any) => b.time), gold.data.bars.map((b: any) => b.time));
+    const shape = (bars: any[]) => bars.map((b) => (b.close - bars[0].open) / bars[0].open);
+    const a = shape(euro.data.bars), b = shape(gold.data.bars);
+    assert.ok(a.some((v, i) => Math.sign(v) !== 0 && Math.sign(v) === -Math.sign(b[i]!)),
+      "the two symbols never disagree on direction, so they are the same series rescaled");
+    // The anchor comes from the named symbol's own day, or a live tick would land off its axis.
+    assert.ok(euro.data.anchor.base > 0.5 && euro.data.anchor.base < 2);
+    assert.notEqual(euro.data.anchor.base, gold.data.anchor.base);
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS candles: an unoffered symbol is refused, never silently served the default", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    // Serving gold's bars under the name EURUSD would be the worst possible failure here: the chart
+    // would look right and be a different instrument.
+    for (const symbol of ["NOPE", "", "xauusd"]) {
+      const m = await c.ask("candles", { tf: "H1", count: 5, symbol, reqId: "u1" }, "candles");
+      assert.equal(m.type, "error", symbol);
+      assert.equal(m.data.code, "UNKNOWN_SYMBOL", symbol);
+      assert.equal(m.data.reqId, "u1", symbol);
+    }
+    // And null means "no symbol named", which is the pre-multi-symbol request.
+    const dflt = await c.ask("candles", { tf: "H1", count: 5, symbol: null }, "candles");
+    assert.equal(dflt.data.instrument.symbol, "XAUUSD");
+  } finally { c.close(); await handle.close(); }
+});
+
+test("WS anchors: a named symbol's anchors price that symbol's own days", async () => {
+  const { handle, url } = await boot();
+  const c = new Client(url(CANDLE_SITE));
+  try {
+    await c.open();
+    const bars = await c.ask("candles", { tf: "H1", count: 2, symbol: "EURUSD" }, "candles");
+    const day = bars.data.anchor.tradeDate;
+    const m = await c.ask("anchors", { days: [day], symbol: "EURUSD" }, "anchors");
+    assert.equal(m.data.instrument.symbol, "EURUSD");
+    assert.equal(m.data.days.length, 1);
+    // The same day's anchor, whichever request asked for it.
+    assert.equal(m.data.days[0].base, bars.data.anchor.base);
+    assert.equal(m.data.days[0].openValue, bars.data.anchor.openValue);
+    // And a different symbol's anchor for the same day is NOT this one.
+    const gold = await c.ask("anchors", { days: [day] }, "anchors");
+    assert.equal(gold.data.instrument.symbol, "XAUUSD");
+    assert.notEqual(gold.data.days[0].base, m.data.days[0].base);
+    // An unoffered symbol is refused here too.
+    const bad = await c.ask("anchors", { days: [day], symbol: "NOPE", reqId: "a9" }, "anchors");
+    assert.equal(bad.type, "error");
+    assert.equal(bad.data.code, "UNKNOWN_SYMBOL");
+    assert.equal(bad.data.reqId, "a9");
+  } finally { c.close(); await handle.close(); }
+});

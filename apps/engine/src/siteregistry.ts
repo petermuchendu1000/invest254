@@ -6,6 +6,7 @@ import { affectsPricing, type ConfigProvider } from "./gameconfig.js";
 import type { PoolController } from "./poolcontroller.js";
 import { deriveSiteDaySeed, type CurveProfile } from "@invest254/shared";
 import { MarketHistory } from "./markethistory.js";
+import { SymbolHistories } from "./symbolhistories.js";
 import { withPriceStamp } from "./pricestamp.js";
 
 /**
@@ -32,8 +33,17 @@ export interface SiteRuntime {
    *
    * Line brands draw the raw wave and have no candles, so asking for them is a client error rather
    * than an empty result, which is why this is undefined rather than an empty history.
+   *
+   * This is the DEFAULT symbol's history, which is also the brand's price axis. A caller that wants
+   * a particular symbol asks `histories` instead; this stays because the price axis, the recovery
+   * path and every single-symbol caller written before multi-symbol all mean this one.
    */
   history?: MarketHistory;
+  /**
+   * Every symbol's history for this brand, built on demand and capped. Present exactly when
+   * `history` is, since both exist only on a candlestick brand.
+   */
+  histories?: SymbolHistories;
   /**
    * The repository every path that opens or settles for this brand must trade through.
    *
@@ -109,17 +119,21 @@ export class SiteRegistry {
       //
       // Built BEFORE the GameServer because it owns this brand's price axis, and the repository the
       // GameServer trades through stamps execution prices against that axis (see below).
-      let history: MarketHistory | undefined;
+      let histories: SymbolHistories | undefined;
       if (curveProfile === "market") {
         let versions = new Map<string, number>();
         try { versions = (await this.opts.repo.listSeedVersions?.(siteId)) ?? versions; }
         catch (err) { this.report(err as Error, `seed-versions ${siteId}`); }
-        history = new MarketHistory(
-          (dateKey) => deriveSiteDaySeed(master, siteId, dateKey, versions.get(dateKey) ?? 0),
-          () => config.active(),
-          this.opts.now ? { now: this.opts.now } : {},
-        );
+        // One day-seed derivation shared by every symbol. The symbol separates INSIDE the curve
+        // (curveDomain), not in the seed, which is what keeps the default symbol reconstructing
+        // bit-for-bit while every other symbol gets a genuinely independent series.
+        histories = new SymbolHistories({
+          seedFor: (dateKey) => deriveSiteDaySeed(master, siteId, dateKey, versions.get(dateKey) ?? 0),
+          cfg: () => config.active(),
+          ...(this.opts.now ? { now: this.opts.now } : {}),
+        });
       }
+      const history: MarketHistory | undefined = histories?.primary;
       // On a candlestick brand, record the chart price every trade executed at (migration 0180), so
       // a receipt can print the number the player actually saw instead of "at market". The wrapper
       // writes AFTER the atomic money RPC returns and never awaits the write, so settlement is
@@ -141,7 +155,11 @@ export class SiteRegistry {
           : undefined,
         this.opts.loadIsMarketer,
       );
-      const rt: SiteRuntime = { siteId, seeds, game, config, tradeRepo, ...(history ? { history } : {}) };
+      const rt: SiteRuntime = {
+        siteId, seeds, game, config, tradeRepo,
+        ...(history ? { history } : {}),
+        ...(histories ? { histories } : {}),
+      };
 
       // Live config hot-reload (docs/22 Task C). When this brand's economy is edited, price the
       // NEXT round under the new version by rebuilding the seed context, and re-arm the tick loop

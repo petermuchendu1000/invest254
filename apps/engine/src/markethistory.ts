@@ -37,6 +37,22 @@ export interface MarketHistoryOptions {
   instrument?: MarketSymbol;
   /** Cap on days of minute bars held in memory (~46KB each). */
   maxCachedDays?: number;
+  /**
+   * How many days back the chain reaches. Defaults to `HISTORY_DAYS`.
+   *
+   * It is an option because the chain is not free: it builds one day curve per day before the first
+   * bar can be served, ~8ms each, so the production 400 days costs about three seconds of CPU the
+   * first time a symbol is charted. A caller that knows it only needs a short window — a test, or a
+   * brand offering a long tail of symbols nobody scrolls a year of — can say so instead of paying
+   * for a year. The window is the only thing that changes: the bars inside it are identical either
+   * way, because each day's prices depend on the chain before it, not on how far back it started.
+   *
+   * That last sentence is not quite true at the seam, and the difference is the point of the
+   * re-anchoring already documented on `chainThrough`: a shorter chain starts from the instrument's
+   * anchor on a later day, so the two windows do not agree on prices. Changing it for a brand is
+   * therefore a visible change to that brand's history, not a tuning knob.
+   */
+  historyDays?: number;
   now?: () => number;
 }
 
@@ -55,14 +71,19 @@ interface DaySlice {
    */
   openValue: number;
   /**
-   * The day's 24 H1 bars, kept for the life of the chain (~1KB a day).
+   * The day's 24 H1 bars, built on first use and then kept for the life of the chain (~1KB a day).
    *
    * Every timeframe from H1 up is a whole number of hours, so all of them — including D1, W1 and
-   * MN1 — fold from these exactly. Keeping them is what makes scrolling a year of dailies instant:
-   * they fall out of the same sampling pass that computes the day's open and close, so the chain
-   * pays for them once and never rebuilds that day again.
+   * MN1 — fold from these exactly, and keeping them is what makes scrolling a year of dailies
+   * instant after the first pass.
+   *
+   * They used to be built eagerly, in the chaining pass. That made the chain pay for 1440 samples
+   * and a fold on all 400 days whether or not anything asked for them, and the chain is walked in
+   * full before the first bar can be served: measured at ~15ms a day, ~6s a symbol. Half of that was
+   * bars nobody had asked for. The chain genuinely needs only the day's opening and closing curve
+   * value, which are two samples, so that is all it takes now.
    */
-  h1: Candle[];
+  h1?: Candle[];
   /** The day's 1440 M1 bars. Only the sub-hour timeframes need these, so they are evictable. */
   m1?: Candle[];
 }
@@ -71,6 +92,7 @@ export class MarketHistory {
   private readonly inst: MarketSymbol;
   private readonly now: () => number;
   private readonly maxCachedDays: number;
+  private readonly historyDays: number;
   /** dateKey -> slice, for the contiguous run of days from `genesisKey` forward. */
   private readonly days = new Map<string, DaySlice>();
   /** Insertion order of dateKeys whose `bars` are populated, for eviction. */
@@ -85,17 +107,26 @@ export class MarketHistory {
     this.inst = opts.instrument ?? XAUUSD;
     this.now = opts.now ?? (() => Date.now());
     this.maxCachedDays = opts.maxCachedDays ?? 16;
+    this.historyDays = Math.max(1, Math.floor(opts.historyDays ?? HISTORY_DAYS));
   }
 
   get instrument(): MarketSymbol { return this.inst; }
 
+  /**
+   * The day's curve, in this history's OWN seed domain.
+   *
+   * The symbol is passed to the generator, which is what makes two symbols on one brand genuinely
+   * different series rather than one series with two axes. XAUUSD and the no-symbol caller keep the
+   * bare `curve` domain (see `curveDomain`), so every day already generated and every position
+   * already settled reconstructs to exactly the same numbers.
+   */
   private curveFor(dateKey: string): CurveGenerator {
-    return new CurveGenerator(this.seedFor(dateKey), this.cfg(), "market");
+    return new CurveGenerator(this.seedFor(dateKey), this.cfg(), "market", this.inst.symbol);
   }
 
-  /** The first day history offers — HISTORY_DAYS before today, in UTC. */
+  /** The first day history offers — `historyDays` before today, in UTC. */
   private genesisKey(): string {
-    return dateKeyUTC(this.now() - HISTORY_DAYS * DAY_S * 1000);
+    return dateKeyUTC(this.now() - this.historyDays * DAY_S * 1000);
   }
 
   /**
@@ -106,7 +137,7 @@ export class MarketHistory {
    * that happens. That re-anchors the series at the instrument's anchor price rather than letting it
    * drift with no floor, and it is invisible in practice: a chart only ever shows a window.
    */
-  private chainThrough(through: string): void {
+  private chainThrough(through: string, withBars?: ReadonlySet<string>): void {
     const genesis = this.genesisKey();
     if (this.chainedTo === null || !this.days.has(genesis)) {
       this.days.clear();
@@ -118,19 +149,50 @@ export class MarketHistory {
     while (key <= through) {
       const curve = this.curveFor(key);
       const dayStartS = dayStartMs(key) / 1000;
-      // One sampling pass gives the chain its close AND the day's hourly bars. Minute bars come from
-      // the same curve but are built only if a sub-hour timeframe actually asks for them.
-      const h1 = aggregate(minuteBars(this.inst, dayStartS, base, (t) => curve.value(t)), "H1");
+      // The chain needs two numbers from the day and nothing else: the curve's value at the open,
+      // which anchors the price axis, and its value at the close, which carries the base forward.
+      // Bars are built only when something asks for them (see `hoursFor`, `minutesFor`).
       const openValue = curve.value(0);
       const slice: DaySlice = {
-        dateKey: key, dayStartS, base, h1, openValue,
+        dateKey: key, dayStartS, base, openValue,
         nextBase: nextBase(this.inst, base, openValue, curve.value(DAY_S)),
       };
       this.days.set(key, slice);
+      // The day's curve is in hand and costs ~8ms to build, so a day whose bars this request
+      // actually needs is filled here rather than constructing the same curve again later. Without
+      // this, a cold request for a year of dailies built 400 curves to chain and 365 more to fold.
+      if (withBars?.has(key)) slice.h1 = aggregate(this.fillMinutes(slice, curve), "H1");
       base = slice.nextBase;
       this.chainedTo = key;
       key = nextKey(key);
     }
+  }
+
+  /**
+   * The day's H1 bars, folded from its minute bars on first use and then kept.
+   *
+   * Folding from `minutesFor` rather than sampling the curve again means one curve construction
+   * serves both: the minute bars are evictable and the hourly ones are not, so a day that is
+   * scrolled past once keeps its cheap summary and drops its expensive detail.
+   */
+  private hoursFor(dateKey: string): Candle[] {
+    const slice = this.days.get(dateKey);
+    if (!slice) return [];
+    if (slice.h1) return slice.h1;
+    slice.h1 = aggregate(this.minutesFor(dateKey), "H1");
+    return slice.h1;
+  }
+
+  /** Build and cache one day's minute bars from a curve already in hand, evicting the oldest. */
+  private fillMinutes(slice: DaySlice, curve: CurveGenerator): Candle[] {
+    slice.m1 = minuteBars(this.inst, slice.dayStartS, slice.base, (t) => curve.value(t));
+    this.barOrder.push(slice.dateKey);
+    while (this.barOrder.length > this.maxCachedDays) {
+      const evict = this.barOrder.shift()!;
+      const s = this.days.get(evict);
+      if (s) delete s.m1;
+    }
+    return slice.m1;
   }
 
   /** The day's M1 bars, built on first use and evicted LRU-style. */
@@ -138,15 +200,7 @@ export class MarketHistory {
     const slice = this.days.get(dateKey);
     if (!slice) return [];
     if (slice.m1) return slice.m1;
-    const curve = this.curveFor(dateKey);
-    slice.m1 = minuteBars(this.inst, slice.dayStartS, slice.base, (t) => curve.value(t));
-    this.barOrder.push(dateKey);
-    while (this.barOrder.length > this.maxCachedDays) {
-      const evict = this.barOrder.shift()!;
-      const s = this.days.get(evict);
-      if (s) delete s.m1;
-    }
-    return slice.m1;
+    return this.fillMinutes(slice, this.curveFor(dateKey));
   }
 
   /**
@@ -159,11 +213,10 @@ export class MarketHistory {
     const want = Math.max(1, Math.min(MAX_BARS, Math.floor(count)));
     const end = Math.min(toS ?? Math.floor(this.now() / 1000), Math.floor(this.now() / 1000));
     const endKey = dateKeyUTC(end * 1000);
-    this.chainThrough(endKey);
 
     // Days needed for `want` bars of this timeframe, with a little slack for partial buckets.
     const spanS = tf === "MN1" ? 31 * DAY_S : TIMEFRAMES[tf];
-    const daysNeeded = Math.min(HISTORY_DAYS + 1, Math.ceil((want * spanS) / DAY_S) + 2);
+    const daysNeeded = Math.min(this.historyDays + 1, Math.ceil((want * spanS) / DAY_S) + 2);
 
     const genesis = this.genesisKey();
     const keys: string[] = [];
@@ -172,10 +225,13 @@ export class MarketHistory {
       keys.unshift(key);
       key = prevKey(key);
     }
+    // Which days are wanted is known before the chain is walked, which is what lets the walk fill
+    // their bars from the curve it is already building for each day.
+    this.chainThrough(endKey, new Set(keys));
 
     const hourly = TIMEFRAMES[tf] >= TIMEFRAMES.H1 || tf === "MN1";
     let src: Candle[] = [];
-    for (const k of keys) src = src.concat(hourly ? (this.days.get(k)?.h1 ?? []) : this.minutesFor(k));
+    for (const k of keys) src = src.concat(hourly ? this.hoursFor(k) : this.minutesFor(k));
 
     const unit = hourly ? TIMEFRAMES.H1 : 60;
     // A bar that has not finished yet must never be served as if it had: its high, low and close are
