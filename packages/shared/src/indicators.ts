@@ -175,7 +175,7 @@ export interface AdxPoint { adx: number; plusDi: number; minusDi: number }
  * a lower low (−DM) — and never both. Each is Wilder-smoothed, normalised by the smoothed true
  * range into +DI/−DI, and ADX is the smoothed spread between them.
  */
-export function adx(bars: readonly Candle[], period = 14): Array<AdxPoint | null> {
+export function adxWilder(bars: readonly Candle[], period = 14): Array<AdxPoint | null> {
   const n = bars.length;
   const out: Array<AdxPoint | null> = new Array(n).fill(null);
   if (n < 2) return out;
@@ -622,4 +622,138 @@ export function fractals(bars: readonly Candle[], window = 5): Fractal[] {
     }
     return { up, down };
   });
+}
+
+/**
+ * Average Directional Movement Index, MetaTrader's `iADX`.
+ *
+ * MetaTrader ships TWO of these and they are not the same indicator. Its own ADX.mq5 smooths DI+,
+ * DI- and the main line with an EXPONENTIAL moving average over the raw True Range, while ADXW.mq5
+ * smooths the True Range, both DIs and the main line with Wilder's SMMA. MetaQuotes documents the
+ * two as distinct entries in the Navigator but publishes no formula for either; the difference
+ * above is read off the source it ships with the terminal (see the MQL5 forum thread "Difference
+ * between ADX and ADX Wilder").
+ *
+ * This matters here because what this codebase called "Average Directional Movement" was smoothed
+ * with SMMA throughout, which makes it `adxWilder`. It is now named that, and this is the other one.
+ */
+export function adx(bars: readonly Candle[], period = 14): Array<AdxPoint | null> {
+  const n = bars.length;
+  const out: Array<AdxPoint | null> = new Array(n).fill(null);
+  if (n < 2) return out;
+
+  const plusDm: number[] = [0], minusDm: number[] = [0], tr: number[] = [bars[0]!.high - bars[0]!.low];
+  for (let i = 1; i < n; i++) {
+    const b = bars[i]!, p = bars[i - 1]!;
+    const up = b.high - p.high;
+    const down = p.low - b.low;
+    plusDm.push(up > down && up > 0 ? up : 0);
+    minusDm.push(down > up && down > 0 ? down : 0);
+    tr.push(Math.max(b.high - b.low, Math.abs(b.high - p.close), Math.abs(b.low - p.close)));
+  }
+
+  // The DIs are the exponentially smoothed directional movements over the RAW true range.
+  const ePlus = ema(plusDm, period), eMinus = ema(minusDm, period), eTr = ema(tr, period);
+  const dx: number[] = new Array(n).fill(0);
+  const dxValid: boolean[] = new Array(n).fill(false);
+  const di: Array<{ p: number; m: number } | null> = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const t = eTr[i], p = ePlus[i], m = eMinus[i];
+    if (t === null || t === undefined || p === null || p === undefined || m === null || m === undefined || t === 0) continue;
+    const pdi = (100 * p) / t, mdi = (100 * m) / t;
+    di[i] = { p: pdi, m: mdi };
+    const sum = pdi + mdi;
+    dx[i] = sum === 0 ? 0 : (100 * Math.abs(pdi - mdi)) / sum;
+    dxValid[i] = true;
+  }
+
+  const first = dxValid.indexOf(true);
+  if (first < 0) return out;
+  const smoothed = ema(dx.slice(first), period);
+  for (let i = 0; i < n; i++) {
+    const d = di[i];
+    const a = i >= first ? smoothed[i - first] : null;
+    if (d && a !== null && a !== undefined) out[i] = { adx: a, plusDi: d.p, minusDi: d.m };
+  }
+  return out;
+}
+
+/**
+ * Fractal Adaptive Moving Average (FRAMA), MetaTrader's `iFrAMA`.
+ *
+ * Ehlers' idea: measure how fractal the recent price path is, and let that set the smoothing. The
+ * window is split in half; each half's range per bar is compared with the whole window's range per
+ * bar, and the ratio gives a fractal dimension D between 1 (a straight line) and 2 (noise). The
+ * smoothing constant is exp(-4.6 * (D - 1)), so a trending market gets a fast average and a choppy
+ * one gets a slow average.
+ *
+ * `period` must be even for the halves to be equal, which is why MetaTrader's default is 14.
+ */
+export function frama(bars: readonly Candle[], period = 14): Series {
+  const n = bars.length;
+  const out: Series = new Array(n).fill(null);
+  const half = Math.floor(period / 2);
+  if (half < 1 || n === 0) return out;
+
+  const rangeOver = (from: number, to: number): number => {
+    let hi = -Infinity, lo = Infinity;
+    for (let i = from; i <= to; i++) {
+      const b = bars[i]!;
+      if (b.high > hi) hi = b.high;
+      if (b.low < lo) lo = b.low;
+    }
+    return hi - lo;
+  };
+
+  let prev: number | null = null;
+  for (let i = period - 1; i < n; i++) {
+    const start = i - period + 1;
+    const mid = start + half;
+    const n1 = rangeOver(mid, i) / half;            // the RECENT half
+    const n2 = rangeOver(start, mid - 1) / half;    // the OLDER half
+    const n3 = rangeOver(start, i) / period;        // the whole window
+    let alpha: number;
+    if (n1 > 0 && n2 > 0 && n3 > 0) {
+      const d = (Math.log(n1 + n2) - Math.log(n3)) / Math.LN2;
+      alpha = Math.exp(-4.6 * (d - 1));
+      // MetaTrader clamps the constant so the average can neither freeze nor become the price.
+      alpha = Math.min(1, Math.max(0.01, alpha));
+    } else {
+      alpha = 1; // a flat window carries no information: follow the price rather than invent a lag
+    }
+    const price = bars[i]!.close;
+    prev = prev === null ? price : alpha * price + (1 - alpha) * prev;
+    out[i] = prev;
+  }
+  return out;
+}
+
+/**
+ * Variable Index Dynamic Average (VIDyA), MetaTrader's `iVIDyA`.
+ *
+ * Chande's average: an EMA whose smoothing constant is scaled by the absolute Chande Momentum
+ * Oscillator, so the average speeds up when the market is directional and slows when it is not.
+ * MetaTrader's defaults are a 9-bar CMO and a 12-bar EMA.
+ */
+export function vidya(src: readonly number[], cmoPeriod = 9, emaPeriod = 12): Series {
+  const n = src.length;
+  const out: Series = new Array(n).fill(null);
+  if (n === 0 || cmoPeriod < 1 || emaPeriod < 1) return out;
+  const f = 2 / (emaPeriod + 1);
+
+  let prev: number | null = null;
+  for (let i = cmoPeriod; i < n; i++) {
+    let up = 0, down = 0;
+    for (let j = i - cmoPeriod + 1; j <= i; j++) {
+      const diff = src[j]! - src[j - 1]!;
+      if (diff > 0) up += diff; else down -= diff;
+    }
+    const total = up + down;
+    const cmo = total === 0 ? 0 : Math.abs((up - down) / total);
+    const k = f * cmo;
+    const price = src[i]!;
+    prev = prev === null ? price : price * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
 }
