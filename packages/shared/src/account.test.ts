@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountSummary, lotsOfStake, LOT_STAKE_CENTS } from "./account.js";
+import { accountSummary, exposureRows, lotsOfStake, LOT_STAKE_CENTS } from "./account.js";
 
 test("a flat account: equity is the balance and there is no margin level", () => {
   const a = accountSummary({ balanceCents: 500_000, openStakeCents: 0, floatingPnlCents: 0 });
@@ -51,4 +51,44 @@ test("volume: a stake renders as lots at the documented contract size", () => {
   assert.equal(lotsOfStake(5_000_000), "5.00");    // the KES 50,000 maximum stake
   // Presentation only: it must never round a stake to zero and so imply a free trade.
   assert.notEqual(lotsOfStake(25_000), "0.00");
+});
+
+test("exposure nets opposite contracts on one symbol, as MetaTrader's Exposure does", () => {
+  // A buy is positive and a sell negative, so one of each in the same size is flat in volume.
+  const rows = exposureRows([
+    { symbol: "XAUUSD", direction: "buy", stakeCents: LOT_STAKE_CENTS },
+    { symbol: "XAUUSD", direction: "sell", stakeCents: LOT_STAKE_CENTS },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.netLots, 0);
+  // But the money committed is NOT flat: both stakes are still at risk.
+  assert.equal(rows[0]!.valueCents, 2 * LOT_STAKE_CENTS);
+  assert.equal(rows[0]!.share, 1);
+});
+
+test("exposure reports each symbol once, largest first", () => {
+  const rows = exposureRows([
+    { symbol: "EURUSD", direction: "buy", stakeCents: 100_000 },
+    { symbol: "XAUUSD", direction: "buy", stakeCents: 300_000 },
+    { symbol: "EURUSD", direction: "buy", stakeCents: 100_000 },
+  ]);
+  assert.deepEqual(rows.map((r) => r.symbol), ["XAUUSD", "EURUSD"]);
+  assert.equal(rows[0]!.valueCents, 300_000);
+  assert.equal(rows[1]!.valueCents, 200_000);
+  // The shares are the bar MetaTrader draws, and they account for the whole account.
+  assert.equal(rows[0]!.share + rows[1]!.share, 1);
+  assert.ok(Math.abs(rows[0]!.share - 0.6) < 1e-9);
+});
+
+test("a short position is a negative volume and a positive value", () => {
+  const rows = exposureRows([
+    { symbol: "XAUUSD", direction: "sell", stakeCents: 2 * LOT_STAKE_CENTS },
+  ]);
+  assert.equal(rows[0]!.netLots, -2);
+  // Money at risk has no direction.
+  assert.equal(rows[0]!.valueCents, 2 * LOT_STAKE_CENTS);
+});
+
+test("a flat account has no exposure rows, as MetaTrader shows none", () => {
+  assert.deepEqual(exposureRows([]), []);
 });
