@@ -5,6 +5,7 @@ import {
   winMultiplier, solveTruncExpBeta,
   checkFeasible, rtp, requiredMeanWinMultiplier, DEFAULT_CONFIG, CALIBRATION_WINDOW_S,
   curveDomain,
+  SYMBOL_GROUPS, symbolsInGroup, DEFAULT_SYMBOL,
   type GameConfig,
 } from "@invest254/shared";
 
@@ -152,7 +153,20 @@ test("checkFeasible: rejects infeasible economies (RTP unreachable within the ca
 // But "should" is not evidence, so it is measured here per symbol. If this fails, multi-symbol does
 // not ship in the statistical path.
 
-const SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "XAGUSD"];
+/**
+ * The gate's sample: the default symbol plus the first instrument of every group in the real
+ * catalogue.
+ *
+ * Drawn from the catalogue rather than hand-listed deliberately. The catalogue carries ninety-odd
+ * symbols and calibrating all of them would cost minutes of CI for no new information — every curve
+ * is the same stochastic process under a different seed. But a NEW GROUP is new information, and
+ * deriving the sample this way means adding one puts it through the gate automatically instead of
+ * relying on whoever adds it to remember this file.
+ */
+const SYMBOLS = [
+  DEFAULT_SYMBOL,
+  ...SYMBOL_GROUPS.map((g) => symbolsInGroup(g)[0]!.symbol),
+].filter((s, i, all) => all.indexOf(s) === i);
 
 for (const lc of [
   // Production: the shipped default.

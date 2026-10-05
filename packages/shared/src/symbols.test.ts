@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SYMBOLS, SYMBOL_GROUPS, DEFAULT_SYMBOL, CURVE_DAY_TRAVEL,
+  SYMBOLS, SYMBOL_GROUPS, DEFAULT_SYMBOL, CURVE_DAY_TRAVEL, conventionalDigits,
   instrumentFor, marketSymbolOf, scaleFor, symbolDef, symbolsInGroup,
 } from "./symbols.js";
 import { XAUUSD } from "./candles.js";
@@ -70,15 +70,74 @@ test("every symbol is unique, because the symbol IS the seed domain", () => {
   for (const n of names) assert.ok(n.length > 0);
 });
 
-test("the four groups are all populated, and every symbol is in one", () => {
-  assert.deepEqual([...SYMBOL_GROUPS], ["Forex\\Majors", "Metals", "Crypto", "Indices"]);
+test("the seven groups are all populated, and every symbol is in one", () => {
+  assert.deepEqual([...SYMBOL_GROUPS], [
+    "Forex\\Majors", "Forex\\Minors", "Forex\\Exotics",
+    "Metals", "Crypto", "Indices", "Energies",
+  ]);
   for (const g of SYMBOL_GROUPS) assert.ok(symbolsInGroup(g).length > 0, g);
   assert.equal(
     SYMBOL_GROUPS.reduce((n, g) => n + symbolsInGroup(g).length, 0),
     SYMBOLS.length,
   );
-  // The seven majors that carry USD on one side.
+  // The seven majors that carry USD on one side. Exactly seven: there is no eighth major, so a
+  // pair arriving in this group is either a cross or a mistake.
   assert.equal(symbolsInGroup("Forex\\Majors").length, 7);
+  // The catalogue is broker-sized rather than a demo of four symbols.
+  assert.ok(SYMBOLS.length >= 90, `${SYMBOLS.length} symbols`);
+});
+
+test("the digit rule is applied, not merely documented", () => {
+  // At ninety-odd symbols, a hand-picked digit count per row is ninety chances to be quietly
+  // wrong. There is one rule, and every row obeys it with no exceptions.
+  for (const d of SYMBOLS) {
+    assert.equal(d.digits, conventionalDigits(d.group, d.anchor), d.symbol);
+  }
+  // And the rule itself reproduces the conventions that are not negotiable.
+  assert.equal(conventionalDigits("Forex\\Majors", 1.085), 5, "a major");
+  assert.equal(conventionalDigits("Forex\\Majors", 151.5), 3, "a yen pair");
+  assert.equal(conventionalDigits("Metals", 2650), 2, "gold");
+  assert.equal(conventionalDigits("Metals", 31.2), 3, "silver");
+  assert.equal(conventionalDigits("Indices", 42_000), 2, "an index");
+  assert.equal(conventionalDigits("Crypto", 62_000), 2, "bitcoin");
+  assert.equal(conventionalDigits("Crypto", 0.52), 5, "a sub-dollar coin");
+  assert.equal(conventionalDigits("Energies", 70.45), 2, "oil");
+  assert.equal(conventionalDigits("Energies", 2.875), 3, "gas");
+});
+
+test("a pair is in the group its own currencies put it in", () => {
+  // The group is not decoration: MetaTrader's Symbols tree is how a trader finds an instrument, and
+  // a cross filed under Majors would be unfindable.
+  const code = (s: string, at: 0 | 3) => s.slice(at, at + 3);
+  for (const d of symbolsInGroup("Forex\\Majors")) {
+    assert.equal(d.symbol.length, 6, d.symbol);
+    assert.ok(
+      code(d.symbol, 0) === "USD" || code(d.symbol, 3) === "USD",
+      `${d.symbol} is in Majors without a USD leg`,
+    );
+  }
+  const MAJOR_CURRENCIES = new Set(["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"]);
+  for (const d of symbolsInGroup("Forex\\Minors")) {
+    assert.equal(d.symbol.length, 6, d.symbol);
+    // A cross has no USD leg, and both legs are themselves major currencies.
+    assert.ok(!d.symbol.includes("USD"), `${d.symbol} is a cross with a USD leg`);
+    assert.ok(MAJOR_CURRENCIES.has(code(d.symbol, 0)), d.symbol);
+    assert.ok(MAJOR_CURRENCIES.has(code(d.symbol, 3)), d.symbol);
+  }
+  for (const d of symbolsInGroup("Forex\\Exotics")) {
+    assert.equal(d.symbol.length, 6, d.symbol);
+    // An exotic is quoted against a major base, and its quote currency is NOT a major — otherwise
+    // it belongs in one of the two groups above.
+    assert.ok(MAJOR_CURRENCIES.has(code(d.symbol, 0)), d.symbol);
+    assert.ok(!MAJOR_CURRENCIES.has(code(d.symbol, 3)), `${d.symbol} is not exotic`);
+  }
+});
+
+test("no two symbols are the same instrument under two names", () => {
+  // Two rows with the same group, anchor and day range would be indistinguishable on a chart, which
+  // is the catalogue padding itself out. The curves would differ, but nothing else would.
+  const shape = SYMBOLS.map((d) => `${d.group}|${d.anchor}|${d.dayRange}`);
+  assert.equal(new Set(shape).size, shape.length);
 });
 
 test("volatility is ordered the way these markets actually are", () => {
