@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas, type MarketerBeat } from '@/components/game/CurveCanvas';
 import { CandleChart } from '@/components/game/CandleChart';
+import { lotsOfStake } from '@invest254/shared/account';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
@@ -75,7 +76,16 @@ export function GameCurve() {
           neutralized form (no price axis, labels or red/green) is now reached only by a player who
           chose Basic — a marketer sees the same wave a player does. */}
       {tvType ? (
-        <CandleChart key={tvType} initialType={tvType} getLastTick={getLastTick} requestCandles={requestCandles} status={status} />
+        <CandleChart
+          key={tvType}
+          initialType={tvType}
+          getLastTick={getLastTick}
+          requestCandles={requestCandles}
+          status={status}
+          openPosition={activePosition && activePosition.entryRate !== null
+            ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents) }
+            : null}
+        />
       ) : (
         <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} />
       )}

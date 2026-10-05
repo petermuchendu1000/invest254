@@ -74,9 +74,11 @@ export function MT5OrderTicket() {
   const digits = market?.instrument.digits ?? 2;
   const symbol = market?.instrument.symbol ?? 'XAUUSD';
   const tick = getLastTick();
-  const price = market && tick
-    ? market.anchor.base + market.instrument.scale * (valueOfRate(tick.rate) - market.anchor.openValue)
-    : null;
+  const priceOfRate = (rate: number | null | undefined): number | null =>
+    market && rate !== null && rate !== undefined
+      ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue)
+      : null;
+  const price = tick ? priceOfRate(tick.rate) : null;
 
   // ── Volume ─────────────────────────────────────────────────────────────────────────────────────
   // Lots are the stake divided by the contract size. The brand's MINIMUM is the floor, so the
@@ -142,13 +144,13 @@ export function MT5OrderTicket() {
   if (activePosition) {
     return (
       <div className="flex flex-col gap-2 rounded border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
-        <MT5LivePosition pos={activePosition} symbol={symbol} />
+        <MT5LivePosition pos={activePosition} symbol={symbol} digits={digits} price={price} openPrice={priceOfRate(activePosition.entryRate)} />
       </div>
     );
   }
 
-  const rowLabel = 'w-16 shrink-0 text-[11px] uppercase tracking-wide text-[#8fa2b8] lg:w-auto lg:basis-full';
-  const stepBtn = 'h-8 min-w-11 lg:min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-2 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
+  const rowLabel = 'w-20 shrink-0 text-[12px] text-[#8fa2b8] lg:w-auto lg:basis-full';
+  const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-1 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
@@ -158,27 +160,37 @@ export function MT5OrderTicket() {
         <span className="text-[11px] text-[#8fa2b8]">Market Execution</span>
       </div>
 
-      {/* Volume — MetaTrader's stepper row. */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className={rowLabel}>Volume</span>
-        <button type="button" onClick={() => bump(-VOLUME_STEPS[0])} disabled={lots <= minLots} className={stepBtn} aria-label="Decrease volume">−0.01</button>
-        <span className="flex h-8 min-w-[4rem] flex-1 basis-16 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-bold text-white tabular-nums">
+      {/* Volume. MetaTrader's mobile stepper is a single full-width row of equal cells with NO
+          inline label: the centre cell IS the volume (iOS five cells, Android seven, the increments
+          scaling with magnitude). Ours had a label and an asymmetric -1/+2 arrangement that no
+          MetaTrader build has, and at phone width it wrapped onto two lines. */}
+      <div className="grid grid-cols-5 gap-1">
+        {VOLUME_STEPS.slice().reverse().map((st) => (
+          <button key={`-${st}`} type="button" onClick={() => bump(-st)} disabled={lots <= minLots} className={stepBtn} aria-label={`Decrease volume by ${st}`}>
+            −{st}
+          </button>
+        ))}
+        <span
+          aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
+          className="flex h-8 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-bold text-white tabular-nums"
+        >
           {lots.toFixed(volDigits)}
         </span>
-        {VOLUME_STEPS.map((s) => (
-          <button key={s} type="button" onClick={() => bump(s)} disabled={lots >= maxLots} className={stepBtn} aria-label={`Increase volume by ${s}`}>
-            +{s}
+        {VOLUME_STEPS.map((st) => (
+          <button key={`+${st}`} type="button" onClick={() => bump(st)} disabled={lots >= maxLots} className={stepBtn} aria-label={`Increase volume by ${st}`}>
+            +{st}
           </button>
         ))}
       </div>
-      <div className="flex items-baseline gap-2 pl-[4.25rem] text-[11px] text-[#8fa2b8] lg:pl-0">
+      <div className="flex items-baseline gap-2 text-[11px] text-[#8fa2b8]">
         <span>= {money.fmt(stakeCents)}</span>
         <span className="ml-auto">min {minLots.toFixed(volDigits)}{limits.maxCents === undefined ? '' : ` / max ${maxLots.toFixed(volDigits)}`}</span>
       </div>
 
-      {/* S/L and T/P, as MetaTrader's "− value +" rows rather than free-text fields. */}
+      {/* Stop Loss and Take Profit. MetaTrader's ORDER TICKET writes these out in full; "S / L"
+          and "T / P" are the Toolbox column headers, which is a different surface. */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className={rowLabel}>S / L</span>
+        <span className={rowLabel}>Stop Loss</span>
         {/* MetaTrader's S/L, stated rather than offered, and now carrying the figure it stands for.
             The engine settles a losing contract at expiry and refuses to close one early, so the
             stop on this contract is fixed at the stake: that is the most it can lose, whatever the
@@ -191,7 +203,7 @@ export function MT5OrderTicket() {
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className={rowLabel}>T / P</span>
+        <span className={rowLabel}>Take Profit</span>
         {/* A target that the engine can never act on is not a setting, so where early close is off
             the steppers are off with it and the row states what actually happens. */}
         <button type="button" onClick={() => bumpTp(-1)} disabled={!earlyCloseEnabled || tpTarget === null} className={stepBtn} aria-label="Lower take profit">−</button>
@@ -199,7 +211,7 @@ export function MT5OrderTicket() {
           'flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[12px] font-semibold tabular-nums',
           earlyCloseEnabled ? 'text-[#ffffff]' : 'text-[#8fa2b8]',
         )}>
-          {!earlyCloseEnabled ? 'at expiry' : tpTarget === null ? 'none' : money.fmt(tpTarget)}
+          {!earlyCloseEnabled ? 'at expiry' : tpTarget === null ? 'not set' : money.fmt(tpTarget)}
         </span>
         <button type="button" onClick={() => bumpTp(1)} disabled={!earlyCloseEnabled} className={stepBtn} aria-label="Raise take profit">+</button>
       </div>
@@ -209,7 +221,19 @@ export function MT5OrderTicket() {
           : <>This brand settles every contract at expiry, so a profit target cannot close one early.</>}
       </p>
 
-      {/* Expiry — not a MetaTrader control, because a MetaTrader position has no expiry. Ours does. */}
+      {/* Fill policy. MetaTrader's ticket carries this row; under Market Execution the only option
+          is "Fill or Kill", rendered as the selected word rather than a dropdown. This engine fills
+          at the next tick or rejects, which is that policy exactly. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={rowLabel}>Fill policy</span>
+        <span className="flex h-8 flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] text-[12px] text-[#8fa2b8] underline decoration-[#8fa2b8]/40 underline-offset-4">
+          Fill or Kill
+        </span>
+      </div>
+
+      {/* Expiry. NOT a MetaTrader control: a MetaTrader position has no expiry, so there is no
+          original to copy. It stays because this contract genuinely has a term, and hiding it would
+          hide the single most important thing about the trade. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>Expiry</span>
         <div className="flex flex-1 gap-1">
@@ -230,25 +254,33 @@ export function MT5OrderTicket() {
         </div>
       </div>
 
-      {/* The quote buttons. SELL red, BUY blue — MetaTrader's pairing. */}
-      <div className="mt-0.5 grid grid-cols-2 gap-2">
+      {/* The quote, then the buttons.
+          MetaTrader's modern order dialog puts NO price on the buttons. The price is shown
+          separately, large and centred above them, and the buttons read "Sell by Market" and
+          "Buy by Market" under Market Execution. Ours used to print the SAME price on both sides,
+          which read as a bid and an ask that were somehow equal. This feed quotes ONE rate and has
+          no spread, so one price is the truth; inventing a second would be the exact habit this
+          rebuild exists to break. */}
+      <div className="flex items-end justify-center pt-0.5">
+        <MT5Price value={price} digits={digits} className="text-[26px] font-semibold" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={() => place('sell')}
           disabled={connecting}
-          className="flex h-16 flex-col items-center justify-center rounded-md bg-[#e8403a] text-white transition active:brightness-90 disabled:opacity-50"
+          className="flex h-12 items-center justify-center rounded-md bg-[#e24242] text-[13px] font-semibold text-white transition active:brightness-90 disabled:opacity-50"
         >
-          <span className="text-[11px] font-semibold uppercase tracking-wider opacity-90">Sell</span>
-          <MT5Price value={price} digits={digits} tone="sell" className="text-[13px]" />
+          Sell by Market
         </button>
         <button
           type="button"
           onClick={() => place('buy')}
           disabled={connecting}
-          className="flex h-16 flex-col items-center justify-center rounded-md bg-[#3183ff] text-white transition active:brightness-90 disabled:opacity-50"
+          className="flex h-12 items-center justify-center rounded-md bg-[#3e78fa] text-[13px] font-semibold text-white transition active:brightness-90 disabled:opacity-50"
         >
-          <span className="text-[11px] font-semibold uppercase tracking-wider opacity-90">Buy</span>
-          <MT5Price value={price} digits={digits} tone="buy" className="text-[13px]" />
+          Buy by Market
         </button>
       </div>
 

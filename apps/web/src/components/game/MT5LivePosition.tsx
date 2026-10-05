@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
+import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
 import { cn } from '@/lib/cn';
 import type { ActivePosition } from '@/lib/game/betting';
 
@@ -19,9 +20,20 @@ import type { ActivePosition } from '@/lib/game/betting';
  * green/red for up/down. The expiry countdown has no MetaTrader equivalent — nothing in MT5 closes
  * itself on a timer — so it is stated plainly as a row rather than dressed as a progress bar.
  */
-export function MT5LivePosition({ pos, symbol }: { pos: ActivePosition; symbol: string }) {
+export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
+  pos: ActivePosition;
+  symbol: string;
+  digits: number;
+  price: number | null;
+  /** The position's entry, mapped through the day anchor into the symbol's own price. */
+  openPrice: number | null;
+}) {
   const money = useDisplayMoney();
   const { sell, earlyCloseEnabled } = useGameSocket();
+  // MetaTrader does not close a position straight off a button: it opens the Close position form.
+  // See docs/mt5/01-order-and-close-dialogs.md; the one-click close without confirmation is the
+  // cross in the Trade tab's Profit column, which is a different control and already correct.
+  const [closing, setClosing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -90,7 +102,7 @@ export function MT5LivePosition({ pos, symbol }: { pos: ActivePosition; symbol: 
       {earlyCloseEnabled ? (
         <button
           type="button"
-          onClick={sell}
+          onClick={() => setClosing(true)}
           disabled={!closable}
           title={pos.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
           className="h-9 w-full rounded-sm border border-[#2b3543] bg-[#202933] text-[12px] font-semibold text-white transition hover:border-[#3183ff] disabled:cursor-not-allowed disabled:opacity-40"
@@ -109,6 +121,19 @@ export function MT5LivePosition({ pos, symbol }: { pos: ActivePosition; symbol: 
       <p className="text-[10px] text-[#8fa2b8]">
         Max loss {money.fmt(pos.stakeCents)} (the stake). This contract cannot lose more.
       </p>
+
+      {closing ? (
+        <MT5ClosePosition
+          pos={pos}
+          symbol={symbol}
+          digits={digits}
+          price={price}
+          openPrice={openPrice}
+          busy={pos.phase === 'settling'}
+          onDismiss={() => setClosing(false)}
+          onConfirm={() => { sell(); setClosing(false); }}
+        />
+      ) : null}
     </div>
   );
 }

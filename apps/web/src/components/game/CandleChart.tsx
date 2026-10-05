@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   IChartApi, ISeriesApi, UTCTimestamp, CandlestickData, BarData, LineData, Time, SeriesType, LogicalRange,
 } from 'lightweight-charts';
-import type { Candle } from '@invest254/shared/chart';
+import { heikinAshi, heikinAshiBar, type Candle } from '@invest254/shared/chart';
 import {
   INDICATOR_BY_ID, INDICATOR_GROUPS, VOLUME_GROUP_NOTE, type Plot,
 } from '@/lib/chart/indicatorCatalog';
@@ -42,11 +42,33 @@ import { cn } from '@/lib/cn';
  * Lightweight Charts is imported dynamically inside the effect so it never runs during SSR.
  */
 
-type MainType = 'candles' | 'bars' | 'line' | 'area' | 'baseline';
+type MainType = 'candles' | 'bars' | 'line' | 'heikin' | 'area' | 'baseline';
 type ScaleMode = 'normal' | 'log' | 'percent';
 
+/**
+ * MetaTrader's chart types, under MetaTrader's own names.
+ *
+ * The desktop has exactly THREE: `ENUM_CHART_MODE` holds CHART_BARS, CHART_CANDLES and CHART_LINE
+ * and nothing else, so there is no API surface for a fourth. The labels are the ones its F8
+ * Properties dialog uses ("Bar chart", "Candlesticks", "Line chart"), which is better evidence of
+ * the live UI than the help prose, and the shortcuts are Alt+1/2/3.
+ *
+ * MOBILE has a native fourth, Heikin Ashi, listed on both the Android and iPhone chart pages with
+ * its formula. This product is phone first, so it belongs here.
+ *
+ * Area and Baseline are NOT MetaTrader chart types and are not offered. They are not deleted,
+ * though: `area` and `baseline` are sellable chart SYSTEMS (migrations 0147 and 0166) that a brand
+ * can be assigned or can buy, so a brand that owns one still opens on it and can return to it. That
+ * is the one entry this menu adds beyond MetaTrader's set, and only for the brand that paid for it.
+ */
 const CHART_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
-  { id: 'candles', label: 'Candles' }, { id: 'bars', label: 'Bars' }, { id: 'line', label: 'Line' },
+  { id: 'bars', label: 'Bar chart' },
+  { id: 'candles', label: 'Candlesticks' },
+  { id: 'line', label: 'Line chart' },
+  { id: 'heikin', label: 'Heikin Ashi' },
+];
+/** The add-on systems that are not MetaTrader types; shown only to the brand that owns one. */
+const ADDON_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
   { id: 'area', label: 'Area' }, { id: 'baseline', label: 'Baseline' },
 ];
 const SCALES: ReadonlyArray<{ id: ScaleMode; label: string }> = [
@@ -106,13 +128,19 @@ interface Legend { o: number; h: number; l: number; c: number; changePct: number
 type Anchor = CandlesReply['anchor'];
 
 export function CandleChart({
-  getLastTick, requestCandles, status, initialType = 'candles',
+  getLastTick, requestCandles, status, initialType = 'candles', openPosition = null,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
   /** Connection state, so history can be refetched after a drop. */
   status: ConnStatus;
   initialType?: MainType;
+  /**
+   * The live position, so the chart can draw its level. MetaTrader's `CHART_SHOW_TRADE_LEVELS`
+   * draws "levels of open positions, Stop Loss, Take Profit and pending orders"; here only the
+   * open-position level exists, for the reason given where it is drawn.
+   */
+  openPosition?: { entryRate: number | null; direction: 'buy' | 'sell'; lots: string } | null;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -127,6 +155,13 @@ export function CandleChart({
   const plotsRef = useRef(new Map<string, ISeriesApi<SeriesType>>());
   const markersRef = useRef(new Map<string, { setMarkers: (m: unknown[]) => void }>());
   const lcRef = useRef<typeof import('lightweight-charts') | null>(null);
+  /**
+   * Heikin Ashi's live state: the bar currently drawn for the newest bucket, and the one before it.
+   * A Heikin Ashi bar is defined by its predecessor, so the forming bar cannot be computed from the
+   * tick alone, and the library will not accept an update to any bar but the newest.
+   */
+  const haLastRef = useRef<Candle | null>(null);
+  const haPrevRef = useRef<Candle | null>(null);
   /** Closed history plus, as the last element, the bar currently forming from live ticks. */
   const candlesRef = useRef<Candle[]>([]);
   const anchorRef = useRef<Anchor | null>(null);
@@ -396,7 +431,13 @@ export function CandleChart({
     const main = mainRef.current; if (!main) return;
     const data = candlesRef.current;
     const t = chartTypeRef.current;
-    if (t === 'candles' || t === 'bars') main.setData(data as unknown as (CandlestickData | BarData)[]);
+    if (t === 'heikin') {
+      const ha = heikinAshi(data);
+      main.setData(ha as unknown as CandlestickData[]);
+      haLastRef.current = ha.length ? ha[ha.length - 1]! : null;
+      haPrevRef.current = ha.length > 1 ? ha[ha.length - 2]! : null;
+    }
+    else if (t === 'candles' || t === 'bars') main.setData(data as unknown as (CandlestickData | BarData)[]);
     else main.setData(data.map((c) => ({ time: c.time as UTCTimestamp, value: c.close })) as LineData[]);
     refreshIndicators();
   }, [refreshIndicators]);
@@ -544,7 +585,7 @@ export function CandleChart({
       const baseVal = held.length ? held[Math.floor(held.length / 2)]!.close : 0;
       const t = chartTypeRef.current;
       let main: ISeriesApi<SeriesType>;
-      if (t === 'candles') main = chart.addSeries(CandlestickSeries, { upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down, priceFormat });
+      if (t === 'candles' || t === 'heikin') main = chart.addSeries(CandlestickSeries, { upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down, priceFormat });
       else if (t === 'bars') main = chart.addSeries(BarSeries, { upColor: up, downColor: down, priceFormat });
       else if (t === 'line') main = chart.addSeries(LineSeries, { color: accent, lineWidth: 2, priceFormat });
       else if (t === 'area') main = chart.addSeries(AreaSeries, { lineColor: accent, topColor: `${accent}55`, bottomColor: `${accent}05`, lineWidth: 2, priceFormat });
@@ -610,8 +651,19 @@ export function CandleChart({
 
           const tm = bar.time as UTCTimestamp;
           const kind = chartTypeRef.current;
-          if (kind === 'candles' || kind === 'bars') series.update({ time: tm, open: bar.open, high: bar.high, low: bar.low, close: bar.close } as CandlestickData);
-          else series.update({ time: tm, value: bar.close } as LineData);
+          if (kind === 'heikin') {
+            // Only ever the NEWEST bar: the library refuses an update to an older one, and the
+            // formula needs nothing more than the bar before this one.
+            const last = haLastRef.current;
+            if (last && last.time !== bar.time) haPrevRef.current = last;
+            const ha = heikinAshiBar(bar, haPrevRef.current);
+            haLastRef.current = ha;
+            series.update({ time: ha.time as UTCTimestamp, open: ha.open, high: ha.high, low: ha.low, close: ha.close } as CandlestickData);
+          } else if (kind === 'candles' || kind === 'bars') {
+            series.update({ time: tm, open: bar.open, high: bar.high, low: bar.low, close: bar.close } as CandlestickData);
+          } else {
+            series.update({ time: tm, value: bar.close } as LineData);
+          }
 
           // One path for both cases. Appending only the newest value cannot work once displaced
           // indicators are in play, and recomputing costs a pass per switched-on indicator.
@@ -648,6 +700,45 @@ export function CandleChart({
   const active = 'bg-[#2b3543] text-white';
   const up = (legend?.changePct ?? 0) >= 0;
   const row = 'flex items-center gap-0.5';
+  /**
+   * MetaTrader's trade levels.
+   *
+   * `CHART_SHOW_TRADE_LEVELS` draws the levels of open positions, Stop Loss, Take Profit and
+   * pending orders. Only the first of those can exist here, and the reasons are worth stating
+   * because they are not laziness:
+   *   - there are no pending orders: every contract is market execution;
+   *   - the Stop Loss has no price level at all. A losing contract cannot be closed early, so the
+   *     whole downside is the stake and no price would ever trigger a stop;
+   *   - the Take Profit is an amount rather than a price, because the payout rises with elapsed
+   *     time rather than with price, so it has no line to sit on either.
+   * Drawing a stop line at a made-up price would be the exact invention this rebuild is undoing.
+   *
+   * Colour: MetaTrader draws position levels in the `Volumes` colour (CHART_COLOR_VOLUME is
+   * documented as "Color of volumes and position opening levels"), which is Green in the one
+   * scheme MetaQuotes publishes values for. The dark schemes' values are undocumented, so this
+   * uses the terminal's own green rather than inventing a hex and calling it MetaTrader's.
+   */
+  useEffect(() => {
+    const series = mainRef.current;
+    const anchor = anchorRef.current;
+    const lc = lcRef.current;
+    if (!series || !anchor || !lc) return;
+    const rate = openPosition?.entryRate ?? null;
+    if (rate === null || !openPosition) return;
+    const inst = instRef.current;
+    const price = anchor.base + inst.scale * (valueOfRate(rate) - anchor.openValue);
+    if (!Number.isFinite(price)) return;
+    const line = series.createPriceLine({
+      price,
+      color: TV.up,
+      lineWidth: 1,
+      lineStyle: lc.LineStyle.Solid,
+      axisLabelVisible: true,
+      title: `${openPosition.direction} ${openPosition.lots}`,
+    });
+    return () => { try { series.removePriceLine(line); } catch { /* series already gone */ } };
+  }, [openPosition?.entryRate, openPosition?.direction, openPosition?.lots, revision]);
+
   const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" aria-hidden />;
   const dp = instrument.digits;
 
@@ -671,7 +762,7 @@ export function CandleChart({
               <div className="absolute right-0 top-8 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
                 <Section title="Chart type">
                   <div className="grid grid-cols-3 gap-1">
-                    {CHART_TYPES.map((c) => (
+                    {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === initialType)].map((c) => (
                       <button key={c.id} type="button" onClick={() => setChartType(c.id)} className={cn(pill, 'w-full', chartType === c.id ? active : idle)}>{c.label}</button>
                     ))}
                   </div>
