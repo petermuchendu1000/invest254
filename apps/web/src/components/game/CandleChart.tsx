@@ -23,6 +23,7 @@ import { MT5ObjectMenu, type ObjectMenuAt } from '@/components/game/MT5ObjectMen
 import { MT5ObjectsList } from '@/components/game/MT5ObjectsList';
 import { MT5ObjectProperties } from '@/components/game/MT5ObjectProperties';
 import { useNavDrawer } from '@/lib/ui/drawer';
+import { MT5ChartLevels } from '@/components/game/mobile/MT5ChartLevels';
 import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
 import {
   MOBILE_TF_GROUPS, MAX_QUICK_TF, mobileTfLabel, useQuickTfStore, useRestoreQuickTf,
@@ -181,7 +182,7 @@ type Anchor = CandlesReply['anchor'];
 
 export function CandleChart({
   getLastTick, requestCandles, status, initialType = 'candles', openPosition = null, symbol,
-  phone = false,
+  phone = false, levelStakeCents = 0,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
@@ -214,6 +215,11 @@ export function CandleChart({
    * truncated at M5 and the rail took 40 of those 360 pixels, which is why this prop exists.
    */
   phone?: boolean;
+  /**
+   * What a contract at the current volume risks, which is the money figure MetaTrader shows while a
+   * Stop Loss level is dragged. Phone only; zero where the caller has no ticket behind it.
+   */
+  levelStakeCents?: number | undefined;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -1172,6 +1178,23 @@ export function CandleChart({
             timeframe={tf}
           />
           <div ref={hostRef} className="relative z-[1] h-full w-full" aria-label={`${instrument.symbol} price chart`} role="img" />
+          {/* MetaTrader's draggable Stop Loss and Take Profit, which its advanced dialog draws on
+              the chart beneath it. Phone only, and only once a level is set: the same `levels`
+              store the dialog writes, so dragging the line moves the dialog's figure and stepping
+              the dialog's figure moves the line. */}
+          {phone ? (
+            <MT5ChartLevels
+              project={projection}
+              width={plotSize.w}
+              height={plotSize.h}
+              digits={instrument.digits}
+              /* The legend's close is the chart's own current price: it is the forming bar's last
+                 value, which is what the level distances have to be measured from if the lines are
+                 to sit where the trader sees the price. */
+              price={legend?.c ?? null}
+              stakeCents={levelStakeCents}
+            />
+          ) : null}
           <ChartDrawings
             tool={tool}
             project={projection}

@@ -67,6 +67,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
 
   const levels = useLevelsStore((s) => s.levels);
   const setLevels = useLevelsStore((s) => s.set);
+  const levelRef = useLevelsStore((s) => s.ref);
   const locked = useLevelsStore((s) => s.locked);
   const setLocked = useLevelsStore((s) => s.setLocked);
   useRestoreLevels();
@@ -77,14 +78,22 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
   if (!ready) return <div className="h-full animate-pulse bg-[#0f1720]" />;
 
   const description = symbolDef(symbol)?.description ?? '';
-  const ref = price ?? 0;
+  /**
+   * The price the levels are measured from: the one they were ANCHORED at, not the live one.
+   *
+   * A level is a price and has to stay where it was put. Reading it against the live price made the
+   * stop crawl with the market, and made this dialog and the chart disagree about the same level,
+   * because the two sampled the price a fraction of a second apart. See levelsStore.
+   */
+  const ref = levelRef ?? price ?? 0;
   const sides = sidesEnabled(levels);
   const refused = tradeDisabled || connecting;
 
   /** One point in the unit currently selected, so the stepper moves by a sensible amount in each. */
   const edit = (field: 'sl' | 'tp', points: number | null) => {
     const next: Levels = field === 'sl' ? { ...levels, slPoints: points } : { ...levels, tpPoints: points };
-    setLevels(locked ? applyRatioLock(levels, next, field) : next);
+    // The live price is offered as the anchor; the store keeps the first one it is given.
+    setLevels(locked ? applyRatioLock(levels, next, field) : next, price);
   };
   const step = (field: 'sl' | 'tp', dir: 1 | -1) => {
     const cur = field === 'sl' ? levels.slPoints : levels.tpPoints;

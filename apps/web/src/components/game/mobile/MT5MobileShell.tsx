@@ -12,6 +12,8 @@ import { MT5MobileMessages } from '@/components/game/mobile/MT5MobileMessages';
 import { MT5OneClickPanel } from '@/components/game/mobile/MT5OneClickPanel';
 import { useMobileTabStore, useRestoreMobileTab } from '@/lib/game/mobileTab';
 import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
+import { useRestoreLevels } from '@/lib/game/levelsStore';
+import { useOrderEntry } from '@/lib/game/useOrderEntry';
 
 /**
  * MetaTrader's phone app, as a shell.
@@ -43,6 +45,10 @@ export function MT5MobileShell() {
   useRestoreMobileTab();
   const panelShown = useOneClickStore((s) => s.shown);
   useRestoreOneClick();
+  // The levels are restored here, at the shell, because the chart draws them whether or not the
+  // trading dialog has been opened this session: MetaTrader's levels live on the chart.
+  useRestoreLevels();
+  const { stakeCents } = useOrderEntry();
 
   /**
    * MetaTrader's New Order screen, over whatever tab is showing.
@@ -79,7 +85,10 @@ export function MT5MobileShell() {
           aria-hidden={tab === 'charts' ? undefined : true}
         >
           <div className="min-h-0 flex-1">
-            <GameCurve phone />
+            {/* The stake behind the chart's draggable Stop Loss: what a contract at the volume
+                currently set would risk. The levels themselves come from the shared store, so the
+                chart and the trading dialog are two views of one pair. */}
+            <GameCurve phone levelStakeCents={stakeCents} />
           </div>
           {/* MetaTrader's one-click panel, in its "panel at the bottom" placement. The `▭` button on
               the chart's own top bar is what shows and hides it. */}

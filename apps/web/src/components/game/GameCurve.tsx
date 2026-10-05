@@ -48,7 +48,11 @@ function useMarketerBeat(active: ActivePosition | null): MarketerBeat {
  * (`CandleChart`) opening on THAT series type. ADDON-1: area/bars/baseline used to fall back to the line curve,
  * so brands paid for a chart their players never saw. Both views share the authoritative tick stream.
  */
-export function GameCurve({ phone = false }: { phone?: boolean } = {}) {
+export function GameCurve({ phone = false, levelStakeCents = 0 }: {
+  phone?: boolean;
+  /** Phone only: the stake behind the chart's draggable Stop Loss. */
+  levelStakeCents?: number;
+} = {}) {
   const { getTicks, getLastTick, requestCandles, getSymbolQuote, getMarket } = useGameSocketApi();
   /**
    * The symbol the chart is on. Null means the brand's own — the one it settles — so the default
@@ -138,6 +142,9 @@ export function GameCurve({ phone = false }: { phone?: boolean } = {}) {
           status={status}
           symbol={symbol}
           phone={phone}
+          /* What a contract at the current volume risks, which is the money MetaTrader shows
+             while a Stop Loss level is dragged on the chart. */
+          levelStakeCents={levelStakeCents}
           openPosition={activePosition && activePosition.entryRate !== null
             ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents) }
             : null}
