@@ -14,7 +14,7 @@ import { formatKes } from '@invest254/shared/money';
 import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
 import { env } from '@/lib/env';
 import { useBrand } from '@/lib/brand/BrandProvider';
-import { curveProfileForChartStyle, chartStyleOf, type Candle } from '@invest254/shared/chart';
+import { curveProfileForChartStyle, chartStyleOf, tradingViewTypeOf, type Candle } from '@invest254/shared/chart';
 import { valueOfRate, type Timeframe, type MarketSymbol } from '@invest254/shared/candles';
 import { wsUrlForSite } from '@/lib/brand/brand';
 import { useSession } from '@/lib/auth/session';
@@ -325,6 +325,14 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   // Placeholder tape shape for this brand: `wave` for line brands, `market` for candlestick/bars/area.
   const synthProfileRef = useRef<'market' | 'wave'>(curveProfileForChartStyle(chartStyleOf(brand.chartStyle)));
   synthProfileRef.current = curveProfileForChartStyle(chartStyleOf(brand.chartStyle));
+  /**
+   * Whether this brand is a MetaTrader terminal, read inside the socket handler.
+   *
+   * A ref rather than a value, because the handler is installed once and closes over what it can
+   * see; a brand read at install time would be stale after a brand switch.
+   */
+  const terminalRef = useRef(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
+  terminalRef.current = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
 
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [online, setOnline] = useState(0);
@@ -795,11 +803,31 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             secondsLeft: cur?.secondsLeft ?? d.durationS,
             sellable: cur?.sellable ?? false,
           }));
-          toast.push({
-            tone: 'info',
-            title: `Opened · ${d.direction === 'buy' ? 'BUY' : 'SELL'} ${formatKes(d.stakeCents)}`,
-            description: `Auto-sell in ${d.durationS}s`,
-          });
+          /**
+           * No popup on a terminal brand, because MetaTrader has none.
+           *
+           * MetaQuotes is specific about where a result goes: "Once an order is sent, its execution
+           * results will appear IN THE WINDOW: either confirmation of a successful trade or a
+           * rejection with the reason specified." A confirmation is the order screen's own, and
+           * after it the position itself is the confirmation — it appears on the Trade tab, in the
+           * live position panel, and as a level on the chart.
+           *
+           * A floating card over the ticket was not only absent from MetaTrader, it painted in this
+           * app's brand palette (`bg-up/10`, an accent dot), so on a green brand it arrived as a
+           * green panel over MetaTrader's grey. Its wording was not MetaTrader's either: it called
+           * the expiry an "Auto-sell".
+           *
+           * REJECTIONS still raise one, on every shell, because MetaTrader reports those: that is
+           * the other half of the sentence above. They render in MetaTrader's own colours on a
+           * terminal screen; see ToastProvider.
+           */
+          if (!terminalRef.current) {
+            toast.push({
+              tone: 'info',
+              title: `Opened · ${d.direction === 'buy' ? 'BUY' : 'SELL'} ${formatKes(d.stakeCents)}`,
+              description: `Auto-sell in ${d.durationS}s`,
+            });
+          }
           break;
         }
         case 'position_update': {

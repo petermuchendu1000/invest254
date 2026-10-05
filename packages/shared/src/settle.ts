@@ -59,9 +59,27 @@ export class SettlementEngine {
   }
 
   private signedMove(dir: Direction, entryT: number): number {
-    const d = dir === "buy" ? 1 : -1;
-    return d * (this.curve.value(entryT + this.durationS) - this.curve.value(entryT));
+    return this.moveAt(dir, entryT, this.durationS);
   }
+
+  /**
+   * The favourable move this contract has made after `elapsedS` seconds.
+   *
+   * The same quantity `signedMove` settles on, read at an arbitrary moment rather than only at
+   * expiry. It is what lets the floating P/L follow the price instead of a timer: at
+   * `elapsedS = durationS` the two are the same number, so the live path and the settlement cannot
+   * disagree about where the contract ends up.
+   *
+   * Public because the game server needs it every tick; the curve it reads is this day's, so a
+   * caller holding a position from an earlier day must not use it (see `livePriceMultiplier`).
+   */
+  moveAt(dir: Direction, entryT: number, elapsedS: number): number {
+    const d = dir === "buy" ? 1 : -1;
+    return d * (this.curve.value(entryT + elapsedS) - this.curve.value(entryT));
+  }
+
+  /** The calibrated move-to-multiplier gain for a direction, which the live path scales with. */
+  gainFor(dir: Direction): number { return this.params[dir].gain; }
 
   private calibrate(dir: Direction, seed: string, windowS: number, n: number): DirParams {
     const rng = new SeededRng(seed, `calib:${dir}`);
