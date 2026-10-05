@@ -5,6 +5,7 @@ import { GameCurve } from '@/components/game/GameCurve';
 import { MarketWatch } from '@/components/game/MarketWatch';
 import { MT5History } from '@/components/history/MT5History';
 import { MT5MobileOrder } from '@/components/game/mobile/MT5MobileOrder';
+import { MT5TradeDialog } from '@/components/game/mobile/MT5TradeDialog';
 import { MT5MobileTabs } from '@/components/game/mobile/MT5MobileTabs';
 import { MT5MobileTrade } from '@/components/game/mobile/MT5MobileTrade';
 import { MT5MobileMessages } from '@/components/game/mobile/MT5MobileMessages';
@@ -56,6 +57,15 @@ export function MT5MobileShell() {
    * MetaTrader lays each of them out, which is not the same way.
    */
   const [ticketOpen, setTicketOpen] = useState(false);
+  /**
+   * MetaTrader's ADVANCED trading dialog, which is "used from the chart".
+   *
+   * The two are reached from different places in MetaTrader and that is copied: the chart's
+   * one-click panel opens this sheet, the Trade screen's `+` opens the classic full-screen ticket,
+   * and the classic ticket's top-right button switches to this one. Both place the same order
+   * through `useOrderEntry`.
+   */
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0f1720]">
@@ -73,7 +83,7 @@ export function MT5MobileShell() {
           </div>
           {/* MetaTrader's one-click panel, in its "panel at the bottom" placement. The `▭` button on
               the chart's own top bar is what shows and hides it. */}
-          {panelShown ? <MT5OneClickPanel onOpenTicket={() => setTicketOpen(true)} /> : null}
+          {panelShown ? <MT5OneClickPanel onOpenTicket={() => setDialogOpen(true)} /> : null}
         </div>
 
         {tab === 'quotes' ? (
@@ -102,9 +112,14 @@ export function MT5MobileShell() {
 
       {ticketOpen ? (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#0f1720]">
-          <MT5MobileOrder onBack={() => setTicketOpen(false)} />
+          <MT5MobileOrder
+            onBack={() => setTicketOpen(false)}
+            onAdvanced={() => { setTicketOpen(false); setDialogOpen(true); }}
+          />
         </div>
       ) : null}
+
+      {dialogOpen ? <MT5TradeDialog onDismiss={() => setDialogOpen(false)} /> : null}
     </div>
   );
 }

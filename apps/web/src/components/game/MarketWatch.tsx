@@ -204,7 +204,12 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
     // Before a per-symbol quote has landed, the brand's own market axis still prices the DEFAULT
     // symbol, so that one row is never blank while the others fill in.
     if (market && market.instrument.symbol === symbol) {
-      return { instrument: market.instrument, price: null, up: null, changedAt: null, t: null, anchor: market.anchor };
+      // No day range either: that comes with the symbol's own quote, and MetaTrader shows no
+      // `L:`/`H:` on a row it has not quoted yet rather than two dashes.
+      return {
+        instrument: market.instrument, price: null, up: null, changedAt: null, t: null,
+        anchor: market.anchor, dayHigh: null, dayLow: null,
+      };
     }
     return null;
   }, [getSymbolQuote, market]);
@@ -480,6 +485,23 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                           ) : (
                             <MT5Price value={price} digits={digits} className="text-[13px]" style={{ color: colour }} />
                           )}
+                          {/* MetaTrader's second right-hand line: `L: <day low>` under the Bid and
+                              `H: <day high>` under the Ask. There is one price here rather than two,
+                              so the pair sits under it together.
+
+                              They are the session's extremes SO FAR, which the engine computes and
+                              sends on the quote: this curve is deterministic for the whole day the
+                              moment its seed is known, so a client folding the day's bars would
+                              print a high the price has not reached yet. Absent, not dashed, until
+                              the first quote carrying them lands. */}
+                          {q?.dayLow !== null && q?.dayLow !== undefined && q.dayHigh !== null ? (
+                            <span className="flex justify-end gap-2 pt-0.5 font-mono text-[10px] leading-none text-[#8fa2b8] tabular-nums">
+                              {/* A flex gap rather than two spaces in the text: HTML collapses
+                                  runs of whitespace, so the pair would have read as one. */}
+                              <span>L: {q.dayLow.toFixed(digits)}</span>
+                              <span>H: {q.dayHigh.toFixed(digits)}</span>
+                            </span>
+                          ) : null}
                         </span>
                       </>
                     ) : (

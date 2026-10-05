@@ -51,7 +51,11 @@ import { cn } from '@/lib/cn';
  *   settle on a timer the trader picks. It is the single most important fact about the trade, so it
  *   is stated rather than hidden to keep the screen looking more like the original.
  */
-export function MT5MobileOrder({ onBack }: { onBack: () => void }) {
+export function MT5MobileOrder({ onBack, onAdvanced }: {
+  onBack: () => void;
+  /** MetaTrader's top-right button: "switches to the extended/advanced dialog". */
+  onAdvanced: () => void;
+}) {
   const money = useDisplayMoney();
   const limits = useStakeLimits();
   const { getTicks, getLastTick } = useGameSocketApi();
@@ -104,6 +108,21 @@ export function MT5MobileOrder({ onBack }: { onBack: () => void }) {
             <div className="truncate text-[11px] leading-tight text-[#8fa2b8]">{description}</div>
           )}
         </div>
+        {/* MetaTrader's top-right button on this screen, which "switches to the extended/advanced
+            dialog" — the sheet with the order-type strip, the volume slider and the SL/TP chips. */}
+        <button
+          type="button"
+          onClick={onAdvanced}
+          aria-label="Advanced dialog"
+          className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded text-[#3183ff]"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-5 w-5" aria-hidden>
+            <path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="10" cy="12" r="2" />
+            <circle cx="18" cy="17" r="2" />
+          </svg>
+        </button>
       </div>
 
       {/* `min-h-full flex-col` inside the scroller is what lets the tick chart take the slack, the

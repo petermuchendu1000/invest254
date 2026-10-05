@@ -177,6 +177,16 @@ export interface SymbolQuote {
   up: boolean | null;
   changedAt: number | null;
   t: number;
+  /**
+   * The day's high and low SO FAR, as prices, which MetaTrader's phone row prints as `H:` and `L:`.
+   *
+   * They arrive on the quote because the engine is the only side that can know them: it holds the
+   * day, and a client deriving them would have to fetch a day of bars per watched symbol. Null
+   * until the first quote carrying them lands, and on an engine that predates them, which is why
+   * the row renders without them rather than printing a dash.
+   */
+  dayHigh: number | null;
+  dayLow: number | null;
 }
 
 export interface CandlesReply {
@@ -897,13 +907,18 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           const prev = quotesRef.current.get(d.symbol);
           quotesRef.current.set(d.symbol, {
             symbol: d.symbol, instrument: d.instrument, anchor: d.anchor, rate: d.rate, price, t: d.t,
-            // A re-seed after a reconnect keeps the colour it had, so the whole list does not flash.
+            // A re-seed after a reconnect keeps the colour it had, so the whole list does not flash,
+            // and the day's range it already had, which the next tick refreshes anyway.
             up: prev?.up ?? null, changedAt: prev?.changedAt ?? null,
+            dayHigh: prev?.dayHigh ?? null, dayLow: prev?.dayLow ?? null,
           });
           break;
         }
         case 'symbol_ticks': {
-          const d = data as { t: number; quotes?: Array<{ symbol: string; rate: number; delta: number }> };
+          const d = data as {
+            t: number;
+            quotes?: Array<{ symbol: string; rate: number; delta: number; high?: number; low?: number }>;
+          };
           for (const q of d.quotes ?? []) {
             const prev = quotesRef.current.get(q.symbol);
             // No seed yet means no anchor, and a rate without its anchor cannot be priced. Dropping
@@ -915,6 +930,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
               ...prev, rate: q.rate, price, t: d.t,
               up: moved ? price > prev.price : prev.up,
               changedAt: moved ? Date.now() : prev.changedAt,
+              // Already prices: the engine maps them through the day's anchor, where it lives.
+              // Kept from the previous quote when absent, so an engine that does not send them
+              // leaves the row without an `H:`/`L:` rather than blanking one it had.
+              dayHigh: typeof q.high === 'number' ? q.high : prev.dayHigh,
+              dayLow: typeof q.low === 'number' ? q.low : prev.dayLow,
             });
           }
           break;

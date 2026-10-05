@@ -189,6 +189,48 @@ export function aggregate(src: readonly Candle[], tf: Timeframe): Candle[] {
 }
 
 /**
+ * The highest and lowest price a day has reached SO FAR.
+ *
+ * MetaTrader's phone Quotes row prints `L: <day low>` under the Bid and `H: <day high>` under the
+ * Ask, and its Details tab carries the same pair. Both are the session's extremes to this moment,
+ * not the whole day's.
+ *
+ * That "so far" is the whole reason this exists rather than reusing `minuteBars`. The curve is
+ * deterministic for the entire day the instant its seed is known, so folding a day's bars for the
+ * high and low would hand back the extremes of a day that has NOT HAPPENED YET — a high the price
+ * has not reached, printed as if it had. The walk therefore stops at `throughS`.
+ *
+ * It samples at 1 Hz, which is the generated path's own resolution and the same rate `minuteBars`
+ * samples at, so the two cannot disagree about a minute they both cover.
+ *
+ * `seed` carries the extremes already known, which is what lets a caller extend the walk by the
+ * seconds that have passed since it last asked instead of rewalking the day. Extending from
+ * `throughS + 1` with the previous result is exactly equivalent to walking from zero.
+ */
+export function dayExtremes(
+  inst: MarketSymbol,
+  base: number,
+  value: (tSeconds: number) => number,
+  fromS: number,
+  throughS: number,
+  seed?: { high: number; low: number },
+): { high: number; low: number } {
+  const open0 = value(0);
+  const px = (t: number) => toTick(inst, priceOf(inst, base, open0, value(t)));
+  // A day that has not started yet is its opening price, not an empty range.
+  const start = Math.max(0, Math.floor(fromS));
+  const end = Math.max(start, Math.floor(throughS));
+  let high = seed?.high ?? px(start);
+  let low = seed?.low ?? high;
+  for (let t = start; t <= end; t++) {
+    const p = px(t);
+    if (p > high) high = p;
+    if (p < low) low = p;
+  }
+  return { high, low };
+}
+
+/**
  * M1 bars for one UTC day, sampled from the day's curve.
  *
  * `value` is the day's curve sampled in seconds-since-midnight. Each minute is sampled at 1 Hz —
