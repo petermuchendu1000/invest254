@@ -23,6 +23,15 @@ interface ChartSymbolState {
   set: (symbol: string | null) => void;
 }
 
+/**
+ * The drag-and-drop type carried when a symbol is dragged from Market Watch onto the chart.
+ *
+ * MetaQuotes, verbatim: "A symbol chart can be opened by dragging it to the chart viewing area
+ * using a mouse (Drag'n'Drop)." A custom type rather than `text/plain` alone so the chart accepts a
+ * symbol from this window and not any stray text the browser lets fall on it.
+ */
+export const CHART_SYMBOL_DND = 'application/x-mt5-symbol';
+
 const STORAGE_KEY = 'pp-chart-symbol';
 
 export const useChartSymbolStore = create<ChartSymbolState>()((set) => ({
