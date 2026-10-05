@@ -17,6 +17,7 @@ import { useVolumeStore, useRestoreVolume } from '@/lib/game/volume';
 import { api } from '@/lib/api/endpoints';
 import type { ActivePosition } from '@/lib/game/betting';
 import type { Tick } from '@/lib/game/types';
+import type { LocalRefusal } from '@/lib/game/orderResult';
 
 /**
  * Everything an order-entry surface needs, in one place.
@@ -64,7 +65,14 @@ export interface OrderEntry {
   durations: readonly number[];
 
   /** Place the order, or route to the deposit sheet. A no-op where trade is disabled. */
-  place: (dir: Direction) => void;
+  /**
+   * Send the order, and say what happened to it.
+   *
+   * `'sent'` means a frame went to the engine and the window should wait for the result;
+   * `'deposit'` means the tap was routed to the deposit sheet, which is its own surface and needs
+   * no rejection in the window; anything else is a refusal with its reason.
+   */
+  place: (dir: Direction) => 'sent' | 'deposit' | LocalRefusal;
 
   activePosition: ActivePosition | null;
   earlyCloseEnabled: boolean;
@@ -181,19 +189,21 @@ export function useOrderEntry(): OrderEntry {
     [defaultDurationS],
   );
 
-  function place(dir: Direction) {
-    if (connecting) return;
+  function place(dir: Direction): 'sent' | 'deposit' | LocalRefusal {
+    if (connecting) return 'OFFLINE';
     // Defence in depth behind the disabled buttons: this brand settles one symbol, and an order
     // raised while the chart is on another would open a position on an instrument the trader is
     // not looking at.
-    if (tradeDisabled) return;
+    if (tradeDisabled) return 'WRONG_SYMBOL';
     // A logged-out or short-funded tap is real buying intent: route it to the deposit sheet seeded
     // with this stake, which then resumes the trade. Same behaviour as the classic panel.
     if (!token || overBalance) {
       openDeposit({ amountCents: stakeCents, pending: { direction: dir, stakeCents } });
-      return;
+      return 'deposit';
     }
-    openPosition({ stakeCents, direction: dir, durationS });
+    // Null means it went. Anything else is the engine's rule, refused here, and the order window
+    // says so: this used to be a silent return and a tap that did nothing.
+    return openPosition({ stakeCents, direction: dir, durationS }) ?? 'sent';
   }
 
   return {

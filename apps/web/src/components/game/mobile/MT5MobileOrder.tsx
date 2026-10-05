@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { symbolDef } from '@invest254/shared/symbols';
 import { useDisplayMoney } from '@/lib/money';
 import { useOrderEntry, durationLabel } from '@/lib/game/useOrderEntry';
+import { useOrderResult } from '@/lib/game/useOrderResult';
+import { MT5OrderResult } from '@/components/game/mobile/MT5OrderResult';
 import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas } from '@/components/game/CurveCanvas';
 import { useRestoreTakeProfit, useTakeProfitStore } from '@/lib/game/takeprofit';
@@ -63,6 +65,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, bump, setLots, stakeCents, overBalance, signedIn,
     durationS, setDurationS, durations, place, earlyCloseEnabled, chartSettled,
+    priceOfRate,
   } = useOrderEntry();
 
   const tpTarget = useTakeProfitStore((s) => s.targetCents);
@@ -85,11 +88,17 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   const description = symbolDef(symbol)?.description ?? '';
   const steps = volumeSteps(lots, { min: minLots, max: maxLots, step: 0.01 });
   const refused = tradeDisabled || connecting;
+  /**
+   * MetaTrader's execution result, which belongs IN THIS WINDOW: "either confirmation of a
+   * successful trade or a rejection with the reason specified". The form stays underneath it.
+   */
+  const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
+  const send = (dir: 'buy' | 'sell') => report(dir, place(dir));
 
   if (!ready) return <div className="h-full animate-pulse bg-[#0f1720]" />;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0f1720] text-white">
+    <div className="relative flex h-full min-h-0 flex-col bg-[#0f1720] text-white">
       {/* 1. Header: back, then the symbol in bold over its description. */}
       <div className="flex shrink-0 items-center gap-1 border-b border-[#2b3543] px-1 py-2">
         <button
@@ -283,7 +292,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           top="SELL"
           colour="#D00000"
           disabled={refused}
-          onPick={() => place('sell')}
+          onPick={() => send('sell')}
           title={tradeDisabled ? `Trade disabled for ${symbol}.` : undefined}
         />
         <span aria-hidden className="w-px shrink-0 bg-[#2b3543]" />
@@ -291,10 +300,13 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           top="BUY"
           colour="#0064F2"
           disabled={refused}
-          onPick={() => place('buy')}
+          onPick={() => send('buy')}
           title={tradeDisabled ? `Trade disabled for ${symbol}.` : undefined}
         />
       </div>
+
+      {/* MetaTrader's result, over the form it was sent from. */}
+      {result === null ? null : <MT5OrderResult result={result} onDismiss={clear} />}
     </div>
   );
 }

@@ -1,0 +1,93 @@
+'use client';
+
+import type { OrderResult } from '@/lib/game/orderResult';
+
+/**
+ * MetaTrader's execution result, in the order window.
+ *
+ * *"Once an order is sent, its execution results will appear in the window: either confirmation of
+ * a successful trade or a rejection with the reason specified"* (docs/mt5/04-mobile-app.md section
+ * 5, documented for both platforms). MetaTrader puts it over the order form it was sent from, not
+ * in a floating card somewhere else, and the form stays underneath: that is what "in the window"
+ * means, and it is why this is a panel rather than a toast.
+ *
+ * ── Why not a popup ─────────────────────────────────────────────────────────────────────────────
+ * Android CAN show trade results as chart pop-ups, but only with the "Trade notifications" chart
+ * setting on, and that is the chart, not the order window. The terminal shell's own confirmation
+ * toast was removed for exactly this reason; the rejection one stays for the surfaces that have no
+ * window of their own (the one-click panel firing instantly, the desktop shell).
+ *
+ * ── The wording ─────────────────────────────────────────────────────────────────────────────────
+ * `Done` is MetaTrader's word for a filled order, the one its own Journal and History use, and the
+ * fill reads in its phrasing: `sell 0.03 XAUUSD at 3082.07`. The ticket number is MetaTrader's
+ * `#` prefix, shortened, because this engine's position ids are uuids and a trader needs a handle,
+ * not thirty-six characters.
+ */
+export function MT5OrderResult({ result, onDismiss }: {
+  result: OrderResult;
+  /** MetaTrader's result is acknowledged, and the window goes back to the form. */
+  onDismiss: () => void;
+}) {
+  const rejected = result.kind === 'rejected';
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-order-result={result.kind}
+      className="absolute inset-x-0 bottom-0 z-10 border-t bg-[#0f1720] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
+      style={{ borderTopColor: rejected ? '#f23645' : '#2b3543' }}
+    >
+      {result.kind === 'sending' ? (
+        <>
+          <div className="flex items-center gap-2">
+            {/* MetaTrader waits here too: the order is with the server and nothing is known yet. */}
+            <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#3183ff]" />
+            <span className="text-[14px] font-semibold text-white">
+              Sending {result.direction === 'buy' ? 'buy' : 'sell'} order
+            </span>
+          </div>
+          <p className="pt-1 text-[11px] text-[#8fa2b8]">
+            The order fills at the next engine tick.
+          </p>
+        </>
+      ) : result.kind === 'done' ? (
+        <>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[14px] font-bold text-[#41be56]">Done</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-white tabular-nums">
+              {result.line}
+            </span>
+          </div>
+          {result.ticket === null ? null : (
+            <p className="pt-1 font-mono text-[11px] text-[#8fa2b8] tabular-nums">
+              #{result.ticket.slice(0, 8)}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="mt-2 h-9 w-full rounded bg-[#202933] text-[13px] font-semibold text-[#3183ff]"
+          >
+            OK
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="text-[14px] font-bold text-[#f23645]">{result.title}</div>
+          {result.detail === undefined ? null : (
+            <p className="pt-1 text-[11px] leading-snug text-[#8fa2b8]">{result.detail}</p>
+          )}
+          {/* MetaTrader's requote flow ends on an `OK` that "returns you to the order screen", and a
+              plain rejection is acknowledged the same way. */}
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="mt-2 h-9 w-full rounded bg-[#202933] text-[13px] font-semibold text-[#3183ff]"
+          >
+            OK
+          </button>
+        </>
+      )}
+    </div>
+  );
+}

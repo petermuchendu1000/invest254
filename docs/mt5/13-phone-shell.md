@@ -39,6 +39,7 @@ Measured again on the same 360x800 phone, after:
 | The shell and its view switching | `components/game/mobile/MT5MobileShell.tsx` |
 | Phone chart bar (`☰ ✛ ∿ M30 ◐ ▭`) | `components/game/CandleChart.tsx`, `phone` prop |
 | Swipe-left quick commands on a row | `components/game/mobile/MT5SwipeRow.tsx`, `lib/game/swipe.ts` |
+| Order execution result | `components/game/mobile/MT5OrderResult.tsx`, `lib/game/orderResult.ts` |
 | On-chart draggable SL and TP | `components/game/mobile/MT5ChartLevels.tsx` |
 | Quick timeframe strip + the 21-period sheet | `lib/game/mobileTimeframes.ts` + the bar above |
 | One-click trading panel | `components/game/mobile/MT5OneClickPanel.tsx` |
@@ -225,19 +226,58 @@ control carries one of those characters as text.
 
 ## Still missing
 
-0. **The order execution result.** *"Once an order is sent, its execution results will appear in the
-   window: either confirmation of a successful trade or a rejection with the reason specified"*
-   (`04-mobile-app.md` section 5, both platforms). The ticket stays on the form after placing and
-   says nothing, which hides a real refusal: `openPosition` holds a single-open rule, and a contract
-   that is still SETTLING counts as open while the Trade screen already reports "No open positions".
-   Tap SELL then, and nothing whatever happens, for a reason nothing on screen states. Found by the
-   phone probe, which now has to retry a placement for exactly this reason.
-
 1. **Unread state on Messages.** MetaTrader shows an unread count beside the category title, a blue
    circle on a chat with new messages, and a red badge on the Messages tab. The notifications API
    gives a notification no read state, so all three would be decoration. `MT5MobileTabs` already
    takes an `unread` prop for when it exists.
 2. **Landscape full-screen.** "Rotate to landscape = full-screen mode, automatically."
+
+## The order execution result, in the window
+
+MetaQuotes, both platforms: *"Once an order is sent, its execution results will appear IN THE
+WINDOW: either confirmation of a successful trade or a rejection with the reason specified. The
+filled position then appears on Trade, and the order + deal(s) on History"* (`04-mobile-app.md`
+section 5).
+
+The window said nothing, and that hid a real refusal. `openPosition` holds the engine's single-open
+rule, and a contract that is still **settling** counts as open while the Trade screen already reports
+"No open positions". Tap SELL then and nothing whatever happened: no fill, no message, no change on
+screen, for a reason nothing on screen stated. The phone probe found it by placing an order a second
+after a previous one, and could only get past it by retrying.
+
+| | |
+|---|---|
+| Where it appears | over the form it was sent from, in `MT5MobileOrder`, `MT5TradeDialog` and the desktop `MT5OrderTicket` |
+| Waiting | `Sending sell order`, with MetaTrader's own note that it fills at the next tick |
+| Accepted | **Done** and the fill in MetaTrader's phrasing, `sell 0.03 XAUUSD at 3082.07`, then `#` and the ticket |
+| Refused | the reason in words, never an engine code, and `OK` to return to the form |
+| Words and wording | `lib/game/orderResult.ts`, unit-tested |
+
+`errorTitle` and `friendlyError` moved out of `GameSocketProvider`, where they were private to the
+toast. The window and the toast now say the same sentences about one refusal, because a rejection
+that reads one way in a popup and another way in the window is two bugs that get reported
+separately.
+
+### One tap, one answer
+
+A window that is waiting prints the rejection itself, so the socket's popup stands down while it is:
+`lib/game/orderWindow.ts` holds that claim, counted rather than a boolean because the classic ticket
+and the advanced dialog can both be mounted, and released on unmount or a window closed mid-order
+would silence refusals for good.
+
+Where no window is waiting the popup stays, because it is then the only surface a rejection has:
+the one-click panel firing instantly, and any refusal that is nobody's order.
+
+A CONFIRMATION is barely seen on the desktop ticket, and that is correct: it is replaced by the live
+position the moment one opens, and the position is the better confirmation. What the desktop was
+missing is the rejection.
+
+### Still not built, and named rather than faked
+
+MetaTrader's **requote** flow (Instant Execution only: the dealer returns new prices with `Accept`
+and `Reject`, valid a few seconds, then `Price changed` and `OK`). This engine is Market Execution
+only, with no dealer and no deviation field, so there is nothing to requote: building the screen
+would be drawing a dialog that can never open.
 
 ## Swipe-left quick commands
 
