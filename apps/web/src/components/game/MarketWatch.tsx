@@ -7,6 +7,7 @@ import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { MT5Price } from '@/components/game/MT5Price';
 import { logJournal } from '@/lib/game/journal';
+import { quoteTone, QUOTE_TONE_COLOUR } from '@/lib/game/quoteTone';
 import { cn } from '@/lib/cn';
 
 /**
@@ -31,11 +32,15 @@ export function MarketWatch({ className }: { className?: string }) {
   const [day, setDay] = useState<Candle | null>(null);
   const [, force] = useState(0);
   /**
-   * Direction of the last price CHANGE, which is what colours a MetaTrader quote row: blue when the
-   * quote last ticked up, red when it last ticked down. It holds its colour between changes — a row
-   * is never uncoloured — so `null` only ever means "no quote yet".
+   * Direction of the last price CHANGE, and WHEN it changed, which is what colours a MetaTrader
+   * quote row. See lib/game/quoteTone for MetaQuotes' rule verbatim: blue up, red down, and grey
+   * once the price has not changed for fifteen seconds.
+   *
+   * The timestamp is the part that used to be missing. The colour was held for ever, so a feed that
+   * had stopped sending looked exactly like a live one that had ticked up.
    */
   const tickUpRef = useRef<boolean | null>(null);
+  const changedAtRef = useRef<number | null>(null);
   const lastSeenRef = useRef<number | null>(null);
 
   // Quote updates come off the tick stream, which does not re-render React on its own.
@@ -81,12 +86,16 @@ export function MarketWatch({ className }: { className?: string }) {
   const last = priceNow();
   if (last !== null) {
     const prev = lastSeenRef.current;
-    if (prev !== null && last !== prev) tickUpRef.current = last > prev;
+    if (prev !== null && last !== prev) {
+      tickUpRef.current = last > prev;
+      changedAtRef.current = Date.now();
+    }
     lastSeenRef.current = last;
   }
-  const tickUp = tickUpRef.current;
-  // MetaTrader's quote colours: blue up, red down — the same pairing as its buy and sell sides.
-  const quoteTone = tickUp === null ? 'text-[#ffffff]' : tickUp ? 'text-[#3183ff]' : 'text-[#f23645]';
+  // MetaTrader colours the row from the LAST traded price where a symbol has one, and only falls
+  // back to Bid where it does not. This symbol quotes one price, which is that last price.
+  const tone = quoteTone({ up: tickUpRef.current, changedAt: changedAtRef.current, now: Date.now() });
+  const quoteColour = tone === null ? '#ffffff' : QUOTE_TONE_COLOUR[tone];
   // Change against the session open, which is what a terminal's change column means.
   const open = market?.anchor.base ?? null;
   const changePct = last !== null && open ? ((last - open) / open) * 100 : null;
@@ -120,7 +129,7 @@ export function MarketWatch({ className }: { className?: string }) {
                   {changePct === null ? '-' : `${up ? '+' : ''}${changePct.toFixed(2)}%`} today
                 </div>
               </div>
-              <MT5Price value={last} digits={digits} className={cn('text-[12px]', quoteTone)} />
+              <MT5Price value={last} digits={digits} className="text-[12px]" style={{ color: quoteColour }} />
             </div>
             <div className="mt-1 flex gap-3 font-mono text-[10px] text-[#8fa2b8]">
               <span>Low: <span className="text-[#8fa2b8]">{show(day?.low ?? null)}</span></span>
