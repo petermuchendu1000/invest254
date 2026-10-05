@@ -8,6 +8,11 @@ import { useDisplayMoney } from '@/lib/money';
 import { MT5Price } from '@/components/game/MT5Price';
 import { logJournal } from '@/lib/game/journal';
 import { quoteTone, QUOTE_TONE_COLOUR } from '@/lib/game/quoteTone';
+import { useStakeLimits } from '@/lib/game/useStakeLimits';
+import {
+  MT5Specification, MT5MarketWatchMenu, marketWatchMenu,
+} from '@/components/game/MT5Specification';
+import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
 import { cn } from '@/lib/cn';
 
 /**
@@ -22,13 +27,54 @@ import { cn } from '@/lib/cn';
  * strip above the chart instead, which is what MetaTrader's own mobile app does.
  */
 
-type Tab = 'symbols' | 'details';
+/**
+ * MetaTrader's four Market Watch tabs, along the bottom edge in this order. Its own Hot Keys page
+ * names all four verbatim when describing Space/Tab, which is the second source for the set.
+ */
+type Tab = 'symbols' | 'details' | 'trading' | 'ticks';
+
+const TABS: ReadonlyArray<{ id: Tab; label: string; unavailable?: string }> = [
+  { id: 'symbols', label: 'Symbols' },
+  { id: 'details', label: 'Details' },
+  {
+    id: 'trading',
+    label: 'Trading',
+    unavailable: 'MetaTrader\u2019s Trading tab is its one-click Buy and Sell pair per symbol. The order ticket here is always on screen, and it is the same two buttons.',
+  },
+  {
+    id: 'ticks',
+    label: 'Ticks',
+    unavailable: 'A tick chart. This feed is served as bars from M1 up, so there is no tick series to draw.',
+  },
+];
 
 export function MarketWatch({ className }: { className?: string }) {
   const { getLastTick, getMarket, requestCandles } = useGameSocketApi();
   const { status } = useGameSocket();
   const money = useDisplayMoney();
   const [tab, setTab] = useState<Tab>('symbols');
+  /** MetaTrader reaches the Specification dialog from the Market Watch context menu. */
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [specOpen, setSpecOpen] = useState(false);
+  const limits = useStakeLimits();
+
+  /**
+   * Ctrl+M, verbatim from MetaQuotes' hot-keys page: "Open/close the 'Market Watch' window." This
+   * panel is docked rather than floating, so the shortcut moves focus to it by selecting its first
+   * tab instead of toggling a window that cannot be closed.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el !== null && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        setTab('symbols');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [day, setDay] = useState<Candle | null>(null);
   const [, force] = useState(0);
   /**
@@ -121,7 +167,11 @@ export function MarketWatch({ className }: { className?: string }) {
              settles on one seeded price — so one quote is printed rather than two numbers implying
              the player buys at one and sells at the other. For the same reason the Spread column
              MetaTrader puts under the symbol is absent instead of showing a made-up figure. */
-          <div className="border-b border-[#2b3543]/60 px-2 py-2">
+          <div
+            data-quote-row=""
+            className="border-b border-[#2b3543]/60 px-2 py-2"
+            onContextMenu={(e) => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}
+          >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-[12px] font-bold text-white">{symbol}</div>
@@ -136,6 +186,10 @@ export function MarketWatch({ className }: { className?: string }) {
               <span>High: <span className="text-[#8fa2b8]">{show(day?.high ?? null)}</span></span>
             </div>
           </div>
+        ) : tab === 'trading' || tab === 'ticks' ? (
+          <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">
+            {TABS.find((t) => t.id === tab)?.unavailable}
+          </div>
         ) : (
           <dl className="divide-y divide-[#2b3543]/50 text-[11px]">
             <Detail label="Symbol" value={symbol} />
@@ -147,21 +201,64 @@ export function MarketWatch({ className }: { className?: string }) {
             {/* The contract size behind the Volume column, stated rather than implied. */}
             <Detail label="Contract size" value={`${money.fmt(LOT_STAKE_CENTS)} / lot`} />
             <Detail label="Session" value="00:00–24:00 UTC" />
+            <div className="px-3 py-2">
+              {/* MetaTrader reaches this from the context menu. A phone has no right click, so the
+                  Details tab carries it too. */}
+              <button
+                type="button"
+                onClick={() => setSpecOpen(true)}
+                className="h-7 w-full rounded-sm border border-[#2b3543] bg-[#202933] text-[11px] font-semibold text-white transition hover:border-[#3183ff]"
+              >
+                Specification
+              </button>
+            </div>
           </dl>
         )}
       </div>
 
+      {menuAt ? (
+        <MT5MarketWatchMenu
+          at={menuAt}
+          items={marketWatchMenu({ onSpecification: () => setSpecOpen(true) })}
+          onDismiss={() => setMenuAt(null)}
+        />
+      ) : null}
+
+      {specOpen ? (
+        <MT5Specification
+          spec={{
+            symbol,
+            // MetaTrader prints the instrument's description beside the symbol in its blue header.
+            description: 'Gold vs US Dollar',
+            digits,
+            contractSize: money.fmt(LOT_STAKE_CENTS),
+            currency: money.currency,
+            minVolume: limits.minCents / LOT_STAKE_CENTS,
+            maxVolume: limits.maxCents === undefined ? null : limits.maxCents / LOT_STAKE_CENTS,
+            volumeStep: 0.01,
+            expiries: DURATION_OPTIONS.map(durationLabel),
+            volumeDigits: 3,
+          }}
+          onDismiss={() => setSpecOpen(false)}
+        />
+      ) : null}
+
       {/* MetaTrader's Market Watch tabs sit along the bottom of the panel, as the Toolbox's do. */}
-      <div className="flex gap-0.5 border-t border-[#2b3543] bg-[#202933] px-1 py-1">
-        {(['symbols', 'details'] as Tab[]).map((t) => (
+      <div data-mw-tabs="" className="flex gap-0.5 border-t border-[#2b3543] bg-[#202933] px-1 py-1">
+        {TABS.map((t) => (
           <button
-            key={t}
+            key={t.id}
             type="button"
-            onClick={() => setTab(t)}
-            aria-pressed={tab === t}
-            className={cn('rounded px-2 py-0.5 text-[11px] font-semibold capitalize transition', tab === t ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white')}
+            onClick={() => setTab(t.id)}
+            aria-pressed={tab === t.id}
+            title={t.unavailable}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px] font-semibold transition',
+              tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
+              t.unavailable ? 'opacity-55' : '',
+            )}
           >
-            {t}
+            {t.label}
           </button>
         ))}
       </div>

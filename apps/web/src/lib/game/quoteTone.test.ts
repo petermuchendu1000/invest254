@@ -16,17 +16,24 @@ test('a quote that just ticked up is blue, and one that ticked down is red', () 
   assert.equal(QUOTE_TONE_COLOUR.down, '#f23645');
 });
 
-test('grey is staleness, not an unchanged tick', () => {
+test("the stale state is the window's foreground, not a grey", () => {
+  // MetaQuotes writes "Gray", and its own screenshots disagree: the unchanged price samples at
+  // #000000 on the white Market Watch and #FFFFFF on the black Popup Prices. Only the gutter glyph
+  // is literally grey. Painting a current-but-unmoved quote grey would dim it for no reason.
+  assert.equal(QUOTE_TONE_COLOUR.stale, 'currentColor');
+});
+
+test('the third state is staleness, not an unchanged tick', () => {
   const now = 1_000_000;
   // Fourteen seconds since the last CHANGE: still coloured.
   assert.equal(quoteTone({ up: true, changedAt: now - 14_000, now }), 'up');
-  // Fifteen: grey. MetaTrader's own timeout, to the second.
+  // Fifteen: stale. MetaTrader's own timeout, to the second.
   assert.equal(quoteTone({ up: true, changedAt: now - STALE_AFTER_MS, now }), 'stale');
   assert.equal(quoteTone({ up: false, changedAt: now - 60_000, now }), 'stale');
   assert.equal(STALE_AFTER_MS, 15_000);
 });
 
-test('a quote that keeps arriving at the same number still goes grey', () => {
+test('a quote that keeps arriving at the same number still goes stale', () => {
   // This is the case the rule is actually about, and the one a naive reading misses: identical
   // quotes arriving every second are not a CHANGE, so the timer keeps running.
   const changedAt = 0;
@@ -41,7 +48,7 @@ test('a going-stale quote comes back the moment it changes again', () => {
 });
 
 test('before any quote has arrived there is no tone at all', () => {
-  // Not one of MetaTrader's three: there is nothing to colour yet, which is distinct from grey.
+  // Not one of MetaTrader's three: there is nothing to colour yet, which is distinct from stale.
   assert.equal(quoteTone({ up: null, changedAt: null, now: 1 }), null);
   assert.equal(quoteTone({ up: true, changedAt: null, now: 1 }), null);
   assert.equal(quoteTone({ up: null, changedAt: 1, now: 1 }), null);
