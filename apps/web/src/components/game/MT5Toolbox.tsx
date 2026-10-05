@@ -17,6 +17,8 @@ import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
 import { EXECUTION_PRICE, tradeDateOf } from '@/lib/history/mt5history';
 import { cn } from '@/lib/cn';
+import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
+import { MIN_PANEL_PX } from '@/lib/chart/paneSplit';
 
 /**
  * MetaTrader's Toolbox.
@@ -51,7 +53,7 @@ const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
 ];
 
 export function MT5Toolbox() {
-  const { activePosition, status } = useGameSocket();
+  const { activePosition, status, earlyCloseEnabled } = useGameSocket();
   const { getLastTick, getMarket, sell } = useGameSocketApi();
   const { data: wallet } = useWallet();
   const money = useDisplayMoney();
@@ -80,9 +82,9 @@ export function MT5Toolbox() {
     return t ? priceOfRate(t.rate) : null;
   }, [getLastTick, priceOfRate]);
   const px = (rate: number | null | undefined): string => {
-    if (rate === null || rate === undefined) return '—';
+    if (rate === null || rate === undefined) return '-';
     const p = priceOfRate(rate);
-    return p === null ? '—' : p.toFixed(digits);
+    return p === null ? '-' : p.toFixed(digits);
   };
   /**
    * The price a rate had on ITS OWN day.
@@ -104,7 +106,7 @@ export function MT5Toolbox() {
     atMs: number | null | undefined,
     stored?: number | null | undefined,
   ): string => {
-    if (rate === null || rate === undefined || atMs === null || atMs === undefined) return '—';
+    if (rate === null || rate === undefined || atMs === null || atMs === undefined) return '-';
     if (typeof stored === 'number' && Number.isFinite(stored)) return stored.toFixed(digits);
     const m = getMarket();
     const a = anchors.get(tradeDateOf(atMs));
@@ -117,7 +119,7 @@ export function MT5Toolbox() {
     toast.push({
       tone: 'info',
       title: `${a.symbol} alert`,
-      description: `${a.above ? 'rose to' : 'fell to'} ${a.price} — now ${price.toFixed(digits)}`,
+      description: `${a.above ? 'rose to' : 'fell to'} ${a.price}, now ${price.toFixed(digits)}`,
     });
   });
 
@@ -135,7 +137,7 @@ export function MT5Toolbox() {
   // modify it on an open position; both surfaces read and write the one value.
   const tpTarget = useTakeProfitStore((st) => st.targetCents);
   const setTp = useTakeProfitStore((st) => st.set);
-  useTakeProfitWatch(live, sell, money.fmt);
+  useTakeProfitWatch(live, sell, money.fmt, earlyCloseEnabled);
 
   // ── Tab data ───────────────────────────────────────────────────────────────────────────────────
   const { data: history } = useQuery({
@@ -156,6 +158,15 @@ export function MT5Toolbox() {
     return out;
   }, [rows, live]);
   const anchors = useDayAnchors(days, open);
+
+  // MetaTrader's Toolbox is a SIZED pane with a splitter on its top edge; the chart above simply
+  // takes what is left. Keeping the size on the pane rather than on the chart is why a drag can
+  // never leave a hole: there is exactly one flexible pane in the column.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panel = usePanelHeight();
+  const grabPanel = useCallback((clientY: number) => {
+    panel.begin(clientY, panelRef.current?.getBoundingClientRect().height ?? MIN_PANEL_PX);
+  }, [panel]);
 
   const notifications = useMyNotifications();
   const journal = useJournal();
@@ -188,7 +199,7 @@ export function MT5Toolbox() {
               matter with a position open appear when the panel does. */}
           {open ? <Figure label="Margin" value={money.fmt(marginCents)} /> : null}
           {open ? <Figure label="Free margin" value={money.fmt(freeMarginCents)} /> : null}
-          <Figure label="Margin level" value={marginLevelPct === null ? '—' : `${marginLevelPct.toFixed(2)}%`} />
+          <Figure label="Margin level" value={marginLevelPct === null ? '-' : `${marginLevelPct.toFixed(2)}%`} />
         </span>
         <span className="flex shrink-0 items-center gap-2 pl-1">
           {live ? <span className="rounded bg-[#3183ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#3183ff]">1 open</span> : null}
@@ -210,8 +221,21 @@ export function MT5Toolbox() {
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-30 bg-black/60 sm:hidden"
           />
-          <div className="fixed inset-x-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom))] z-40 flex max-h-[68vh] flex-col overflow-hidden rounded border border-[#2b3543] bg-[#0f1720] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none">
-          <div className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2b3543]" style={{ maxHeight: 'min(46vh, 22rem)' }}>
+          <div
+            ref={panelRef}
+            className="fixed inset-x-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom))] z-40 flex max-h-[68vh] flex-col overflow-hidden rounded border border-[#2b3543] bg-[#0f1720] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none"
+            style={panel.px === null ? undefined : { height: panel.px, maxHeight: 'none' }}
+          >
+          {/* The splitter. Drag up for more Toolbox, down for more chart; double-click hands the
+              size back to the layout. On a phone the pane is bottom-anchored, so it grows upward
+              under the finger, which is the same gesture as the desktop drag. */}
+          <PaneSplitter onGrab={grabPanel} onMove={panel.move} onRelease={panel.end} onReset={panel.reset} />
+          <div
+            className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2b3543]"
+            // Unsized, the pane keeps the height it always had. Once a trader has dragged it, the
+            // pane itself carries the height and the scroller just fills it.
+            style={panel.px === null ? { maxHeight: 'min(46vh, 22rem)' } : undefined}
+          >
             {/* MetaTrader shows a position as a two-line entry on a phone and as a wide table on a
                 desktop, because ten columns cannot be read on a 430px screen. Both are rendered from
                 the same values and swapped at `sm`, rather than the table being squeezed. */}
@@ -227,39 +251,63 @@ export function MT5Toolbox() {
                     to={px(getLastTick()?.rate ?? null)}
                     profit={money.fmt(live.livePnlCents)}
                     profitCents={live.livePnlCents}
-                    note={tpTarget === null ? null : `T/P ${money.fmt(tpTarget)}`}
+                    note={earlyCloseEnabled && tpTarget !== null ? `T/P ${money.fmt(tpTarget)}` : `Max loss ${money.fmt(live.stakeCents)}`}
                   />
                   <div className="hidden sm:block">
                     <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
                       <tr className="border-t border-[#2b3543]/60">
                         <Td>{symbol}</Td>
                         <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
-                        <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '—'}</Td>
+                        <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '-'}</Td>
                         <Td className={live.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{live.direction}</Td>
                         <Td>{lotsOfStake(live.stakeCents)}</Td>
                         <Td>{px(live.entryRate)}</Td>
                         <Td>
-                          {/* Present, disabled, and honest about why. The engine refuses to close a
-                              losing contract early, so a stop is not implementable; the most this
-                              contract can lose is its stake, always. */}
+                          {/* MetaTrader's S/L column, stated rather than offered. The engine settles
+                              a losing contract at expiry and refuses to close one early, so the stop
+                              is fixed at the stake: the most this position can lose, always. A
+                              figure the trader can read beats a dash that explains nothing. */}
                           <span
-                            className="cursor-not-allowed text-[#8fa2b8]/50"
-                            title="No stop loss: this contract settles at expiry and the most it can lose is the stake."
+                            className="text-[#8fa2b8]"
+                            title="Fixed: this contract settles at expiry and cannot lose more than its stake."
                           >
-                            —
+                            {money.fmt(live.stakeCents)}
                           </span>
                         </Td>
                         <Td>
                           {/* MetaTrader's "− value +", the same control the ticket carries. */}
-                          <span className="flex items-center gap-1">
-                            <button type="button" onClick={() => setTp(tpTarget === null ? null : Math.max(0, tpTarget - 10_000) || null)} disabled={tpTarget === null} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
-                            <span className="min-w-14 text-center">{tpTarget === null ? 'none' : money.fmt(tpTarget)}</span>
-                            <button type="button" onClick={() => setTp((tpTarget ?? 0) + 10_000)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
-                          </span>
+                          {earlyCloseEnabled ? (
+                            <span className="flex items-center gap-1">
+                              <button type="button" onClick={() => setTp(tpTarget === null ? null : Math.max(0, tpTarget - 10_000) || null)} disabled={tpTarget === null} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
+                              <span className="min-w-14 text-center">{tpTarget === null ? 'none' : money.fmt(tpTarget)}</span>
+                              <button type="button" onClick={() => setTp((tpTarget ?? 0) + 10_000)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
+                            </span>
+                          ) : (
+                            // A target that can never fire is not a setting, it is a decoration.
+                            <span className="text-[#8fa2b8]" title="This brand settles every contract at expiry, so a profit target cannot close it early.">
+                              at expiry
+                            </span>
+                          )}
                         </Td>
                         <Td>{px(getLastTick()?.rate ?? null)}</Td>
                         <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#3183ff]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
-                          {money.fmt(live.livePnlCents)}
+                          <span className="flex items-center justify-end gap-2">
+                            {money.fmt(live.livePnlCents)}
+                            {/* MetaTrader closes a position from its row with a small ×. Shown only
+                                where the engine will honour a manual close. */}
+                            {earlyCloseEnabled ? (
+                              <button
+                                type="button"
+                                onClick={sell}
+                                disabled={live.phase !== 'open' || !live.sellable || !live.positionId}
+                                aria-label="Close position"
+                                title={live.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
+                                className="rounded-sm border border-[#2b3543] px-1.5 text-[11px] font-normal text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645] disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </span>
                         </Td>
                       </tr>
                     </Table>
@@ -282,7 +330,7 @@ export function MT5Toolbox() {
                       lots={lotsOfStake(p.stakeCents)}
                       from={pxOn(p.entryRate, p.openedAt, p.entryPrice)}
                       to={pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}
-                      profit={p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
+                      profit={p.pnlCents === null ? '-' : money.fmt(p.pnlCents)}
                       profitCents={p.pnlCents ?? 0}
                       note={clock(p.openedAt)}
                     />
@@ -300,7 +348,7 @@ export function MT5Toolbox() {
                       <Td>{pxOn(p.entryRate, p.openedAt, p.entryPrice)}</Td>
                       <Td>{pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}</Td>
                       <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#3183ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
-                        {p.pnlCents === null ? '—' : money.fmt(p.pnlCents)}
+                        {p.pnlCents === null ? '-' : money.fmt(p.pnlCents)}
                       </Td>
                     </tr>
                   ))}
@@ -583,7 +631,9 @@ function Figure({ label, value, tone, className }: { label: string; value: strin
   return (
     <span className={cn('flex shrink-0 items-baseline gap-1.5 whitespace-nowrap', className)}>
       <span className="text-[10px] uppercase tracking-wide text-[#8fa2b8]">{label}</span>
-      <span className={cn('font-mono text-[12px] font-semibold tabular-nums', tone === 'up' ? 'text-[#41be56]' : tone === 'down' ? 'text-[#f23645]' : 'text-[#ffffff]')}>{value}</span>
+      {/* Equity carries this tone when the floating P/L is non-zero, so it is money, not a price:
+          MetaTrader's blue for a profit, red for a loss. */}
+      <span className={cn('font-mono text-[12px] font-semibold tabular-nums', tone === 'up' ? 'text-[#3183ff]' : tone === 'down' ? 'text-[#f23645]' : 'text-[#ffffff]')}>{value}</span>
     </span>
   );
 }

@@ -122,7 +122,7 @@ export function PositionHistory() {
                         {p.pnlCents !== null ? (
                           <Money cents={p.pnlCents} className={resultClass(p)} />
                         ) : (
-                          <span className="text-muted">—</span>
+                          <span className="text-muted">-</span>
                         )}
                       </td>
                       <td className="px-4 py-2 text-muted">{formatDateTime(p.openedAt)}</td>

@@ -169,7 +169,7 @@ export function MultipliersPanel({ getLastTick, resetKey, instrumentId }: { getL
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
             <Stat label="Entry" value={position.entry.toFixed(2)} />
-            <Stat label="Current" value={price != null && position.instrumentId === instrumentId ? price.toFixed(2) : '—'} />
+            <Stat label="Current" value={price != null && position.instrumentId === instrumentId ? price.toFixed(2) : '-'} />
             <Stat label="Stop out" value={stopoutPrice(position).toFixed(2)} tone="down" />
           </div>
           {position.tpCents != null || position.slCents != null ? (

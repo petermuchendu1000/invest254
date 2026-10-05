@@ -214,7 +214,7 @@ function Row({ r, checked, onToggle, onReject }: { r: AdminPayoutRow; checked: b
       <Td className="font-medium tabular-nums"><Money cents={r.amountCents} /></Td>
       <Td className="tabular-nums">{r.phone}</Td>
       <Td><StatusBadge status={r.status} /></Td>
-      <Td className="font-mono text-xs text-muted">{r.approvedBy ? `${r.approvedBy.slice(0, 8)}…` : '—'}</Td>
+      <Td className="font-mono text-xs text-muted">{r.approvedBy ? `${r.approvedBy.slice(0, 8)}…` : '-'}</Td>
       <Td className="whitespace-nowrap text-xs text-muted">{formatAgo(r.createdAtMs)}</Td>
       <Td className="text-right">
         {canAct ? (
@@ -223,7 +223,7 @@ function Row({ r, checked, onToggle, onReject }: { r: AdminPayoutRow; checked: b
             <Button size="sm" variant="outline" disabled={action.isPending} onClick={onReject}>Reject</Button>
           </span>
         ) : (
-          <span className="text-xs text-muted">—</span>
+          <span className="text-xs text-muted">-</span>
         )}
       </Td>
     </tr>

@@ -18,6 +18,10 @@ export interface HelloData {
     maxMultiplier: number;
     defaultDurationS: number;
     tickRateMs: number;
+    /** Whether the engine will accept a manual close on this brand (false in pool mode). Absent on
+     *  an engine that predates the flag, which is read as "no", because a close control that
+     *  cannot work is worse than one that is not there. */
+    earlyCloseEnabled?: boolean;
   };
 }
 

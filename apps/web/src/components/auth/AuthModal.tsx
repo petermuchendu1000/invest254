@@ -492,7 +492,7 @@ export function AuthModal() {
               <span className="text-up">
                 <ShieldIcon />
               </span>
-              <span>Admin account — verify your security questions</span>
+              <span>Admin account: verify your security questions</span>
             </div>
             {resetKeys.map((k) => (
               <Input

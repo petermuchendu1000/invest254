@@ -43,7 +43,7 @@ function UserCell({ userId, username }: { userId: string; username: string }) {
 
 /** Exact timestamp (to the second) with a relative label underneath. */
 function TimeCell({ ms }: { ms: number | null }) {
-  if (ms == null) return <span className="text-muted">—</span>;
+  if (ms == null) return <span className="text-muted">-</span>;
   return (
     <span className="flex flex-col leading-tight">
       <span className="whitespace-nowrap text-xs font-medium text-fg" title={formatExact(ms)}>{formatExact(ms)}</span>
@@ -306,7 +306,7 @@ function useRowActions(r: AdminWithdrawalRow) {
             tone: 'success',
             title: act === 'approve' ? 'Withdrawal approved' : act === 'mark-paid' ? 'Marked as paid' : 'Withdrawal rejected',
             description: act === 'approve' ? 'M-Pesa payout dispatched.'
-              : act === 'mark-paid' ? 'Recorded as paid — the player now sees this withdrawal as complete.'
+              : act === 'mark-paid' ? 'Recorded as paid. The player now sees this withdrawal as complete.'
                 : 'Funds returned to the player.',
           }),
         onError: (e) =>
@@ -322,7 +322,7 @@ function useRowActions(r: AdminWithdrawalRow) {
         <PasswordConfirmButton label="Mark paid" confirmLabel="Confirm paid" variant={canAct ? 'ghost' : 'primary'} busy={action.isPending} onConfirm={(pw) => run('mark-paid', pw)} />
       ) : null}
     </span>
-  ) : <span className="text-xs text-muted">—</span>;
+  ) : <span className="text-xs text-muted">-</span>;
   return node;
 }
 
@@ -331,7 +331,7 @@ function Lifetime({ r }: { r: AdminWithdrawalRow }) {
   const net = r.totalDepositsCents - r.totalWithdrawalsCents;
   return (
     <span className="flex flex-col items-end text-xs leading-5">
-      <span title={r.depositCount ? `${r.depositCount} deposit(s) since ${r.firstDepositAtMs ? formatExact(r.firstDepositAtMs).slice(0, 11) : '—'}` : 'never deposited'}>
+      <span title={r.depositCount ? `${r.depositCount} deposit(s) since ${r.firstDepositAtMs ? formatExact(r.firstDepositAtMs).slice(0, 11) : '-'}` : 'never deposited'}>
         <span className="text-muted">In </span><Money cents={r.totalDepositsCents} />
       </span>
       <span title={`${r.withdrawalCount} withdrawal(s) paid`}><span className="text-muted">Out </span><Money cents={r.totalWithdrawalsCents} /></span>
@@ -367,7 +367,7 @@ function CardRow({ r, checked, onToggle, highlighted = false }: { r: AdminWithdr
         </div>
       </div>
       <div className="mt-3 flex items-end justify-between gap-3 border-t border-border pt-3">
-        <span className="text-xs text-muted">Balance <Money cents={r.balanceCents} className="text-fg" /><br />Requested {r.createdAtMs ? formatAgo(r.createdAtMs) : '—'}</span>
+        <span className="text-xs text-muted">Balance <Money cents={r.balanceCents} className="text-fg" /><br />Requested {r.createdAtMs ? formatAgo(r.createdAtMs) : '-'}</span>
         <Lifetime r={r} />
       </div>
       <div className="mt-3 flex justify-end">{actions}</div>

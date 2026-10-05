@@ -192,7 +192,7 @@ export function MT5Entry({
 
 /** A signed amount: MetaTrader's blue for a credit, red for a debit. */
 export function MT5Amount({ cents, fmt }: { cents: number | null; fmt: (cents: number) => string }) {
-  if (cents === null) return <span className="text-[#8fa2b8]">—</span>;
+  if (cents === null) return <span className="text-[#8fa2b8]">-</span>;
   return <span className={cents < 0 ? 'text-[#f23645]' : 'text-[#3183ff]'}>{fmt(cents)}</span>;
 }
 

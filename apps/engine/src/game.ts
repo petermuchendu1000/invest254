@@ -741,6 +741,12 @@ export class GameServer {
       minStakeCents: c.minStakeCents, maxStakeCents: c.maxStakeCents, maxMultiplier: c.maxMultiplier,
       defaultDurationS: c.defaultDurationS, tickRateMs: c.tickRateMs,
       configVersion: (c as VersionedGameConfig).version ?? 0,
+      // Whether `sell` can succeed at all on this brand. Pool mode refuses every manual close
+      // (decision B above), and the client had no way to know: it drew a Close button, and every
+      // tap came back SELL_DISABLED. This reports the rule rather than changing it. Nothing about
+      // how a position is decided or settled is touched; it is the same boolean `sell` already
+      // tests, said out loud so the interface can be honest.
+      earlyCloseEnabled: !(this.pool?.enabled() ?? false),
     };
   }
 }

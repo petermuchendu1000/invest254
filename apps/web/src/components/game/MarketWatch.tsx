@@ -91,7 +91,7 @@ export function MarketWatch({ className }: { className?: string }) {
   const open = market?.anchor.base ?? null;
   const changePct = last !== null && open ? ((last - open) / open) * 100 : null;
   const up = (changePct ?? 0) >= 0;
-  const show = (n: number | null | undefined) => (n === null || n === undefined ? '—' : n.toFixed(digits));
+  const show = (n: number | null | undefined) => (n === null || n === undefined ? '-' : n.toFixed(digits));
 
   return (
     <aside className={cn('flex flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] text-[#ffffff]', className)}>
@@ -117,7 +117,7 @@ export function MarketWatch({ className }: { className?: string }) {
               <div className="min-w-0">
                 <div className="text-[12px] font-bold text-white">{symbol}</div>
                 <div className="font-mono text-[10px] text-[#8fa2b8]">
-                  {changePct === null ? '—' : `${up ? '+' : ''}${changePct.toFixed(2)}%`} today
+                  {changePct === null ? '-' : `${up ? '+' : ''}${changePct.toFixed(2)}%`} today
                 </div>
               </div>
               <MT5Price value={last} digits={digits} className={cn('text-[12px]', quoteTone)} />

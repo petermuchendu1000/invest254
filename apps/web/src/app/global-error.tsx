@@ -23,7 +23,7 @@ export default function GlobalError({ reset }: { error: Error; reset: () => void
       >
         <h1 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Invest254 hit a problem</h1>
         <p style={{ maxWidth: '24rem', color: '#8b949e', fontSize: '0.875rem' }}>
-          The app failed to load. Please reload — your account and balance are safe.
+          The app failed to load. Please reload. Your account and balance are safe.
         </p>
         <button
           onClick={reset}

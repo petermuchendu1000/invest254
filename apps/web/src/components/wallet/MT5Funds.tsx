@@ -80,12 +80,12 @@ export function MT5Funds() {
 
         {figures.demo ? (
           <p className="px-3 pb-3 text-[12px] leading-snug text-[#8fa2b8]">
-            This is practice money — not real cash, and never withdrawable. Switch to your real account
+            This is practice money: not real cash, and never withdrawable. Switch to your real account
             to deposit or withdraw.
           </p>
         ) : bonus > 0 ? (
           <p className="px-3 pb-3 text-[12px] leading-snug text-[#8fa2b8]">
-            Includes {money.fmt(bonus)} bonus — stakeable now, withdrawable after wagering.
+            Includes {money.fmt(bonus)} bonus: stakeable now, withdrawable after wagering.
           </p>
         ) : null}
 
@@ -108,7 +108,7 @@ export function MT5Funds() {
                 }
                 // A pending deposit has not moved the balance yet, so it carries no amount — the same
                 // rule the History screen's Deals tab applies.
-                result={isCompleted(t) ? <MT5Amount cents={signedCents(t)} fmt={money.fmt} /> : <span className="text-[#8fa2b8]">—</span>}
+                result={isCompleted(t) ? <MT5Amount cents={signedCents(t)} fmt={money.fmt} /> : <span className="text-[#8fa2b8]">-</span>}
               />
             ))
           )}

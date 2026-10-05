@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ANCHORS_NEEDED, fibLines, hitTest, humanDuration, measure, pitchforkLines,
+  ANCHORS_NEEDED, fibLines, humanDuration, measure, pitchforkLines,
   type Anchor, type Drawing, type DrawingKind, type Point, type ToolId,
 } from '@/lib/chart/drawings';
 
@@ -78,18 +78,10 @@ export function ChartDrawings({
     return time === null || price === null ? null : { time, price };
   }, [project]);
 
-  const pointAt = useCallback((e: { clientX: number; clientY: number }): Point | null => {
-    const rect = svgRef.current?.getBoundingClientRect();
-    return rect ? { x: e.clientX - rect.left, y: e.clientY - rect.top } : null;
-  }, []);
-
   const onPointerDown = (e: React.PointerEvent) => {
-    // The cursor tool selects an existing object; it never creates one.
-    if (!drawingTool) {
-      const p = pointAt(e);
-      if (p) onSelect(hitTest(p, segmentsOf(drawings, project)));
-      return;
-    }
+    // Without a drawing tool the overlay is pointer-transparent and never sees this; selection is
+    // the objects' own (see HitLine), and deselection is a click on the chart beneath.
+    if (!drawingTool) return;
     const a = anchorAt(e);
     if (!a) return;
     e.preventDefault();
@@ -143,19 +135,39 @@ export function ChartDrawings({
       width={width}
       height={height}
       className="absolute inset-0 z-10"
-      // The chart keeps pan, pinch and crosshair unless a tool is actually in use.
-      style={{ pointerEvents: tool === 'cursor' || tool === 'crosshair' ? 'none' : 'auto',
-               cursor: drawingTool ? 'crosshair' : 'default', touchAction: drawingTool ? 'none' : 'auto' }}
+      /**
+       * The overlay takes the pointer ONLY while a drawing tool is in use.
+       *
+       * It used to put a full-size transparent rect over the plot whenever the cursor tool was
+       * active, to catch selection clicks. The cursor tool is the DEFAULT, and a child may re-enable
+       * pointer events even under a `none` parent, so from page load every pan, pinch, zoom and
+       * crosshair move landed on an invisible sheet instead of the chart: the chart simply stopped
+       * responding, and once a tool had been used and dropped back to the cursor it stayed that way.
+       *
+       * Selection is now the drawn objects' own job — each carries a transparent wide-stroke twin
+       * (see `HitLine`) — so nothing but an actual line is ever a target, and the chart keeps every
+       * gesture it had.
+       */
+      style={{
+        pointerEvents: drawingTool ? 'auto' : 'none',
+        cursor: drawingTool ? 'crosshair' : 'default',
+        touchAction: drawingTool ? 'none' : 'auto',
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       aria-hidden
     >
-      {/* The cursor tool must still be able to SELECT, so it gets a transparent catcher that sits
-          under nothing and above nothing — enabled only while the rail is on the cursor. */}
-      {tool === 'cursor' ? (
-        <rect x={0} y={0} width={width} height={height} fill="transparent" style={{ pointerEvents: 'auto' }} onPointerDown={onPointerDown} />
-      ) : null}
-      {drawings.map((d) => <Shape key={d.id} d={d} project={project} selected={d.id === selected} />)}
+      {drawings.map((d) => (
+        <Shape
+          key={d.id}
+          d={d}
+          project={project}
+          selected={d.id === selected}
+          // Only the cursor tool selects; while drawing, a click on an old object must place an
+          // anchor rather than select it.
+          {...(drawingTool ? {} : { onPick: () => onSelect(d.id) })}
+        />
+      ))}
       {preview ? <Shape d={preview} project={project} selected={false} preview /> : null}
       {/* Anchors already committed for the object in progress, so a three-click pitchfork shows its
           progress rather than appearing to have swallowed the first two clicks. */}
@@ -168,44 +180,21 @@ export function ChartDrawings({
   );
 }
 
-/** Every drawing, as the line segments selection is tested against. */
-function segmentsOf(drawings: readonly Drawing[], project: Projection): Array<{ id: string; a: Point; b: Point }> {
-  const out: Array<{ id: string; a: Point; b: Point }> = [];
-  for (const d of drawings) {
-    for (const [a, b] of segmentPairs(d, project)) out.push({ id: d.id, a, b });
-  }
-  return out;
+function HitLine({ x1, y1, x2, y2, onPick }: { x1: number; y1: number; x2: number; y2: number; onPick?: (() => void) | undefined }) {
+  if (!onPick) return null;
+  return (
+    <line
+      x1={x1} y1={y1} x2={x2} y2={y2}
+      stroke="transparent" strokeWidth={14} fill="none"
+      style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+      onPointerDown={(e) => { e.stopPropagation(); onPick(); }}
+    />
+  );
 }
 
-function segmentPairs(d: Drawing, project: Projection): Array<[Point, Point]> {
-  const px = (an: Anchor): Point | null => {
-    const x = project.xOf(an.time), y = project.yOf(an.price);
-    return x === null || y === null ? null : { x, y };
-  };
-  const pairs: Array<[Point, Point]> = [];
-  const push = (a: Anchor, b: Anchor) => { const p = px(a), q = px(b); if (p && q) pairs.push([p, q]); };
-
-  if (d.kind === 'horizontal' || d.kind === 'text') {
-    const p = px(d.points[0]!);
-    // A horizontal line spans the pane, so its hit area is the whole width at that price.
-    if (p) pairs.push([{ x: 0, y: p.y }, { x: 10_000, y: p.y }]);
-    return pairs;
-  }
-  const [a, b, c] = d.points;
-  if (!a || !b) return pairs;
-  if (d.kind === 'trend' || d.kind === 'measure') { push(a, b); return pairs; }
-  if (d.kind === 'fib') {
-    for (const l of fibLines(a, b)) push({ time: a.time, price: l.price }, { time: b.time, price: l.price });
-    return pairs;
-  }
-  if (d.kind === 'pitchfork' && c) {
-    const f = pitchforkLines(a, b, c);
-    for (const l of [f.median, f.upper, f.lower]) push(l.from, l.to);
-  }
-  return pairs;
-}
-
-function Shape({ d, project, selected, preview }: { d: Drawing; project: Projection; selected: boolean; preview?: boolean }) {
+function Shape({ d, project, selected, preview, onPick }: {
+  d: Drawing; project: Projection; selected: boolean; preview?: boolean; onPick?: (() => void) | undefined;
+}) {
   const px = (an: Anchor): Point | null => {
     const x = project.xOf(an.time), y = project.yOf(an.price);
     return x === null || y === null ? null : { x, y };
@@ -222,17 +211,30 @@ function Shape({ d, project, selected, preview }: { d: Drawing; project: Project
     return pa ? (
       <g>
         <line x1={0} y1={pa.y} x2="100%" y2={pa.y} {...common} />
+        <HitLine x1={0} y1={pa.y} x2={10_000} y2={pa.y} onPick={onPick} />
         <text x={6} y={pa.y - 5} fill={stroke} fontSize={10} fontFamily="monospace">{a.price.toFixed(project.digits)}</text>
       </g>
     ) : null;
   }
   if (d.kind === 'text') {
-    return pa ? <text x={pa.x} y={pa.y} fill={stroke} fontSize={12} fontWeight={600}>{d.label ?? ''}</text> : null;
+    return pa ? (
+      <g>
+        <text x={pa.x} y={pa.y} fill={stroke} fontSize={12} fontWeight={600}>{d.label ?? ''}</text>
+        <HitLine x1={pa.x} y1={pa.y - 6} x2={pa.x + Math.max(20, (d.label ?? '').length * 7)} y2={pa.y - 6} onPick={onPick} />
+      </g>
+    ) : null;
   }
   if (!b) return null;
   const pb = px(b);
 
-  if (d.kind === 'trend') return pa && pb ? <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} {...common} /> : null;
+  if (d.kind === 'trend') {
+    return pa && pb ? (
+      <g>
+        <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} {...common} />
+        <HitLine x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} onPick={onPick} />
+      </g>
+    ) : null;
+  }
 
   if (d.kind === 'measure' && pa && pb) {
     const m = measure(a, b, project.barSeconds);
@@ -243,6 +245,7 @@ function Shape({ d, project, selected, preview }: { d: Drawing; project: Project
         <rect x={Math.min(pa.x, pb.x)} y={Math.min(pa.y, pb.y)} width={Math.abs(pb.x - pa.x)} height={Math.abs(pb.y - pa.y)}
               fill={tone} fillOpacity={0.12} stroke={tone} strokeWidth={1} />
         <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={tone} strokeWidth={1.5} />
+        <HitLine x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} onPick={onPick} />
         <text x={(pa.x + pb.x) / 2} y={Math.min(pa.y, pb.y) - 6} fill={tone} fontSize={11} fontFamily="monospace" textAnchor="middle">
           {`${m.delta >= 0 ? '+' : ''}${m.delta.toFixed(project.digits)} (${m.percent.toFixed(2)}%) · ${humanDuration(m.seconds)}${bars}`}
         </text>
@@ -261,6 +264,7 @@ function Shape({ d, project, selected, preview }: { d: Drawing; project: Project
             <g key={l.ratio}>
               <line x1={left} y1={y} x2={right} y2={y} stroke={stroke} strokeWidth={l.ratio === 0 || l.ratio === 1 ? 1.5 : 1}
                     strokeDasharray={l.ratio === 0 || l.ratio === 1 ? undefined : '3 3'} />
+              <HitLine x1={left} y1={y} x2={right} y2={y} onPick={onPick} />
               <text x={right + 4} y={y + 3} fill={stroke} fontSize={9} fontFamily="monospace">
                 {`${l.label} ${l.price.toFixed(project.digits)}`}
               </text>
@@ -277,7 +281,12 @@ function Shape({ d, project, selected, preview }: { d: Drawing; project: Project
       <g>
         {[f.median, f.upper, f.lower].map((l, i) => {
           const p = px(l.from), q = px(l.to);
-          return p && q ? <line key={i} x1={p.x} y1={p.y} x2={q.x} y2={q.y} {...common} strokeWidth={i === 0 ? width + 0.5 : width} /> : null;
+          return p && q ? (
+            <g key={i}>
+              <line x1={p.x} y1={p.y} x2={q.x} y2={q.y} {...common} strokeWidth={i === 0 ? width + 0.5 : width} />
+              <HitLine x1={p.x} y1={p.y} x2={q.x} y2={q.y} onPick={onPick} />
+            </g>
+          ) : null;
         })}
       </g>
     );

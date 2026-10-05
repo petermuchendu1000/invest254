@@ -48,8 +48,8 @@ export function PnlColorToggle() {
       </div>
       <p className="text-xs text-muted">
         {mode === 'classic'
-          ? 'Gains show green, losses red — the conventional trading palette.'
-          : 'Gains use your brand colour, losses a muted neutral — calmer and colourblind-safe. Position (above/below zero) and +/− signs distinguish both modes.'}
+          ? 'Gains show green, losses red. The conventional trading palette.'
+          : 'Gains use your brand colour, losses a muted neutral, calmer and colourblind-safe. Position (above/below zero) and +/− signs distinguish both modes.'}
       </p>
     </div>
   );

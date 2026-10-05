@@ -42,7 +42,7 @@ export function kycSub(status: string | null | undefined): string {
   switch (status) {
     case 'approved': return 'Verified';
     case 'pending': return 'In review';
-    case 'rejected': return 'Not approved — try again';
+    case 'rejected': return 'Not approved: try again';
     default: return 'Not verified';
   }
 }

@@ -406,7 +406,7 @@ function UserRow({ r, selected, onToggle }: { r: AdminUserRow; selected: boolean
         )}
       </Td>
       <Td className="whitespace-nowrap text-right text-xs text-muted">
-        {r.lastActiveAtMs ? <span title={formatExact(r.lastActiveAtMs)}>{formatAgo(r.lastActiveAtMs)}</span> : '—'}
+        {r.lastActiveAtMs ? <span title={formatExact(r.lastActiveAtMs)}>{formatAgo(r.lastActiveAtMs)}</span> : '-'}
       </Td>
     </tr>
   );

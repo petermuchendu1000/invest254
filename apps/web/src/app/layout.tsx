@@ -49,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const name = brandWordmark(b);
   return {
     title: { default: b.name, template: `%s · ${b.name}` },
-    description: `${b.name} — real-money trade-prediction game. Predict BUY/SELL on the live curve.`,
+    description: `${b.name}: real-money trade-prediction game. Predict BUY/SELL on the live curve.`,
     applicationName: b.name,
     manifest: '/manifest.webmanifest',
     appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: b.name },

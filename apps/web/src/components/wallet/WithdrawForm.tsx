@@ -87,7 +87,7 @@ export function WithdrawForm() {
     try {
       return maskMsisdn(normalizeMsisdn(effectivePhone));
     } catch {
-      return effectivePhone ? effectivePhone : '—';
+      return effectivePhone ? effectivePhone : '-';
     }
   }, [effectivePhone]);
 

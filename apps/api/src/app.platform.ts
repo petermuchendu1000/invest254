@@ -553,7 +553,7 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     // The price chart + trade interface are SYSTEM-admin-assigned add-ons (Issue 2): a platform admin
     // may not set them via a site patch — it requests them (addon flow) and the system admin grants.
     if ((ctx.claims?.role ?? "") !== "platform_superadmin" && ("chart_style" in patch || "trade_ui" in patch))
-      throw new ApiError("ADDON_SYSTEM_ADMIN_ONLY", "price chart and trade interface are assigned by the system admin — request the change instead", 403);
+      throw new ApiError("ADDON_SYSTEM_ADMIN_ONLY", "price chart and trade interface are assigned by the system admin. Request the change instead", 403);
     const out = await domain(() => deps.platform.updateSite(ctx.claims!.userId, ctx.claims!.role ?? "player", ctx.params.id!, patch));
     // a currency change voids stake limits set in the old currency (KES 50 must not become $50)
     if ("currency" in patch && deps.stakeNative) await deps.stakeNative.clear(ctx.params.id!);

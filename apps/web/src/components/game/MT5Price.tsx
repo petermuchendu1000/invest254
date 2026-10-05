@@ -23,7 +23,7 @@ export function MT5Price({
   tone?: 'sell' | 'buy' | undefined;
 }) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
-    return <span className={cn('font-mono tabular-nums', className)}>—</span>;
+    return <span className={cn('font-mono tabular-nums', className)}>-</span>;
   }
   const text = value.toFixed(digits);
   // A fractional pip exists only on the odd-digit quotes (3 and 5), exactly as in MetaTrader.

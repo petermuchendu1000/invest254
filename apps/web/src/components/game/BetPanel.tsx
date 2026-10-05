@@ -29,22 +29,19 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const ceil2 = (n: number) => Math.ceil(n * 100) / 100;
 
 /**
- * Early close ("Cash Out", then "Close Trade") is HIDDEN.
+ * Early close ("Cash Out", then "Close Trade") is shown only when the ENGINE says it can work.
  *
  * `GameService.sell` refuses outright while a brand is in pool mode:
  *   `if (this.pool?.enabled()) throw new Error("SELL_DISABLED: manual sell is disabled in pool mode")`
- * — a player must not cash the green peak of a trade the pool controller already decided will lose
- * (docs/25 decision B). ALL 15 production brands run `pool_mode = true`, so the control could never
- * do what it said: every tap ended in SELL_DISABLED.
+ * because a player must not cash the green peak of a trade the pool controller already decided will
+ * lose (docs/25 decision B). Every production brand runs `pool_mode = true`, so the control could
+ * never do what it said: every tap ended in SELL_DISABLED.
  *
- * It is hidden rather than deleted — `sell` stays wired end to end, so turning pool mode off on a
- * brand brings the feature back by flipping this one flag. The player is told what happens instead,
- * which is the truth in pool mode: the trade settles itself at expiry.
- *
- * (The player's /game/config does not expose poolMode — only the admin one does — so this cannot
- * currently be derived per brand at runtime.)
+ * It used to be a hardcoded `false` here, with a comment noting that the player's /game/config does
+ * not carry pool mode. It does now: the engine reports `earlyCloseEnabled` in its hello, so this is
+ * a runtime fact rather than a constant someone has to remember to flip. Turn pool mode off on a
+ * brand and the control appears there, on that brand only, with no deploy.
  */
-const EARLY_CLOSE_ENABLED = false;
 
 export function BetPanel() {
   const hydrated = useHydrated();
@@ -66,7 +63,7 @@ export function BetPanel() {
     staleTime: 5 * 60_000,
   });
   const { data: wallet } = useWallet();
-  const { status, activePosition, openPosition, sell } = useGameSocket();
+  const { status, activePosition, openPosition, sell, earlyCloseEnabled } = useGameSocket();
 
   const minStakeCents = limits.minCents;
   const maxStakeCents = limits.maxCents;
@@ -193,9 +190,8 @@ export function BetPanel() {
     return (
       <Card className="flex flex-col gap-2.5 rounded-xl p-3">
         <LivePnl pos={activePosition} />
-        {/* HIDDEN — see EARLY_CLOSE_ENABLED. Kept, not deleted: the moment pool mode is off on any
-            brand this is a working feature again, and `sell` is still wired end to end. */}
-        {EARLY_CLOSE_ENABLED ? (
+        {/* Shown only where the engine will honour it: see the note at the top of this file. */}
+        {earlyCloseEnabled ? (
           <Button variant="secondary" size="md" fullWidth className="!h-11" disabled={!canClose} onClick={sell}>
             {activePosition.phase === 'settling'
               ? 'Closing…'
