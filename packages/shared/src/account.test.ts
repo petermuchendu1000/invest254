@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountSummary, exposureRows, lotsOfStake, LOT_STAKE_CENTS } from "./account.js";
+import { accountSummary, exposureRows, lotsOfStake, LOT_STAKE_CENTS, accountStripFields, mtAmount } from "./account.js";
 
 test("a flat account: equity is the balance and there is no margin level", () => {
   const a = accountSummary({ balanceCents: 500_000, openStakeCents: 0, floatingPnlCents: 0 });
@@ -91,4 +91,68 @@ test("a short position is a negative volume and a positive value", () => {
 
 test("a flat account has no exposure rows, as MetaTrader shows none", () => {
   assert.deepEqual(exposureRows([]), []);
+});
+
+/**
+ * MetaTrader's account summary strip, against the strings read off its own screenshots in
+ * docs/mt5/09-toolbox.md section 4. Reproducing a published line exactly is the only test here that
+ * can catch a format that merely looks right.
+ */
+
+test("the strip reproduces MetaTrader's own published line, character for character", () => {
+  // en/position_manage.png, floating:
+  // Balance: 3 370.75 USD  Equity: 4 004.07  Margin: 371.89  Free Margin: 3 632.18  Margin Level: 1 076.68 %
+  const fields = accountStripFields({
+    balance: 3370.75, equity: 4004.07, margin: 371.89, freeMargin: 3632.18,
+    marginLevelPct: 1076.68, currency: 'USD',
+  });
+  assert.equal(fields.map((f) => `${f.label} ${f.value}`).join('  '),
+    'Balance: 3 370.75 USD  Equity: 4 004.07  Margin: 371.89  Free Margin: 3 632.18  Margin Level: 1 076.68 %');
+});
+
+test('a second published line, to prove the first was not a coincidence', () => {
+  // en/interface_overview.png
+  const fields = accountStripFields({
+    balance: 7796.40, equity: 8508.03, margin: 2016.60, freeMargin: 6491.43,
+    marginLevelPct: 421.90, currency: 'USD',
+  });
+  assert.equal(fields.map((f) => `${f.label} ${f.value}`).join('  '),
+    'Balance: 7 796.40 USD  Equity: 8 508.03  Margin: 2 016.60  Free Margin: 6 491.43  Margin Level: 421.90 %');
+});
+
+test('the two labels this platform had wrong carry their capital second word', () => {
+  // They read "Free margin" and "Margin level" before the screenshots were read off at 8x.
+  const labels = accountStripFields({
+    balance: 1, equity: 1, margin: 0, freeMargin: 1, marginLevelPct: null, currency: 'KES',
+  }).map((f) => f.label);
+  assert.deepEqual(labels, ['Balance:', 'Equity:', 'Margin:', 'Free Margin:', 'Margin Level:']);
+});
+
+test('the currency code appears once, after the balance, and nowhere else', () => {
+  const fields = accountStripFields({
+    balance: 1000, equity: 1200, margin: 100, freeMargin: 1100, marginLevelPct: 1200, currency: 'KES',
+  });
+  assert.equal(fields[0]!.value, '1 000.00 KES');
+  for (const f of fields.slice(1)) assert.ok(!f.value.includes('KES'), `${f.label} ${f.value}`);
+});
+
+test('margin level has a space before its percent sign, and a dash when nothing is open', () => {
+  const open = accountStripFields({ balance: 1, equity: 1, margin: 1, freeMargin: 0, marginLevelPct: 100, currency: 'USD' });
+  assert.equal(open[4]!.value, '100.00 %');
+  // Nothing open means dividing by a zero margin. MetaTrader has no screenshot of that state, and a
+  // number here would be a claim about an account with no position in it.
+  const flat = accountStripFields({ balance: 1, equity: 1, margin: 0, freeMargin: 1, marginLevelPct: null, currency: 'USD' });
+  assert.equal(flat[4]!.value, '-');
+});
+
+test('the thousands separator is a space at every magnitude, and survives a negative', () => {
+  assert.equal(mtAmount(0), '0.00');
+  assert.equal(mtAmount(999.5), '999.50');
+  assert.equal(mtAmount(1000), '1 000.00');
+  assert.equal(mtAmount(1234567.891), '1 234 567.89');
+  // A floating loss is a real strip value: the trailing total goes negative.
+  assert.equal(mtAmount(-1234.5), '-1 234.50');
+  // Not a locale's separator: `Intl` would give a comma here on en and a point on de, and the
+  // Russian build of MetaTrader uses the same space the English one does.
+  assert.ok(!mtAmount(1000).includes(','));
 });

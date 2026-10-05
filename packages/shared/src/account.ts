@@ -12,8 +12,8 @@ import type { Cents } from "./money.js";
  *   Margin       stake committed to open contracts — funds reserved and unusable, which is the job
  *                margin does on a real account
  *   Equity       Balance + the floating result, i.e. what the account is worth closed right now
- *   Free margin  Equity - Margin
- *   Margin level Equity / Margin * 100 — MetaTrader's own formula
+ *   Free Margin  Equity - Margin
+ *   Margin Level Equity / Margin * 100 — MetaTrader's own formula
  *
  * The floating result is the engine's live P/L, the same number it will settle on. Nothing here
  * feeds settlement; this is a read-only view.
@@ -117,4 +117,66 @@ export function exposureRows(open: readonly ExposureInput[]): ExposureRow[] {
     }))
     // MetaTrader lists the largest exposure first, which is the one worth looking at.
     .sort((a, b) => b.valueCents - a.valueCents || a.symbol.localeCompare(b.symbol));
+}
+
+/**
+ * One amount in MetaTrader's account-strip format.
+ *
+ * A SPACE thousands separator and a point decimal: `3 370.75`, `1 076.68`. Measured off five
+ * MetaTrader screenshots at 8x and confirmed on the Russian build, so it is build-wide rather than
+ * locale-dependent — which is why this does not go through `Intl.NumberFormat`, whose separator is
+ * whatever the locale says and would give `3,370.75` on en and `3.370,75` on de.
+ *
+ * The separator is a plain space, exactly as MetaTrader renders one. A field must therefore be laid
+ * out so it cannot wrap mid-number; that is the caller's job, and the strip does it with
+ * `whitespace-nowrap`.
+ */
+export function mtAmount(value: number, digits = 2): string {
+  const fixed = Math.abs(value).toFixed(digits);
+  const [whole = '0', frac] = fixed.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${value < 0 ? '-' : ''}${grouped}${frac ? `.${frac}` : ''}`;
+}
+
+/** One field of MetaTrader's account summary strip. */
+export interface AccountStripField {
+  /** MetaTrader's own label, including its colon. */
+  label: string;
+  value: string;
+}
+
+/**
+ * MetaTrader's account summary strip, field by field.
+ *
+ * The format is sourced rather than invented — see docs/mt5/09-toolbox.md section 4, which reads it
+ * off the pixels of five screenshots. The rules that are easy to get wrong, and that two of this
+ * platform's own labels got wrong before the sources were read:
+ *
+ *   - `Free Margin` and `Margin Level` capitalise their second word. They used to read "Free
+ *     margin" and "Margin level" here.
+ *   - The currency code appears ONCE, after the Balance value. Every other figure is bare.
+ *   - Margin Level carries a space before its `%`.
+ *   - The fields are separated by TWO spaces, which is the caller's layout problem rather than this
+ *     function's; it returns them separately so a renderer can space them however the medium needs.
+ *
+ * `marginLevelPct` is null when nothing is open, because the ratio is equity over margin and margin
+ * is zero. MetaTrader has no screenshot of that state, so rather than invent one the field prints a
+ * dash: a number here would be a claim about an account with no position in it.
+ */
+export function accountStripFields(a: {
+  balance: number;
+  equity: number;
+  margin: number;
+  freeMargin: number;
+  marginLevelPct: number | null;
+  /** The account's currency code, which MetaTrader prints after the balance alone. */
+  currency: string;
+}): AccountStripField[] {
+  return [
+    { label: 'Balance:', value: `${mtAmount(a.balance)} ${a.currency}` },
+    { label: 'Equity:', value: mtAmount(a.equity) },
+    { label: 'Margin:', value: mtAmount(a.margin) },
+    { label: 'Free Margin:', value: mtAmount(a.freeMargin) },
+    { label: 'Margin Level:', value: a.marginLevelPct === null ? '-' : `${mtAmount(a.marginLevelPct)} %` },
+  ];
 }
