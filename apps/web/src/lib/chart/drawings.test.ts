@@ -46,9 +46,14 @@ test('fib: works downward too. The tool does not assume which way you dragged', 
 });
 
 test('fib: the published ratio set, labelled as MetaTrader labels them', () => {
-  assert.deepEqual([...FIB_LEVELS], [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]);
+  // MetaTrader's nine defaults: 0, 23.6, 38.2, 50, 61.8, 100, 161.8, 261.8, 423.6 per cent.
+  // 78.6 is NOT one of them, and the three extensions above 100 are. This test used to assert
+  // the opposite of both.
+  assert.deepEqual([...FIB_LEVELS], [0, 0.236, 0.382, 0.5, 0.618, 1, 1.618, 2.618, 4.236]);
+  // A level is labelled with its DESCRIPTION, and the description defaults to the percentage
+  // written out as MetaQuotes' own Levels screenshot writes it: no percent sign.
   const labels = fibLines(at(0, 0), at(1, 1)).map((l) => l.label);
-  assert.deepEqual(labels, ['0%', '23.6%', '38.2%', '50%', '61.8%', '78.6%', '100%']);
+  assert.deepEqual(labels, ['0.0', '23.6', '38.2', '50.0', '61.8', '100.0', '161.8', '261.8', '423.6']);
 });
 
 // ───────────────────────────── pitchfork ─────────────────────────────
