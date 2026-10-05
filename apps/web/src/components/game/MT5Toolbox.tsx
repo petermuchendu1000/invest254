@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { valueOfRate } from '@invest254/shared/candles';
-import { accountSummary, lotsOfStake } from '@invest254/shared/account';
+import { accountSummary, accountStripFields, mtAmount, lotsOfStake } from '@invest254/shared/account';
 import { useGameSocket, useGameSocketApi, type NewsItemDto, type DayAnchor } from '@/lib/game/GameSocketProvider';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
@@ -152,10 +152,25 @@ export function MT5Toolbox() {
   // An optimistic open has no engine id yet; its stake is already committed, so it counts.
   const live = activePosition && activePosition.phase !== 'settling' ? activePosition : null;
   const floatingCents = live ? live.livePnlCents : 0;
-  const { balanceCents, equityCents, marginCents, freeMarginCents, marginLevelPct } = accountSummary({
+  const summary = accountSummary({
     balanceCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
     openStakeCents: live ? live.stakeCents : 0,
     floatingPnlCents: floatingCents,
+  });
+  /**
+   * The strip in MetaTrader's own format: its labels, its ordering, its space thousands separator,
+   * and the currency code once after the balance.
+   *
+   * The figures are converted to the brand's display unit first, because the shared formatter is
+   * about MetaTrader's typography and knows nothing about this platform's currencies.
+   */
+  const strip = accountStripFields({
+    balance: money.toDisplay(summary.balanceCents),
+    equity: money.toDisplay(summary.equityCents),
+    margin: money.toDisplay(summary.marginCents),
+    freeMargin: money.toDisplay(summary.freeMarginCents),
+    marginLevelPct: summary.marginLevelPct,
+    currency: money.currency,
   });
 
   // ── Take profit ────────────────────────────────────────────────────────────────────────────────
@@ -223,8 +238,8 @@ export function MT5Toolbox() {
                * WRAPPING, not a fixed column count.
                *
                * A five-column grid sized its cells by the container and the figures by their text,
-               * and each figure is `whitespace-nowrap shrink-0`, so "Free margin KES 442.91" simply
-               * ran over the top of "Margin level" and rendered as "442.91ARGIN LEVEL". Wrapping
+               * and each figure is `whitespace-nowrap shrink-0`, so "Free Margin KES 442.91" simply
+               * ran over the top of "Margin Level" and rendered as "442.91ARGIN LEVEL". Wrapping
                * lets each figure keep its own width and drop to a second line when the bar runs out,
                * which cannot overlap at any width.
                */
@@ -232,16 +247,37 @@ export function MT5Toolbox() {
               : 'flex items-center overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
           )}
         >
-          <Figure label="Balance" value={money.fmt(balanceCents)} />
-          <Figure label="Equity" value={money.fmt(equityCents)} tone={floatingCents === 0 ? undefined : floatingCents > 0 ? 'up' : 'down'} />
-          {/* Collapsed, the row is ONE line on a phone. Carrying all five pushed "Free margin" off
-              the edge mid-word, which reads as broken rather than as scrollable; the two that only
+          {/* MetaTrader's own five fields, in its own order, labels and number format — read off its
+              screenshots in docs/mt5/09-toolbox.md section 4 rather than written from memory, which
+              is how "Free margin" and "Margin level" ended up miscased here before.
+
+              Collapsed, the row is ONE line on a phone. Carrying all five pushed Free Margin off the
+              edge mid-word, which reads as broken rather than as scrollable; the two that only
               matter with a position open appear when the panel does. */}
-          {open ? <Figure label="Margin" value={money.fmt(marginCents)} /> : null}
-          {open ? <Figure label="Free margin" value={money.fmt(freeMarginCents)} /> : null}
-          <Figure label="Margin level" value={marginLevelPct === null ? '-' : `${marginLevelPct.toFixed(2)}%`} />
+          {strip.map((f, i) => (
+            i === 2 || i === 3
+              ? (open ? <Figure key={f.label} label={f.label} value={f.value} /> : null)
+              : (
+                <Figure
+                  key={f.label}
+                  label={f.label}
+                  value={f.value}
+                  // Equity carries the floating tone, which is the one figure that moves with a live
+                  // position. MetaTrader colours the strip's trailing total the same way.
+                  tone={i === 1 && floatingCents !== 0 ? (floatingCents > 0 ? 'up' : 'down') : undefined}
+                />
+              )
+          ))}
         </span>
         <span className="flex shrink-0 items-center gap-2 pl-1">
+          {/* MetaTrader ends the strip with the total floating P/L, right-aligned and with NO label.
+              It is the only figure there that is not an account total, which is why it sits apart
+              from the five rather than among them. Absent with nothing open, as MetaTrader's is. */}
+          {live ? (
+            <span className={cn('font-mono text-[12px] font-semibold tabular-nums', floatingCents > 0 ? 'text-[#3183ff]' : floatingCents < 0 ? 'text-[#f23645]' : 'text-[#ffffff]')}>
+              {mtAmount(money.toDisplay(floatingCents))}
+            </span>
+          ) : null}
           {live ? <span className="rounded bg-[#3183ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#3183ff]">1 open</span> : null}
           <span className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
             title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} />
@@ -760,7 +796,9 @@ const clock = (ms: number): string => {
 function Figure({ label, value, tone, className }: { label: string; value: string; tone?: 'up' | 'down' | undefined; className?: string | undefined }) {
   return (
     <span className={cn('flex shrink-0 items-baseline gap-1.5 whitespace-nowrap', className)}>
-      <span className="text-[10px] uppercase tracking-wide text-[#8fa2b8]">{label}</span>
+      {/* No `uppercase`: MetaTrader's own casing is part of the label ("Free Margin:", not "FREE
+          MARGIN"), and forcing it here would throw away the thing the screenshots were read for. */}
+      <span className="text-[10px] tracking-wide text-[#8fa2b8]">{label}</span>
       {/* Equity carries this tone when the floating P/L is non-zero, so it is money, not a price:
           MetaTrader's blue for a profit, red for a loss. */}
       <span className={cn('font-mono text-[12px] font-semibold tabular-nums', tone === 'up' ? 'text-[#3183ff]' : tone === 'down' ? 'text-[#f23645]' : 'text-[#ffffff]')}>{value}</span>
