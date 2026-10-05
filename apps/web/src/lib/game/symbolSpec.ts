@@ -63,7 +63,18 @@ export interface SpecInput {
   /** The expiries the ticket offers, in the order it offers them. */
   expiries: readonly string[];
   volumeDigits: number;
+  /**
+   * MetaTrader's `Trade` mode for this instrument. Defaults to full access.
+   *
+   * These are MetaTrader's own five values, and the one that matters here is `Disabled`: a broker
+   * marks a symbol disabled when it quotes it but will not accept an order on it, which is exactly
+   * the state of every symbol this brand does not settle. It is a real MetaTrader state rather than
+   * a gap dressed up as one, and a trader who sees it on the Specification knows what it means.
+   */
+  tradeMode?: TradeMode;
 }
+
+export type TradeMode = 'Full access' | 'Long only' | 'Short only' | 'Close only' | 'Disabled';
 
 export function specRows(i: SpecInput): SpecRow[] {
   const rows: SpecRow[] = [
@@ -79,7 +90,7 @@ export function specRows(i: SpecInput): SpecRow[] {
     { label: 'Profit currency', value: i.currency, kind: 'string' },
     // MetaTrader's two modes are "By bid price" and "By last price". With one price, it is the last.
     { label: 'Chart mode', value: 'By last price', kind: 'enum' },
-    { label: 'Trade', value: 'Full access', kind: 'enum' },
+    { label: 'Trade', value: i.tradeMode ?? 'Full access', kind: 'enum' },
     { label: 'Execution', value: 'Market', kind: 'enum' },
     { label: 'Filling', value: 'Fill or Kill', kind: 'enum' },
     {

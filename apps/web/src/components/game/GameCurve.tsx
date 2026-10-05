@@ -11,6 +11,9 @@ import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { ActivePosition } from '@/lib/game/betting';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
+import { useChartSymbolStore } from '@/lib/game/chartSymbol';
+import type { Timeframe } from '@invest254/shared/candles';
+import type { Tick } from '@/lib/game/types';
 
 const WINDOW_MS = 60_000;
 
@@ -45,7 +48,29 @@ function useMarketerBeat(active: ActivePosition | null): MarketerBeat {
  * so brands paid for a chart their players never saw. Both views share the authoritative tick stream.
  */
 export function GameCurve() {
-  const { getTicks, getLastTick, requestCandles } = useGameSocketApi();
+  const { getTicks, getLastTick, requestCandles, getSymbolQuote } = useGameSocketApi();
+  /**
+   * The symbol the chart is on. Null means the brand's own — the one it settles — so the default
+   * path is byte-for-byte what it was before symbol switching existed.
+   */
+  const charted = useChartSymbolStore((s) => s.symbol);
+  const symbol = charted ?? undefined;
+  const chartCandles = useCallback(
+    (tf: Timeframe, count: number, to?: number) => requestCandles(tf, count, to, symbol),
+    [requestCandles, symbol],
+  );
+  /**
+   * The live edge for whichever symbol is charted.
+   *
+   * The brand's own tick stream carries one instrument, so a chart on any other symbol reads that
+   * symbol's quote instead. `delta` is zero because the chart does not use it: it recomputes the
+   * bar from the price, and a delta against the wrong previous quote would be worse than none.
+   */
+  const chartTick = useCallback((): Tick | null => {
+    if (symbol === undefined) return getLastTick();
+    const q = getSymbolQuote(symbol);
+    return q === null ? null : { t: q.t, rate: q.rate, delta: 0 };
+  }, [symbol, getLastTick, getSymbolQuote]);
   const { activePosition, status } = useGameSocket();
   const brand = useBrand();
   // The wave follows the effective "basic" skin: a real marketer OR a player who chose Basic.
@@ -79,9 +104,10 @@ export function GameCurve() {
         <CandleChart
           key={tvType}
           initialType={tvType}
-          getLastTick={getLastTick}
-          requestCandles={requestCandles}
+          getLastTick={chartTick}
+          requestCandles={chartCandles}
           status={status}
+          symbol={symbol}
           openPosition={activePosition && activePosition.entryRate !== null
             ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents) }
             : null}

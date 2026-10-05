@@ -6,6 +6,7 @@ import type { Direction } from '@invest254/shared';
 import { valueOfRate } from '@invest254/shared/candles';
 import { LOT_STAKE_CENTS } from '@invest254/shared/account';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
+import { useChartSymbolStore } from '@/lib/game/chartSymbol';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useDisplayMoney } from '@/lib/money';
 import { useSession } from '@/lib/auth/session';
@@ -60,7 +61,9 @@ export function MT5OrderTicket() {
   const limits = useStakeLimits();
   const { data: wallet } = useWallet();
   const { status, activePosition, openPosition, earlyCloseEnabled } = useGameSocket();
-  const { getLastTick, getMarket } = useGameSocketApi();
+  const { getLastTick, getMarket, getSymbolQuote } = useGameSocketApi();
+  const charted = useChartSymbolStore((st) => st.symbol);
+  const setCharted = useChartSymbolStore((st) => st.set);
   const { data: config } = useQuery({
     queryKey: ['gameConfig', brand.slug],
     queryFn: () => api.gameConfig(brand.slug),
@@ -79,14 +82,23 @@ export function MT5OrderTicket() {
   }, []);
 
   const market = getMarket();
-  const digits = market?.instrument.digits ?? 2;
-  const symbol = market?.instrument.symbol ?? 'XAUUSD';
+  /**
+   * The ticket follows the CHART, as MetaTrader's does: its order dialog belongs to the symbol you
+   * opened it on. This brand settles one of them, so every other symbol is quoted and charted with
+   * MetaTrader's own `Disabled` trade mode, and the ticket says so rather than offering a button
+   * that would open a position on a different instrument from the one on screen.
+   */
+  const quote = charted === null ? null : getSymbolQuote(charted);
+  const tradeDisabled = charted !== null;
+  const settledSymbol = market?.instrument.symbol ?? 'XAUUSD';
+  const symbol = charted ?? settledSymbol;
+  const digits = quote?.instrument.digits ?? market?.instrument.digits ?? 2;
   const tick = getLastTick();
   const priceOfRate = (rate: number | null | undefined): number | null =>
     market && rate !== null && rate !== undefined
       ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue)
       : null;
-  const price = tick ? priceOfRate(tick.rate) : null;
+  const price = charted === null ? (tick ? priceOfRate(tick.rate) : null) : quote?.price ?? null;
 
   // ── Volume ─────────────────────────────────────────────────────────────────────────────────────
   // Lots are the stake divided by the contract size. The brand's MINIMUM is the floor, so the
@@ -136,6 +148,10 @@ export function MT5OrderTicket() {
 
   function place(dir: Direction) {
     if (connecting) return;
+    // Defence in depth behind the disabled buttons: this brand settles one symbol, and an order
+    // raised while the chart is on another would open a position on an instrument the trader is
+    // not looking at.
+    if (tradeDisabled) return;
     // A logged-out or short-funded tap is real buying intent: route it to the deposit sheet seeded
     // with this stake, which then resumes the trade. Same behaviour as the classic panel.
     if (!token || overBalance) {
@@ -152,7 +168,16 @@ export function MT5OrderTicket() {
   if (activePosition) {
     return (
       <div className="flex flex-col gap-2 rounded border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
-        <MT5LivePosition pos={activePosition} symbol={symbol} digits={digits} price={price} openPrice={priceOfRate(activePosition.entryRate)} />
+        {/* An OPEN position is always on the symbol this brand settles, whatever the chart is
+            showing, so it is named and priced with that one. Handing it the charted symbol would
+            label a gold contract EURUSD and print its P/L against the wrong axis. */}
+        <MT5LivePosition
+          pos={activePosition}
+          symbol={settledSymbol}
+          digits={market?.instrument.digits ?? 2}
+          price={tick ? priceOfRate(tick.rate) : null}
+          openPrice={priceOfRate(activePosition.entryRate)}
+        />
       </div>
     );
   }
@@ -277,7 +302,8 @@ export function MT5OrderTicket() {
         <button
           type="button"
           onClick={() => place('sell')}
-          disabled={connecting}
+          disabled={connecting || tradeDisabled}
+          title={tradeDisabled ? `Trade disabled for ${symbol}.` : undefined}
           className="flex h-12 items-center justify-center rounded-md bg-[#e24242] text-[13px] font-semibold text-white transition active:brightness-90 disabled:opacity-50"
         >
           Sell by Market
@@ -285,13 +311,29 @@ export function MT5OrderTicket() {
         <button
           type="button"
           onClick={() => place('buy')}
-          disabled={connecting}
+          disabled={connecting || tradeDisabled}
+          title={tradeDisabled ? `Trade disabled for ${symbol}.` : undefined}
           className="flex h-12 items-center justify-center rounded-md bg-[#3e78fa] text-[13px] font-semibold text-white transition active:brightness-90 disabled:opacity-50"
         >
           Buy by Market
         </button>
       </div>
 
+      {tradeDisabled ? (
+        /* MetaTrader's own words for a symbol a broker quotes but will not accept an order on. The
+           Specification dialog for this symbol says the same thing in its Trade row. */
+        <p data-trade-disabled="" className="text-center text-[11px] leading-snug text-[#f0b90b]">
+          Trade disabled for {symbol}.{' '}
+          <button
+            type="button"
+            onClick={() => setCharted(null)}
+            className="underline underline-offset-2 transition hover:text-white"
+          >
+            Chart {settledSymbol}
+          </button>{' '}
+          to place an order.
+        </p>
+      ) : null}
       {connecting ? <p className="text-center text-[11px] text-[#8fa2b8]">Connecting…</p> : null}
       {overBalance && token ? (
         <p className="text-center text-[11px] text-[#f0b90b]">Not enough free margin: tap a side to top up.</p>

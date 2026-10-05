@@ -97,3 +97,18 @@ test('the Sessions block covers every day, because this market never closes', ()
   assert.equal(SPEC_SESSION_DAYS[0], 'Sunday');
   assert.equal(SPEC_SESSION_SPAN, '00:00-24:00');
 });
+
+test('the Trade row carries MetaTrader’s own mode, and defaults to full access', () => {
+  // A broker marks a symbol Disabled when it quotes it but will not accept an order on it, which is
+  // exactly the state of every symbol this brand does not settle. Printing "Full access" there
+  // would be the Specification lying about the one row a trader checks before placing an order.
+  const full = specRows(base).find((r) => r.label === 'Trade');
+  assert.equal(full?.value, 'Full access');
+  assert.equal(full?.kind, 'enum');
+  const off = specRows({ ...base, tradeMode: 'Disabled' as const }).find((r) => r.label === 'Trade');
+  assert.equal(off?.value, 'Disabled');
+  // The row stays in MetaTrader's own position, after Chart mode and before Execution.
+  const labels = specRows({ ...base, tradeMode: 'Disabled' as const }).map((r) => r.label);
+  assert.equal(labels[labels.indexOf('Trade') - 1], 'Chart mode');
+  assert.equal(labels[labels.indexOf('Trade') + 1], 'Execution');
+});
