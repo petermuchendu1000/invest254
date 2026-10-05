@@ -329,7 +329,29 @@ export function CandleChart({
    * be. Returns null off-scale so a half-visible object is clipped rather than drawn at the edge.
    */
   const projection: Projection = {
-    xOf: (time) => chartRef.current?.timeScale().timeToCoordinate(time as UTCTimestamp) ?? null,
+    /**
+     * Chart time to pixels.
+     *
+     * `timeToCoordinate` answers only for times the series actually HAS, so a ray extended four
+     * spans past its anchors, which is how a Gann Fan and a Fibonacci Fan are drawn, asks about a
+     * time beyond the last bar and gets null. That used to make the whole fan disappear rather
+     * than run off the edge. Past the data the coordinate is extrapolated at the bar spacing the
+     * chart is currently using, so a ray leaves the plot in the direction it should and the SVG
+     * clips it, which is what MetaTrader shows.
+     */
+    xOf: (time) => {
+      const ts = chartRef.current?.timeScale();
+      if (!ts) return null;
+      const exact = ts.timeToCoordinate(time as UTCTimestamp);
+      if (exact !== null && exact !== undefined) return exact;
+      const bars = candlesRef.current;
+      const first = bars[0], last = bars[bars.length - 1];
+      if (!first || !last || last.time === first.time) return null;
+      const x0 = ts.timeToCoordinate(first.time as UTCTimestamp);
+      const xN = ts.timeToCoordinate(last.time as UTCTimestamp);
+      if (x0 === null || xN === null) return null;
+      return x0 + (time - first.time) * ((xN - x0) / (last.time - first.time));
+    },
     yOf: (price) => mainRef.current?.priceToCoordinate(price) ?? null,
     timeOf: (x) => (chartRef.current?.timeScale().coordinateToTime(x) as number | null) ?? null,
     priceOf: (y) => mainRef.current?.coordinateToPrice(y) ?? null,

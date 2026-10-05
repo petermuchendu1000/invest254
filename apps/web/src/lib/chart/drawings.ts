@@ -578,3 +578,36 @@ export function gannPipsPerBar(d: Drawing, barSeconds: number, digits: number): 
   const perBar = ((b.price - a.price) / (b.time - a.time)) * barSeconds;
   return Math.abs(perBar) / 10 ** -digits;
 }
+
+/**
+ * Where a selected object's square markers go.
+ *
+ * MetaTrader: "Click on an object to select it. Square markers or frames appear for a selected
+ * object. The markers are used for moving objects and changing their drawing parameters", and
+ * "the object moving point is its central point as a rule".
+ *
+ * So every anchor gets a marker, and most objects get one more in the middle that moves the whole
+ * object without reshaping it. The Gann objects do not: MetaQuotes says a Gann Fan has "two points,
+ * both on the 1x1 trendline", and its slope is changed through Pips per bar rather than by dragging.
+ * Andrews' Pitchfork's fourth marker is the midpoint of its two teeth, which is the point
+ * MetaQuotes describes as "the second point of the handle" and the one that moves it.
+ *
+ * Marker COLOUR and size are not specified anywhere in MetaQuotes' help and are not legible in any
+ * of its screenshots, so those are ours.
+ *
+ * The two anchors whose MIDPOINT carries the moving marker are returned, rather than the midpoint
+ * itself, because the midpoint is taken in PIXELS at paint time: a chart-space midpoint falls
+ * between two bars and the chart will not always map a time that no bar sits on.
+ */
+export function moveHandleOf(d: Drawing): [number, number] | null {
+  if (d.kind === 'gannLine' || d.kind === 'gannFan' || d.kind === 'gannGrid') return null;
+  // The pitchfork's moving point is the midpoint of its two teeth, which is the point MetaQuotes
+  // calls "the second point of the handle".
+  if (d.kind === 'pitchfork') return d.points.length >= 3 ? [1, 2] : null;
+  return d.points.length >= 2 ? [0, 1] : null;
+}
+
+/** Move every anchor of an object by the same time and price, which is what dragging it does. */
+export function translateDrawing(d: Drawing, dTime: number, dPrice: number): Drawing {
+  return { ...d, points: d.points.map((p) => ({ time: p.time + dTime, price: p.price + dPrice })) };
+}

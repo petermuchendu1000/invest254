@@ -4,8 +4,8 @@ import {
   ANCHORS_NEEDED, FIB_LEVELS, GANN_RATIOS, equidistantChannel, extendRay, fibArcs, fibChannel,
   fibExpansion, fibFan, fibLines, fibTimeZones, gannFan, gannGrid, gannPipsPerBar,
   gannUnitPerSecond, linearRegression, nextObjectName, objectNameOf, regressionDeviation,
-  dashOf, defaultLevelsOf, levelLabel, shownOn, LINE_STYLES,
-  type Anchor, type Drawing,
+  dashOf, defaultLevelsOf, levelLabel, moveHandleOf, shownOn, translateDrawing, LINE_STYLES,
+  type Anchor, type Drawing, type DrawingKind,
 } from './drawings.js';
 import { DRAWABLE_OBJECTS } from './objects.js';
 
@@ -230,4 +230,34 @@ test("MetaTrader's five line styles map to real dash patterns, and solid to none
   assert.equal(LINE_STYLES.length, 5);
   assert.deepEqual(LINE_STYLES.map((s) => s.label), ['Solid', 'Dash', 'Dot', 'Dash-dot', 'Dash-dot-dot']);
   for (const s of LINE_STYLES.filter((x) => x.id !== 'solid')) assert.ok(s.dash && s.dash.length > 0);
+});
+
+test("a selected object's markers are MetaTrader's: one per anchor, plus a central moving point", () => {
+  const mk = (kind: DrawingKind, n: number): Drawing =>
+    ({ id: 'h', kind, color: '#fff', points: Array.from({ length: n }, (_, i) => ({ time: i * 60, price: 100 + i })) });
+  // A trendline's moving point is the midpoint of its two ends, so three markers in all.
+  assert.deepEqual(moveHandleOf(mk('trend', 2)), [0, 1]);
+  // Andrews' Pitchfork's is the midpoint of its two teeth, which MetaQuotes calls the second
+  // point of the handle: four markers.
+  assert.deepEqual(moveHandleOf(mk('pitchfork', 3)), [1, 2]);
+  // A Gann Fan has "two points, both on the 1x1 trendline" and no central one.
+  assert.equal(moveHandleOf(mk('gannFan', 2)), null);
+  assert.equal(moveHandleOf(mk('gannGrid', 2)), null);
+  assert.equal(moveHandleOf(mk('gannLine', 2)), null);
+  // A one-anchor object is moved by its only marker.
+  assert.equal(moveHandleOf(mk('horizontal', 1)), null);
+});
+
+test('moving an object shifts every anchor by the same amount, so its shape is kept', () => {
+  const d: Drawing = {
+    id: 'm', kind: 'pitchfork', color: '#fff',
+    points: [{ time: 0, price: 10 }, { time: 60, price: 20 }, { time: 120, price: 5 }],
+  };
+  const moved = translateDrawing(d, 300, -2.5);
+  assert.deepEqual(moved.points, [
+    { time: 300, price: 7.5 }, { time: 360, price: 17.5 }, { time: 420, price: 2.5 },
+  ]);
+  // Same gaps between the anchors before and after, which is what "keeps its shape" means.
+  const gaps = (x: Drawing) => x.points.slice(1).map((p, i) => [p.time - x.points[i]!.time, p.price - x.points[i]!.price]);
+  assert.deepEqual(gaps(moved), gaps(d));
 });

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ANCHORS_NEEDED, extendRay, fibArcs, fibChannel, fibExpansion, fibFan, fibLines, fibTimeZones,
   gannFan, gannGrid, equidistantChannel, humanDuration, linearRegression, measure, pitchforkLines,
-  regressionDeviation, dashOf, gannUnitPerSecond, levelLabel, nextObjectName, shownOn,
+  regressionDeviation, dashOf, gannUnitPerSecond, levelLabel, moveHandleOf, nextObjectName, shownOn,
   ELLIOTT_CORRECTION_LABELS, ELLIOTT_IMPULSE_LABELS,
   type Anchor, type Drawing, type DrawingKind, type Point, type ToolId,
 } from '@/lib/chart/drawings';
@@ -143,6 +143,12 @@ export function ChartDrawings({
   const [pending, setPending] = useState<Anchor[]>([]);
   /** Where the pointer is while an object is in progress, for the rubber-band preview. */
   const [hover, setHover] = useState<Anchor | null>(null);
+  /**
+   * A marker being dragged on the selected object: which one, where the drag started, and the
+   * object's anchors as they were when it started, so every move is computed from the original
+   * rather than compounding rounding on each mouse event.
+   */
+  const [drag, setDrag] = useState<{ index: number | 'move'; from: Anchor; origin: Anchor[] } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   // `objects` opens the Insert tree rather than drawing, so it is not a drawing tool either.
@@ -150,7 +156,7 @@ export function ChartDrawings({
     tool === 'cursor' || tool === 'crosshair' || tool === 'trash' || tool === 'objects' ? null : tool;
 
   // Changing tool abandons a half-placed object rather than finishing it with the next tool's clicks.
-  useEffect(() => { setPending([]); setHover(null); }, [tool]);
+  useEffect(() => { setPending([]); setHover(null); setDrag(null); }, [tool]);
 
   const anchorAt = useCallback((e: { clientX: number; clientY: number }): Anchor | null => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -239,6 +245,43 @@ export function ChartDrawings({
   // `revision` is in the dependency list so a pan or zoom repaints every object at its new position.
   void revision;
 
+  /**
+   * The selected object's square markers, and the drag that moves them.
+   *
+   * The overlay is pointer-transparent under the cursor tool so the chart keeps its own pan and
+   * zoom, so each marker re-enables the pointer for itself and captures it for the duration of the
+   * drag. That is also what stops a drag that leaves the marker from being lost.
+   */
+  const selectedObject = selected === null ? null : drawings.find((d) => d.id === selected) ?? null;
+
+  const grab = (e: React.PointerEvent, index: number | 'move') => {
+    if (!selectedObject || drawingTool) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const a = anchorAt(e);
+    if (!a) return;
+    (e.target as Element).setPointerCapture(e.pointerId);
+    setDrag({ index, from: a, origin: selectedObject.points.map((p) => ({ ...p })) });
+  };
+
+  const dragTo = (e: React.PointerEvent) => {
+    if (!drag || !selectedObject) return;
+    e.stopPropagation();
+    const a = anchorAt(e);
+    if (!a) return;
+    const points = drag.index === 'move'
+      ? drag.origin.map((p) => ({ time: p.time + (a.time - drag.from.time), price: p.price + (a.price - drag.from.price) }))
+      : drag.origin.map((p, i) => (i === drag.index ? a : p));
+    onChange(drawings.map((d) => (d.id === selectedObject.id ? { ...d, points } : d)));
+  };
+
+  const letGo = (e: React.PointerEvent) => {
+    if (!drag) return;
+    e.stopPropagation();
+    try { (e.target as Element).releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    setDrag(null);
+  };
+
   const preview: Drawing | null = drawingTool && pending.length > 0 && hover
     ? { id: '__preview', kind: drawingTool, points: [...pending, hover], color: colorOf(drawingTool) }
     : null;
@@ -315,6 +358,40 @@ export function ChartDrawings({
         return x === null || y === null ? null
           : <circle key={i} cx={x} cy={y} r={3.5} fill={drawingTool ? colorOf(drawingTool) : '#fff'} />;
       })}
+      {/* MetaTrader's square markers on the selected object: one per anchor, and one in the middle
+          that moves the whole object without reshaping it. */}
+      {selectedObject && !drawingTool && shownOn(selectedObject, timeframe) ? (
+        <g
+          // A marker covers the object underneath it, and the central one sits exactly where a
+          // trader aims to right click a line. Without this, selecting an object would take away
+          // its own context menu.
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onContextMenu(selectedObject.id, e.clientX, e.clientY);
+          }}
+        >
+          {selectedObject.points.map((p, i) => {
+            const x = project.xOf(p.time), y = project.yOf(p.price);
+            return x === null || y === null ? null : (
+              <Handle key={i} x={x} y={y} colour={selectedObject.color}
+                      onDown={(e) => grab(e, i)} onMove={dragTo} onUp={letGo} />
+            );
+          })}
+          {(() => {
+            const pair = moveHandleOf(selectedObject);
+            if (!pair) return null;
+            const u = selectedObject.points[pair[0]], v = selectedObject.points[pair[1]];
+            if (!u || !v) return null;
+            const ux = project.xOf(u.time), uy = project.yOf(u.price);
+            const vx = project.xOf(v.time), vy = project.yOf(v.price);
+            if (ux === null || uy === null || vx === null || vy === null) return null;
+            return (
+              <Handle x={(ux + vx) / 2} y={(uy + vy) / 2} colour={selectedObject.color} centre
+                      onDown={(e) => grab(e, 'move')} onMove={dragTo} onUp={letGo} />
+            );
+          })()}
+        </g>
+      ) : null}
     </svg>
   );
 }
@@ -349,6 +426,35 @@ export function DrawingsBackdrop({ project, drawings, width, height, revision, t
         </g>
       ))}
     </svg>
+  );
+}
+
+/**
+ * One of MetaTrader's square markers on a selected object.
+ *
+ * The centre marker is drawn hollow so the point that MOVES the object reads differently from the
+ * points that reshape it. MetaQuotes names no colour for either, so both take the object's own.
+ */
+function Handle({ x, y, colour, centre, onDown, onMove, onUp }: {
+  x: number; y: number; colour: string; centre?: boolean;
+  onDown: (e: React.PointerEvent) => void;
+  onMove: (e: React.PointerEvent) => void;
+  onUp: (e: React.PointerEvent) => void;
+}) {
+  const r = 4;
+  return (
+    <rect
+      data-object-handle={centre ? 'move' : 'anchor'}
+      x={x - r} y={y - r} width={r * 2} height={r * 2}
+      fill={centre ? '#0f1720' : colour}
+      stroke={centre ? colour : '#ffffff'}
+      strokeWidth={1.25}
+      style={{ pointerEvents: 'all', cursor: centre ? 'move' : 'pointer', touchAction: 'none' }}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+    />
   );
 }
 
