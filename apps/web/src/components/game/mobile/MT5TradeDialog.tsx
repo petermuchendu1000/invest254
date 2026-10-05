@@ -5,6 +5,8 @@ import { symbolDef } from '@invest254/shared/symbols';
 import { useDisplayMoney } from '@/lib/money';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useOrderEntry, durationLabel } from '@/lib/game/useOrderEntry';
+import { useOrderResult } from '@/lib/game/useOrderResult';
+import { MT5OrderResult } from '@/components/game/mobile/MT5OrderResult';
 import {
   LEVEL_UNITS, priceOfPoints, pointsOfPrice, swapForSide, sidesEnabled, applyRatioLock,
   type LevelUnit, type Levels,
@@ -63,6 +65,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, bump, setLots, stakeCents, overBalance, signedIn,
     durationS, place, earlyCloseEnabled, chartSettled,
+    priceOfRate,
   } = useOrderEntry();
 
   const levels = useLevelsStore((s) => s.levels);
@@ -73,6 +76,11 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
   useRestoreLevels();
 
   const [unit, setUnit] = useState<LevelUnit>('price');
+  /**
+   * MetaTrader's execution result. The dialog is "the window" an order sent from here came from, so
+   * the confirmation or the rejection belongs over this sheet, not in a popup somewhere else.
+   */
+  const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
   const [typing, setTyping] = useState<null | { field: 'volume' | 'sl' | 'tp'; text: string }>(null);
 
   if (!ready) return <div className="h-full animate-pulse bg-[#0f1720]" />;
@@ -149,7 +157,8 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
     // MetaTrader swaps the levels when you tap the other side, which is a change to the ticket the
     // trader can see happen, so it is applied before the order rather than silently inside it.
     setLevels(swapForSide(levels, dir));
-    place(dir);
+    // "Once an order is sent, its execution results will appear in the window." This window.
+    report(dir, place(dir));
   };
 
   return (
@@ -160,6 +169,8 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
         aria-label="New order"
         className="fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden rounded-t-xl border-t border-[#2b3543] bg-[#0f1720] text-white pb-[env(safe-area-inset-bottom)] shadow-2xl"
       >
+        {/* MetaTrader's result, over the form it was sent from. */}
+        {result === null ? null : <MT5OrderResult result={result} onDismiss={clear} />}
         {/* 1. The grabber. MetaTrader's sheet can be dragged; this one is sized to its content, so
                the grabber is the dismiss affordance rather than a drag handle that leads nowhere. */}
         <button type="button" onClick={onDismiss} aria-label="Close" className="flex shrink-0 justify-center py-2">

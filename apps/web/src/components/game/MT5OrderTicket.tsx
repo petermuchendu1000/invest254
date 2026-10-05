@@ -3,6 +3,8 @@
 import { useDisplayMoney } from '@/lib/money';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useOrderEntry, DURATION_OPTIONS, durationLabel } from '@/lib/game/useOrderEntry';
+import { useOrderResult } from '@/lib/game/useOrderResult';
+import { MT5OrderResult } from '@/components/game/mobile/MT5OrderResult';
 import { MT5LivePosition } from '@/components/game/MT5LivePosition';
 import { useRestoreTakeProfit, useTakeProfitStore } from '@/lib/game/takeprofit';
 import { MT5Price } from '@/components/game/MT5Price';
@@ -54,6 +56,8 @@ export function MT5OrderTicket() {
   } = order;
   const money = useDisplayMoney();
   const limits = useStakeLimits();
+  const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
+  const send = (dir: 'buy' | 'sell') => report(dir, place(dir));
 
   // S/L and T/P sit on the ticket in MetaTrader, so they sit here. The target is shared with the
   // Toolbox row, which modifies it on an open contract exactly as MetaTrader does.
@@ -93,7 +97,16 @@ export function MT5OrderTicket() {
   const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-1 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
+    <div className="relative flex flex-col gap-2 rounded-xl border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
+      {/**
+        * MetaTrader's execution result, in the window the order was sent from, same as the phone's.
+        *
+        * A CONFIRMATION is barely seen here and that is correct: this ticket is replaced by the
+        * live position the moment one opens (see the early return above), and the position itself
+        * is the better confirmation. A REJECTION is what this surface was missing, and it is the
+        * reason the toast stands down while a window is waiting.
+        */}
+      {result === null ? null : <MT5OrderResult result={result} onDismiss={clear} />}
       <div className="flex items-baseline gap-2">
         <span className="text-[13px] font-bold text-white">{symbol}</span>
         {/* MetaTrader states the execution mode on the ticket. Ours fills at the next engine tick. */}
@@ -208,7 +221,7 @@ export function MT5OrderTicket() {
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          onClick={() => place('sell')}
+          onClick={() => send('sell')}
           disabled={connecting || tradeDisabled}
           title={tradeDisabled ? `Trade disabled for ${symbol}.` : undefined}
           className="flex h-12 items-center justify-center rounded-md bg-[#e24242] text-[13px] font-semibold text-white transition active:brightness-90 disabled:opacity-50"
@@ -217,7 +230,7 @@ export function MT5OrderTicket() {
         </button>
         <button
           type="button"
-          onClick={() => place('buy')}
+          onClick={() => send('buy')}
           disabled={connecting || tradeDisabled}
           title={tradeDisabled ? `Trade disabled for ${symbol}.` : undefined}
           className="flex h-12 items-center justify-center rounded-md bg-[#3e78fa] text-[13px] font-semibold text-white transition active:brightness-90 disabled:opacity-50"

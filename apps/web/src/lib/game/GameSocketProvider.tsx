@@ -22,6 +22,10 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import { logJournal } from '@/lib/game/journal';
+import {
+  errorTitle, friendlyError, type LocalRefusal,
+} from '@/lib/game/orderResult';
+import { orderWindowWaiting } from '@/lib/game/orderWindow';
 import type { WalletDto } from '@/lib/api/types';
 import type {
   ConnStatus,
@@ -67,8 +71,23 @@ interface GameSocketValue {
   getLastTick: () => Tick | null;
   /** The single in-flight position (optimistic → open → settling), or null. */
   activePosition: ActivePosition | null;
-  /** Place a BUY/SELL position (optimistic; reconciled by `position_opened`). */
-  openPosition: (input: OpenPositionInput) => void;
+  /**
+   * Place a BUY/SELL position (optimistic; reconciled by `position_opened`).
+   *
+   * Returns the reason it was NOT sent, or null when it went. It used to return void and refuse
+   * silently, which hid the single-open rule completely: a contract still settling counts as open
+   * while the Trade screen already says "No open positions", so a tap did nothing at all for a
+   * reason nothing on screen stated. MetaTrader puts a rejection in the order window, and it
+   * cannot do that without being told.
+   */
+  openPosition: (input: OpenPositionInput) => LocalRefusal | null;
+  /**
+   * The last trade error the engine sent, for the order window to show as MetaTrader's rejection.
+   *
+   * Carries the same title and detail the toast uses, from `lib/game/orderResult`, so the two
+   * cannot drift into saying different things about one refusal.
+   */
+  lastTradeError: { code: string; title: string; detail: string | undefined; at: number } | null;
   /** Manually cash out the open position (only valid while `sellable`). */
   sell: () => void;
   /**
@@ -198,8 +217,8 @@ export interface CandlesReply {
 }
 
 /** Stable functions (never change identity) — consumers that only trade/read buffers never re-render. */
-type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled' | 'instrumentResetKey'>;
-type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled'>;
+type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled' | 'lastTradeError' | 'instrumentResetKey'>;
+type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled' | 'lastTradeError'>;
 const ApiCtx = createContext<GameSocketApi | null>(null);
 const StateCtx = createContext<GameSocketState | null>(null);
 const InstKeyCtx = createContext<string>('');
@@ -248,44 +267,6 @@ function isTick(v: unknown): v is Tick {
     typeof v === 'object' && v !== null &&
     typeof (v as Tick).t === 'number' && typeof (v as Tick).rate === 'number'
   );
-}
-
-function errorTitle(code: string): string {
-  switch (code) {
-    case 'AUTH_REQUIRED':
-      return 'Log in to trade';
-    case 'AUTH_INVALID':
-      return 'Session expired: log in again';
-    case 'INSUFFICIENT_FUNDS':
-      return 'Insufficient balance';
-    case 'SYSTEM_DISABLED':
-      return 'Paused';
-    default:
-      return 'Trade rejected';
-  }
-}
-
-/**
- * Reformat an engine error for display so amounts are shown in the brand's display currency, never
- * as raw KES cents. e.g. "STAKE_BELOW_MIN: min 25000" -> "Minimum stake is $1.92 (KES 250)".
- */
-function friendlyError(
-  message: string | undefined,
-  reasons: string[] | undefined,
-  fmt: (c: number) => string,
-): string | undefined {
-  const raw = reasons && reasons.length > 0 ? reasons.join(' · ') : message;
-  if (!raw) return raw;
-  // Engine codes arrive as the message of an ENGINE_ERROR frame: never show a bare code.
-  if (/^INSUFFICIENT_FUNDS\b/.test(raw)) return 'Top up or lower the stake.';
-  if (/^CONTRACT_EXISTS\b/.test(raw)) return 'One contract at a time on this market.';
-  if (/^(INVALID_INSTRUMENT|NO_SEED)\b/.test(raw)) return 'Market unavailable. Pick another.';
-  if (/^stake must be integer cents/.test(raw)) return 'Enter a valid stake.';
-  let m: RegExpExecArray | null;
-  if ((m = /STAKE_BELOW_MIN:\s*min\s*(\d+)/i.exec(raw))) return `Minimum stake is ${fmt(Number(m[1]))}.`;
-  if ((m = /STAKE_ABOVE_MAX:\s*max\s*(\d+)/i.exec(raw))) return `Maximum stake is ${fmt(Number(m[1]))}.`;
-  // Generic safety: reformat any bare "min <cents>" / "max <cents>" so raw cents never leak through.
-  return raw.replace(/\b(min|max)\s+(\d{3,})\b/gi, (_s, w: string, c: string) => `${w} ${fmt(Number(c))}`);
 }
 
 /** The user a JWT belongs to (its `sub`), or null. Used only to tell "same user, refreshed token" apart. */
@@ -342,6 +323,14 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const [earlyCloseEnabled, setEarlyCloseEnabled] = useState(false);
   const [activePosition, setActivePosition] = useState<ActivePosition | null>(null);
   const activeRef = useRef<ActivePosition | null>(null);
+  /**
+   * The last trade rejection, for the order window to show.
+   *
+   * Stamped with `at` so a window can tell a fresh refusal from the one it already showed: two
+   * identical refusals in a row are two events, and the second has to re-render.
+   */
+  const [lastTradeError, setLastTradeError] =
+    useState<{ code: string; title: string; detail: string | undefined; at: number } | null>(null);
 
   // Phase 2 — instrument/digit stream state (separate buffer so it never touches the rise/fall path).
   const instTicksRef = useRef<InstrumentTick[]>([]);
@@ -554,15 +543,16 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   );
 
   const openPosition = useCallback(
-    (input: OpenPositionInput) => {
-      if (activeRef.current) return; // single-open rule
+    (input: OpenPositionInput): LocalRefusal | null => {
+      // Single-open rule, the engine's own. A contract in `settling` still holds the slot.
+      if (activeRef.current) return 'POSITION_OPEN';
       if (!tokenRef.current) {
         toast.push({ tone: 'error', title: 'Log in to trade' });
-        return;
+        return 'LOGIN_REQUIRED';
       }
       if (!sendTrade('open_position', input)) {
         toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: try again shortly.' });
-        return;
+        return 'OFFLINE';
       }
       const last = ticksRef.current[ticksRef.current.length - 1] ?? null;
       const now = Date.now();
@@ -584,6 +574,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       qc.setQueryData<WalletDto>(['wallet'], (old) =>
         old ? { ...old, real: Math.max(0, old.real - input.stakeCents) } : old,
       );
+      return null;
     },
     [qc, send, setActive, toast],
   );
@@ -1058,11 +1049,20 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             // cash-out failed → restore so the user can retry / let it auto-settle
             setActive({ ...a, phase: 'open' });
           }
-          toast.push({
-            tone: 'error',
-            title: errorTitle(/^INSUFFICIENT_FUNDS/.test(String(d.message ?? '')) ? 'INSUFFICIENT_FUNDS' : d.code),
-            description: friendlyError(d.message, d.reasons, fmtRef.current),
-          });
+          const title = errorTitle(/^INSUFFICIENT_FUNDS/.test(String(d.message ?? '')) ? 'INSUFFICIENT_FUNDS' : d.code);
+          const detail = friendlyError(d.message, d.reasons, fmtRef.current);
+          // Recorded for the order window, which is where MetaTrader puts a rejection.
+          setLastTradeError({ code: String(d.code ?? ''), title, detail, at: Date.now() });
+          /**
+           * The popup only where nothing else will say it.
+           *
+           * An order window that is waiting prints this same rejection itself, in MetaTrader's own
+           * place for it: "its execution results will appear in the window". Raising a card over
+           * that window is one tap answered twice, in two different visual languages. Where no
+           * window is waiting — the one-click panel firing instantly, the desktop shell, a refusal
+           * that is nobody's order — the popup is the only surface a rejection has and it stays.
+           */
+          if (!orderWindowWaiting()) toast.push({ tone: 'error', title, description: detail });
           break;
         }
         default:
@@ -1202,7 +1202,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
     requestSymbols, subscribeSymbols, getSymbolQuote]);
-  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, earlyCloseEnabled }), [status, online, fairness, activePosition, earlyCloseEnabled]);
+  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, earlyCloseEnabled, lastTradeError }), [status, online, fairness, activePosition, earlyCloseEnabled, lastTradeError]);
 
   return (
     <ApiCtx.Provider value={apiValue}>
