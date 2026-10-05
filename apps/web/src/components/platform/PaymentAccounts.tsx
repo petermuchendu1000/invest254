@@ -10,7 +10,7 @@
  *    which paybill receives deposits, which shortcode pays withdrawals) and that the System owner is told.
  *  - Readiness is shown as checkable facts (Deposits ✓ / Payouts ✗ + what is missing), so the operator can see
  *    why Go-live is refused before trying (error prevention > error messages).
- *  - Secrets are write-only: "saved •••• 1234 — leave blank to keep" (no fear of wiping a key by saving).
+ *  - Secrets are write-only: "saved •••• 1234, leave blank to keep" (no fear of wiping a key by saving).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -229,7 +229,7 @@ function GatewayCard({ type, id, code, schema, config, status, open, onToggle }:
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {fields.map((f) => {
                   const meta = config.secretMeta[f.key];
-                  const label = f.secret && meta?.set ? `${f.label} (saved •••• ${meta.last4}. Leave blank to keep)` : f.label;
+                  const label = f.secret && meta?.set ? `${f.label} (saved •••• ${meta.last4}, leave blank to keep)` : f.label;
                   return (
                     <label key={f.key} className="flex flex-col gap-1.5 text-sm">
                       <span className="font-medium text-fg">{label}{f.required ? '' : <span className="font-normal text-muted"> (optional)</span>}</span>
