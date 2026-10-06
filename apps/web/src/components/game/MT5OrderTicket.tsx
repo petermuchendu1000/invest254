@@ -88,7 +88,7 @@ export function MT5OrderTicket() {
   useRestoreLevels();
 
   if (!ready) {
-    return <div className="h-40 animate-pulse rounded-xl border border-[#2b3543] bg-[#0f1720]" />;
+    return <div className="h-40 animate-pulse rounded-sm border border-[#2b3543] bg-[#0f1720]" />;
   }
 
   if (activePosition) {
@@ -112,7 +112,7 @@ export function MT5OrderTicket() {
   const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-1 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
 
   return (
-    <div className="relative flex flex-col gap-2 rounded-xl border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
+    <div className="relative flex flex-col gap-2 rounded-sm border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
       {/**
         * MetaTrader's execution result, in the window the order was sent from, same as the phone's.
         *

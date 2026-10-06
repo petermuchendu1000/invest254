@@ -60,7 +60,7 @@ export function MT5Specification({ spec, onDismiss }: { spec: SpecInput; onDismi
 
           {/* MetaTrader's Sessions block: a Quotes column and a Trade column, one row per weekday. */}
           <div className="mt-2 px-3 pb-3">
-            <div className="mb-1 flex gap-2 border-b border-[#2b3543] pb-1 text-[9px] font-semibold uppercase tracking-wider text-muted">
+            <div className="mb-1 flex gap-2 border-b border-[#2b3543] pb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">
               <span className="flex-1">Sessions</span>
               <span className="w-24 text-right">Quotes</span>
               <span className="w-24 text-right">Trade</span>

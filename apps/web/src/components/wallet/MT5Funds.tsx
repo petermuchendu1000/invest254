@@ -61,7 +61,7 @@ export function MT5Funds() {
           <button
             type="button"
             onClick={() => openDeposit()}
-            className="flex-1 rounded bg-[#41be56] px-4 py-3 text-[14px] font-semibold text-white transition hover:bg-[#2e9d41]"
+            className="flex-1 rounded bg-[#3183ff] px-4 py-3 text-[14px] font-semibold text-white transition hover:bg-[#2567cc]"
           >
             Deposit
           </button>

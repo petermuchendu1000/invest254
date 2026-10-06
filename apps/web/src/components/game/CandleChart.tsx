@@ -1298,7 +1298,7 @@ export function CandleChart({
                           ))}
                         </div>
                         {g.group === 'volumes' ? (
-                          <p className="px-0.5 pt-1 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
+                          <p className="px-0.5 pt-1 text-[9px] leading-snug text-[#8fa2b8]">{VOLUME_GROUP_NOTE}</p>
                         ) : null}
                       </Section>
                     ))}
@@ -1425,7 +1425,7 @@ export function CandleChart({
             <div className="absolute inset-0 z-20 grid place-items-center bg-[#0f1720]/70 text-[11px] font-semibold text-[#8fa2b8]">Loading {tf} history…</div>
           ) : null}
           {loadError ? (
-            <div className="absolute inset-x-0 top-8 z-20 mx-auto w-fit rounded-md border border-[#2b3543] bg-[#0f1720] px-3 py-1.5 text-[11px] text-[#8fa2b8]">
+            <div className="absolute inset-x-0 top-8 z-20 mx-auto w-fit rounded-sm border border-[#2b3543] bg-[#0f1720] px-3 py-1.5 text-[11px] text-[#8fa2b8]">
               History unavailable ({loadError}). The live bar is still updating.
             </div>
           ) : null}
@@ -1578,7 +1578,7 @@ function DrawRail({
         <div className="absolute left-10 top-1 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
           {OBJECT_GROUPS.map((g) => (
             <div key={g.group} className="mb-2 last:mb-0">
-              <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted">{g.label}</div>
+              <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">{g.label}</div>
               <div className="grid gap-1">
                 {g.items.map((o) => (
                   <button
@@ -1591,9 +1591,9 @@ function DrawRail({
                     className={cn(
                       'flex h-6 items-center rounded-md border px-2 text-left text-[10px] font-semibold transition',
                       o.kind !== null && tool === o.kind
-                        ? 'border-accent bg-accent/15 text-accent'
-                        : 'border-border bg-surface/80 text-muted hover:text-fg',
-                      o.unavailable && 'cursor-not-allowed opacity-45 hover:text-muted',
+                        ? 'border-[#3183ff] bg-[#3183ff]/15 text-[#3183ff]'
+                        : 'border-[#2b3543] bg-[#0f1720]/80 text-[#8fa2b8] hover:text-white',
+                      o.unavailable && 'cursor-not-allowed opacity-45 hover:text-[#8fa2b8]',
                     )}
                   >
                     <span className="truncate">{o.name}</span>
@@ -1643,7 +1643,7 @@ function DrawRail({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-2 last:mb-0">
-      <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-muted">{title}</div>
+      <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">{title}</div>
       {children}
     </div>
   );
@@ -1661,8 +1661,8 @@ function Toggle({ on, onClick, children, disabled, title }: {
       title={title}
       className={cn(
         'flex h-6 items-center justify-between rounded-md border px-2 text-[10px] font-semibold transition',
-        on ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-surface/80 text-muted hover:text-fg',
-        disabled && 'cursor-not-allowed opacity-45 hover:text-muted',
+        on ? 'border-[#3183ff] bg-[#3183ff]/15 text-[#3183ff]' : 'border-[#2b3543] bg-[#0f1720]/80 text-[#8fa2b8] hover:text-white',
+        disabled && 'cursor-not-allowed opacity-45 hover:text-[#8fa2b8]',
       )}
     >
       <span>{children}</span>
@@ -1863,7 +1863,7 @@ function MobileChartBar({
               {/* Title case, not the uppercase the desktop Tools menu uses for its own sections:
                   MetaTrader's phone period sheet heads its three groups "Minutes", "Hours" and
                   "Days", and shouting them would be this shell's styling rather than its. */}
-              <div className="mb-1 text-[10px] font-semibold tracking-wide text-muted">{g.label}</div>
+              <div className="mb-1 text-[10px] font-semibold tracking-wide text-[#8fa2b8]">{g.label}</div>
               <div className="grid grid-cols-4 gap-1">
                 {g.items.map((k) => (
                   <button
@@ -1938,7 +1938,7 @@ function MobileChartBar({
                 ))}
               </div>
               {g.group === 'volumes' ? (
-                <p className="px-0.5 pt-1 text-[9px] leading-snug text-muted">{VOLUME_GROUP_NOTE}</p>
+                <p className="px-0.5 pt-1 text-[9px] leading-snug text-[#8fa2b8]">{VOLUME_GROUP_NOTE}</p>
               ) : null}
             </Section>
           ))}
