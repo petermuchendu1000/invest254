@@ -80,6 +80,23 @@ export const DEFAULT_CONFIG: GameConfig = {
   minStakeCents: 25000,
   maxStakeCents: 5_000_000,
   minWithdrawalCents: 25000,
+  /**
+   * On a brand with protective levels this is the HORIZON a position is held to when neither its
+   * stop, its target nor the trader closes it first. It is no longer the trader's to pick: the
+   * Expiry control is gone, because choosing a term alongside a stop is two contradictory ways to
+   * end one trade.
+   *
+   * Left at ten seconds DELIBERATELY, and an operator who wants MetaTrader's open-ended positions
+   * raises it per brand (the bound is 3600). Ten seconds is barely room for a stop to be reached,
+   * so the levels only really earn their keep at a longer horizon, but moving this default moves
+   * every brand's character at once and that is the operator's call, not a side effect of shipping
+   * the levels.
+   *
+   * Safe to raise whenever they want it: the calibration re-solves for whatever horizon it is
+   * given. Measured RTP against a 25% target is 25.14% at 10s, 25.47% at 60s, 25.33% at 300s and
+   * 24.97% at 3600s, with the break-even cost scaling as the square root of the horizon, which is
+   * what a martingale implies.
+   */
   defaultDurationS: 10,
   tickRateMs: 150,
   driftBias: 0.30,

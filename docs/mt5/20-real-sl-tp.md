@@ -104,3 +104,63 @@ So one of three must give:
 
 RTP is the operator's revenue and `targetWinRate` is a feel knob, so RTP binds and the achieved
 win rate is surfaced rather than silently missed.
+
+## What shipped
+
+**The engine holds the levels.** A position carries `slPrice`/`tpPrice` as chart prices, armed with
+the order or moved later through `set_levels` (MetaTrader's Modify position). Every tick converts
+the current rate to a price and compares; a buy stops at or below its stop and takes profit at or
+above its target, a sell mirrors it. The **stop is checked first**, because a tick spanning both
+levels cannot be known to have touched the better one first and the trader does not get the benefit
+of that doubt.
+
+**The browser stopped watching.** `useTakeProfitLevelWatch` fired a sell from a React effect when
+the price reached the level. That only worked while the tab was open, receiving ticks and connected:
+a trader who set a target and shut the laptop had no target. It is deleted rather than kept as a
+weaker second copy of the same rule.
+
+**Expiry is gone from the ticket.** It was never a MetaTrader control. A position now ends at its
+stop, its target, a manual close, or the brand's horizon, and choosing a term alongside a stop would
+be two contradictory ways to end one trade. The horizon is the BRAND's: a brand with a price axis
+ignores whatever duration the client sends.
+
+### The horizon, and why its default did not move
+
+`defaultDurationS` stays at **10 seconds**, deliberately. At ten seconds a stop barely has room to
+be reached, so the levels only really earn their keep at a longer horizon, and an operator who wants
+MetaTrader's open-ended positions raises it per brand (the bound is 3600).
+
+That is their call rather than a side effect of shipping this. Raising the shipped default was tried
+and reverted: it changes every brand's character at once, and it broke 10 engine tests whose
+fixtures assume a ten-second term. The economics do not constrain the choice, because the
+calibration re-solves for whatever horizon it is given:
+
+| horizon | measured RTP (target 25%) | break-even cost |
+| --: | --: | --: |
+| 10s | 25.14% | 0.00289 |
+| 60s | 25.47% | 0.00728 |
+| 300s | 25.33% | 0.01708 |
+| 3600s | 24.97% | 0.05767 |
+
+The cost scales as the square root of the horizon, which is what a martingale implies.
+
+### Known gap
+
+A **re-armed** position keeps the committed contract. The levels are not persisted, so a restart
+cannot know what stop the trader had set, and settling it on a model whose inputs were lost is worse
+than settling it the way it opened. Closing this needs the same kind of forward-only column the
+execution prices got in migration 0180.
+
+### Proof
+
+* `apps/engine/src/game.levels.test.ts` — 7 tests. Opens a position, steps the clock, and proves the
+  stop closes it before its horizon with nothing watching; that a level set through Modify fires the
+  same way; that a loser can now be closed by hand; and that a brand with no axis keeps the
+  committed contract untouched. The stop level is chosen from the curve's own path, so the test
+  cannot pass by firing instantly on the wrong side of entry.
+* `packages/shared/src/settle.continuous.test.ts` — 4 tests pinning the economics under eight
+  stopping rules.
+* `scratchpad/sltp.mjs` — 9/9 in a real browser against the real engine. Reads the websocket frames:
+  the order carries the levels as prices, the engine acknowledges what it took, and after a RELOAD
+  the engine hands the stop back because it never lost it.
+* Full suites: engine 574 pass / 0 fail, shared 379 pass / 0 fail.

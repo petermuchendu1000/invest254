@@ -203,28 +203,18 @@ export function MT5OrderTicket() {
         </span>
       </div>
 
-      {/* Expiry. NOT a MetaTrader control: a MetaTrader position has no expiry, so there is no
-          original to copy. It stays because this contract genuinely has a term, and hiding it would
-          hide the single most important thing about the trade. */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className={rowLabel}>Expiry</span>
-        <div className="flex flex-1 gap-1">
-          {durations.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setDurationS(d)}
-              aria-pressed={durationS === d}
-              className={cn(
-                'h-8 flex-1 rounded border text-[12px] font-semibold transition',
-                durationS === d ? 'border-[#3183ff] bg-[#3183ff]/15 text-white' : 'border-[#2b3543] bg-[#0f1720] text-[#8fa2b8] hover:text-white',
-              )}
-            >
-              {d < 60 ? `${d}s` : `${d / 60}m`}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/*
+        * Expiry is GONE, and that is the point.
+        *
+        * It was never a MetaTrader control: a MetaTrader position has no expiry, and this one only
+        * had a term because the engine committed its outcome at open and revealed it on a timer.
+        * It does not any more. A position now ends when its stop or its target is reached, when the
+        * trader closes it, or at the brand's own horizon, which is a backstop rather than a choice.
+        * Choosing a term alongside a stop would have been two contradictory ways to end one trade.
+        *
+        * The horizon stays configurable per brand (`defaultDurationS`); it is simply not the
+        * trader's to pick. See docs/mt5/20-real-sl-tp.md.
+        */}
 
       {/* The quote, then the buttons.
           MetaTrader's modern order dialog puts NO price on the buttons. The price is shown

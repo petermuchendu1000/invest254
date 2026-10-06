@@ -5,6 +5,7 @@ import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
 import { useLevelsStore } from '@/lib/game/levelsStore';
 import { levelPrice } from '@/lib/game/levelWatch';
+import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import type { ActivePosition } from '@/lib/game/betting';
 
 /**
@@ -51,6 +52,8 @@ export function MT5ModifyPosition({
   const setLevels = useLevelsStore((s) => s.set);
   const levelRef = useLevelsStore((s) => s.ref);
   const anchor = levelRef ?? openPrice;
+  // The engine's own setter: what it accepts is what will fire.
+  const pushLevels = useGameSocket().setLevels;
   const slPrice = levelPrice(levels, anchor, 'sl', digits);
   const tpPrice = levelPrice(levels, anchor, 'tp', digits);
 
@@ -60,11 +63,22 @@ export function MT5ModifyPosition({
     return () => window.removeEventListener('keydown', onKey);
   }, [onDismiss]);
 
-  /** One point at a time, which is what MetaTrader's own stepper on this row moves by. */
+  /**
+   * One point at a time, which is what MetaTrader's own stepper on this row moves by.
+   *
+   * The move goes to the ENGINE as well as to the local store. Modifying a position here used to
+   * change only what this tab drew; the level that would actually fire now lives on the server, so
+   * a Modify that did not reach it would be a dialog quietly lying about what it had done.
+   */
   const bump = (dir: 1 | -1) => {
     if (anchor === null) return;
     const cur = levels.tpPoints;
-    setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, openPrice);
+    const next = { ...levels, tpPoints: cur === null ? dir * 100 : cur + dir };
+    setLevels(next, openPrice);
+    pushLevels(
+      levelPrice(next, openPrice, 'sl', digits),
+      levelPrice(next, openPrice, 'tp', digits),
+    );
   };
 
   return (

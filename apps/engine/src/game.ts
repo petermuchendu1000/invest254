@@ -340,7 +340,20 @@ export class GameServer {
     const poolActive = this.pool?.enabled() ?? false;
     const poolPath = poolActive && !isMarketer;
     const ov = (this.loadOverride && (!poolActive || isMarketer)) ? await this.loadOverride(input.userId) : null;
-    const durationS = input.durationS ?? ov?.tradeDurationS ?? this.cfg.defaultDurationS;
+    /**
+     * The horizon is the BRAND's, not the trader's.
+     *
+     * It used to be picked per order from an Expiry control, because the contract's whole character
+     * was its term. With real protective levels a position ends when its stop or target is reached,
+     * when the trader closes it, or at this backstop, and letting the trader also set the backstop
+     * would be two contradictory ways to end one trade. A brand with a price axis therefore ignores
+     * what the client asked for and uses its own configured horizon; everything else keeps the old
+     * per-order duration exactly. The economics are unaffected: the calibration re-solves for
+     * whatever horizon it is given, and RTP measures 24.97-25.47% against a 25% target from a 10
+     * second horizon out to an hour.
+     */
+    const horizon = ov?.tradeDurationS ?? this.cfg.defaultDurationS;
+    const durationS = this.priceAxis !== undefined ? horizon : (input.durationS ?? horizon);
     const minStake = ov?.minStakeCents ?? this.cfg.minStakeCents;
     const maxStake = ov?.maxStakeCents ?? this.cfg.maxStakeCents;
     if (!Number.isInteger(input.stakeCents)) throw new RangeError("stake must be integer cents");

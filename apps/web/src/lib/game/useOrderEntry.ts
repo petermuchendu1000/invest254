@@ -19,6 +19,8 @@ import { api } from '@/lib/api/endpoints';
 import type { ActivePosition } from '@/lib/game/betting';
 import type { Tick } from '@/lib/game/types';
 import type { LocalRefusal } from '@/lib/game/orderResult';
+import { useLevelsStore } from '@/lib/game/levelsStore';
+import { levelPrice } from '@/lib/game/levelWatch';
 
 /**
  * Everything an order-entry surface needs, in one place.
@@ -225,6 +227,10 @@ export function useOrderEntry(): OrderEntry {
     [defaultDurationS],
   );
 
+  // The ticket's working copy of the levels, which `place` hands to the engine as absolute prices.
+  const levels = useLevelsStore((s) => s.levels);
+  const levelRef = useLevelsStore((s) => s.ref);
+
   function place(dir: Direction): 'sent' | 'deposit' | LocalRefusal {
     if (connecting) return 'OFFLINE';
     // Defence in depth behind the disabled buttons: this brand settles one symbol, and an order
@@ -239,7 +245,19 @@ export function useOrderEntry(): OrderEntry {
     }
     // Null means it went. Anything else is the engine's rule, refused here, and the order window
     // says so: this used to be a silent return and a tap that did nothing.
-    return openPosition({ stakeCents, direction: dir, durationS }) ?? 'sent';
+    /**
+     * MetaTrader arms the protective levels WITH the order, so they go in the same message.
+     *
+     * Sent as absolute chart prices and resolved here, where the ticket's reference price is known.
+     * The engine holds them from this moment on: this is the hand-off that turns a level the tab was
+     * drawing into a stop that fires whether or not the tab is open.
+     */
+    const ref = levelRef ?? price;
+    return openPosition({
+      stakeCents, direction: dir, durationS,
+      slPrice: levelPrice(levels, ref, 'sl', digits),
+      tpPrice: levelPrice(levels, ref, 'tp', digits),
+    }) ?? 'sent';
   }
 
   return {
