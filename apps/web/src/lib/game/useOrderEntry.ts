@@ -182,16 +182,13 @@ export function useOrderEntry(): OrderEntry {
   const maxLots = vol.max;
   const volStep = vol.step;
   /**
-   * Decimals the volume prints to.
+   * Decimals the volume prints to, from the shared rule rather than from a copy of it here.
    *
-   * The symbol's step decides it, EXCEPT where the brand's minimum is not a whole number of steps:
-   * a minimum of 0.025 lots on a hundredth step has to print three places or the ticket shows a
-   * rounded volume that does not match the stake actually sent.
+   * The off-grid-minimum case (0.025 lots on a hundredth step) used to be worked out in this hook
+   * alone, so the ticket printed three places and every grid printed two for the same position. It
+   * now lives in `volumeDigitsOf`, which the grids read through `useVolumeDigits`.
    */
-  const stepDigits = volumeDigitsOf(vol);
-  const volDigits = Math.abs(minLots / volStep - Math.round(minLots / volStep)) < 1e-9
-    ? stepDigits
-    : stepDigits + 1;
+  const volDigits = volumeDigitsOf(vol);
   /**
    * The volume lives in a shared store, not in this hook's own state.
    *

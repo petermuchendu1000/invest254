@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { XAUUSD } from '@invest254/shared/candles';
 import { lotsOfStake } from '@invest254/shared/account';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { usePositions } from '@/lib/positions/hooks';
 import { useTransactions } from '@/lib/wallet/hooks';
 import { useSession } from '@/lib/auth/session';
@@ -53,12 +54,31 @@ export function MT5History({ embedded = false }: {
 }) {
   const token = useSession((s) => s.token);
   const money = useDisplayMoney();
+  /**
+   * Volume prints to the SYMBOL's volume digits, the same ones the order ticket offers.
+   *
+   * docs/mt5/09-toolbox.md 300 and the rows at 313-318: one rule for the ticket and the grids. These
+   * rows read `0.03` while the ticket that placed them read `0.025`, so the lot size appeared to
+   * change between the ticket and the row it produced.
+   */
+  const volumeDigits = useVolumeDigits(SYMBOL);
+  const lots = useCallback((stakeCents: number) => lotsOfStake(stakeCents, volumeDigits), [volumeDigits]);
+  /**
+   * Money on this screen is BARE: no currency code anywhere.
+   *
+   * docs/mt5/09-toolbox.md 429 keeps the code after the Balance value alone and prints "all other
+   * figures bare"; 729 is stricter for the History summary strip, which carries no code at all,
+   * "not even after Balance". Every figure here went through the wallet formatter and read
+   * `KES 225`, which is neither.
+   */
+  const amount = money.mt;
 
   const [tab, setTab] = useState<HistoryTab>('positions');
   const [period, setPeriod] = useState<PeriodKey>('month');
   const [custom, setCustom] = useState<{ from: string; to: string }>({ from: '', to: '' });
   const [menu, setMenu] = useState<'period' | 'sort' | null>(null);
-  const [sort, setSort] = useState<SortKey>('time');
+  // Close time, descending: the newest settled record first, which is the view MetaTrader opens on.
+  const [sort, setSort] = useState<SortKey>('closetime');
   const [ascending, setAscending] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -92,16 +112,16 @@ export function MT5History({ embedded = false }: {
   useAutoPage(transactionsQ, transactions.at(-1)?.ts, range.fromMs);
 
   const orders = useMemo(
-    () => orderRows(positions, range, SYMBOL, lotsOfStake),
-    [positions, range],
+    () => orderRows(positions, range, SYMBOL, lots),
+    [positions, range, lots],
   );
   const deals = useMemo(
-    () => dealRows(positions, transactions, range, SYMBOL, lotsOfStake),
-    [positions, transactions, range],
+    () => dealRows(positions, transactions, range, SYMBOL, lots),
+    [positions, transactions, range, lots],
   );
   const closed = useMemo(
-    () => positionRows(positions, transactions, range, SYMBOL, lotsOfStake),
-    [positions, transactions, range],
+    () => positionRows(positions, transactions, range, SYMBOL, lots),
+    [positions, transactions, range, lots],
   );
 
   const money3 = moneySummary(tab === 'deals' ? deals : closed);
@@ -204,9 +224,9 @@ export function MT5History({ embedded = false }: {
             {/* Swap and Commission are the two lines MetaTrader drops when they are zero, and here
                 they are structurally zero — nothing is held overnight and nothing is charged per
                 trade. See moneySummary. */}
-            <MT5SummaryLine label="Profit" value={money.fmt(money3.profitCents)} />
-            <MT5SummaryLine label="Deposit" value={money.fmt(money3.depositCents)} />
-            <MT5SummaryLine label="Balance" value={money.fmt(money3.balanceCents)} />
+            <MT5SummaryLine label="Profit" value={amount(money3.profitCents)} />
+            <MT5SummaryLine label="Deposit" value={amount(money3.depositCents)} />
+            <MT5SummaryLine label="Balance" value={amount(money3.balanceCents)} />
           </>
         )}
       </MT5Summary>
@@ -240,7 +260,7 @@ export function MT5History({ embedded = false }: {
                     <Row key={r.id} onOpen={() => setSelected(r.id)}>
                       <Td>{stamp(r.atMs)}</Td>
                       <Td>{r.ticket}</Td>
-                      <Td>{r.symbol}</Td>
+                      <Td className="text-left">{r.symbol}</Td>
                       <Td className={sideClass(r.side)}>{r.side}</Td>
                       <Td>{r.lots} / {r.filledLots}</Td>
                       <Td>{r.state === 'CANCELED' ? '-' : px(r.price)}</Td>
@@ -254,12 +274,12 @@ export function MT5History({ embedded = false }: {
                     <Row key={r.id}>
                       <Td>{stamp(r.atMs)}</Td>
                       <Td>{r.ticket}</Td>
-                      <Td>{r.symbol}</Td>
+                      <Td className="text-left">{r.symbol}</Td>
                       <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
                       <Td>{r.entry ?? '-'}</Td>
                       <Td>{r.lots ?? '-'}</Td>
                       <Td>{r.lots === null ? '-' : px(r.price)}</Td>
-                      <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
+                      <Td><MT5Amount cents={r.amountCents} fmt={amount} /></Td>
                     </Row>
                   ))}
                 </Table>
@@ -271,12 +291,12 @@ export function MT5History({ embedded = false }: {
                     <Row key={r.id} onOpen={r.kind === 'trade' ? () => setSelected(r.id) : undefined}>
                       <Td>{stamp(r.atMs)}</Td>
                       <Td>{r.ticket}</Td>
-                      <Td>{r.symbol}</Td>
+                      <Td className="text-left">{r.symbol}</Td>
                       <Td className={r.side ? sideClass(r.side) : ''}>{r.side ?? r.label}</Td>
                       <Td>{r.lots ?? '-'}</Td>
                       <Td>{r.lots === null ? '-' : px(r.entryPrice)}</Td>
                       <Td>{r.lots === null ? '-' : px(r.exitPrice)}</Td>
-                      <Td><MT5Amount cents={r.amountCents} fmt={money.fmt} /></Td>
+                      <Td><MT5Amount cents={r.amountCents} fmt={amount} /></Td>
                     </Row>
                   ))}
                 </Table>
@@ -361,15 +381,23 @@ function PositionEntry({ row, fmt, onOpen }: { row: PositionRow; fmt: (cents: nu
   );
 }
 
-/** MetaTrader's wide-window history table: one line per record, grey headings, no rules between
- *  columns — only the thin row rule the entry list uses. */
+/**
+ * MetaTrader's wide-window history table: one line per record, grey headings, no rules between
+ * columns — only the thin row rule the entry list uses.
+ *
+ * `Symbol` is the one left-aligned column and everything else is right-aligned, HEADER INCLUDED:
+ * docs/mt5/09-toolbox.md 266-268 reads that off the position grid ("`Symbol` is left-aligned …
+ * every column from `Ticket` rightwards is right-aligned, including its header"), and the figure
+ * columns here are the same figures. Every column was left-aligned, which breaks the one thing a
+ * column of numbers is for — reading the decimal points down the page.
+ */
 function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
   return (
-    <table className="w-full border-collapse text-left font-mono text-[12px] tabular-nums">
+    <table className="w-full border-collapse text-right font-mono text-[12px] tabular-nums">
       <thead>
         <tr className="border-b border-[#2b3543] text-[#8fa2b8]">
           {head.map((h) => (
-            <th key={h} className="whitespace-nowrap px-3 py-1.5 font-normal">{h}</th>
+            <th key={h} className={cn('whitespace-nowrap px-3 py-1.5 font-normal', h === 'Symbol' && 'text-left')}>{h}</th>
           ))}
         </tr>
       </thead>

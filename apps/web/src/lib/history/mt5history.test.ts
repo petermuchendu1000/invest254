@@ -59,7 +59,9 @@ test('periodSubtitle: one day collapses to a single date, a span prints both', (
 
 test('MetaTrader date and time formats', () => {
   assert.equal(dateOnly(NOW), '2026.06.15');
-  assert.equal(stamp(new Date(2026, 5, 15, 9, 7, 4).getTime()), '2026.06.15 09:07:04');
+  // Built with Date.UTC, because a record's time is the broker's SERVER time and `stamp` prints
+  // UTC: a local-time constructor would make this assertion pass only where TZ is UTC.
+  assert.equal(stamp(Date.UTC(2026, 5, 15, 9, 7, 4)), '2026.06.15 09:07:04');
 });
 
 test('a price is only knowable on the day its axis is anchored to', () => {
@@ -186,13 +188,25 @@ test('sortRows: every key sorts both ways and never mutates the input', () => {
     { symbol: 'C', ticket: '0001', atMs: 100, amountCents: null },
   ];
   const before = JSON.stringify(rows);
-  assert.deepEqual(sortRows(rows, 'time', false).map((r) => r.atMs), [300, 200, 100]);
-  assert.deepEqual(sortRows(rows, 'time', true).map((r) => r.atMs), [100, 200, 300]);
+  assert.deepEqual(sortRows(rows, 'closetime', false).map((r) => r.atMs), [300, 200, 100]);
+  assert.deepEqual(sortRows(rows, 'closetime', true).map((r) => r.atMs), [100, 200, 300]);
   assert.deepEqual(sortRows(rows, 'symbol', true).map((r) => r.symbol), ['A', 'B', 'C']);
   assert.deepEqual(sortRows(rows, 'ticket', true).map((r) => r.ticket), ['0001', '0002', '0003']);
   // A row with no result sorts as zero, between the loss and the win.
   assert.deepEqual(sortRows(rows, 'profit', true).map((r) => r.amountCents), [-5, null, 10]);
   assert.equal(JSON.stringify(rows), before, 'input untouched');
+});
+
+/** History's sort is `Symbol · Ticket · Open time · Close time · Profit` (04-mobile-app.md 422). */
+test('sortRows: Open time and Close time are two different orders', () => {
+  const rows = [
+    { symbol: 'A', ticket: '1', atMs: 500, openMs: 100, closeMs: 500 },  // opened first, closed last
+    { symbol: 'A', ticket: '2', atMs: 300, openMs: 200, closeMs: 300 },
+    // A cancelled order never closed, so it sorts on the one time it has.
+    { symbol: 'A', ticket: '3', atMs: 400, openMs: 400, closeMs: null },
+  ];
+  assert.deepEqual(sortRows(rows, 'opentime', true).map((r) => r.ticket), ['1', '2', '3']);
+  assert.deepEqual(sortRows(rows, 'closetime', true).map((r) => r.ticket), ['2', '3', '1']);
 });
 
 test('sortRows: ties fall back to newest-first, so the order is reproducible', () => {

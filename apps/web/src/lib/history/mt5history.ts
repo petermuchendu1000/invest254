@@ -128,16 +128,34 @@ export function periodSubtitle(r: Range): string {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** MetaTrader's date format: 2017.06.07 */
+/**
+ * MetaTrader's date format: 2017.06.07, on the LOCAL day.
+ *
+ * Local because its only caller is `periodSubtitle`, which names the window `periodRange` built out
+ * of local midnights. A record's own time is a different thing and is stamped in server time — see
+ * `stamp`.
+ */
 export function dateOnly(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
 }
 
-/** MetaTrader's timestamp format: 2017.06.07 11:51:19 */
+/**
+ * A record's time, as MetaTrader's Time column prints one: `2017.06.07 11:51:19`.
+ *
+ * Format from docs/mt5/09-toolbox.md 289-291 — "The record is represented as YYYY.MM.DD HH:MM" —
+ * plus the seconds the same lines record the rendered values as carrying (`2026.06.22 14:49:50`).
+ *
+ * The zone is the other half of that sentence: "Specified according to the time zone of the broker's
+ * trading server." The broker here is this platform's own engine, and its day is UTC — the chart's
+ * price axis is re-anchored at every UTC midnight, which is what `tradeDateOf` reads. So a record is
+ * stamped in UTC on every surface, rather than in whatever zone the browser happens to sit in, which
+ * would move one trade's stamp between two of the same trader's devices.
+ */
 export function stamp(ms: number): string {
   const d = new Date(ms);
-  return `${dateOnly(ms)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const date = `${d.getUTCFullYear()}.${pad(d.getUTCMonth() + 1)}.${pad(d.getUTCDate())}`;
+  return `${date} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
 // ───────────────────────────────── rows ─────────────────────────────────
@@ -152,6 +170,9 @@ export interface OrderRow {
   lots: string;
   filledLots: string;
   atMs: number;
+  /** When the request was placed, and when the position it opened closed (null if it never did). */
+  openMs: number;
+  closeMs: number | null;
   state: 'FILLED' | 'CANCELED';
   /** The price it filled at; null on a cancelled order, and on a trade placed before 0180. */
   price: number | null;
@@ -168,6 +189,9 @@ export interface DealRow {
   lots: string | null;
   label: string | null;
   atMs: number;
+  /** The round trip this execution belongs to. A balance deal is both at once; it has no duration. */
+  openMs: number;
+  closeMs: number | null;
   /** Set on `out` deals and on balance deals; an `in` deal has no result yet. */
   amountCents: number | null;
   /** The price this execution happened at — entry on an `in` deal, exit on an `out` one. */
@@ -190,6 +214,9 @@ export interface PositionRow {
   lots: string | null;
   label: string | null;
   atMs: number;
+  /** The round trip's two times, which is what History's `Open time` and `Close time` sort on. */
+  openMs: number;
+  closeMs: number | null;
   amountCents: number | null;
   /** The round trip's two prices. Both null on a balance operation, which has no price at all. */
   entryPrice: number | null;
@@ -234,6 +261,8 @@ export function orderRows(
       lots: lotsOf(p.stakeCents),
       filledLots: canceled ? lotsOf(0) : lotsOf(p.stakeCents),
       atMs: p.openedAt,
+      openMs: p.openedAt,
+      closeMs: p.settledAt,
       state: canceled ? 'CANCELED' : 'FILLED',
       price: canceled ? null : p.entryPrice ?? null,
     });
@@ -256,7 +285,7 @@ export function dealRows(
       out.push({
         id: `${p.id}:in`, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
         side: p.direction, entry: 'in', lots, label: null, atMs: p.openedAt, amountCents: null,
-        price: p.entryPrice ?? null,
+        openMs: p.openedAt, closeMs: p.settledAt, price: p.entryPrice ?? null,
       });
     }
     // Closing a BUY is a sell execution, and vice versa — MetaTrader reports the deal's own
@@ -265,7 +294,8 @@ export function dealRows(
       out.push({
         id: `${p.id}:out`, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
         side: p.direction === 'buy' ? 'sell' : 'buy', entry: 'out', lots, label: null,
-        atMs: p.settledAt, amountCents: p.pnlCents, price: p.exitPrice ?? null,
+        atMs: p.settledAt, openMs: p.openedAt, closeMs: p.settledAt,
+        amountCents: p.pnlCents, price: p.exitPrice ?? null,
       });
     }
   }
@@ -275,7 +305,7 @@ export function dealRows(
       id: `tx:${t.id}`, ticket: ticketOf(t.id), kind: 'balance', symbol: 'Balance',
       side: null, entry: null, lots: null,
       label: t.kind === 'withdrawal' ? 'Withdrawal' : 'Deposit',
-      atMs: t.ts, amountCents: signedCents(t), price: null,
+      atMs: t.ts, openMs: t.ts, closeMs: t.ts, amountCents: signedCents(t), price: null,
     });
   }
   return out;
@@ -297,7 +327,7 @@ export function positionRows(
     out.push({
       id: p.id, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
       side: p.direction, lots: lotsOf(p.stakeCents), label: null,
-      atMs: p.settledAt, amountCents: p.pnlCents,
+      atMs: p.settledAt, openMs: p.openedAt, closeMs: p.settledAt, amountCents: p.pnlCents,
       entryPrice: p.entryPrice ?? null, exitPrice: p.exitPrice ?? null,
     });
   }
@@ -306,7 +336,8 @@ export function positionRows(
     out.push({
       id: `tx:${t.id}`, ticket: ticketOf(t.id), kind: 'balance', symbol: 'Balance',
       side: null, lots: null, label: t.kind === 'withdrawal' ? 'Withdrawal' : 'Deposit',
-      atMs: t.ts, amountCents: signedCents(t), entryPrice: null, exitPrice: null,
+      atMs: t.ts, openMs: t.ts, closeMs: t.ts, amountCents: signedCents(t),
+      entryPrice: null, exitPrice: null,
     });
   }
   return out;
@@ -354,13 +385,22 @@ export function moneySummary(rows: ReadonlyArray<{ kind: 'trade' | 'balance'; am
 
 // ───────────────────────────────── sorting ─────────────────────────────────
 
-/** MetaTrader's sort menu. "Open time" and "Close time" collapse to one time per row here. */
-export type SortKey = 'symbol' | 'ticket' | 'time' | 'profit';
+/**
+ * The HISTORY screen's sort menu, which is its own list and not the Trade tab's.
+ *
+ * docs/mt5/04-mobile-app.md 422: Android's History sort button offers `Symbol · Ticket · Open time ·
+ * Close time · Profit`, while "the Trade tab's sort offers symbol, ticket, time, profit". This
+ * screen used to show the Trade tab's four, so a trader on History could not sort by either of the
+ * two times the tab is about. A history record really does have both: a contract has an `openedAt`
+ * and a `settledAt`, which is what `openMs` and `closeMs` carry.
+ */
+export type SortKey = 'symbol' | 'ticket' | 'opentime' | 'closetime' | 'profit';
 
 export const SORTS: ReadonlyArray<{ key: SortKey; label: string }> = [
   { key: 'symbol', label: 'Symbol' },
   { key: 'ticket', label: 'Ticket' },
-  { key: 'time', label: 'Time' },
+  { key: 'opentime', label: 'Open time' },
+  { key: 'closetime', label: 'Close time' },
   { key: 'profit', label: 'Profit' },
 ];
 
@@ -368,22 +408,31 @@ interface Sortable {
   symbol: string;
   ticket: string;
   atMs: number;
+  /** When the contract opened. */
+  openMs?: number | undefined;
+  /** When it closed, or null for a record that has no close: a cancelled order, an entry deal. */
+  closeMs?: number | null | undefined;
   amountCents?: number | null;
 }
 
 /**
  * Sorted copy. `ascending` is MetaTrader's arrow direction; the default view is newest first, which
- * is time DESCENDING. Ties fall back to time so the order is stable and reproducible.
+ * is time DESCENDING. Ties fall back to the row's own time so the order is stable and reproducible.
+ *
+ * A row with no close time sorts on the one time it has rather than being pushed to an end, because
+ * a cancelled order is not older or newer than a settled one, it simply never closed.
  */
 export function sortRows<T extends Sortable>(rows: readonly T[], key: SortKey, ascending: boolean): T[] {
   const dir = ascending ? 1 : -1;
+  const timeOf = (r: Sortable): number =>
+    key === 'opentime' ? r.openMs ?? r.atMs : (key === 'closetime' ? r.closeMs ?? r.atMs : r.atMs);
   const out = rows.slice();
   out.sort((a, b) => {
     let d = 0;
     if (key === 'symbol') d = a.symbol.localeCompare(b.symbol);
     else if (key === 'ticket') d = a.ticket.localeCompare(b.ticket);
     else if (key === 'profit') d = (a.amountCents ?? 0) - (b.amountCents ?? 0);
-    else d = a.atMs - b.atMs;
+    else d = timeOf(a) - timeOf(b);
     if (d !== 0) return dir * d;
     return b.atMs - a.atMs;
   });

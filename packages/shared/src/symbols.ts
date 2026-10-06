@@ -356,9 +356,24 @@ export function conventionalVolume(group: SymbolGroup): VolumeSpec {
 export const volumeSpecOf = (symbol: string): VolumeSpec =>
   conventionalVolume(BY_SYMBOL.get(symbol)?.group ?? "Forex\\Majors");
 
-/** Decimals a volume prints to on this symbol, which follows from its step. */
-export const volumeDigitsOf = (spec: VolumeSpec): number =>
-  (Math.abs(spec.step * 100 - Math.round(spec.step * 100)) < 1e-9 && spec.step < 0.1 ? 2 : 1);
+/**
+ * Decimals a volume prints to on this symbol — the ONE rule every surface uses.
+ *
+ * MetaTrader prints a volume to the symbol's own volume digits wherever it appears, in the ticket
+ * and in every grid row alike (docs/mt5/09-toolbox.md 300 and the rows at 313-318). The step sets
+ * it, EXCEPT where the range's minimum is not a whole number of steps: a minimum of 0.025 lots on a
+ * hundredth step has to print three places, or the figure shown is not the volume actually sent.
+ *
+ * It lives here rather than in the order ticket because the ticket was the only surface applying the
+ * off-grid rule: it showed 0.025 while the Trade grid, the History grid and the phone position row
+ * showed the same position as 0.03, so the lot size appeared to change between the ticket and the
+ * row it produced.
+ */
+export const volumeDigitsOf = (spec: VolumeSpec): number => {
+  const stepDigits = Math.abs(spec.step * 100 - Math.round(spec.step * 100)) < 1e-9 && spec.step < 0.1 ? 2 : 1;
+  const onGrid = Math.abs(spec.min / spec.step - Math.round(spec.min / spec.step)) < 1e-9;
+  return onGrid ? stepDigits : stepDigits + 1;
+};
 
 /**
  * The symbol's spec intersected with what the brand's stake limits allow, in lots.
