@@ -192,7 +192,7 @@ export function BetPanel() {
         <LivePnl pos={activePosition} />
         {/* Shown only where the engine will honour it: see the note at the top of this file. */}
         {earlyCloseEnabled ? (
-          <Button variant="secondary" size="md" fullWidth className="!h-11" disabled={!canClose} onClick={sell}>
+          <Button variant="secondary" size="md" fullWidth className="!h-11" disabled={!canClose} onClick={() => sell()}>
             {activePosition.phase === 'settling'
               ? 'Closing…'
               : canClose

@@ -6,7 +6,6 @@ import {
   type LevelUnit, type Levels,
 } from '@/lib/game/levels';
 import { useLevelsStore } from '@/lib/game/levelsStore';
-import { useDisplayMoney } from '@/lib/money';
 import { cn } from '@/lib/cn';
 
 /**
@@ -29,21 +28,16 @@ import { cn } from '@/lib/cn';
  * price did not fit on one line. A docked ticket is wider and MetaTrader's own desktop ticket puts
  * each level on one row, so that is what this is: label, stepper, clear.
  */
-export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLabel }: {
+export function MT5LevelRows({ price, digits, continuous }: {
   /** The live price, which a first level is anchored against. Null before the first quote. */
   price: number | null;
   digits: number;
-  /** The stake, which is the most this position can lose whichever model prices it. */
-  stakeCents: number;
   /**
    * Whether the engine prices this brand's positions CONTINUOUSLY, so both levels really close one
    * at their price. See `isContinuousBrand` in lib/game/levelWatch.ts.
    */
   continuous: boolean;
-  /** The horizon a position runs to if nothing closes it, e.g. "1m". */
-  durationLabel: string;
 }) {
-  const money = useDisplayMoney();
   const levels = useLevelsStore((s) => s.levels);
   const setLevels = useLevelsStore((s) => s.set);
   const levelRef = useLevelsStore((s) => s.ref);
@@ -78,12 +72,11 @@ export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLa
    * How a level reads in the selected unit, which is what MetaTrader's segmented control changes:
    * the VALUE shown, not the level.
    *
-   * `currency` is its third mode, "an approximate money amount", and what it can honestly say
-   * depends on how the brand is priced. On a CONTINUOUS contract both figures follow from the
-   * distance, but the engine publishes neither the gain nor the break-even cost they follow from, so
-   * both read `varies` rather than an invented number. On a committed contract the stop's is exact
-   * and fixed, the stake, because that is the whole of the downside; the target's still cannot be
-   * stated, since the payout is a multiplier assigned at open that no level determines.
+   * `currency` is its third mode, "an approximate money amount". Both levels read `varies`: the
+   * figures follow from the distance, but the engine publishes neither the gain nor the break-even
+   * cost they follow from, so there is no number to print that would not be invented. The rows only
+   * exist on a continuous brand now, so the committed-contract case this used to carry (a stop worth
+   * exactly the stake) can no longer arise here.
    */
   const text = (field: 'sl' | 'tp'): string => {
     const points = field === 'sl' ? levels.slPoints : levels.tpPoints;
@@ -91,7 +84,7 @@ export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLa
     if (points === null) return 'not set';
     if (unit === 'points') return String(points);
     if (unit === 'price') return priceOfPoints(ref, points, digits).toFixed(digits);
-    return field === 'sl' && !continuous ? money.fmt(stakeCents) : 'varies';
+    return 'varies';
   };
   const commit = (field: 'sl' | 'tp', raw: string) => {
     const n = Number(raw);
@@ -99,6 +92,21 @@ export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLa
     edit(field, unit === 'points' ? Math.round(n) : pointsOfPrice(ref, n, digits));
     setTyping(null);
   };
+
+  /**
+   * A brand whose engine will not act on a level gets NO level rows.
+   *
+   * This is the rule the chart's context menu already follows and the reason its 11 unimplementable
+   * rows are absent rather than greyed: a control that cannot act must not be drawn. Here the ticket
+   * used to draw a full Stop Loss and Take Profit pair, with spinners, a unit control and a ratio
+   * lock, on a brand where the engine fires neither, and then printed a sentence underneath saying
+   * so. The trader could set a stop, watch it on the chart, and lose the whole stake anyway.
+   *
+   * `continuous` is the engine's own test (`isContinuousBrand`): a price axis, pool mode off. It is
+   * the same condition `openPosition` uses to decide whether it will honour the levels at all, so
+   * the ticket cannot offer what the engine will refuse.
+   */
+  if (!continuous) return null;
 
   const rowLabel = 'w-20 shrink-0 text-[12px] text-[#8fa2b8]';
   const stepBtn = 'h-8 w-8 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-semibold text-[#3183ff] transition hover:border-[#3183ff] disabled:opacity-40';
@@ -193,26 +201,22 @@ export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLa
         );
       })}
 
-      {/* MetaTrader prints the money value of each level under them. Which of these two the brand
-          gets is argued in lib/game/levelWatch.ts: on a continuous brand the engine checks both
-          levels every tick and closes at what the position is worth there, so the stop is a real
-          stop; on any other brand neither level fires. */}
-      <p className="text-[11px] leading-snug text-[#8fa2b8]">
-        {continuous ? (
-          <>
-            <span style={{ color: '#DD5B4E' }}>Stop</span> and{' '}
-            <span style={{ color: '#0EB52E' }}>Target</span> close the position at their price, for
-            what it is worth there, so a stop can return part of the stake. Max loss{' '}
-            {money.fmt(stakeCents)}. Stops processing is performed on the server side.
-          </>
-        ) : (
-          <>
-            <span style={{ color: '#DD5B4E' }}>Stop</span> risks {money.fmt(stakeCents)}, the stake.
-            Neither it nor <span style={{ color: '#0EB52E' }}>Target</span> fires on this brand: the
-            contract settles at {durationLabel}.
-          </>
-        )}
-      </p>
+      {/**
+        * MetaTrader's new-order ticket prints NO paragraph under Stop Loss and Take Profit.
+        *
+        * Its fields stand on their own; the only stop-level prose MetaQuotes writes anywhere is the
+        * two-line hint under the Modify position button (01-order-and-close-dialogs.md 224-228),
+        * which is where this app now carries it too. What used to be here was two inventions: one
+        * claiming stops are processed "on the server side" where MetaQuotes writes "broker side"
+        * and quoting a max loss MetaTrader never prints here, and one that read
+        *
+        *     "Stop risks KES 10,000, the stake. Neither it nor Target fires on this brand: the
+        *      contract settles at 10s."
+        *
+        * A paragraph explaining that the two controls directly above it do nothing is not a label,
+        * it is an admission. The rows are not drawn at all on such a brand now (see the early
+        * return at the top of this component), so there is nothing left to explain.
+        */}
 
       {shape === null && (levels.slPoints !== null || levels.tpPoints !== null) ? (
         <p data-levels-invalid="" className="text-[11px] text-[#f23645]">

@@ -24,7 +24,7 @@ import {
   priceChangePct, priceText, stamp,
   type DealRow, type OrderRow, type PeriodKey, type PositionRow as ClosedRow, type Range,
 } from '@/lib/history/mt5history';
-import { ticketLabel } from '@/lib/game/betting';
+import { ticketLabel, type ActivePosition } from '@/lib/game/betting';
 import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
@@ -61,7 +61,7 @@ import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
 type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
-  const { activePosition, status, earlyCloseEnabled, setLevels: pushLevels } = useGameSocket();
+  const { positions, status, earlyCloseEnabled, setLevels: pushLevels } = useGameSocket();
   const brand = useBrand();
   /**
    * Whether the engine acts on the S/L and T/P levels at all: a brand with a price axis, pool mode
@@ -146,12 +146,22 @@ export function MT5Toolbox() {
     });
   });
 
-  // An optimistic open has no engine id yet; its stake is already committed, so it counts.
-  const live = activePosition && activePosition.phase !== 'settling' ? activePosition : null;
-  const floatingCents = live ? live.livePnlCents : 0;
+  /**
+   * EVERY open position, which is what MetaTrader's account figures are computed over.
+   *
+   * An optimistic open has no engine id yet; its stake is already committed, so it counts. A
+   * position being closed does not: its money is on its way back.
+   *
+   * Margin, Free Margin and Margin Level only mean anything across several positions, and they were
+   * being computed over one because that is all the client could hold. The sums are the whole point
+   * of the strip.
+   */
+  const openPositions = positions.filter((p) => p.phase !== 'settling');
+  const live = openPositions[openPositions.length - 1] ?? null;
+  const floatingCents = openPositions.reduce((n, p) => n + p.livePnlCents, 0);
   const summary = accountSummary({
     walletCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
-    openStakeCents: live ? live.stakeCents : 0,
+    openStakeCents: openPositions.reduce((n, p) => n + p.stakeCents, 0),
     floatingPnlCents: floatingCents,
   });
   /**
@@ -207,14 +217,17 @@ export function MT5Toolbox() {
    * On an OPEN position this is Modify position, so it goes to the engine: stepping it only in the
    * local store would move a number on screen and leave the stop that actually fires where it was.
    */
-  const stepTp = (dir: 1 | -1) => {
+  const stepTpOf = (pos: ActivePosition, dir: 1 | -1) => {
     const point = 1 / 10 ** digits;
-    if (live && live.phase === 'open') {
-      const base = live.tpPrice ?? nowPrice;
-      if (base === null) return;
-      pushLevels(live.slPrice, Number((base + dir * point).toFixed(digits)));
-      return;
-    }
+    if (pos.phase !== 'open' || !pos.positionId) return;
+    const base = pos.tpPrice ?? nowPrice;
+    if (base === null) return;
+    // Modify position, on THIS position: the engine holds the levels, so stepping it only in the
+    // local store would move a number on screen and leave the stop that actually fires where it was.
+    pushLevels(pos.slPrice, Number((base + dir * point).toFixed(digits)), pos.positionId);
+  };
+  /** The TICKET's target, for when nothing is open: the working copy a trader drags before ordering. */
+  const stepTicketTp = (dir: 1 | -1) => {
     if (anchor === null) return;
     const cur = levels.tpPoints;
     setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, nowPrice);
@@ -233,7 +246,18 @@ export function MT5Toolbox() {
   // MetaTrader reaches the Close position form from the Trade tab's own row, through the position
   // context menu. Opening the form from a button on the ticket was our invention; this is the route
   // the terminal actually has.
-  const [sheet, setSheet] = useState<null | 'menu' | 'close' | 'modify'>(null);
+  /**
+   * Which position a form is open on, as well as which form.
+   *
+   * With many positions "the menu" is not enough: closing one row's position from another row's
+   * confirmation is the kind of mistake a terminal must make impossible. The id travels with the
+   * sheet, and the row it was opened from is looked up by it.
+   */
+  const [sheet, setSheet] = useState<null | { kind: 'menu' | 'close' | 'modify'; positionId: string | null }>(null);
+  /** The position a form is acting on, re-read from the live list so it stays current while open. */
+  const sheetPos = sheet === null
+    ? null
+    : positions.find((p) => p.positionId === sheet.positionId) ?? null;
 
   const notifications = useMyNotifications();
   const journal = useJournal();
@@ -299,7 +323,7 @@ export function MT5Toolbox() {
               {mtAmount(money.toDisplay(floatingCents))}
             </span>
           ) : null}
-          {live ? <span className="rounded bg-[#3183ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#3183ff]">1 open</span> : null}
+          {openPositions.length ? <span className="rounded bg-[#3183ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#3183ff]">{openPositions.length} open</span> : null}
           <span className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
             title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} />
           <span className={cn('text-[#8fa2b8] transition', open && 'rotate-180')} aria-hidden>▾</span>
@@ -358,98 +382,47 @@ export function MT5Toolbox() {
                 being about the PHONE, which is what MetaTrader's two-line entry is for, instead of
                 hiding the grid from every laptop. */}
             {tab === 'trade' ? (
-              live ? (
+              openPositions.length ? (
                 <>
-                  <PositionRow
-                    className="sm:hidden"
-                    onOpenMenu={() => setSheet('menu')}
-                    symbol={symbol}
-                    direction={live.direction}
-                    lots={lots(live.stakeCents)}
-                    from={px(live.entryRate)}
-                    to={px(getLastTick()?.rate ?? null)}
-                    profit={money.mt(live.livePnlCents)}
-                    profitCents={live.livePnlCents}
-                    note={continuous && tpPrice !== null ? `T/P ${tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(live.stakeCents)}`}
-                  />
+                  {/* MetaTrader's phone entry: one two-line row per position. */}
+                  {openPositions.map((pos) => (
+                    <PositionRow
+                      key={pos.clientId}
+                      className="sm:hidden"
+                      onOpenMenu={() => setSheet({ kind: 'menu', positionId: pos.positionId })}
+                      symbol={symbol}
+                      direction={pos.direction}
+                      lots={lots(pos.stakeCents)}
+                      from={px(pos.entryRate)}
+                      to={px(getLastTick()?.rate ?? null)}
+                      profit={money.mt(pos.livePnlCents)}
+                      profitCents={pos.livePnlCents}
+                      note={continuous && pos.tpPrice !== null ? `T/P ${pos.tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(pos.stakeCents)}`}
+                    />
+                  ))}
                   <div className="hidden sm:block">
                     <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
-                      <tr
-                        className="cursor-pointer border-t border-[#2b3543]/60 hover:bg-[#202933]"
-                        onClick={() => setSheet('menu')}
-                        title="Open the position menu"
-                      >
-                        <Td first>{symbol}</Td>
-                        <Td>{ticketLabel(live)}</Td>
-                        {/* MetaTrader's Time column: `YYYY.MM.DD HH:MM` plus the seconds its own
-                            rendered values carry, in the broker's server time (09-toolbox.md
-                            289-291). This read `06.10 12:25:30` from a local helper here — no year,
-                            the day before the month, and the browser's zone rather than the
-                            server's — while /history printed the same instant correctly. There is
-                            one formatter now, `stamp`, and it says which zone the server keeps. */}
-                        <Td>{live.expiresAtMs ? stamp(live.expiresAtMs - live.durationS * 1000) : '-'}</Td>
-                        <Td className={live.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{live.direction}</Td>
-                        <Td>{lots(live.stakeCents)}</Td>
-                        <Td>{px(live.entryRate)}</Td>
-                        <Td>
-                          {/* MetaTrader's S/L column: the LEVEL, as a price, the same one the ticket
-                              sets and the chart draws. It used to print the stake instead, because
-                              there was no stop to show: the whole column was a sentence about the
-                              engine. On a continuous brand the engine checks this level every tick
-                              and closes the position there, which is what the column is for.
-
-                              An UNSET level leaves the cell BLANK and draws no cross: 09-toolbox.md
-                              336-338, "the cell is blank and no × is drawn". It printed "-" here
-                              while the live panel said "not set" and the close form said the same:
-                              three answers to one question. */}
-                          <span
-                            className="text-[#8fa2b8]"
-                            title={continuous
-                              ? 'The stop closes this position at its price, for what it is worth there. Stops processing is performed on the server side.'
-                              : 'This contract settles a loss at expiry, so the stop cannot fire. The level is the trader\u2019s.'}
-                          >
-                            {slPrice === null ? '' : slPrice.toFixed(digits)}
-                          </span>
-                        </Td>
-                        <Td>
-                          {/* MetaTrader's T/P column: the level as a price, stepped in the
-                              instrument's own points. It held a money TARGET before, which is a
-                              different concept the chart could not draw and the phone never fired.
-                              Unset, it is blank for the same reason the S/L cell is. */}
-                          {continuous ? (
-                            <span className="flex items-center gap-1">
-                              <button type="button" onClick={() => stepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
-                              <span className="min-w-16 text-center">{tpPrice === null ? '' : tpPrice.toFixed(digits)}</span>
-                              <button type="button" onClick={() => stepTp(1)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
-                            </span>
-                          ) : (
-                            // A target that can never fire is not a setting, it is a decoration.
-                            <span className="text-[#8fa2b8]" title="This brand settles every contract at expiry, so a target cannot close it early.">
-                              at expiry
-                            </span>
-                          )}
-                        </Td>
-                        <Td>{px(getLastTick()?.rate ?? null)}</Td>
-                        <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#3183ff]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
-                          <span className="flex items-center justify-end gap-2">
-                            {money.mt(live.livePnlCents)}
-                            {/* MetaTrader closes a position from its row with a small ×. Shown only
-                                where the engine will honour a manual close. */}
-                            {earlyCloseEnabled ? (
-                              <button
-                                type="button"
-                                onClick={sell}
-                                disabled={live.phase !== 'open' || !live.sellable || !live.positionId}
-                                aria-label="Close position"
-                                title={live.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
-                                className="rounded-sm border border-[#2b3543] px-1.5 text-[11px] font-normal text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645] disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                ×
-                              </button>
-                            ) : null}
-                          </span>
-                        </Td>
-                      </tr>
+                      {/* One row per open position, which is what MetaTrader's Trade tab is: "open
+                          positions above the account summary strip ... in a single shared column
+                          grid" (docs/mt5/09-toolbox.md 250). This drew exactly one row, because the
+                          client could only hold one position. */}
+                      {openPositions.map((pos) => (
+                        <TradeGridRow
+                          key={pos.clientId}
+                          pos={pos}
+                          symbol={symbol}
+                          digits={digits}
+                          continuous={continuous}
+                          earlyCloseEnabled={earlyCloseEnabled}
+                          nowRate={getLastTick()?.rate ?? null}
+                          px={px}
+                          lots={lots}
+                          money={money}
+                          onOpenMenu={() => setSheet({ kind: 'menu', positionId: pos.positionId })}
+                          onClose={() => { if (pos.positionId) sell(pos.positionId); }}
+                          onStepTp={(dir) => stepTpOf(pos, dir)}
+                        />
+                      ))}
                     </Table>
                   </div>
                 </>
@@ -572,24 +545,24 @@ export function MT5Toolbox() {
 
       {/* MetaTrader's position menu and the two forms it leads to. Rendered once, outside the
           collapsible pane, so dismissing the panel does not strand an open form. */}
-      {live && sheet === 'menu' ? (
+      {sheetPos && sheet?.kind === 'menu' ? (
         <MT5PositionMenu
-          title={`${symbol}, ${live.direction} ${lots(live.stakeCents)}`}
-          subtitle={`#${ticketLabel(live)} at ${px(live.entryRate)}`}
+          title={`${symbol}, ${sheetPos.direction} ${lots(sheetPos.stakeCents)}`}
+          subtitle={`#${ticketLabel(sheetPos)} at ${px(sheetPos.entryRate)}`}
           onDismiss={() => setSheet(null)}
           items={[
             {
               id: 'close',
               label: 'Close position',
-              onPick: () => setSheet('close'),
-              disabled: !earlyCloseEnabled || !live.sellable || live.phase !== 'open',
+              onPick: () => setSheet({ kind: 'close', positionId: sheetPos.positionId }),
+              disabled: !earlyCloseEnabled || !sheetPos.sellable || sheetPos.phase !== 'open',
               note: !earlyCloseEnabled
                 ? 'This brand settles every contract at expiry.'
-                : !live.sellable
+                : !sheetPos.sellable
                   ? 'This contract settles at expiry and cannot be closed at a loss.'
                   : undefined,
             },
-            { id: 'modify', label: 'Modify position', onPick: () => setSheet('modify') },
+            { id: 'modify', label: 'Modify position', onPick: () => setSheet({ kind: 'modify', positionId: sheetPos.positionId }) },
             {
               id: 'chart',
               label: 'Chart',
@@ -600,25 +573,27 @@ export function MT5Toolbox() {
         />
       ) : null}
 
-      {live && sheet === 'close' ? (
+      {sheetPos && sheet?.kind === 'close' ? (
         <MT5ClosePosition
-          pos={live}
+          pos={sheetPos}
           symbol={symbol}
           digits={digits}
           price={livePrice()}
-          openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
-          busy={live.phase === 'settling'}
+          openPrice={sheetPos.entryRate === null ? null : priceOfRate(sheetPos.entryRate)}
+          busy={sheetPos.phase === 'settling'}
           onDismiss={() => setSheet(null)}
-          onConfirm={() => { sell(); setSheet(null); }}
+          // THIS position, named explicitly. With several open, a close that meant "the newest"
+          // would shut the wrong trade from a confirmation naming another.
+          onConfirm={() => { if (sheetPos.positionId) sell(sheetPos.positionId); setSheet(null); }}
         />
       ) : null}
 
-      {live && sheet === 'modify' ? (
+      {sheetPos && sheet?.kind === 'modify' ? (
         <MT5ModifyPosition
-          pos={live}
+          pos={sheetPos}
           symbol={symbol}
           digits={digits}
-          openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
+          openPrice={sheetPos.entryRate === null ? null : priceOfRate(sheetPos.entryRate)}
           canTakeProfit={earlyCloseEnabled}
           onDismiss={() => setSheet(null)}
         />
@@ -1640,5 +1615,107 @@ function ExposureTab({ symbol, live, currency, fmt }: {
         })}
       </tbody>
     </table>
+  );
+}
+
+/**
+ * One open position, as MetaTrader's Trade tab draws one.
+ *
+ * Columns, in MetaTrader's order (docs/mt5/09-toolbox.md 258):
+ * `Symbol | Ticket | Time | Type | Volume | Price | S / L | T / P | Price | Profit`.
+ *
+ * Extracted from the single hard-coded row this grid used to contain. It was written for the one
+ * position the client could hold, so everything it showed came from a `live` captured in the
+ * Toolbox's own scope; a grid of positions needs each row to speak only about its own.
+ */
+function TradeGridRow({
+  pos, symbol, digits, continuous, earlyCloseEnabled, nowRate, px, lots, money,
+  onOpenMenu, onClose, onStepTp,
+}: {
+  pos: ActivePosition;
+  symbol: string;
+  digits: number;
+  continuous: boolean;
+  earlyCloseEnabled: boolean;
+  nowRate: number | null;
+  px: (rate: number | null) => string;
+  lots: (stakeCents: number) => string;
+  money: ReturnType<typeof useDisplayMoney>;
+  onOpenMenu: () => void;
+  onClose: () => void;
+  onStepTp: (dir: 1 | -1) => void;
+}) {
+  /**
+   * The ENGINE's levels for THIS position, never the ticket's working copy.
+   *
+   * Once a position is open the copy a trader drags around on the ticket is no longer what will
+   * fire: the engine holds the levels and settles on them. With several positions open the ticket's
+   * copy cannot stand in for any of them, so a row shows its own or shows nothing.
+   */
+  const slPrice = pos.slPrice;
+  const tpPrice = pos.tpPrice;
+  return (
+    <tr
+      className="cursor-pointer border-t border-[#2b3543]/60 hover:bg-[#202933]"
+      onClick={onOpenMenu}
+      title="Open the position menu"
+    >
+      <Td first>{symbol}</Td>
+      <Td>{ticketLabel(pos)}</Td>
+      {/* MetaTrader's Time column: `YYYY.MM.DD HH:MM` plus the seconds its own rendered values
+          carry, in the broker's server time (09-toolbox.md 289-291). */}
+      <Td>{pos.expiresAtMs ? stamp(pos.expiresAtMs - pos.durationS * 1000) : '-'}</Td>
+      <Td className={pos.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{pos.direction}</Td>
+      <Td>{lots(pos.stakeCents)}</Td>
+      <Td>{px(pos.entryRate)}</Td>
+      <Td>
+        {/* MetaTrader's S/L column: the LEVEL, as a price. An UNSET level leaves the cell BLANK and
+            draws no cross (09-toolbox.md 336-338, "the cell is blank and no × is drawn"). */}
+        <span
+          className="text-[#8fa2b8]"
+          title={continuous
+            ? 'The stop closes this position at its price, for what it is worth there. Stops processing is performed on the broker side.'
+            : 'This contract settles a loss at expiry, so the stop cannot fire. The level is the trader’s.'}
+        >
+          {slPrice === null ? '' : slPrice.toFixed(digits)}
+        </span>
+      </Td>
+      <Td>
+        {/* MetaTrader's T/P column, stepped in the instrument's own points. Unset, it is blank for
+            the same reason the S/L cell is. The steppers do not open the menu the row click does. */}
+        {continuous ? (
+          <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={() => onStepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
+            <span className="min-w-16 text-center">{tpPrice === null ? '' : tpPrice.toFixed(digits)}</span>
+            <button type="button" onClick={() => onStepTp(1)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
+          </span>
+        ) : (
+          // A target that can never fire is not a setting, it is a decoration.
+          <span className="text-[#8fa2b8]" title="This brand settles every contract at expiry, so a target cannot close it early.">
+            at expiry
+          </span>
+        )}
+      </Td>
+      <Td>{px(nowRate)}</Td>
+      <Td className={cn('font-semibold', pos.livePnlCents > 0 ? 'text-[#3183ff]' : pos.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
+        <span className="flex items-center justify-end gap-2">
+          {money.mt(pos.livePnlCents)}
+          {/* MetaTrader closes a position from its row with a small ×. Shown only where the engine
+              will honour a manual close, and it closes THIS row's position. */}
+          {earlyCloseEnabled ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              disabled={pos.phase !== 'open' || !pos.sellable || !pos.positionId}
+              aria-label="Close position"
+              title={pos.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
+              className="rounded-sm border border-[#2b3543] px-1.5 text-[11px] font-normal text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ×
+            </button>
+          ) : null}
+        </span>
+      </Td>
+    </tr>
   );
 }

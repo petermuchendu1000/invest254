@@ -483,21 +483,49 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               return send(ws, "open_positions", openPositionsPayload(rt, userId));
             }
             case "open_position": {
-              const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
+              /**
+               * The caller's own id for this order, echoed on every answer to it.
+               *
+               * MetaTrader holds many positions at once, so a trader can send a second order while
+               * the first is still in flight, and this handler AWAITS the repository: with a real
+               * database those awaits are real I/O, so two orders can finish in either order. The
+               * ack carries no clue which order it answers, and binding by arrival order would be a
+               * guess that is wrong exactly when it costs money, pairing one order's ticket with
+               * another's stake.
+               *
+               * `candles` above already does this, and for the same stated reason: several requests
+               * can be in flight at once, so the reply echoes the caller's id rather than leaving it
+               * to be matched by guesswork. An order deserves it more than a chart does.
+               *
+               * Optional, so a client written before this still works: absent means the field is
+               * simply not echoed, and such a client only ever has one order outstanding anyway.
+               */
+              const orderId = msg.data?.clientId === undefined ? undefined : String(msg.data.clientId);
+              const cid = orderId === undefined ? {} : { clientId: orderId };
+              const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED", ...cid });
               if (opts.playAllowed && !(await opts.playAllowed()))
-                return send(ws, "error", { code: "SYSTEM_DISABLED", message: "Play is temporarily disabled by the platform." });
+                return send(ws, "error", { code: "SYSTEM_DISABLED", message: "Play is temporarily disabled by the platform.", ...cid });
               // MetaTrader arms the protective levels with the order itself, so they are part of
               // the request rather than a second round trip the trader could lose a tick inside.
               const lvl = (v: unknown): number | null => {
                 const n = Number(v);
                 return Number.isFinite(n) && n > 0 ? n : null;
               };
-              const { position: p, balance } = await rt.game.openPosition({
-                userId, stakeCents: Number(msg.data.stakeCents), direction: msg.data.direction as Direction, durationS: msg.data.durationS,
-                role: roleOf.get(ws) ?? "player",
-                slPrice: lvl(msg.data.slPrice), tpPrice: lvl(msg.data.tpPrice),
-              });
-              send(ws, "position_opened", { positionId: p.id, ticket: p.ticket, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs, slPrice: p.slPrice, tpPrice: p.tpPrice });
+              // `balance` is deliberately not read: the authoritative snapshot is re-fetched below,
+              // because bonus-first staking can move two buckets (0094).
+              let p;
+              try {
+                ({ position: p } = await rt.game.openPosition({
+                  userId, stakeCents: Number(msg.data.stakeCents), direction: msg.data.direction as Direction, durationS: msg.data.durationS,
+                  role: roleOf.get(ws) ?? "player",
+                  slPrice: lvl(msg.data.slPrice), tpPrice: lvl(msg.data.tpPrice),
+                }));
+              } catch (err: any) {
+                // Refused with the order's own id, so a client with several orders outstanding can
+                // roll back the one that failed instead of the newest one it happens to be holding.
+                return send(ws, "error", { code: "TRADE_REJECTED", message: String(err?.message ?? err), ...cid });
+              }
+              send(ws, "position_opened", { positionId: p.id, ticket: p.ticket, ...cid, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs, slPrice: p.slPrice, tpPrice: p.tpPrice });
               // Bonus-first staking (0094) spends bonus_balance before real, so the stake usually
               // moves BOTH buckets — push the full snapshot or the client bonus figure goes stale.
               const afterOpen = await opts.repo.getWalletSnapshot(userId);

@@ -141,12 +141,6 @@ export function MT5ModifyPosition({
             onMove={(d) => move('sl', d)}
             onClear={() => clear('sl')}
           />
-          <p className="px-3 py-2 text-[11px] leading-snug text-[#8fa2b8]">
-            {continuous
-              ? 'The stop closes the position at this price, for what it is worth there, so part of the stake can come back. Stops processing is performed on the server side.'
-              : 'The level is the trader’s, and it cannot fire: this contract settles at expiry and cannot be closed at a loss, so the stake is the whole of the downside.'}
-          </p>
-
           <LevelRow
             label="Take Profit"
             accent={TP_GREEN}
@@ -157,11 +151,6 @@ export function MT5ModifyPosition({
             onMove={(d) => move('tp', d)}
             onClear={() => clear('tp')}
           />
-          <p className="px-3 py-2 text-[11px] leading-snug text-[#8fa2b8]">
-            {continuous
-              ? 'A PRICE, as MetaTrader\u2019s is: the position closes when the price reaches it, for what it is worth there.'
-              : 'This brand settles every contract at expiry, so a profit target cannot close one early.'}
-          </p>
         </div>
 
         <button
@@ -171,6 +160,27 @@ export function MT5ModifyPosition({
         >
           Done
         </button>
+
+        {/**
+          * MetaTrader's hint, verbatim, in the one place MetaTrader prints it: UNDER the button.
+          *
+          * docs/mt5/01-order-and-close-dialogs.md 224-228 records both lines off MetaQuotes' own
+          * `position_modify` screenshot, and notes that the number is the symbol's stops level
+          * (`SYMBOL_TRADE_STOPS_LEVEL`), zero on that broker's demo. It is zero here too, and for a
+          * real reason rather than a copied one: this engine imposes no minimum distance between a
+          * level and the market, so a stop may be placed as close to the price as the trader likes.
+          *
+          * It replaces two paragraphs this dialog used to carry, one under each row, which were
+          * neither MetaTrader's words nor correct: they said stops are processed "on the server
+          * side" where MetaQuotes writes "on the broker side", and on a brand whose levels cannot
+          * fire they explained at length that the controls above them did nothing. A control that
+          * cannot act is not labelled, it is not drawn (see `MT5LevelRows`).
+          */}
+        <p className="shrink-0 px-3 pb-3 text-[11px] leading-snug text-[#8fa2b8]">
+          Stop Loss or Take Profit you set must differ from market price by at least 0 points.
+          <br />
+          Stops processing is performed on the broker side.
+        </p>
       </div>
     </div>
   );
