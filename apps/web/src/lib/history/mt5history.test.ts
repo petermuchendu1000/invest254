@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   periodRange, periodSubtitle, dateOnly, stamp, ticketOf, positionTicket, isCompleted, signedCents, tradeDateOf, priceKnown,
   orderRows, dealRows, positionRows, ordersSummary, moneySummary, sortRows, priceText, EXECUTION_PRICE,
+  DESKTOP_PERIODS, historyStrip, priceChangePct, changeText,
 } from './mt5history.js';
 import type { PositionDto, TransactionDto } from '../api/types.js';
 
@@ -200,6 +201,40 @@ test('money summary: Balance is Profit plus Deposit over the period', () => {
   assert.equal(s.profitCents, 85_617);
   assert.equal(s.depositCents, 8_000_000);
   assert.equal(s.balanceCents, 8_085_617);
+});
+
+test('history strip: Deposit and Withdrawal are the two signed halves, Credit is zero', () => {
+  // MetaTrader's own strip: 591.31 + 3 000.00 - 250.00 = 3 341.31 (09-toolbox.md 725).
+  const s = historyStrip([
+    { kind: 'trade', amountCents: 59_131 },
+    { kind: 'balance', amountCents: 300_000 },
+    { kind: 'balance', amountCents: -25_000 },
+    { kind: 'trade', amountCents: null }, // an in deal has no result yet
+  ]);
+  assert.equal(s.profitCents, 59_131);
+  assert.equal(s.creditCents, 0);
+  assert.equal(s.depositCents, 300_000);
+  assert.equal(s.withdrawalCents, -25_000);
+  assert.equal(s.balanceCents, 334_131);
+});
+
+test('Change is the asset price move, so a winning sell prints a negative one', () => {
+  assert.equal(changeText(priceChangePct(100, 102.18)), '2.18 %');
+  // The price fell: the cell says so whichever way the trade was taken.
+  assert.equal(changeText(priceChangePct(100, 99.99)), '-0.01 %');
+  // Nothing to measure, and nothing invented.
+  assert.equal(priceChangePct(null, 100), null);
+  assert.equal(priceChangePct(100, null), null);
+  assert.equal(priceChangePct(0, 100), null);
+  assert.equal(changeText(null), '');
+});
+
+test('All History reaches back to the beginning and still ends tonight', () => {
+  const r = periodRange('all', NOW);
+  assert.equal(r.fromMs, 0);
+  assert.equal(r.toMs, periodRange('today', NOW).toMs);
+  // The desktop list is MetaTrader's four, in its order (09-toolbox.md 669-674).
+  assert.deepEqual(DESKTOP_PERIODS.map((p) => p.label), ['All History', 'Last 3 Months', 'Last Month', 'Custom Period']);
 });
 
 test('sortRows: every key sorts both ways and never mutates the input', () => {

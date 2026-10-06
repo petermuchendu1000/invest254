@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   IChartApi, ISeriesApi, UTCTimestamp, CandlestickData, BarData, LineData, Time, SeriesType, LogicalRange,
 } from 'lightweight-charts';
@@ -28,6 +28,7 @@ import { MT5ObjectProperties } from '@/components/game/MT5ObjectProperties';
 import { useNavDrawer } from '@/lib/ui/drawer';
 import { MT5ChartLevels } from '@/components/game/mobile/MT5ChartLevels';
 import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
+import { useAlertsStore, ALERT_DEFAULTS } from '@/lib/game/alerts';
 import {
   MOBILE_TF_GROUPS, MAX_QUICK_TF, mobileTfLabel, useQuickTfStore, useRestoreQuickTf,
 } from '@/lib/game/mobileTimeframes';
@@ -107,6 +108,22 @@ function chartTypesFor(phone: boolean, current: MainType): ReadonlyArray<{ id: M
 /** The add-on systems that are not MetaTrader types; shown only to the brand that owns one. */
 const ADDON_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
   { id: 'area', label: 'Area' }, { id: 'baseline', label: 'Baseline' },
+];
+/**
+ * The same three types as `CHART_KINDS`, under the CONTEXT MENU's spelling of them.
+ *
+ * The two surfaces really do disagree in MetaTrader. Its menu screenshot reads `Bar Chart` /
+ * `Candlesticks` / `Line Chart` (docs/mt5/08-chart-properties.md:499-501) while its Properties
+ * dialog reads `Bar chart` / `Candlesticks` / `Line chart`, and the doc records the casing clash as
+ * one of the six places MetaQuotes' prose and its own screenshot differ, with the screenshot
+ * winning for the menu (:547-549). Copying the dialog's casing here would quietly resolve a
+ * difference the doc went to the trouble of measuring, so the menu carries its own labels and
+ * `CHART_KINDS` keeps the dialog's.
+ */
+const MENU_CHART_TYPES: ReadonlyArray<{ id: ChartKind; label: string; accel: string }> = [
+  { id: 'bars', label: 'Bar Chart', accel: 'Alt+1' },
+  { id: 'candles', label: 'Candlesticks', accel: 'Alt+2' },
+  { id: 'line', label: 'Line Chart', accel: 'Alt+3' },
 ];
 /**
  * There is no price-scale TYPE here, and that is deliberate.
@@ -359,6 +376,30 @@ export function CandleChart({
    */
   const [priceManual, setPriceManual] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /**
+   * Where MetaTrader's chart background context menu is open, in client pixels, or null.
+   *
+   * Right-clicking the plot did nothing at all before this: the browser's own menu was not even
+   * suppressed. On the desktop terminal that menu is the primary route to the chart's commands
+   * (docs/mt5/08-chart-properties.md:482-524), so everything it offers that this platform has was
+   * reachable only through the ⚙ Tools menu and the left rail.
+   */
+  /**
+   * Where the chart menu was opened, and at WHAT PRICE.
+   *
+   * MetaTrader's menu is built around the price under the cursor: its first rows are
+   * `Sell Limit 1  219.306` and a `Trading ▸` submenu whose every row carries that same level
+   * (docs/mt5/08-chart-properties.md:490, 527). Without the price the menu is just a list of
+   * commands; with it, the menu is about the point on the chart that was clicked.
+   */
+  const [chartMenu, setChartMenu] = useState<{ x: number; y: number; price: number | null } | null>(null);
+  /**
+   * MetaTrader's `One Click Trading` (Alt+T), which is a terminal setting rather than a chart one:
+   * the same flag the phone's one-click panel fires from, so switching it here switches it there.
+   */
+  const oneClick = useOneClickStore((s) => s.instant);
+  const setOneClick = useOneClickStore((s) => s.setInstant);
+  useRestoreOneClick();
   const [legend, setLegend] = useState<Legend | null>(null);
   const visibleBarsRef = useRef(120);
 
@@ -577,6 +618,81 @@ export function CandleChart({
       followingRef.current ? liveWindow(candlesRef.current.length, bars) : zoomedWindow(r, bars, candlesRef.current.length),
     );
   }, []);
+
+  /**
+   * MetaTrader's `Save as Picture`, through the chart's own `takeScreenshot`.
+   *
+   * It is composited onto the background colour first. This chart's series canvas is deliberately
+   * transparent so an object set to "draw as background" can sit between the pane colour and the
+   * candles (see the `createChart` call), which means a raw screenshot of it saves candles floating
+   * on nothing.
+   *
+   * The file name is MetaTrader's own chart title, `SYMBOL,PERIOD`, with the comma that a file
+   * system would rather not carry replaced.
+   */
+  const savePicture = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const shot = chart.takeScreenshot();
+    const out = document.createElement('canvas');
+    out.width = shot.width;
+    out.height = shot.height;
+    const ctx = out.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = props.colours.background;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(shot, 0, 0);
+    const name = `${instRef.current.symbol}_${tfRef.current}.png`;
+    const link = document.createElement('a');
+    link.href = out.toDataURL('image/png');
+    link.download = name;
+    link.click();
+    /**
+     * A test seam, for the same reason `chartBars` and `chartTradeLevel` are ones: a download
+     * leaves nothing behind in the page, so from outside there is no way to tell a picture that
+     * was saved from a menu item that did nothing at all.
+     */
+    const host = plotRef.current;
+    if (host) host.dataset.chartPicture = name;
+  }, [props.colours.background]);
+
+  /**
+   * The accelerators the context menu prints, so it is not advertising keys that do nothing.
+   *
+   * The menu's own shortcut column is MetaQuotes' (docs/mt5/08-chart-properties.md:493-524), and
+   * four of these keys appear NOWHERE else in its documentation — the menu is the only published
+   * source for Alt+T (:558-559). F8 and Ctrl+B already have their own effects above, so this
+   * covers the rest of the set the menu draws.
+   *
+   * Read from `e.code` rather than `e.key`, because Alt is a modifier that rewrites `key` on
+   * several keyboard layouts while the physical key stays put.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el !== null && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        // Alt+1/2/3 are MENU_CHART_TYPES' own accelerators, taken from its order rather than
+        // written out a second time where the two could drift apart.
+        const typed = e.code.startsWith('Digit') ? MENU_CHART_TYPES[Number(e.code.slice(5)) - 1] : undefined;
+        if (typed) { e.preventDefault(); setChartType(typed.id); return; }
+        if (e.code === 'KeyT') { e.preventDefault(); setOneClick(!oneClick); return; }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        if (e.code === 'KeyG') { e.preventDefault(); changeProps({ ...props, showGrid: !props.showGrid }); }
+        else if (e.code === 'KeyI') { e.preventDefault(); setMenuOpen(true); }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // `=` as well as `+`: on most layouts the key the menu calls "+" is unshifted `=`, and a
+      // zoom that needed a second hand would read as broken rather than as faithful.
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoom('in'); }
+      else if (e.key === '-') { e.preventDefault(); zoom('out'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [props, changeProps, zoom, oneClick, setOneClick]);
 
   /**
    * Draw whatever is switched on, and remove whatever is not.
@@ -1384,7 +1500,35 @@ export function CandleChart({
           hasSelection={selectedDrawing !== null}
           onObjectsList={() => setObjectsListOpen(true)}
         />}
-        <div ref={plotRef} className="relative min-h-0 flex-1" style={{ background: TV.bg }}>
+        <div
+          ref={plotRef}
+          className="relative min-h-0 flex-1"
+          style={{ background: TV.bg }}
+          /**
+           * MetaTrader's chart background menu, on MetaTrader's own gesture.
+           *
+           * Bound to the plot alone, so the browser's menu is suppressed over the chart and nowhere
+           * else on the page. It reads the event and nothing more: the left-drag pan and the
+           * crosshair belong to lightweight-charts, which ignores the secondary button, so a right
+           * click cannot move the view.
+           *
+           * An object's own right-click menu (ChartDrawings) fires first on the way up and calls
+           * `preventDefault`; without this guard the background menu would open on top of it.
+           */
+          onContextMenu={(e) => {
+            if (e.defaultPrevented) return;
+            e.preventDefault();
+            /**
+             * The price under the cursor, read the way every other chart gesture reads one: through
+             * the series' own `coordinateToPrice`, against the plot host's box, so it is the price
+             * the trader is pointing at on the axis they can see rather than one derived from the
+             * data. Null before the first paint, which the menu renders as no price-bearing row.
+             */
+            const host = hostRef.current?.getBoundingClientRect() ?? null;
+            const price = host ? projection.priceOf(e.clientY - host.top) : null;
+            setChartMenu({ x: e.clientX, y: e.clientY, price: Number.isFinite(price as number) ? price : null });
+          }}
+        >
           {/* Behind the candles: objects the trader set to draw as background. */}
           <DrawingsBackdrop
             project={projection}
@@ -1520,6 +1664,153 @@ export function CandleChart({
           onUnselect={() => setSelectedDrawing(null)}
           onUndoDelete={undoDelete}
           onDismiss={() => setObjectMenu(null)}
+        />
+      ) : null}
+
+      {chartMenu ? (
+        /**
+         * MetaTrader's 27-item chart background menu, minus the items this platform has no
+         * equivalent of. The groups below are its groups, in its order, under its labels and with
+         * its printed accelerators; the numbers are its rows in docs/mt5/08-chart-properties.md.
+         *
+         * Nothing here is a second implementation of anything. Every item calls the handler the
+         * ⚙ Tools menu, the left rail or the Properties dialog already calls, which is the whole
+         * point of a second surface: the menu is a shorter route to the same chart, not a copy of
+         * it that can disagree with it.
+         *
+         * WHAT IS NOT DRAWN, and why. Each of these has no handler to call because the thing itself
+         * does not exist here, and drawing a row that cannot act is the one failure this menu
+         * cannot afford:
+         *   1  `Sell Limit 1 219.306`   every contract is market execution, so there is no pending
+         *                    order to place at the clicked price, and the three order rows of the
+         *                    `Trading` submenu go with it for the same reason. Its fourth row,
+         *                    `Alert  219.306`, IS drawn: see below.
+         *   3  `Depth Of Market  Alt+B`  there is no order book; one price is quoted.
+         *   7  `Expert List  Alt+X`      there are no Expert Advisors and no MQL5 programs.
+         *   12 `Templates ▸`             templates are MetaTrader's saved chart settings files;
+         *                                this chart persists its settings per symbol instead and
+         *                                has no file to save or load.
+         *   14 `Docked  Alt+D`           the chart is a pane in one page, not a detachable window.
+         *   18 `Volumes  Ctrl+K` and
+         *   19 `Tick Volumes  Ctrl+L`    the feed carries no traded volume, which is the same
+         *                                reason the Show tab disables both rows (NO_VOLUME) and the
+         *                                seven volume-fed indicators are disabled in the catalogue.
+         *   21 `Trade History`           nothing draws closed deals on this chart, so the command
+         *                                would toggle a setting with no picture behind it. The
+         *                                Show tab keeps its checkbox because that dialog is a
+         *                                faithful copy of MetaTrader's thirteen rows; a menu is a
+         *                                list of commands, and a command must do something.
+         *   24 `Delete Indicators Window`  MetaTrader greys this outside an indicator subwindow,
+         *                                and this menu opens on the chart background, which is
+         *                                exactly where it greys it.
+         *   25 `Step by Step  F12`       that steps the Strategy Tester; there is no tester.
+         */
+        <MT5ChartMenu
+          at={chartMenu}
+          onDismiss={() => setChartMenu(null)}
+          groups={[
+            /**
+             * 2. `Trading ▸`, holding the one row of MetaTrader's submenu this platform can honour:
+             * `Alert  <price>` (docs/mt5/08-chart-properties.md:527 lists the submenu as
+             * `Sell Limit`, `Buy Stop`, `Take Profit`, `Alert`, ———, `New Order F9`).
+             *
+             * It is here now because the Toolbox grew an Alerts tab and an Alert Editor. Until it
+             * did, this row had nowhere to go and was correctly left out; the rule has not changed,
+             * only what the platform can do. The three order rows stay out (market execution only)
+             * and `New Order F9` stays out because the order ticket is docked beside the chart and
+             * never closed, so there is no window for it to open.
+             *
+             * The CONDITION follows the cursor, which is MetaTrader's own rule for this submenu,
+             * stated verbatim at :528-531 for the order types: what the menu offers depends on
+             * whether it was opened above or below the current price. An alert placed above the
+             * market is one that fires when the price rises to it, and below, when it falls to it.
+             * Anything else would arm an alert that was already true the moment it was created.
+             *
+             * The whole row is omitted rather than shown dead when there is no price yet (before
+             * the first paint), which is the same rule every other row here follows.
+             */
+            ...(chartMenu.price === null ? [] : [[{
+              kind: 'submenu' as const,
+              label: 'Trading',
+              items: [{
+                label: `Alert  ${chartMenu.price.toFixed(instrument.digits)}`,
+                run: () => {
+                  /**
+                   * The price the ROW SAYS, not the raw coordinate behind it.
+                   *
+                   * `coordinateToPrice` returns the full float for the pixel that was clicked
+                   * (3078.165777074284), and the row prints it at the symbol's digits (3078.17).
+                   * Arming the alert at the float would mean a trader read one number off the menu
+                   * and got another, on the one figure the alert is entirely about. The label is the
+                   * promise; this makes it the fact.
+                   */
+                  const price = Number(chartMenu.price?.toFixed(instrument.digits));
+                  if (!Number.isFinite(price)) return;
+                  const lastClose = candlesRef.current[candlesRef.current.length - 1]?.close ?? price;
+                  useAlertsStore.getState().add({
+                    enabled: true,
+                    symbol: instrument.symbol,
+                    condition: price >= lastClose ? 'last>' : 'last<',
+                    price,
+                    timeHHMM: '',
+                    limit: ALERT_DEFAULTS.limit,
+                    timeoutS: ALERT_DEFAULTS.timeoutS,
+                    expiresAtMs: null,
+                  });
+                },
+              }],
+            }]]),
+            [
+              // 4. Not a chart setting but a terminal one, and the phone's one-click panel fires
+              // from this same flag.
+              { kind: 'toggle', label: 'One Click Trading', accel: 'Alt+T', on: oneClick, run: () => setOneClick(!oneClick) },
+              /**
+               * 5. The ⚙ Tools menu IS this chart's indicator list: MetaTrader's lists what is
+               * applied so it can be edited or removed, and ours lists all 38 with the applied ones
+               * lit, which does both jobs from one place. It is not greyed when none are applied,
+               * as MetaTrader greys its own, because an empty list there has nothing to manage
+               * while ours is still how an indicator is added.
+               */
+              { kind: 'command', label: 'Indicator List', accel: 'Ctrl+I', run: () => setMenuOpen(true) },
+              // 6. The same dialog Ctrl+B and the rail's list button open.
+              { kind: 'command', label: 'Object List', accel: 'Ctrl+B', run: () => setObjectsListOpen(true) },
+            ],
+            // 8-10. `shownKind` is which of MetaTrader's three is being drawn, so a Heikin Ashi
+            // chart marks Candlesticks, exactly as the Properties dialog's radio does.
+            MENU_CHART_TYPES.map((c) => ({
+              kind: 'radio' as const, label: c.label, accel: c.accel,
+              on: shownKind === c.id, run: () => setChartType(c.id),
+            })),
+            [
+              // 11. All 21 periods, through the same `chooseTf` the toolbar strip uses, so the
+              // period chosen here is remembered as that one is.
+              {
+                kind: 'submenu', label: 'Timeframes',
+                items: TIMEFRAME_KEYS.map((k) => ({ label: k, on: tf === k, run: () => chooseTf(k) })),
+              },
+              // 13. The history refetch that a reconnect and the midnight reseed already trigger.
+              { kind: 'command', label: 'Refresh', run: () => setReloadKey((k) => k + 1) },
+            ],
+            [
+              // 15-17. Three chart properties, written through the same `changeProps` the
+              // Properties dialog writes through, so the menu and the dialog cannot drift apart.
+              { kind: 'toggle', label: 'Grid', accel: 'Ctrl+G', on: props.showGrid, run: () => changeProps({ ...props, showGrid: !props.showGrid }) },
+              { kind: 'toggle', label: 'Auto Scroll', on: props.autoScroll, run: () => changeProps({ ...props, autoScroll: !props.autoScroll }) },
+              { kind: 'toggle', label: 'Chart Shift', on: props.chartShift, run: () => changeProps({ ...props, chartShift: !props.chartShift }) },
+            ],
+            // 20. The open position's level, which is the one trade level that can exist here.
+            [{ kind: 'toggle', label: 'Trade Levels', on: props.showTradeLevels, run: () => changeProps({ ...props, showTradeLevels: !props.showTradeLevels }) }],
+            [
+              // 22-23. The toolbar's own −/+ , which hold the right edge still.
+              { kind: 'command', label: 'Zoom In', accel: '+', run: () => zoom('in') },
+              { kind: 'command', label: 'Zoom Out', accel: '-', run: () => zoom('out') },
+            ],
+            // 26. MetaQuotes states this is one of only two commands the context menu has that the
+            // main Charts menu does not (:554-556), which is why it is worth having here.
+            [{ kind: 'command', label: 'Save as Picture', run: savePicture }],
+            // 27. The F8 dialog.
+            [{ kind: 'command', label: 'Properties', accel: 'F8', run: () => setPropertiesOpen(true) }],
+          ]}
         />
       ) : null}
 
@@ -2189,3 +2480,200 @@ const BarIcon = {
     </svg>
   ),
 };
+
+/**
+ * One row of MetaTrader's chart background menu.
+ *
+ * Four shapes, because its menu has four: a command, a toggle it draws ticked (`Grid`,
+ * `Auto Scroll`), a mutually exclusive choice it draws with the active icon framed (the three
+ * chart types, docs/mt5/08-chart-properties.md:500), and a row that opens a submenu.
+ */
+type ChartMenuItem =
+  | { kind: 'command'; label: string; accel?: string; run: () => void }
+  | { kind: 'toggle'; label: string; accel?: string; on: boolean; run: () => void }
+  | { kind: 'radio'; label: string; accel?: string; on: boolean; run: () => void }
+  /**
+   * A row that opens a submenu.
+   *
+   * `on` is OPTIONAL on a submenu row, because MetaTrader's two submenus are different shapes.
+   * `Timeframes` is a choice: 21 periods, one of them current, drawn ticked. `Trading` is a list of
+   * commands, each acting on the price that was clicked, with nothing to tick. A row with no `on` is
+   * announced as a plain `menuitem` rather than a `menuitemradio` that is permanently unchecked,
+   * which is what a screen reader would otherwise read out.
+   */
+  | { kind: 'submenu'; label: string; items: ReadonlyArray<{ label: string; on?: boolean; run: () => void }> };
+
+/**
+ * MetaTrader's chart background context menu.
+ *
+ * It draws what it is given and nothing else; which rows exist, in what order and in what groups is
+ * decided where it is used, beside the doc's own table. What lives here is the behaviour every
+ * context menu owes its user and this chart had none of: it closes on Escape, on a click outside it
+ * and on a choice, and it stays inside the window when it is opened near an edge.
+ *
+ * Source: docs/mt5/08-chart-properties.md:482-524, read off MetaQuotes' own `chart_trading_menu.png`.
+ */
+/** The narrowest a submenu is drawn: wide enough for 21 period keys, none longer than `MN1`. */
+const SUB_WIDTH = 96;
+
+/**
+ * How wide a submenu will come out, before it has been laid out.
+ *
+ * `Timeframes` holds 21 three-character keys and `Trading` holds rows like `Alert  3075.60`, so one
+ * fixed width cannot serve both: at 96px the Trading rows would wrap, and at Trading's width the
+ * period list would be a mostly empty column. The box itself is `max-content`, so this estimate is
+ * only used to decide whether the submenu fits to the RIGHT of the menu or has to flip left — being
+ * a few pixels out moves it to the correct side anyway, and a wrong side is the visible failure.
+ */
+function subWidthOf(items: ReadonlyArray<{ label: string }>): number {
+  const longest = items.reduce((n, i) => Math.max(n, i.label.length), 0);
+  return Math.max(SUB_WIDTH, longest * 7 + 24);
+}
+
+function MT5ChartMenu({ at, groups, onDismiss }: {
+  at: { x: number; y: number };
+  groups: ReadonlyArray<ReadonlyArray<ChartMenuItem>>;
+  onDismiss: () => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState(at);
+  /** Which submenu is open, and where it was placed so that it fits on screen. */
+  const [sub, setSub] = useState<{ label: string; x: number; y: number; h: number; w: number } | null>(null);
+  /**
+   * Right-clicking near the bottom or the right of the window would otherwise open a menu that runs
+   * off it, which on a 900px-tall screen hides `Properties` — the item the menu exists for. Measured
+   * after layout rather than estimated, because the height depends on how many rows this chart has,
+   * and before the paint so the menu does not appear in the wrong place and then jump.
+   */
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 6;
+    setPos({
+      x: Math.max(pad, Math.min(at.x, window.innerWidth - width - pad)),
+      y: Math.max(pad, Math.min(at.y, window.innerHeight - height - pad)),
+    });
+  }, [at.x, at.y]);
+
+  /**
+   * Place a submenu beside the row that opens it, and inside the window.
+   *
+   * Measured from the row and the menu rather than offset with `left-full`, because a submenu
+   * anchored to its row's top runs off the bottom as soon as the row is in the lower half of the
+   * screen — which Timeframes, 21 rows tall and two thirds of the way down a 27-row menu, always
+   * is. It stays a CHILD of the row so that moving the pointer into it does not leave the row.
+   */
+  const openSub = (label: string, row: HTMLElement, items: ReadonlyArray<{ label: string }>) => {
+    const r = row.getBoundingClientRect();
+    const menu = box.current?.getBoundingClientRect() ?? r;
+    const pad = 6;
+    const h = Math.min(window.innerHeight - pad * 2, Math.round(window.innerHeight * 0.6));
+    const w = subWidthOf(items);
+    const right = menu.right + w + pad <= window.innerWidth;
+    setSub({
+      label,
+      x: right ? menu.right : Math.max(pad, menu.left - w),
+      y: Math.max(pad, Math.min(r.top, window.innerHeight - h - pad)),
+      h,
+      w,
+    });
+  };
+
+  useEffect(() => {
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) onDismiss(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [onDismiss]);
+
+  const run = (fn: () => void) => () => { fn(); onDismiss(); };
+
+  return (
+    <div
+      ref={box}
+      role="menu"
+      aria-label="Chart"
+      data-chart-menu=""
+      // A right click on the menu itself must not raise the browser's menu over it; the plot's own
+      // suppression does not reach here, because the menu is not inside the plot.
+      onContextMenu={(e) => e.preventDefault()}
+      className="fixed z-[90] min-w-56 rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[11px] shadow-xl"
+      style={{ left: pos.x, top: pos.y }}
+    >
+      {groups.map((group, g) => (
+        <div key={g} className="contents">
+          {/* MetaTrader's group separators, which are what make a 27-item menu readable. */}
+          {g > 0 ? <div role="separator" data-menu-separator="" className="my-1 h-px bg-[#2b3543]" /> : null}
+          {group.map((item) => (
+            item.kind === 'submenu'
+              ? (
+                <div
+                  key={item.label}
+                  onMouseEnter={(e) => openSub(item.label, e.currentTarget, item.items)}
+                  onMouseLeave={() => setSub(null)}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={sub?.label === item.label}
+                    onClick={(e) => (sub?.label === item.label ? setSub(null) : openSub(item.label, e.currentTarget, item.items))}
+                    className="flex w-full items-center gap-4 px-3 py-1.5 text-left text-white transition hover:bg-[#3183ff]"
+                  >
+                    <span className="flex-1">{item.label}</span>
+                    <span aria-hidden>▸</span>
+                  </button>
+                  {sub?.label === item.label ? (
+                    <div
+                      role="menu"
+                      aria-label={item.label}
+                      style={{ left: sub.x, top: sub.y, minWidth: sub.w, maxHeight: sub.h, width: 'max-content' }}
+                      className="fixed z-[91] overflow-y-auto rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl"
+                    >
+                      {item.items.map((sub) => (
+                        <button
+                          key={sub.label}
+                          type="button"
+                          role={sub.on === undefined ? 'menuitem' : 'menuitemradio'}
+                          {...(sub.on === undefined ? {} : { 'aria-checked': sub.on })}
+                          onClick={run(sub.run)}
+                          className={cn(
+                            'block w-full px-3 py-1 text-left transition hover:bg-[#3183ff]',
+                            sub.on ? 'bg-[#2b3543] text-white' : 'text-white',
+                          )}
+                        >
+                          {sub.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )
+              : (
+                <button
+                  key={item.label}
+                  type="button"
+                  role={item.kind === 'command' ? 'menuitem' : item.kind === 'radio' ? 'menuitemradio' : 'menuitemcheckbox'}
+                  {...(item.kind === 'command' ? {} : { 'aria-checked': item.on })}
+                  onClick={run(item.run)}
+                  onMouseEnter={() => setSub(null)}
+                  className="flex w-full items-center gap-4 px-3 py-1.5 text-left text-white transition hover:bg-[#3183ff]"
+                >
+                  {/* The tick column, always reserved: without it the labels of the toggled rows
+                      would sit a glyph further right than the rest and the menu would look ragged,
+                      which is not what MetaTrader draws. */}
+                  <span className="w-2.5 shrink-0 text-[#3183ff]" aria-hidden>
+                    {item.kind !== 'command' && item.on ? (item.kind === 'radio' ? '•' : '✓') : ''}
+                  </span>
+                  <span className="flex-1">{item.label}</span>
+                  {item.accel ? <span className="shrink-0 text-[#8fa2b8]">{item.accel}</span> : null}
+                </button>
+              )
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}

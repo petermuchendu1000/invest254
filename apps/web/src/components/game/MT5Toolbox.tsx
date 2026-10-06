@@ -1,23 +1,30 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { valueOfRate } from '@invest254/shared/candles';
 import { accountSummary, accountStripFields, mtAmount, lotsOfStake } from '@invest254/shared/account';
 import { useGameSocket, useGameSocketApi, type NewsItemDto, type DayAnchor } from '@/lib/game/GameSocketProvider';
-import { useWallet } from '@/lib/wallet/hooks';
+import { useWallet, useTransactions } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useSession } from '@/lib/auth/session';
 import { useMyNotifications } from '@/lib/notifications/hooks';
 import { useJournal, logJournal } from '@/lib/game/journal';
-import { useAlertsStore, usePriceAlertWatch, type PriceAlert } from '@/lib/game/alerts';
+import {
+  ALERT_CONDITIONS, ALERT_DEFAULTS, conditionLabel, useAlertsStore, useAlertWatch,
+  type AlertCondition, type AlertDraft, type PriceAlert,
+} from '@/lib/game/alerts';
 import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
 import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 import { useToast } from '@/lib/toast/ToastProvider';
-import { api } from '@/lib/api/endpoints';
-import type { PositionDto } from '@/lib/api/types';
-import { EXECUTION_PRICE, stamp, tradeDateOf } from '@/lib/history/mt5history';
+import { usePositions } from '@/lib/positions/hooks';
+import type { PositionDto, TransactionDto } from '@/lib/api/types';
+import {
+  DESKTOP_PERIODS, changeText, dealRows, historyStrip, orderRows, periodRange, positionRows,
+  priceChangePct, priceText, stamp,
+  type DealRow, type OrderRow, type PeriodKey, type PositionRow as ClosedRow, type Range,
+} from '@/lib/history/mt5history';
+import { ticketLabel } from '@/lib/game/betting';
 import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
@@ -128,40 +135,14 @@ export function MT5Toolbox() {
     const p = priceOfRate(rate);
     return p === null ? '-' : p.toFixed(digits);
   };
-  /**
-   * The price a rate had on ITS OWN day.
-   *
-   * `stored` wins whenever it is there: since migration 0180 the engine records the executed price
-   * on the trade itself, which is the price that was shown, not a reconstruction of it — and it
-   * stays right even for a trade older than the day chain the engine retains.
-   *
-   * Otherwise the price is rebuilt from the anchor of the day the trade was made on (see
-   * `useDayAnchors`). It cannot come from the CURRENT day's anchor, which is right for a live
-   * position and wrong for anything settled earlier: the engine re-anchors the axis at every UTC
-   * midnight, so an old trade rendered that way printed a price that never happened — quietly, and
-   * plausibly enough that nobody would spot it. Until that day's anchor has arrived, or if the day
-   * is off the chain entirely, the cell says what is true of every contract here, as the History
-   * screen does, rather than guessing.
-   */
-  const pxOn = (
-    rate: number | null | undefined,
-    atMs: number | null | undefined,
-    stored?: number | null | undefined,
-  ): string => {
-    if (rate === null || rate === undefined || atMs === null || atMs === undefined) return '-';
-    if (typeof stored === 'number' && Number.isFinite(stored)) return stored.toFixed(digits);
-    const m = getMarket();
-    const a = anchors.get(tradeDateOf(atMs));
-    if (!m || !a) return EXECUTION_PRICE;
-    return (a.base + m.instrument.scale * (valueOfRate(rate) - a.openValue)).toFixed(digits);
-  };
-
-  // Price alerts fire against the same price the chart draws.
-  usePriceAlertWatch(livePrice, symbol, (a, price) => {
+  // Alerts fire against the same price the chart draws, and against the clock for `Time =`.
+  useAlertWatch(livePrice, symbol, (a, price) => {
     toast.push({
       tone: 'info',
       title: `${a.symbol} alert`,
-      description: `${a.above ? 'rose to' : 'fell to'} ${a.price}, now ${price.toFixed(digits)}`,
+      description: a.condition === 'time='
+        ? `${conditionLabel(a.condition)} ${a.timeHHMM}`
+        : `${conditionLabel(a.condition)} ${a.price}${price === null ? '' : `, now ${price.toFixed(digits)}`}`,
     });
   });
 
@@ -239,25 +220,6 @@ export function MT5Toolbox() {
     setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, nowPrice);
   };
 
-  // ── Tab data ───────────────────────────────────────────────────────────────────────────────────
-  const { data: history } = useQuery({
-    queryKey: ['positions', 'toolbox'],
-    queryFn: () => api.positions(token!, { limit: 25 }),
-    enabled: Boolean(token) && open && tab === 'history',
-    staleTime: 15_000,
-  });
-  const rows = useMemo(() => history?.items ?? [], [history]);
-  // Every UTC day the open position and the loaded history touch — the days whose anchors price them.
-  const days = useMemo(() => {
-    const out: string[] = [];
-    if (live) out.push(tradeDateOf(live.expiresAtMs ? live.expiresAtMs - live.durationS * 1000 : Date.now()));
-    for (const p of rows) {
-      out.push(tradeDateOf(p.openedAt));
-      if (p.settledAt !== null) out.push(tradeDateOf(p.settledAt));
-    }
-    return out;
-  }, [rows, live]);
-  const anchors = useDayAnchors(days, open);
 
   // MetaTrader's Toolbox is a SIZED pane with a splitter on its top edge; the chart above simply
   // takes what is left. Keeping the size on the pane rather than on the chart is why a drag can
@@ -418,7 +380,7 @@ export function MT5Toolbox() {
                         title="Open the position menu"
                       >
                         <Td first>{symbol}</Td>
-                        <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
+                        <Td>{ticketLabel(live)}</Td>
                         {/* MetaTrader's Time column: `YYYY.MM.DD HH:MM` plus the seconds its own
                             rendered values carry, in the broker's server time (09-toolbox.md
                             289-291). This read `06.10 12:25:30` from a local helper here — no year,
@@ -497,45 +459,7 @@ export function MT5Toolbox() {
             ) : null}
 
             {tab === 'history' ? (
-              rows.length > 0 ? (
-                <>
-                <div className="sm:hidden">
-                  {rows.map((p: PositionDto) => (
-                    <PositionRow
-                      key={p.id}
-                      symbol={symbol}
-                      direction={p.direction}
-                      lots={lots(p.stakeCents)}
-                      from={pxOn(p.entryRate, p.openedAt, p.entryPrice)}
-                      to={pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}
-                      profit={p.pnlCents === null ? '-' : money.mt(p.pnlCents)}
-                      profitCents={p.pnlCents ?? 0}
-                      note={stamp(p.openedAt)}
-                    />
-                  ))}
-                </div>
-                <div className="hidden sm:block">
-                <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'Close', 'Profit']}>
-                  {rows.map((p: PositionDto) => (
-                    <tr key={p.id} className="border-t border-[#2b3543]/60">
-                      <Td first>{symbol}</Td>
-                      <Td>{p.id.slice(0, 8)}</Td>
-                      <Td>{stamp(p.openedAt)}</Td>
-                      <Td className={p.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{p.direction}</Td>
-                      <Td>{lots(p.stakeCents)}</Td>
-                      <Td>{pxOn(p.entryRate, p.openedAt, p.entryPrice)}</Td>
-                      <Td>{pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}</Td>
-                      <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#3183ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
-                        {p.pnlCents === null ? '-' : money.mt(p.pnlCents)}
-                      </Td>
-                    </tr>
-                  ))}
-                </Table>
-                </div>
-                </>
-              ) : (
-                <Empty>{token ? 'No closed trades yet.' : 'Sign in to see your trade history.'}</Empty>
-              )
+              <HistoryTab symbol={symbol} digits={digits} lots={lots} amount={money.mt} token={token} />
             ) : null}
 
             {tab === 'news' ? <NewsTab active={open} /> : null}
@@ -651,7 +575,7 @@ export function MT5Toolbox() {
       {live && sheet === 'menu' ? (
         <MT5PositionMenu
           title={`${symbol}, ${live.direction} ${lots(live.stakeCents)}`}
-          subtitle={`#${live.positionId ? live.positionId.slice(0, 8) : '…'} at ${px(live.entryRate)}`}
+          subtitle={`#${ticketLabel(live)} at ${px(live.entryRate)}`}
           onDismiss={() => setSheet(null)}
           items={[
             {
@@ -748,117 +672,387 @@ function NewsTab({ active }: { active: boolean }) {
   );
 }
 
-function AlertsTab({
-  symbol, digits, livePrice, alerts,
-}: { symbol: string; digits: number; livePrice: () => number | null; alerts: PriceAlert[] }) {
-  const { add, remove, rearm } = useAlertsStore();
-  const [above, setAbove] = useState(true);
-  const [price, setPrice] = useState('');
+/**
+ * MetaTrader's Alerts tab and its Alert Editor.
+ *
+ * The grid is MetaTrader's own, verbatim and in order — `Symbol | Condition | Counter | Limit |
+ * Timeout | Expiration | Event` (docs/mt5/09-toolbox.md 899-901), which is what
+ * `TOOLBOX_COLUMNS.alerts` already held while this tab drew an inline form and four columns of its
+ * own. The gutter carries MetaTrader's yellow bell for an enabled alert and its red crossed circle
+ * for a disabled one (:910), and every row is created, modified, deleted and enabled from the
+ * context menu with the accelerators MetaTrader lists (:912-921) — they are wired, not drawn.
+ *
+ * THE CONDITION LIST IS THREE, NOT NINE, AND THE TAB SAYS WHY. MetaTrader offers
+ * `Bid < Bid > Ask < Ask > Last < Last > Volume < Volume > Time =` (:933-935). This platform quotes
+ * one price per symbol, and docs/mt5/10-market-watch.md 417-419 is explicit about what that means:
+ * a one-price platform "must delete `Bid`, `Ask` and `Spread` outright rather than fold them",
+ * keeping the `Last` family. Drawing six price conditions over one number would offer a trader
+ * three ways to say the same thing and two that cannot be true. Volume goes for a different reason
+ * — the feed carries no volume to compare — and `Time =` stays, because it never needed a price.
+ * See lib/game/alerts, which is where the rule lives and where the watcher applies it.
+ *
+ * The Action list keeps MetaTrader's four and offers the one this terminal can honestly perform,
+ * with the other three visibly disabled and carrying their reason, which is how the rest of this
+ * panel treats a control the platform cannot back.
+ */
+function AlertsTab({ symbol, digits, livePrice, alerts }: {
+  symbol: string; digits: number; livePrice: () => number | null; alerts: PriceAlert[];
+}) {
+  const { add, update, remove, toggle, rearm } = useAlertsStore();
+  const toast = useToast();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  /** `null` = closed; `{ id: null }` = Create; `{ id }` = Modify on that row. */
+  const [editing, setEditing] = useState<{ id: string | null; draft: AlertDraft } | null>(null);
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const p = Number(price);
-    if (!Number.isFinite(p) || p <= 0) return;
-    add(symbol, above, p);
-    logJournal('info', 'Alert', `${symbol} alert set ${above ? '≥' : '≤'} ${p}`);
-    setPrice('');
+  const blank = (): AlertDraft => ({
+    enabled: true,
+    symbol,
+    condition: 'last>',
+    price: Number((livePrice() ?? 0).toFixed(digits)),
+    timeHHMM: '',
+    limit: ALERT_DEFAULTS.limit,
+    timeoutS: ALERT_DEFAULTS.timeoutS,
+    expiresAtMs: null,
+  });
+  const draftOf = (a: PriceAlert): AlertDraft => ({
+    enabled: a.enabled, symbol: a.symbol, condition: a.condition, price: a.price,
+    timeHHMM: a.timeHHMM, limit: a.limit, timeoutS: a.timeoutS, expiresAtMs: a.expiresAtMs,
+  });
+  const current = alerts.find((a) => a.id === selected) ?? null;
+
+  const create = () => { setMenu(null); setEditing({ id: null, draft: blank() }); };
+  const modify = () => { if (current) { setMenu(null); setEditing({ id: current.id, draft: draftOf(current) }); } };
+  const drop = () => { if (current) { setMenu(null); remove(current.id); setSelected(null); } };
+  const enable = () => { if (current) { setMenu(null); toggle(current.id); } };
+
+  /**
+   * MetaTrader's four accelerators, acting on the selected row (09-toolbox.md 914-917). They are
+   * bound to this tab rather than to the window, so they cannot fire while a trader is typing into
+   * the order ticket, and the panel's own Ctrl+T / Ctrl+F9 keep working.
+   */
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const el = e.target as HTMLElement;
+    if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') return;
+    if (e.key === 'Insert') { e.preventDefault(); create(); }
+    else if (e.key === 'Enter' && current) { e.preventDefault(); modify(); }
+    else if (e.key === 'Delete' && current) { e.preventDefault(); drop(); }
+    else if (e.key === ' ' && current) { e.preventDefault(); enable(); }
   };
 
-  const now = livePrice();
   return (
-    <div>
-      <form onSubmit={submit} className="flex flex-wrap items-center gap-1.5 border-b border-[#2b3543] px-3 py-2">
-        <span className="text-[11px] font-semibold text-white">{symbol}</span>
-        <button
-          type="button"
-          onClick={() => setAbove((v) => !v)}
-          className="rounded border border-[#2b3543] bg-[#0f1720] px-2 py-0.5 text-[11px] font-semibold text-[#ffffff]"
-          title="Fire when the price rises above, or falls below, the level"
-        >
-          {above ? 'Bid ≥' : 'Bid ≤'}
-        </button>
-        <input
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          inputMode="decimal"
-          placeholder={now === null ? 'price' : now.toFixed(digits)}
-          className="w-24 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-0.5 text-[11px] text-[#ffffff] outline-none focus:border-[#3183ff]"
+    <div
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+      className="outline-none"
+      data-alerts-tab=""
+    >
+      <Table head={[...(TOOLBOX_COLUMNS.alerts ?? [])]}>
+        {alerts.map((a) => (
+          <tr
+            key={a.id}
+            onClick={() => setSelected(a.id)}
+            onDoubleClick={() => { setSelected(a.id); setEditing({ id: a.id, draft: draftOf(a) }); }}
+            className={cn('cursor-pointer border-t border-[#2b3543]/60', selected === a.id ? 'bg-[#2b3543]' : 'hover:bg-[#202933]')}
+          >
+            <Td first>
+              <span className="flex items-center gap-1.5">
+                <AlertBell on={a.enabled} />
+                {a.symbol}
+              </span>
+            </Td>
+            <Td>{conditionLabel(a.condition)} {a.condition === 'time=' ? a.timeHHMM : a.price.toFixed(digits)}</Td>
+            <Td>{a.counter}</Td>
+            <Td>{a.limit}</Td>
+            {/* MetaTrader prints the timeout with its unit in the cell: "10 sec" (09-toolbox.md 906). */}
+            <Td>{a.timeoutS} sec</Td>
+            {/* Blank when an alert never expires, which is how MetaTrader's own rows read. */}
+            <Td>{a.expiresAtMs === null ? '' : stamp(a.expiresAtMs)}</Td>
+            {/* `Event` is the action that will be performed. MetaTrader's rows name a sound file or
+                a mail subject there; this terminal can only raise its own notification, so that is
+                what the cell says rather than naming a file that does not exist. */}
+            <Td>Notification</Td>
+          </tr>
+        ))}
+      </Table>
+
+      {alerts.length === 0 ? <Empty>No alerts. Right-click to create one.</Empty> : null}
+
+      {/* MetaTrader runs alerts on its server, so they fire with the app closed. These live in this
+          browser, so they can only fire while the terminal is open — said plainly. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[#2b3543] px-3 py-1.5 text-[10px] text-[#8fa2b8]">
+        <span>Alerts fire while this terminal is open.</span>
+        <span>Checked against {symbol}, the open chart&apos;s symbol.</span>
+        {current?.counter ? (
+          <button type="button" onClick={() => rearm(current.id)} className="text-[#3183ff] hover:underline">
+            Re-arm {current.symbol}
+          </button>
+        ) : null}
+      </div>
+
+      {menu ? (
+        <>
+          <button type="button" aria-label="Close menu" onClick={() => setMenu(null)} className="fixed inset-0 z-[70] cursor-default" />
+          <div
+            role="menu"
+            data-alerts-menu=""
+            className="fixed z-[71] w-48 overflow-hidden rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            {/* Verbatim, with MetaTrader's accelerators and no ellipses (09-toolbox.md 912-922).
+                Three of the four need a selected row, and are disabled without one rather than
+                silently doing nothing. */}
+            <AlertMenuItem label="Create" accel="Insert" onPick={create} />
+            <AlertMenuItem label="Modify" accel="Enter" onPick={modify} disabled={!current} />
+            <AlertMenuItem label="Delete" accel="Delete" onPick={drop} disabled={!current} />
+            <AlertMenuItem label="Enable" accel="Space" onPick={enable} disabled={!current} checked={current?.enabled ?? false} />
+          </div>
+        </>
+      ) : null}
+
+      {editing ? (
+        <AlertEditor
+          draft={editing.draft}
+          digits={digits}
+          onChange={(d) => setEditing({ id: editing.id, draft: d })}
+          onTest={(d) => {
+            toast.push({
+              tone: 'info',
+              title: `${d.symbol} alert`,
+              description: `${conditionLabel(d.condition)} ${d.condition === 'time=' ? d.timeHHMM : d.price}`,
+            });
+            logJournal('info', 'Alert', `${d.symbol} alert test ${conditionLabel(d.condition)} ${d.condition === 'time=' ? d.timeHHMM : d.price}`);
+          }}
+          onCancel={() => setEditing(null)}
+          onOk={(d) => {
+            if (editing.id === null) add(d); else update(editing.id, d);
+            logJournal('info', 'Alert', `${d.symbol} alert ${editing.id === null ? 'created' : 'modified'}: ${conditionLabel(d.condition)} ${d.condition === 'time=' ? d.timeHHMM : d.price}`);
+            setEditing(null);
+          }}
         />
-        <button type="submit" className="rounded bg-[#3183ff] px-2 py-0.5 text-[11px] font-semibold text-white">Add</button>
-        {/* MetaTrader runs alerts on its server, so they fire with the app closed. These live in this
-            browser, so they can only fire while the terminal is open — said plainly. */}
-        <span className="basis-full text-[10px] text-[#8fa2b8]">Alerts fire while this terminal is open.</span>
-      </form>
-      {alerts.length === 0 ? (
-        <Empty>No alerts set.</Empty>
-      ) : (
-        <Table head={['Symbol', 'Condition', 'Price', 'Status', '']}>
-          {alerts.map((a) => (
-            <tr key={a.id} className="border-t border-[#2b3543]/60">
-              <Td>{a.symbol}</Td>
-              <Td>{a.above ? 'Bid ≥' : 'Bid ≤'}</Td>
-              <Td>{a.price.toFixed(digits)}</Td>
-              {/* `stamp` is server time, like every other record stamp in this panel. Note that
-                  MetaTrader's `Time =` alert CONDITION is the one field it specifies in local
-                  computer time ("Specify the local computer time", 09-toolbox.md 937) — a different
-                  field, and not one this panel offers: the only conditions here are on price. */}
-              <Td className={a.triggeredAtMs ? 'text-[#f0b90b]' : 'text-[#41be56]'}>
-                {a.triggeredAtMs ? `fired ${stamp(a.triggeredAtMs)}` : 'armed'}
-              </Td>
-              <Td>
-                <span className="flex gap-2">
-                  {a.triggeredAtMs ? (
-                    <button type="button" onClick={() => rearm(a.id)} className="text-[#3183ff] hover:underline">re-arm</button>
-                  ) : null}
-                  <button type="button" onClick={() => remove(a.id)} className="text-[#8fa2b8] hover:text-[#f23645]">delete</button>
-                </span>
-              </Td>
-            </tr>
-          ))}
-        </Table>
-      )}
+      ) : null}
     </div>
   );
 }
 
+/** MetaTrader's gutter glyphs: a yellow bell while armed, a red crossed circle when disabled. */
+function AlertBell({ on }: { on: boolean }) {
+  return on ? (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-label="Enabled" role="img" className="shrink-0 text-[#f0b90b]" fill="currentColor">
+      <path d="M8 1.5a1 1 0 0 1 1 1v.3a3.8 3.8 0 0 1 2.8 3.7v2.3l1 1.6H3.2l1-1.6V6.5A3.8 3.8 0 0 1 7 2.8v-.3a1 1 0 0 1 1-1Zm0 13a1.8 1.8 0 0 1-1.7-1.3h3.4A1.8 1.8 0 0 1 8 14.5Z" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-label="Disabled" role="img" className="shrink-0 text-[#f23645]" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M4 12 12 4" />
+    </svg>
+  );
+}
+
+function AlertMenuItem({ label, accel, onPick, disabled, checked }: {
+  label: string; accel: string; onPick: () => void; disabled?: boolean; checked?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onPick}
+      disabled={disabled ?? false}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-[#2b3543] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <span className="w-3 shrink-0 text-[#4597ff]" aria-hidden>{checked ? '✓' : ''}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="shrink-0 text-[10px] text-[#8fa2b8]">{accel}</span>
+    </button>
+  );
+}
+
+/** A `datetime-local` value for an instant, and back. The control reads the local clock. */
+const dtLocal = (ms: number | null): string =>
+  ms === null ? '' : new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+
 /**
- * The day anchors for a page of trade history, fetched once per day and kept for the session.
+ * MetaTrader's `Alert Editor` — its title, its nine fields in its order, and its three buttons
+ * `OK` `Test` `Cancel` with OK focused (docs/mt5/09-toolbox.md 924-927).
  *
- * A page spans a handful of UTC days, so this is one small request, not one per row; days already
- * held are never asked for again. A failure is swallowed deliberately — the prices degrade to
- * "at market" and the rest of the tab keeps working, which is the right trade for a display field.
+ * `Action:` and `Source:` are the two fields this terminal cannot fully back, so they are present
+ * and visibly disabled with the reason on each option, rather than drawn as if they worked:
+ * MetaTrader's Sound and File actions reach the terminal's own Sounds folder and local files, and
+ * Mail goes through the terminal's SMTP settings, none of which a browser tab has. The one action
+ * it can perform it performs for real, and `Test` performs it now.
  */
-function useDayAnchors(days: readonly string[], enabled: boolean): Map<string, DayAnchor> {
-  const { requestAnchors } = useGameSocketApi();
-  const { status } = useGameSocket();
-  const [anchors, setAnchors] = useState<Map<string, DayAnchor>>(new Map());
-  // Keyed on the SORTED JOIN rather than the array: a re-render that produces an equal list must not
-  // refire the request.
-  const wanted = useMemo(() => [...new Set(days)].sort().join(','), [days]);
-
+function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
+  draft: AlertDraft;
+  digits: number;
+  onChange: (d: AlertDraft) => void;
+  onOk: (d: AlertDraft) => void;
+  onTest: (d: AlertDraft) => void;
+  onCancel: () => void;
+}) {
   useEffect(() => {
-    if (!enabled || status !== 'open' || wanted === '') return;
-    const missing = wanted.split(',').filter((d) => !anchors.has(d));
-    if (missing.length === 0) return;
-    let cancelled = false;
-    requestAnchors(missing)
-      .then((r) => {
-        if (cancelled) return;
-        setAnchors((prev) => {
-          const next = new Map(prev);
-          for (const d of r.days) next.set(d.dateKey, d);
-          return next;
-        });
-      })
-      .catch(() => { /* prices fall back to "at market"; nothing else depends on this */ });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wanted, enabled, status]);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
 
-  // A reconnect re-anchors the series, so anything held is re-fetched rather than trusted.
-  useEffect(() => { if (status !== 'open') setAnchors(new Map()); }, [status]);
+  const timeCondition = draft.condition === 'time=';
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Alert Editor"
+      className="fixed inset-0 z-[80] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+    >
+      <form
+        onSubmit={(e) => { e.preventDefault(); onOk(draft); }}
+        className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]"
+      >
+        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+          <span className="text-[15px] font-semibold leading-tight">Alert Editor</span>
+        </div>
 
-  return anchors;
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-2.5 text-[12px]">
+          <label className="mb-2 flex items-center gap-2">
+            <input type="checkbox" checked={draft.enabled} onChange={(e) => onChange({ ...draft, enabled: e.target.checked })} />
+            <span>Enable</span>
+          </label>
+
+          <Field label="Action:">
+            <select
+              value="notification"
+              onChange={() => { /* the three others are disabled options; nothing to select */ }}
+              className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+            >
+              <option value="notification">Notification</option>
+              <option value="sound" disabled>Sound (no sound files on this platform)</option>
+              <option value="file" disabled>File (a browser cannot run one)</option>
+              <option value="mail" disabled>Mail (this terminal has no mail server)</option>
+            </select>
+          </Field>
+
+          <Field label="Expiration:">
+            <input
+              type="datetime-local"
+              aria-label="Expiration"
+              value={dtLocal(draft.expiresAtMs)}
+              onChange={(e) => onChange({ ...draft, expiresAtMs: e.target.value ? new Date(e.target.value).getTime() : null })}
+              className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+            />
+          </Field>
+
+          {/* One symbol, because the watcher runs against the open chart's price: an alert on
+              anything else would sit in the list and never fire. */}
+          <Field label="Symbol:">
+            <input
+              value={draft.symbol}
+              readOnly
+              aria-label="Symbol"
+              title="Alerts are checked against the open chart's symbol."
+              className="w-full rounded border border-[#2b3543] bg-[#202933] px-1.5 py-1 text-[#8fa2b8] outline-none"
+            />
+          </Field>
+
+          <Field label="Condition:">
+            <select
+              value={draft.condition}
+              aria-label="Condition"
+              onChange={(e) => onChange({ ...draft, condition: e.target.value as AlertCondition })}
+              className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+            >
+              {ALERT_CONDITIONS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </Field>
+          <p className="mb-2 text-[10px] leading-snug text-[#8fa2b8]">
+            MetaTrader also offers Bid and Ask conditions. This platform quotes one price per symbol,
+            so there is no bid, no ask and no spread to compare, and Volume is not published at all.
+          </p>
+
+          <Field label="Value:">
+            {timeCondition ? (
+              <input
+                value={draft.timeHHMM}
+                aria-label="Value"
+                placeholder="15:00"
+                onChange={(e) => onChange({ ...draft, timeHHMM: e.target.value })}
+                className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+              />
+            ) : (
+              <input
+                value={String(draft.price)}
+                aria-label="Value"
+                inputMode="decimal"
+                onChange={(e) => onChange({ ...draft, price: Number(e.target.value) })}
+                className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+              />
+            )}
+          </Field>
+          {timeCondition ? (
+            // MetaTrader's own wording for this field: "Specify the local computer time in the
+            // format "HH:MM"" (09-toolbox.md 937-938). It is the one field on the tab that is not
+            // in the server's time zone.
+            <p className="mb-2 text-[10px] leading-snug text-[#8fa2b8]">Local computer time, HH:MM.</p>
+          ) : (
+            <p className="mb-2 text-[10px] leading-snug text-[#8fa2b8]">Price to {digits} decimal places.</p>
+          )}
+
+          <Field label="Source:">
+            <span className="flex gap-1">
+              <input
+                value=""
+                readOnly
+                aria-label="Source"
+                title="MetaTrader browses for a sound file or a mail template here; a browser tab has neither."
+                className="w-full rounded border border-[#2b3543] bg-[#202933] px-1.5 py-1 text-[#8fa2b8] outline-none"
+              />
+              <button type="button" disabled title="No file to browse for on this platform." className="shrink-0 rounded border border-[#2b3543] px-2 text-[#8fa2b8] disabled:cursor-not-allowed disabled:opacity-40">...</button>
+            </span>
+          </Field>
+
+          <Field label="Timeout:">
+            <span className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={1}
+                aria-label="Timeout"
+                value={draft.timeoutS}
+                onChange={(e) => onChange({ ...draft, timeoutS: Math.max(1, Number(e.target.value) || 1) })}
+                className="w-24 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+              />
+              <span className="text-[#8fa2b8]">sec</span>
+            </span>
+          </Field>
+
+          <Field label="Maximum iterations:">
+            <input
+              type="number"
+              min={1}
+              aria-label="Maximum iterations"
+              value={draft.limit}
+              onChange={(e) => onChange({ ...draft, limit: Math.max(1, Number(e.target.value) || 1) })}
+              className="w-24 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+            />
+          </Field>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-[#2b3543] px-3 py-2.5">
+          <button type="submit" autoFocus className="rounded bg-[#3183ff] px-3 py-1 text-[12px] font-semibold text-white">OK</button>
+          <button type="button" onClick={() => onTest(draft)} className="rounded border border-[#2b3543] px-3 py-1 text-[12px] text-white">Test</button>
+          <button type="button" onClick={onCancel} className="rounded border border-[#2b3543] px-3 py-1 text-[12px] text-[#8fa2b8]">Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** One labelled row of the Alert Editor: MetaTrader's label on the left, its control on the right. */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="mb-2 flex items-center gap-2">
+      <span className="w-32 shrink-0 text-[#8fa2b8]">{label}</span>
+      <span className="min-w-0 flex-1">{children}</span>
+    </label>
+  );
 }
 
 /**
@@ -950,6 +1144,437 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 /** The tabs MetaTrader has and this platform cannot fill. Company is hidden, so it is not here. */
 const UNFILLABLE: readonly ToolboxTab[] = ['calendar', 'articles', 'codebase', 'experts'];
+
+/**
+ * MetaTrader's History tab.
+ *
+ * The grid is MetaTrader's own, verbatim and in its order — `Time | Symbol | Deal | Type |
+ * Direction | Volume | Price | S / L | T / P | Commission | Profit | Change` (docs/mt5/09-toolbox.md
+ * 610-616), which is also what `TOOLBOX_COLUMNS.history` already held while this tab drew eight
+ * columns of its own with an invented `Close` among them. Time is leftmost and carries the sort
+ * triangle (:618).
+ *
+ * The rows are the ones the /history screen already derives: `orderRows`, `dealRows` and
+ * `positionRows` in lib/history/mt5history, which is where the three representations and their
+ * arithmetic are documented and unit-tested. Nothing about history is computed twice.
+ *
+ * FOUR REPRESENTATIONS, ONE COLUMN SET. MetaTrader publishes a default visible set for Deals only
+ * (:610, and :620-623 records that even that is not stable across builds), and its `Orders & Deals`
+ * mode is "a tree view of all trading operations" (:665) — one grid holding both record types. So
+ * all four modes render into the one documented column set, and a cell a representation has no
+ * field for is left EMPTY rather than filled with something invented.
+ *
+ * Cells this platform cannot fill, and why:
+ *
+ *   S / L, T / P   The API returns no levels for a settled contract: the engine records the open,
+ *                  the close and the result, and nothing else. MetaTrader draws an unset level as a
+ *                  blank cell (:336-338), which is what the Trade tab above does too, so the empty
+ *                  cell here says exactly what is true.
+ *   Direction      "direction of the deal relative to the current position" (:631) — a DEAL field.
+ *                  An order is a request and a position is a round trip; neither has one, so the
+ *                  cell is empty in those two modes rather than repeating the Type.
+ *   Commission     Blank on an order (nothing is charged for a request) and on a balance operation;
+ *                  `0.00` on a deal, which is not a placeholder but this platform's real figure —
+ *                  the house margin is inside the payout rather than charged per trade, which is
+ *                  the same fact `moneySummary` documents.
+ *   Change         Blank wherever no profit is locked in: an entry deal, an order, a deposit. On an
+ *                  exit it is the asset price's own move over the round trip (:636) — see
+ *                  `priceChangePct`, which is why a winning sell can print a negative Change.
+ *   Deal           MetaTrader's deal ticket. One contract here is one engine record with one
+ *                  ticket (see `positionTicket`), so the request, the two executions and the round
+ *                  trip all carry the same number. That is why the Russian build's extra `Order`
+ *                  column (:620-622) is not drawn beside it: it would repeat this one.
+ *
+ * The position's CLOSE price is not dropped either: `Price` is the open price, as it is in
+ * MetaTrader's own grids and in the Trade tab above, and the close is the `out` deal's own Price in
+ * Deals mode — the same records seen the other way round (:662-664).
+ */
+type HistoryMode = 'positions' | 'deals' | 'orders' | 'ordersdeals';
+
+/** The four modes, in the order the context menu lists them (09-toolbox.md 648-655). */
+const HISTORY_MODES: ReadonlyArray<{ key: HistoryMode; label: string }> = [
+  { key: 'positions', label: 'Positions' },
+  { key: 'deals', label: 'Deals' },
+  { key: 'orders', label: 'Orders' },
+  { key: 'ordersdeals', label: 'Orders & Deals' },
+];
+
+/** One row of the grid, whichever representation produced it. */
+interface GridRow {
+  id: string;
+  timeMs: number;
+  symbol: string;
+  ticket: string;
+  type: string;
+  side: 'buy' | 'sell' | null;
+  direction: string;
+  volume: string;
+  price: string;
+  commission: string;
+  profitCents: number | null;
+  changePct: number | null;
+  /** Orders & Deals is a tree: a deal hangs under the request that produced it. */
+  child: boolean;
+}
+
+const dealGrid = (r: DealRow, digits: number): GridRow => ({
+  id: r.id,
+  timeMs: r.atMs,
+  // A balance operation has no instrument: MetaTrader blanks the Symbol cell and puts the
+  // operation's name in Type (09-toolbox.md 643-644).
+  symbol: r.kind === 'balance' ? '' : r.symbol,
+  ticket: r.ticket,
+  type: r.side ?? r.label ?? '',
+  side: r.side,
+  direction: r.entry ?? '',
+  volume: r.lots ?? '',
+  price: r.lots === null ? '' : priceText(r.price, digits),
+  commission: r.kind === 'trade' ? '0.00' : '',
+  // "For entry trades the zero profit is shown" (09-toolbox.md 635): an `in` deal prints 0.00.
+  profitCents: r.entry === 'in' ? 0 : r.amountCents,
+  changePct: r.entry === 'out' ? priceChangePct(r.openPrice, r.price) : null,
+  child: false,
+});
+
+const orderGrid = (r: OrderRow, digits: number): GridRow => ({
+  id: r.id,
+  timeMs: r.atMs,
+  symbol: r.symbol,
+  ticket: r.ticket,
+  // A cancelled request types as "canceled buy" / "canceled sell" and its result is zeroed
+  // (09-toolbox.md 632), which is how MetaTrader states a cancellation inside this column set
+  // rather than through a State column the set does not have.
+  type: r.state === 'CANCELED' ? `canceled ${r.side}` : r.side,
+  side: r.side,
+  direction: '',
+  volume: r.lots,
+  price: r.state === 'CANCELED' ? '' : priceText(r.price, digits),
+  commission: '',
+  profitCents: null,
+  changePct: null,
+  child: false,
+});
+
+const positionGrid = (r: ClosedRow, digits: number): GridRow => ({
+  id: r.id,
+  timeMs: r.atMs,
+  symbol: r.kind === 'balance' ? '' : r.symbol,
+  ticket: r.ticket,
+  type: r.side ?? r.label ?? '',
+  side: r.side,
+  direction: '',
+  volume: r.lots ?? '',
+  price: r.lots === null ? '' : priceText(r.entryPrice, digits),
+  commission: r.kind === 'trade' ? '0.00' : '',
+  profitCents: r.amountCents,
+  changePct: r.kind === 'trade' ? priceChangePct(r.entryPrice, r.exitPrice) : null,
+  child: false,
+});
+
+function HistoryTab({ symbol, digits, lots, amount, token }: {
+  symbol: string;
+  digits: number;
+  lots: (stakeCents: number) => string;
+  /** MetaTrader's bare grid money: no currency code anywhere on this tab (09-toolbox.md 729). */
+  amount: (cents: number) => string;
+  token: string | null;
+}) {
+  // Deals, because MetaTrader opens on Deals — it is the one mode its menu ticks (09-toolbox.md 658).
+  const [mode, setMode] = useState<HistoryMode>('deals');
+  // All History: the period block publishes no tick (:669-674), so this is a choice, and it is the
+  // one preset that cannot hide a record from a trader who came here to find one.
+  const [period, setPeriod] = useState<PeriodKey>('all');
+  const [custom, setCustom] = useState<{ from: string; to: string }>({ from: '', to: '' });
+  // Ascending, which is the direction of the triangle on the Time header (09-toolbox.md 615, 618).
+  const [ascending, setAscending] = useState(true);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const range: Range = useMemo(
+    () => periodRange(period, Date.now(), {
+      ...(custom.from ? { fromMs: new Date(`${custom.from}T00:00:00`).getTime() } : {}),
+      ...(custom.to ? { toMs: new Date(`${custom.to}T00:00:00`).getTime() + 86_400_000 } : {}),
+    }),
+    [period, custom.from, custom.to],
+  );
+
+  const positionsQ = usePositions('all');
+  const transactionsQ = useTransactions();
+  const positions: PositionDto[] = useMemo(
+    () => (positionsQ.data?.pages ?? []).flatMap((p) => p.items),
+    [positionsQ.data],
+  );
+  const transactions: TransactionDto[] = useMemo(
+    () => (transactionsQ.data?.pages ?? []).flatMap((p) => p.items),
+    [transactionsQ.data],
+  );
+  // Both feeds are newest-first and cursor-paged, so a period filter that only ever saw the first
+  // page would under-report its own window. Same loop as the /history screen's.
+  useAutoPage(positionsQ, positions.at(-1)?.openedAt, range.fromMs);
+  useAutoPage(transactionsQ, transactions.at(-1)?.ts, range.fromMs);
+
+  const orders = useMemo(() => orderRows(positions, range, symbol, lots), [positions, range, symbol, lots]);
+  const deals = useMemo(() => dealRows(positions, transactions, range, symbol, lots), [positions, transactions, range, symbol, lots]);
+  const closed = useMemo(() => positionRows(positions, transactions, range, symbol, lots), [positions, transactions, range, symbol, lots]);
+
+  /**
+   * The grid, sorted on the Time column it draws.
+   *
+   * `sortRows` keys on the ROUND TRIP's open and close times, which is what the mobile screen's
+   * sort menu offers; the Time cell here is the record's own stamp, so an entry deal would sort by
+   * its position's close time and land away from the time printed beside it.
+   */
+  const grid: GridRow[] = useMemo(() => {
+    const dir = ascending ? 1 : -1;
+    const byTime = <T extends { timeMs: number }>(rows: T[]): T[] => rows.sort((a, b) => dir * (a.timeMs - b.timeMs));
+    if (mode === 'orders') return byTime(orders.map((r) => orderGrid(r, digits)));
+    if (mode === 'positions') return byTime(closed.map((r) => positionGrid(r, digits)));
+    if (mode === 'deals') return byTime(deals.map((r) => dealGrid(r, digits)));
+    /**
+     * Orders & Deals: "a tree view of all trading operations showing how the trade requests were
+     * processed" (09-toolbox.md 665). Every request here is filled the instant it is placed, so the
+     * tree is always exactly one level deep and never worth collapsing; it is drawn expanded, with
+     * each execution indented under the request that produced it. A deposit has no request above
+     * it, so it stands at the top level where MetaTrader's tree also leaves it.
+     */
+    const byTicket = new Map<string, DealRow[]>();
+    for (const d of deals) {
+      if (d.kind === 'balance') continue;
+      const list = byTicket.get(d.ticket);
+      if (list) list.push(d); else byTicket.set(d.ticket, [d]);
+    }
+    const groups: Array<{ at: number; rows: GridRow[] }> = orders.map((o) => ({
+      at: o.atMs,
+      rows: [
+        orderGrid(o, digits),
+        ...(byTicket.get(o.ticket) ?? [])
+          .slice()
+          .sort((a, b) => a.atMs - b.atMs)
+          .map((d) => ({ ...dealGrid(d, digits), child: true })),
+      ],
+    }));
+    for (const d of deals) if (d.kind === 'balance') groups.push({ at: d.atMs, rows: [dealGrid(d, digits)] });
+    return groups.sort((a, b) => dir * (a.at - b.at)).flatMap((g) => g.rows);
+  }, [mode, ascending, orders, deals, closed, digits]);
+
+  /**
+   * The summary strip is the ACCOUNT's history over the period, not the current mode's rows, which
+   * is why it is computed from the deals in every mode: the deals are the money that moved.
+   *
+   * Its Profit and the Profit column's own total are two different quantities and are allowed to
+   * disagree — they disagree in MetaTrader's own screenshot too (09-toolbox.md 732-733, flagged
+   * there as unexplained): the strip is the account's result, the total is the sum of the cells
+   * above it, which in Deals mode also carries every deposit and withdrawal.
+   */
+  const strip = historyStrip(deals);
+  const profitTotal = grid.reduce((n, r) => n + (r.profitCents ?? 0), 0);
+  const head = [...(TOOLBOX_COLUMNS.history ?? [])];
+
+  const openMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  if (!token) return <Empty>Sign in to see your trade history.</Empty>;
+
+  return (
+    <div onContextMenu={openMenu} data-history-mode={mode}>
+      {/* MetaTrader shows history as a wide grid on a desktop and as two-line entries on a phone.
+          Twelve columns cannot be read at 390px, which is what the Trade tab above says about ten. */}
+      <div className="sm:hidden">
+        {grid.map((r) => (
+          <div key={r.id} className="flex items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold text-white">
+                {r.symbol ? `${r.symbol}, ` : ''}
+                <span className={r.side === 'buy' ? 'text-[#3183ff]' : r.side === 'sell' ? 'text-[#f23645]' : ''}>
+                  {r.type} {r.volume}
+                </span>
+                {r.direction ? <span className="text-[#8fa2b8]"> {r.direction}</span> : null}
+              </div>
+              <div className="font-mono text-[11px] text-[#8fa2b8]">{stamp(r.timeMs)} {r.price}</div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className={cn('font-mono text-[12px] font-semibold tabular-nums', toneClass(r.profitCents))}>
+                {r.profitCents === null ? '' : amount(r.profitCents)}
+              </div>
+              <div className={cn('font-mono text-[10px]', toneClass(r.changePct))}>{changeText(r.changePct)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden sm:block">
+        <Table head={head}>
+          {grid.map((r) => (
+            <tr key={r.id} className="border-t border-[#2b3543]/60">
+              <Td first className={r.child ? 'pl-6' : ''}>{stamp(r.timeMs)}</Td>
+              <Td>{r.symbol}</Td>
+              <Td>{r.ticket}</Td>
+              <Td className={r.side === 'buy' ? 'text-[#3183ff]' : r.side === 'sell' ? 'text-[#f23645]' : ''}>{r.type}</Td>
+              <Td>{r.direction}</Td>
+              <Td>{r.volume}</Td>
+              <Td>{r.price}</Td>
+              {/* S / L and T / P: no level is recorded against a settled contract, and an unset
+                  level is a blank cell in MetaTrader (09-toolbox.md 336-338). */}
+              <Td>{''}</Td>
+              <Td>{''}</Td>
+              <Td>{r.commission}</Td>
+              <Td className={cn('font-semibold', toneClass(r.profitCents))}>
+                {r.profitCents === null ? '' : amount(r.profitCents)}
+              </Td>
+              {/* Blue for positive and red for negative, as MetaTrader colours this column
+                  (09-toolbox.md 636). */}
+              <Td className={toneClass(r.changePct)}>{changeText(r.changePct)}</Td>
+            </tr>
+          ))}
+          {/* MetaTrader's summary strip, with its two right-aligned column totals sitting under
+              Commission and Profit and nothing under Change (09-toolbox.md 722-733). Drawn as the
+              grid's last row so the two totals land under their own columns, which is the whole
+              point of putting them on the strip. No currency code anywhere on this line, "not even
+              after Balance" (:729). */}
+          <tr className="border-t border-[#2b3543] bg-[#202933]">
+            <td colSpan={9} className="whitespace-nowrap px-2 py-1 text-left text-[11px]" data-history-strip="">
+              <span className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
+                <StripField label="Profit:" value={amount(strip.profitCents)} />
+                <StripField label="Credit:" value={amount(strip.creditCents)} />
+                <StripField label="Deposit:" value={amount(strip.depositCents)} />
+                <StripField label="Withdrawal:" value={amount(strip.withdrawalCents)} />
+                <StripField label="Balance:" value={amount(strip.balanceCents)} />
+              </span>
+            </td>
+            <td className="whitespace-nowrap px-2 py-1 font-semibold">{amount(0)}</td>
+            <td className={cn('whitespace-nowrap px-2 py-1 font-semibold', toneClass(profitTotal))}>{amount(profitTotal)}</td>
+            <td />
+          </tr>
+        </Table>
+      </div>
+
+      {grid.length === 0 ? (
+        <Empty>
+          {positionsQ.isLoading || transactionsQ.isLoading
+            ? 'Loading history…'
+            : `No ${mode === 'orders' ? 'orders' : mode === 'positions' ? 'positions' : 'deals'} in this period.`}
+        </Empty>
+      ) : null}
+
+      {/* The whole switch lives in the context menu: "There is no toolbar, no segmented control and
+          no dropdown" (09-toolbox.md 657). The two blocks drawn are the two this platform can act
+          on. MetaTrader's menu carries five more — New Order, Symbols ▸ and Volumes ▸, Report ▸ and
+          Show on Charts ▸, Register as Signal — which are a second order ticket, a filter over one
+          quoted instrument, a lots/units toggle for a platform that has no units, an HTML report
+          generator and MQL5 signal registration; none of them exists here, and a menu item that
+          does nothing is worse than an absent one. */}
+      {menu ? (
+        <>
+          <button type="button" aria-label="Close menu" onClick={() => setMenu(null)} className="fixed inset-0 z-[70] cursor-default" />
+          <div
+            role="menu"
+            data-history-menu=""
+            className="fixed z-[71] w-52 overflow-hidden rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            style={{ left: Math.min(menu.x, 1200), top: menu.y }}
+          >
+            {HISTORY_MODES.map((m) => (
+              <MenuItem key={m.key} checked={mode === m.key} label={m.label} onPick={() => { setMode(m.key); setMenu(null); }} />
+            ))}
+            <div className="my-1 border-t border-[#2b3543]" />
+            {DESKTOP_PERIODS.map((p) => (
+              <MenuItem
+                key={p.key}
+                checked={period === p.key}
+                label={p.label}
+                // The gear MetaTrader puts on Custom Period, which is the only item that opens
+                // anything (09-toolbox.md 673-676).
+                glyph={p.key === 'custom' ? '⚙' : undefined}
+                onPick={() => { setPeriod(p.key); if (p.key !== 'custom') setMenu(null); }}
+              />
+            ))}
+            {period === 'custom' ? (
+              <div className="flex flex-col gap-1.5 border-t border-[#2b3543] px-3 py-2">
+                <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+                  From
+                  <input
+                    type="date"
+                    aria-label="Custom period from"
+                    value={custom.from}
+                    onChange={(e) => setCustom({ ...custom, from: e.target.value })}
+                    className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[#3183ff]"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+                  To
+                  <input
+                    type="date"
+                    aria-label="Custom period to"
+                    value={custom.to}
+                    onChange={(e) => setCustom({ ...custom, to: e.target.value })}
+                    className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[#3183ff]"
+                  />
+                </label>
+                <button type="button" onClick={() => setMenu(null)} className="self-end rounded bg-[#3183ff] px-2 py-0.5 text-[11px] font-semibold text-white">Apply</button>
+              </div>
+            ) : null}
+            <div className="my-1 border-t border-[#2b3543]" />
+            <MenuItem
+              checked={false}
+              label={ascending ? 'Sort: Time ▲' : 'Sort: Time ▼'}
+              onPick={() => { setAscending((v) => !v); setMenu(null); }}
+            />
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** Blue up, red down, nothing at zero — MetaTrader's pairing, and never green (09-toolbox.md 646). */
+const toneClass = (n: number | null): string =>
+  n === null || n === 0 ? '' : n > 0 ? 'text-[#3183ff]' : 'text-[#f23645]';
+
+function StripField({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="flex items-baseline gap-1 whitespace-nowrap">
+      <span className="text-[#8fa2b8]">{label}</span>
+      <span className="font-semibold tabular-nums">{value}</span>
+    </span>
+  );
+}
+
+function MenuItem({ checked, label, glyph, onPick }: {
+  checked: boolean; label: string; glyph?: string | undefined; onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onPick}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-[#2b3543]"
+    >
+      <span className="w-3 shrink-0 text-[#4597ff]" aria-hidden>{checked ? '✓' : glyph ?? ''}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  );
+}
+
+/**
+ * Pull older pages until the loaded tail reaches past the start of the period, then stop.
+ *
+ * The same loop the /history screen runs, and deliberately a copy: it is eight lines of react-query
+ * paging shape that would have to become a module of its own to be shared, and the two screens page
+ * the same two feeds for the same reason.
+ */
+function useAutoPage(
+  q: { hasNextPage: boolean; isFetchingNextPage: boolean; fetchNextPage: () => unknown; data?: { pages: unknown[] } | undefined },
+  oldestMs: number | undefined,
+  fromMs: number,
+): void {
+  const pages = q.data?.pages.length ?? 0;
+  const needMore = q.hasNextPage && !q.isFetchingNextPage && pages < 20
+    && (oldestMs === undefined || oldestMs >= fromMs);
+  useEffect(() => {
+    if (needMore) void q.fetchNextPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needMore]);
+}
 
 /**
  * MetaTrader's Exposure tab.

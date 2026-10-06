@@ -10,6 +10,7 @@ import { BetPanel } from '@/components/game/BetPanel';
 import { MT5Toolbox } from '@/components/game/MT5Toolbox';
 import { MarketWatch } from '@/components/game/MarketWatch';
 import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
+import { MT5Chrome } from '@/components/game/MT5Chrome';
 import { cn } from '@/lib/cn';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
@@ -123,6 +124,18 @@ export function TradeSurface() {
      * and two sets of state.
      */
     <section className="flex h-full min-h-0 flex-col gap-2 md:gap-3">
+      {/*
+        MetaTrader's application chrome: the menu bar and its three toolbars, flush under the brand's
+        title bar. Terminal brands only, and desktop only — a phone returned MT5MobileShell above,
+        and MetaTrader's phone app has no menu bar to carry (see MT5Chrome for how every row reaches
+        a handler that already exists, and for the three menu titles it will not draw).
+
+        It is here rather than in AppShell because this is the one place that already decides what a
+        terminal is, and because what the toolbars act on — the chart, the rail, Market Watch, the
+        Toolbox — is all inside this screen.
+      */}
+      {terminal ? <MT5Chrome /> : null}
+
       {/*
         The three DOCKED panels, side by side: Market Watch left, chart in the middle, ticket right.
         The Toolbox is deliberately NOT one of them, and sits below this row instead: see its note.
