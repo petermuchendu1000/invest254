@@ -74,6 +74,11 @@ interface GameSocketValue {
   /** The single in-flight position (optimistic → open → settling), or null. */
   activePosition: ActivePosition | null;
   /**
+   * EVERY open position, oldest first. MetaTrader's Trade tab is a grid of these, not one card.
+   * `activePosition` is the newest of them, for the surfaces that are genuinely about one.
+   */
+  positions: readonly ActivePosition[];
+  /**
    * Place a BUY/SELL position (optimistic; reconciled by `position_opened`).
    *
    * Returns the reason it was NOT sent, or null when it went. It used to return void and refuse
@@ -89,7 +94,7 @@ interface GameSocketValue {
    * Returns false when there is nothing open or the socket is down. The engine's reply is the
    * truth; this only asks.
    */
-  setLevels: (slPrice: number | null, tpPrice: number | null) => boolean;
+  setLevels: (slPrice: number | null, tpPrice: number | null, positionId?: string) => boolean;
   /**
    * The last trade error the engine sent, for the order window to show as MetaTrader's rejection.
    *
@@ -97,8 +102,13 @@ interface GameSocketValue {
    * cannot drift into saying different things about one refusal.
    */
   lastTradeError: { code: string; title: string; detail: string | undefined; at: number } | null;
-  /** Manually cash out the open position (only valid while `sellable`). */
-  sell: () => void;
+  /**
+   * Manually close a position (only valid while `sellable`).
+   *
+   * Names the position explicitly, because several can be open: omitted it means the newest, which
+   * is what the surfaces that only ever speak about one have always meant.
+   */
+  sell: (positionId?: string) => void;
   /**
    * Whether `sell` can succeed on this brand at all. The engine refuses every manual close while
    * the brand runs in pool mode, so a Close control, and anything built on it (take profit), is
@@ -226,8 +236,8 @@ export interface CandlesReply {
 }
 
 /** Stable functions (never change identity) — consumers that only trade/read buffers never re-render. */
-type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled' | 'lastTradeError' | 'instrumentResetKey'>;
-type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'earlyCloseEnabled' | 'lastTradeError'>;
+type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'lastTradeError' | 'instrumentResetKey'>;
+type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'lastTradeError'>;
 const ApiCtx = createContext<GameSocketApi | null>(null);
 const StateCtx = createContext<GameSocketState | null>(null);
 const InstKeyCtx = createContext<string>('');
@@ -330,8 +340,21 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   // Set from the engine's hello. False until then: the close affordances stay away rather than
   // appearing and then failing.
   const [earlyCloseEnabled, setEarlyCloseEnabled] = useState(false);
-  const [activePosition, setActivePosition] = useState<ActivePosition | null>(null);
-  const activeRef = useRef<ActivePosition | null>(null);
+  /**
+   * EVERY position this account currently has running, oldest first.
+   *
+   * MetaTrader holds many at once: its Trade tab is "open positions above the account summary strip
+   * ... in a single shared column grid" (docs/mt5/09-toolbox.md 250), its Exposure tab adds them up,
+   * and Margin, Free Margin and Margin Level only mean anything across several. The engine, the
+   * socket protocol and the database have always agreed: `sell` and `set_levels` carry a
+   * `positionId`, `open_positions` is an array, and every row has its own ticket.
+   *
+   * Only this file disagreed. It kept ONE position, refused a second order with `POSITION_OPEN`,
+   * and the ticket replaced itself with a position card, so there was no control left to place
+   * another trade with. That was never the engine's rule; it was this state shape.
+   */
+  const [positions, setPositionsState] = useState<ActivePosition[]>([]);
+  const positionsRef = useRef<ActivePosition[]>([]);
   /**
    * The last trade rejection, for the order window to show.
    *
@@ -357,13 +380,51 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const multListenersRef = useRef<Set<(e: MultEvent) => void>>(new Set());
 
   /** Keep ref + state in lockstep so socket handlers can read the current value. */
-  const setActive = useCallback(
-    (next: ActivePosition | null | ((cur: ActivePosition | null) => ActivePosition | null)) => {
-      const resolved = typeof next === 'function' ? next(activeRef.current) : next;
-      activeRef.current = resolved;
-      setActivePosition(resolved);
+  const setPositions = useCallback(
+    (next: ActivePosition[] | ((cur: readonly ActivePosition[]) => ActivePosition[])) => {
+      const resolved = typeof next === 'function' ? next(positionsRef.current) : next;
+      positionsRef.current = resolved;
+      setPositionsState(resolved);
     },
     [],
+  );
+
+  /**
+   * Change one position, identified however the caller knows it.
+   *
+   * A position has two identities over its life: the `clientId` this tab made when the order was
+   * sent, and the `positionId` the engine answers with. A frame arriving before the ack can only be
+   * matched on the first, and everything after it on the second, so both are accepted.
+   */
+  const patchPosition = useCallback(
+    (key: { positionId?: string | null; clientId?: string },
+     fn: (p: ActivePosition) => ActivePosition | null) => {
+      setPositions((cur) => {
+        const out: ActivePosition[] = [];
+        for (const p of cur) {
+          const hit = (key.positionId != null && p.positionId === key.positionId)
+            || (key.clientId !== undefined && p.clientId === key.clientId);
+          if (!hit) { out.push(p); continue; }
+          const next = fn(p);
+          if (next) out.push(next);
+        }
+        return out;
+      });
+    },
+    [setPositions],
+  );
+
+  /**
+   * The position the single-position surfaces still speak for: the NEWEST one.
+   *
+   * MetaTrader's own surfaces are plural (the Trade grid, Exposure, the margin figures) and those
+   * read `positions`. A few genuinely singular ones remain, among them the chart's level overlay and
+   * the phone's one-position card, and for those "the position the trader just opened" is the one
+   * they mean. Derived rather than stored, so it can never disagree with the list.
+   */
+  const activePosition = useMemo<ActivePosition | null>(
+    () => positions[positions.length - 1] ?? null,
+    [positions],
   );
 
   /**
@@ -384,12 +445,27 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
    * authoritative list, and `open_positions` below resolves the pending order against it either way.
    */
   const OPEN_ACK_TIMEOUT_MS = 8_000;
-  const openAckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** True between the watchdog firing and the `open_positions` that answers it. */
+  /**
+   * One watchdog PER OUTSTANDING ORDER, keyed by the `clientId` it was sent with.
+   *
+   * It used to be a single timer, which was right while only one order could exist. With several in
+   * flight a shared timer is worse than none: sending a second order would clear the first order's
+   * guard, so the very case the watchdog exists for, a lost ack, would go unwatched on every order
+   * but the last.
+   */
+  const openAckTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** True between a watchdog firing and the `open_positions` that answers it. */
   const awaitingSync = useRef(false);
-  const clearOpenAck = useCallback(() => {
-    if (openAckTimer.current) { clearTimeout(openAckTimer.current); openAckTimer.current = null; }
-    awaitingSync.current = false;
+  /** Disarm one order's watchdog: its answer arrived. */
+  const clearOpenAck = useCallback((clientId?: string) => {
+    if (clientId === undefined) {
+      for (const t of openAckTimers.current.values()) clearTimeout(t);
+      openAckTimers.current.clear();
+    } else {
+      const t = openAckTimers.current.get(clientId);
+      if (t) { clearTimeout(t); openAckTimers.current.delete(clientId); }
+    }
+    if (openAckTimers.current.size === 0) awaitingSync.current = false;
   }, []);
 
   const getTicks = useCallback(() => ticksRef.current, []);
@@ -551,9 +627,16 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     let classic = false;
     for (const m of q) {
       if (m.type === 'open_digit') rejectDigit(code, '');     // the digits screen tells the player
-      if (m.type === 'open_position' && activeRef.current && !activeRef.current.positionId) {
-        activeRef.current = null; setActivePosition(null); classic = true;
-        void qc.invalidateQueries({ queryKey: ['wallet'] });
+      if (m.type === 'open_position') {
+        // Every order still waiting for an ack is rolled back, not just one: a queue that is
+        // dropped can hold several, and each one optimistically debited the wallet.
+        const pending = positionsRef.current.filter((p) => !p.positionId);
+        if (pending.length) {
+          for (const p of pending) clearOpenAck(p.clientId);
+          setPositions((cur) => cur.filter((p) => p.positionId));
+          classic = true;
+          void qc.invalidateQueries({ queryKey: ['wallet'] });
+        }
       }
     }
     if (classic) toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting…' });
@@ -579,21 +662,28 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
 
   const openPosition = useCallback(
     (input: OpenPositionInput): LocalRefusal | null => {
-      // Single-open rule, the engine's own. A contract in `settling` still holds the slot.
-      if (activeRef.current) return 'POSITION_OPEN';
+      /**
+       * No single-open rule. It was never the engine's: `GameServer.openPositionsOf` returns a list,
+       * nothing in `openPosition` looks at what is already running, and every position carries its
+       * own id, ticket, levels and settlement. The refusal lived here, and it made the terminal
+       * refuse the one thing a terminal is for.
+       */
       if (!tokenRef.current) {
         toast.push({ tone: 'error', title: 'Log in to trade' });
         return 'LOGIN_REQUIRED';
       }
-      if (!sendTrade('open_position', input)) {
+      // This tab's id for this order, echoed by the engine on the ack and on a refusal, so several
+      // orders can be outstanding at once and each answer lands on the order that caused it.
+      const clientId = `c${++clientSeq.current}`;
+      if (!sendTrade('open_position', { ...input, clientId })) {
         toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: try again shortly.' });
         return 'OFFLINE';
       }
       const last = ticksRef.current[ticksRef.current.length - 1] ?? null;
       const now = Date.now();
-      setActive({
+      setPositions((cur) => [...cur, {
         positionId: null,
-        clientId: `c${++clientSeq.current}`,
+        clientId,
         direction: input.direction,
         stakeCents: input.stakeCents,
         durationS: input.durationS,
@@ -610,31 +700,33 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         // What was ASKED for. `position_opened` replaces these with what the engine actually took.
         slPrice: input.slPrice ?? null,
         tpPrice: input.tpPrice ?? null,
-      });
-      // Bound the wait. See OPEN_ACK_TIMEOUT_MS: on firing this asks the engine rather than guessing.
-      if (openAckTimer.current) clearTimeout(openAckTimer.current);
-      openAckTimer.current = setTimeout(() => {
-        openAckTimer.current = null;
-        const a = activeRef.current;
-        if (!a || a.positionId) return; // acked while the timer was in flight
+      }]);
+      // Bound the wait, PER ORDER. See OPEN_ACK_TIMEOUT_MS: on firing this asks the engine rather
+      // than guessing. One timer per outstanding order, keyed by its clientId, because several can
+      // now be in flight and a single shared timer would disarm the previous order's guard.
+      const timer = setTimeout(() => {
+        openAckTimers.current.delete(clientId);
+        const mine = positionsRef.current.find((p) => p.clientId === clientId);
+        if (!mine || mine.positionId) return; // acked while the timer was in flight
         logJournal('warn', 'Trade', 'No acknowledgement in 8s: asking the server what is open');
         awaitingSync.current = true;
         if (!sendTrade('sync_positions', {})) {
-          // The socket is gone, so nothing can answer. Roll back and let the reconnect's own
-          // `open_positions` re-adopt the position if the engine does hold one.
+          // The socket is gone, so nothing can answer. Roll back THIS order and let the reconnect's
+          // own `open_positions` re-adopt it if the engine does hold it.
           awaitingSync.current = false;
-          setActive(null);
+          patchPosition({ clientId }, () => null);
           void qc.invalidateQueries({ queryKey: ['wallet'] });
           toast.push({ tone: 'error', title: 'Order not confirmed', description: 'Reconnecting: your positions will reappear if the order was taken.' });
         }
       }, OPEN_ACK_TIMEOUT_MS);
+      openAckTimers.current.set(clientId, timer);
       // Optimistic debit; reconciled by the authoritative `balance` push.
       qc.setQueryData<WalletDto>(['wallet'], (old) =>
         old ? { ...old, real: Math.max(0, old.real - input.stakeCents) } : old,
       );
       return null;
     },
-    [qc, send, setActive, toast],
+    [qc, send, setPositions, patchPosition, clearOpenAck, toast],
   );
 
   /**
@@ -644,25 +736,38 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
    * reply is what the UI believes afterwards, so a tab that lost a race against another device is
    * corrected rather than left showing a stop the server never took.
    */
-  const setLevels = useCallback((slPrice: number | null, tpPrice: number | null): boolean => {
-    const a = activeRef.current;
+  /**
+   * Which position a per-position command acts on.
+   *
+   * Explicit when the caller names one, which every plural surface does (a Trade grid row, a close
+   * form opened from it). Omitted it means the newest, which is what the remaining singular surfaces
+   * have always meant by "the position".
+   */
+  const pick = useCallback((positionId?: string | null): ActivePosition | null => {
+    const list = positionsRef.current;
+    if (positionId == null) return list[list.length - 1] ?? null;
+    return list.find((p) => p.positionId === positionId) ?? null;
+  }, []);
+
+  const setLevels = useCallback((slPrice: number | null, tpPrice: number | null, positionId?: string): boolean => {
+    const a = pick(positionId);
     if (!a || !a.positionId || a.phase !== 'open') return false;
     if (!send('set_levels', { positionId: a.positionId, slPrice, tpPrice })) {
       toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: your levels were not changed.' });
       return false;
     }
     return true;
-  }, [send, toast]);
+  }, [pick, send, toast]);
 
-  const sell = useCallback(() => {
-    const a = activeRef.current;
+  const sell = useCallback((positionId?: string) => {
+    const a = pick(positionId);
     if (!a || !a.positionId || a.phase !== 'open' || !a.sellable) return;
     if (!send('sell', { positionId: a.positionId })) {
       toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting. Your position auto-settles at expiry.' });
       return;
     }
-    setActive({ ...a, phase: 'settling' });
-  }, [send, setActive, toast]);
+    patchPosition({ positionId: a.positionId }, (p) => ({ ...p, phase: 'settling' }));
+  }, [pick, patchPosition, send, toast]);
 
   const subscribeInstrument = useCallback(
     (instrumentId: string) => {
@@ -870,61 +975,88 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             openedAtMs: number; expiresAtMs: number; entryRate: number; sellable: boolean;
             slPrice?: number | null; tpPrice?: number | null;
           }[] };
-          const first = d.positions?.[0];
+          const rows = d.positions ?? [];
           /**
-           * Two callers, and the difference matters.
+           * The engine's list is the TRUTH, and this reconciles the whole of it.
            *
-           * Normally this is the auth reply and is taken only when nothing is active, so it can
-           * never overwrite an optimistic open the trader raised in this page's life: that one is
-           * reconciled by `position_opened`.
+           * Two callers, and the difference still matters. Normally this is the auth reply after a
+           * reload, where the tab has nothing and every row is adopted. When the acknowledgement
+           * watchdog asked (`awaitingSync`), the pending orders are exactly what has to be resolved:
+           * a row the engine holds confirms one, and a pending order with no row was never taken.
            *
-           * When the acknowledgement watchdog asked (`awaitingSync`), the optimistic open is exactly
-           * what has to be resolved, and this frame is the authoritative answer to "did the engine
-           * take my order". A PENDING position is adopted or dropped on its evidence; an ACKED one
-           * is still never touched, because it already has the truth.
+           * Positions the tab already has are UPDATED rather than replaced, so a live P/L and a
+           * countdown already arriving are not reset to neutral by a sync. Positions the engine does
+           * not list are dropped only when it is answering the watchdog; otherwise a settle that
+           * raced this frame could resurrect, or a position could vanish on a partial list.
            */
-          const pending = activeRef.current && !activeRef.current.positionId;
-          const answeringWatchdog = awaitingSync.current && pending;
+          const answeringWatchdog = awaitingSync.current;
+          awaitingSync.current = false;
+
+          setPositions((cur) => {
+            const byId = new Map(cur.filter((p) => p.positionId).map((p) => [p.positionId as string, p]));
+            const adopted: ActivePosition[] = rows.map((r) => {
+              const had = byId.get(r.positionId);
+              byId.delete(r.positionId);
+              if (had) {
+                // Known already: take the engine's durable facts, keep the live ones still flowing.
+                return {
+                  ...had,
+                  ticket: r.ticket ?? had.ticket,
+                  sellable: r.sellable,
+                  slPrice: r.slPrice ?? null,
+                  tpPrice: r.tpPrice ?? null,
+                };
+              }
+              return {
+                positionId: r.positionId,
+                // The engine's ticket, so a recovered position is named the same number it was
+                // named before the reload rather than renumbered.
+                ticket: r.ticket ?? null,
+                clientId: `srv${r.positionId}`,
+                direction: r.direction,
+                stakeCents: r.stakeCents,
+                durationS: r.durationS,
+                phase: 'open' as const,
+                entryRate: r.entryRate,
+                expiresAtMs: r.expiresAtMs,
+                /**
+                 * The live figures are the engine's and arrive on its next tick, which is within one
+                 * tick interval. Seeded neutral rather than guessed: a multiplier invented here
+                 * would print a P/L the engine never said until the first update landed.
+                 */
+                liveMultiplier: 1,
+                livePnlCents: 0,
+                secondsLeft: Math.max(0, Math.round((r.expiresAtMs - Date.now()) / 1000)),
+                sellable: r.sellable,
+                // The stop the ENGINE still holds. A refreshed tab gets its levels back because the
+                // engine never lost them, which is the whole reason they live there.
+                slPrice: r.slPrice ?? null,
+                tpPrice: r.tpPrice ?? null,
+              };
+            });
+            // Orders still waiting for an ack. The watchdog's answer decides them; otherwise they
+            // are left alone, because this frame is not evidence about an order sent after it.
+            const stillPending = cur.filter((p) => !p.positionId);
+            if (!answeringWatchdog) return [...byId.values(), ...adopted, ...stillPending];
+            return adopted;
+          });
+
           if (answeringWatchdog) {
-            awaitingSync.current = false;
-            if (!first) {
-              // The engine has nothing open for this user, so the order was never taken. Roll the
-              // optimistic debit back and say so, rather than leaving money committed to nothing.
+            if (rows.length === 0) {
+              // The engine has nothing open for this user, so the order was never taken. The
+              // optimistic debit is rolled back above and said plainly here, rather than leaving
+              // money committed to nothing.
               logJournal('error', 'Trade', 'The server has no such position: the order was not taken');
-              setActive(null);
               void qc.invalidateQueries({ queryKey: ['wallet'] });
               toast.push({ tone: 'error', title: 'Order not accepted', description: 'The server has no record of it. Your balance is unchanged.' });
-              break;
+            } else {
+              const last = rows[rows.length - 1]!;
+              logJournal('ok', 'Trade', `#${ticketLabel({ ticket: last.ticket ?? null, positionId: last.positionId })} confirmed by the server after a lost acknowledgement`);
             }
-            logJournal('ok', 'Trade', `#${ticketLabel({ ticket: first.ticket ?? null, positionId: first.positionId })} confirmed by the server after a lost acknowledgement`);
-          } else if (!first || activeRef.current) break;
-          if (!answeringWatchdog) logJournal('ok', 'Trade', `#${ticketLabel({ ticket: first.ticket ?? null, positionId: first.positionId })} recovered after reconnect`);
-          setActive({
-            positionId: first.positionId,
-            // The engine's ticket, so a recovered position is named the same number it was named
-            // before the reload rather than renumbered.
-            ticket: first.ticket ?? null,
-            clientId: `srv${first.positionId}`,
-            direction: first.direction,
-            stakeCents: first.stakeCents,
-            durationS: first.durationS,
-            phase: 'open',
-            entryRate: first.entryRate,
-            expiresAtMs: first.expiresAtMs,
-            /**
-             * The live figures are the engine's and arrive on its next tick, which is within one
-             * tick interval. Seeded neutral rather than guessed: a multiplier invented here would
-             * print a P/L the engine never said, for as long as it took the first update to land.
-             */
-            liveMultiplier: 1,
-            livePnlCents: 0,
-            secondsLeft: Math.max(0, Math.round((first.expiresAtMs - Date.now()) / 1000)),
-            sellable: first.sellable,
-            // The stop the ENGINE still holds. A refreshed tab gets its levels back because the
-            // engine never lost them, which is the whole reason they live there.
-            slPrice: first.slPrice ?? null,
-            tpPrice: first.tpPrice ?? null,
-          });
+            clearOpenAck();
+          } else if (rows.length) {
+            logJournal('ok', 'Trade', `${rows.length} position${rows.length === 1 ? '' : 's'} recovered after reconnect`);
+          }
           break;
         }
         case 'position_opened': {
@@ -933,8 +1065,20 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             logJournal('ok', 'Trade', `#${ticketLabel({ ticket: o.ticket ?? null, positionId: o.positionId ?? null })} ${o.direction} accepted at ${o.entryRate?.toFixed?.(6) ?? '?'}`);
           }
           const d = data as PositionOpenedData;
-          clearOpenAck(); // acknowledged: the watchdog has nothing left to guard
-          setActive((cur) => ({
+          /**
+           * Bound to the order that caused it by the `clientId` the engine echoes back.
+           *
+           * With several orders outstanding, "the pending position" is ambiguous and matching by
+           * arrival order would be a guess: this handler awaits the database on the engine side, so
+           * two acks can arrive in either order, and pairing one order's ticket and entry price with
+           * another's stake is the kind of wrong that costs money. An engine that does not echo it
+           * falls back to the oldest pending order, which is exactly right when only one can exist.
+           */
+          const ackKey = d.clientId !== undefined && d.clientId !== null
+            ? { clientId: String(d.clientId) }
+            : { clientId: positionsRef.current.find((p) => !p.positionId)?.clientId };
+          clearOpenAck(ackKey.clientId); // acknowledged: that order's watchdog has nothing to guard
+          const fill = (cur: ActivePosition | null): ActivePosition => ({
             positionId: d.positionId,
             // The ticket the database allocated inside the money RPC's own INSERT. It arrives with
             // the acknowledgement, so the number is on screen the moment the trade is real.
@@ -954,7 +1098,19 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             // refused comes back null). The ack is the truth, not the optimistic copy above.
             slPrice: d.slPrice ?? null,
             tpPrice: d.tpPrice ?? null,
-          }));
+          });
+          setPositions((cur) => {
+            const i = ackKey.clientId === undefined
+              ? -1
+              : cur.findIndex((p) => p.clientId === ackKey.clientId && !p.positionId);
+            // The order this answers is filled in place, so it keeps its position in the list and
+            // the grid does not reorder under the trader's cursor as acks land.
+            if (i >= 0) return cur.map((p, n) => (n === i ? fill(p) : p));
+            // No pending order to attach it to: a settle-then-reopen race, or an ack for an order
+            // this tab never sent (another device). Adopt it rather than drop the position.
+            if (cur.some((p) => p.positionId === d.positionId)) return [...cur];
+            return [...cur, fill(null)];
+          });
           /**
            * No popup on a terminal brand, because MetaTrader has none.
            *
@@ -990,25 +1146,20 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
          */
         case 'levels_set': {
           const d = data as { positionId?: string; slPrice?: number | null; tpPrice?: number | null };
-          setActive((cur) => (cur && cur.positionId === d.positionId
-            ? { ...cur, slPrice: d.slPrice ?? null, tpPrice: d.tpPrice ?? null }
-            : cur));
+          patchPosition({ positionId: d.positionId ?? null },
+            (p) => ({ ...p, slPrice: d.slPrice ?? null, tpPrice: d.tpPrice ?? null }));
           break;
         }
         case 'position_update': {
           const d = data as PositionUpdateData;
-          setActive((cur) =>
-            cur && cur.positionId === d.positionId
-              ? {
-                  ...cur,
-                  phase: cur.phase === 'settling' ? 'settling' : 'open',
-                  liveMultiplier: d.liveMultiplier,
-                  livePnlCents: d.livePnlCents,
-                  secondsLeft: d.secondsLeft,
-                  sellable: d.sellable,
-                }
-              : cur,
-          );
+          patchPosition({ positionId: d.positionId }, (p) => ({
+            ...p,
+            phase: p.phase === 'settling' ? 'settling' : 'open',
+            liveMultiplier: d.liveMultiplier,
+            livePnlCents: d.livePnlCents,
+            secondsLeft: d.secondsLeft,
+            sellable: d.sellable,
+          }));
           break;
         }
         case 'position_settled': {
@@ -1021,10 +1172,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           // The side, for the close report. The engine states it on the settle; the local position
           // is only a fallback for an engine that predates that field, and it may itself be gone
           // (a settle arriving after a reconnect has no local position at all).
-          const local = activeRef.current;
-          const closedDirection = d.direction
-            ?? (local && local.positionId === d.positionId ? local.direction : undefined);
-          setActive((cur) => (cur && cur.positionId === d.positionId ? null : cur));
+          const local = positionsRef.current.find((p) => p.positionId === d.positionId) ?? null;
+          const closedDirection = d.direction ?? local?.direction;
+          patchPosition({ positionId: d.positionId }, () => null);
           if (typeof d.balance === 'number') setWalletReal(d.balance);
           void qc.invalidateQueries({ queryKey: ['positions'] });
           void qc.invalidateQueries({ queryKey: ['ledger'] });
@@ -1052,6 +1202,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             mode: d.mode,
             ticket: d.positionId,
             direction: closedDirection,
+            // The settled instrument, so the notice can print the volume to this symbol's own
+            // digits without reaching back into this provider from outside it.
+            symbol: marketRef.current?.instrument.symbol,
           });
           break;
         }
@@ -1214,15 +1367,28 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           // open can produce count (a stray error from another request must not clear a live contract).
           if (digitAwaitingRef.current > 0 && /^(ENGINE_ERROR|AUTH_|SYSTEM_DISABLED|INVALID_INSTRUMENT)/.test(String(d.code ?? '')))
             rejectDigit(String(d.code ?? ''), String(d.message ?? ''));
-          const a = activeRef.current;
-          if (a && !a.positionId) {
+          /**
+           * Roll back the order the engine is refusing, by the `clientId` it echoes.
+           *
+           * With several orders outstanding this cannot be "the pending one": refusing order B must
+           * not cancel order A, which the engine may have accepted. The engine echoes the id on the
+           * refusals an order can produce; without one (an older engine, or an error belonging to
+           * nothing in particular) the oldest pending order is the only safe reading, and it is the
+           * right one when a single order is outstanding.
+           */
+          const refusedId = d.clientId !== undefined && d.clientId !== null ? String(d.clientId) : undefined;
+          const refused = refusedId !== undefined
+            ? positionsRef.current.find((p) => p.clientId === refusedId && !p.positionId)
+            : positionsRef.current.find((p) => !p.positionId);
+          if (refused) {
             // optimistic open refused → roll back and re-sync balance
-            clearOpenAck();
-            setActive(null);
+            clearOpenAck(refused.clientId);
+            patchPosition({ clientId: refused.clientId }, () => null);
             void qc.invalidateQueries({ queryKey: ['wallet'] });
-          } else if (a && a.phase === 'settling') {
+          } else {
             // cash-out failed → restore so the user can retry / let it auto-settle
-            setActive({ ...a, phase: 'open' });
+            const settling = positionsRef.current.find((p) => p.phase === 'settling');
+            if (settling) patchPosition({ positionId: settling.positionId }, (p) => ({ ...p, phase: 'open' }));
           }
           const title = errorTitle(/^INSUFFICIENT_FUNDS/.test(String(d.message ?? '')) ? 'INSUFFICIENT_FUNDS' : d.code);
           const detail = friendlyError(d.message, d.reasons, fmtRef.current);
@@ -1377,7 +1543,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
     requestSymbols, subscribeSymbols, getSymbolQuote]);
-  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, earlyCloseEnabled, lastTradeError }), [status, online, fairness, activePosition, earlyCloseEnabled, lastTradeError]);
+  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, positions, earlyCloseEnabled, lastTradeError }), [status, online, fairness, activePosition, positions, earlyCloseEnabled, lastTradeError]);
 
   return (
     <ApiCtx.Provider value={apiValue}>

@@ -23,10 +23,24 @@ import type { OrderResult } from '@/lib/game/orderResult';
  * `#` prefix, shortened, because this engine's position ids are uuids and a trader needs a handle,
  * not thirty-six characters.
  */
-export function MT5OrderResult({ result, onDismiss }: {
+export function MT5OrderResult({ result, onDismiss, placement = 'overlay' }: {
   result: OrderResult;
   /** MetaTrader's result is acknowledged, and the window goes back to the form. */
   onDismiss: () => void;
+  /**
+   * Where the panel sits, because MetaTrader's two order windows are different shapes.
+   *
+   * `overlay` is the PHONE's: a full-screen order window whose result rises over the bottom of the
+   * form, which is where MetaTrader's own mobile result appears and where the form's action button
+   * already is. Nothing is lost, because that window exists only to send this one order.
+   *
+   * `inline` is the DOCKED desktop ticket's, and it is not a style choice. That ticket is a
+   * permanent panel, not a modal: the trader goes back to it to place the next order. Pinned to the
+   * bottom the panel landed squarely on `Sell by Market` and `Buy by Market` and stayed there until
+   * it was dismissed, so a filled order took the trade buttons away with it. In flow it says the
+   * same thing in the same window, at the top of the ticket, with the buttons still reachable.
+   */
+  placement?: 'overlay' | 'inline';
 }) {
   const rejected = result.kind === 'rejected';
   return (
@@ -34,8 +48,15 @@ export function MT5OrderResult({ result, onDismiss }: {
       role="status"
       aria-live="polite"
       data-order-result={result.kind}
-      className="absolute inset-x-0 bottom-0 z-10 border-t bg-[#0f1720] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
-      style={{ borderTopColor: rejected ? '#f23645' : '#2b3543' }}
+      data-order-result-placement={placement}
+      className={
+        placement === 'overlay'
+          ? 'absolute inset-x-0 bottom-0 z-10 border-t bg-[#0f1720] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3'
+          : 'rounded-sm border bg-[#0f1720] px-3 pb-3 pt-2.5'
+      }
+      style={placement === 'overlay'
+        ? { borderTopColor: rejected ? '#f23645' : '#2b3543' }
+        : { borderColor: rejected ? '#f23645' : '#2b3543' }}
     >
       {result.kind === 'sending' ? (
         <>

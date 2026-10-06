@@ -2,7 +2,6 @@
 
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
-import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { cn } from '@/lib/cn';
 import type { OutcomeFx } from '@/lib/game/outcomeFx';
@@ -28,15 +27,15 @@ export function MT5CloseNotice({ fx, visible, onDismiss }: {
   /**
    * The volume prints to the SETTLED symbol's digits, like every other surface.
    *
-   * `OutcomeFx` carries the closed position's ticket and side but not its symbol, and this is the
-   * one place a volume was still left on the two-place default: a position that reads `0.025` in the
-   * ticket, the Trade grid and the History grid announced itself as `0.03` on closing. Reading the
-   * brand's settled instrument is exact rather than a guess, because that is the only instrument an
-   * order can be opened on (`useOrderEntry`: every other symbol is quoted and charted with
-   * MetaTrader's `Disabled` trade mode), so it is necessarily the symbol of the position that just
-   * closed. If a brand ever settles more than one, the symbol belongs on `OutcomeFx` instead.
+   * It comes in ON THE OUTCOME, not from the game socket. This used to call `useGameSocketApi()`,
+   * and this component is rendered by `OutcomeOverlay`, which `Providers` mounts ABOVE
+   * `GameSocketProvider`: that hook throws outside its provider, so the first position to close
+   * threw inside render, the error boundary caught it, and the entire terminal unmounted. From the
+   * trader's side a closed trade simply took the screen, the Trade buttons and all, which is the
+   * worst possible moment to lose them. The provider fires the outcome and knows the symbol, so it
+   * states it, exactly as this comment used to say it should.
    */
-  const settledSymbol = useGameSocketApi().getMarket()?.instrument.symbol ?? 'XAUUSD';
+  const settledSymbol = fx.symbol ?? 'XAUUSD';
   const volDigits = useVolumeDigits(settledSymbol);
   const won = fx.result === 'win';
   // MetaTrader's money colours: blue for a profit, red for a loss. Never green.

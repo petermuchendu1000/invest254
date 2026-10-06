@@ -9,6 +9,11 @@ import type { Direction } from '@invest254/shared';
 /** S→C: engine ack that a position was opened (authoritative entry data). */
 export interface PositionOpenedData {
   positionId: string;
+  /**
+   * The id the client sent with this order, echoed back so the ack binds to the order that caused
+   * it. Absent from an engine written before this; with one order outstanding there is no ambiguity.
+   */
+  clientId?: string | null;
   /** MetaTrader's ticket (migration 0184); null on a brand or row that has none. */
   ticket?: number | null;
   entryRate: number;
@@ -64,6 +69,13 @@ export interface WsErrorData {
   code: string;
   message?: string;
   reasons?: string[];
+  /**
+   * The id of the request this refuses, echoed back by the engine.
+   *
+   * Present on the refusals an `open_position` can produce, so a client holding several outstanding
+   * orders rolls back the one that failed rather than the newest one it happens to have.
+   */
+  clientId?: string | null;
 }
 
 /** C→S: open a BUY/SELL position. */

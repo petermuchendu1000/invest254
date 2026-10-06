@@ -106,22 +106,19 @@ export function MT5OrderTicket() {
     return <div className="h-40 animate-pulse rounded-sm border border-[#2b3543] bg-[#0f1720]" />;
   }
 
-  if (activePosition) {
-    return (
-      <div className="flex flex-col gap-2 rounded border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
-        {/* An OPEN position is always on the symbol this brand settles, whatever the chart is
-            showing, so it is named and priced with that one. Handing it the charted symbol would
-            label a gold contract EURUSD and print its P/L against the wrong axis. */}
-        <MT5LivePosition
-          pos={activePosition}
-          symbol={settledSymbol}
-          digits={market?.instrument.digits ?? 2}
-          price={tick ? priceOfRate(tick.rate) : null}
-          openPrice={priceOfRate(activePosition.entryRate)}
-        />
-      </div>
-    );
-  }
+  /**
+   * ── The ticket STAYS while positions are open ───────────────────────────────────────────────────
+   *
+   * This used to return early here, replacing itself with a card for the one position the client
+   * allowed. That is what "I cannot place different trades" was: not a rule and not a refusal a
+   * trader could read, but the two by-Market buttons quietly ceasing to exist the moment a trade
+   * opened, so there was no control left to place another with.
+   *
+   * MetaTrader never does this. Its order window and its open positions are different surfaces: the
+   * positions live in the Toolbox's Trade grid, "open positions above the account summary strip ...
+   * in a single shared column grid" (docs/mt5/09-toolbox.md 250), one row each with its own ticket,
+   * levels and close, and the ticket stays where it is, ready for the next order.
+   */
 
   /** What the bound IS, for the stepper that cannot move past it, and why where there is a why. */
   const atMin = `Minimum volume ${minLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`;
@@ -148,12 +145,12 @@ export function MT5OrderTicket() {
       {/**
         * MetaTrader's execution result, in the window the order was sent from, same as the phone's.
         *
-        * A CONFIRMATION is barely seen here and that is correct: this ticket is replaced by the
-        * live position the moment one opens (see the early return above), and the position itself
-        * is the better confirmation. A REJECTION is what this surface was missing, and it is the
-        * reason the toast stands down while a window is waiting.
+        * `inline` rather than pinned to the bottom of the ticket. This is a DOCKED panel, not the
+        * phone's single-use order window: the trader comes straight back to it for the next order.
+        * Overlaid, the result covered `Sell by Market` and `Buy by Market` and stayed there until
+        * dismissed, so every filled order took the trade buttons away with it.
         */}
-      {result === null ? null : <MT5OrderResult result={result} onDismiss={clear} />}
+      {result === null ? null : <MT5OrderResult result={result} onDismiss={clear} placement="inline" />}
       <div className="flex items-baseline gap-2">
         <span className="text-[13px] font-bold text-white">{symbol}</span>
         {/* MetaTrader states the execution mode on the ticket. Ours fills at the next engine tick. */}
@@ -232,13 +229,7 @@ export function MT5OrderTicket() {
         * be set at all and the target was a different concept wearing MetaTrader's label, so the
         * two shells disagreed about both.
         */}
-      <MT5LevelRows
-        price={price}
-        digits={digits}
-        stakeCents={stakeCents}
-        continuous={continuous}
-        durationLabel={durationLabel(durationS)}
-      />
+      <MT5LevelRows price={price} digits={digits} continuous={continuous} />
 
       {/* Fill policy. MetaTrader's ticket carries this row; under Market Execution the only option
           is "Fill or Kill", rendered as the selected word rather than a dropdown. This engine fills

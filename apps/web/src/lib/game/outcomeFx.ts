@@ -28,6 +28,15 @@ export interface OutcomeFx {
    */
   ticket?: string | undefined;
   direction?: 'buy' | 'sell' | undefined;
+  /**
+   * The instrument the closed position settled on.
+   *
+   * Carried here rather than read from the game socket, because this outcome is rendered by
+   * `OutcomeOverlay`, which is mounted ABOVE `GameSocketProvider` in the tree: a hook into that
+   * provider throws there, and the close notice took the whole app down with it on every settle.
+   * The provider knows the symbol when it fires the outcome, so it states it.
+   */
+  symbol?: string | undefined;
 }
 
 interface OutcomeFxState {
