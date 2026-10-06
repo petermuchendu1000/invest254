@@ -5,6 +5,8 @@ import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
+import { isContinuousBrand } from '@/lib/game/levelWatch';
+import { useBrand } from '@/lib/brand/BrandProvider';
 import { cn } from '@/lib/cn';
 import type { ActivePosition } from '@/lib/game/betting';
 
@@ -30,6 +32,12 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
 }) {
   const money = useDisplayMoney();
   const { sell, earlyCloseEnabled } = useGameSocket();
+  const brand = useBrand();
+  /**
+   * Whether the engine acts on the levels at all: a brand with a price axis, pool mode off. The same
+   * test `openPosition` makes, and NOT `earlyCloseEnabled` alone, which a line brand also reports.
+   */
+  const continuous = isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled });
   // MetaTrader does not close a position straight off a button: it opens the Close position form.
   // See docs/mt5/01-order-and-close-dialogs.md; the one-click close without confirmation is the
   // cross in the Trade tab's Profit column, which is a different control and already correct.
@@ -98,9 +106,14 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
         */}
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums">
         <Row label="Volume" value={lotsOfStake(pos.stakeCents)} />
-        <Row label="Stake" value={money.fmt(pos.stakeCents)} />
+        {/* MetaTrader's row carries BOTH prices: the one it opened at and the one it is at now.
+            Without the open price the S/L and T/P rows are numbers with nothing to read them
+            against, which is the state this card was in. */}
+        <Row label="Price" value={openPrice === null ? '-' : openPrice.toFixed(digits)} />
         <Row label="S / L" value={pos.slPrice === null ? 'not set' : pos.slPrice.toFixed(digits)} />
         <Row label="T / P" value={pos.tpPrice === null ? 'not set' : pos.tpPrice.toFixed(digits)} />
+        <Row label="Price" value={price === null ? '-' : price.toFixed(digits)} />
+        <Row label="Stake" value={money.fmt(pos.stakeCents)} />
         {pos.phase === 'open' ? null : <Row label="State" value={state} />}
       </dl>
 
@@ -123,18 +136,25 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           {closeWhy}
         </button>
       ) : null}
-      <p className="text-[10px] text-[#8fa2b8]">
-        {earlyCloseEnabled
-          ? 'Market execution. Left alone, it closes itself at expiry.'
-          : 'Closes automatically at expiry: market execution.'}
-      </p>
-      {/* MetaTrader's S/L, stated rather than offered: this compact surface carries no level
-          controls, and the ticket, the Toolbox and Modify position all do. The stake is the figure
-          that holds either way, because the continuous payout floors at zero, so it is the most
-          this position can lose whatever the price does and whatever closes it. */}
-      <p className="text-[10px] text-[#8fa2b8]">
-        Max loss {money.fmt(pos.stakeCents)} (the stake). This contract cannot lose more.
-      </p>
+      {/*
+        MetaTrader prints NO sentence under a position.
+
+        Its row is Symbol / Ticket / Time / Type / Volume / Price / S/L / T/P / Price / Profit and
+        stops there (docs/mt5/09-toolbox.md 258). This card carried two lines that were not
+        MetaTrader's and were no longer true: "Closes automatically at expiry: market execution." and
+        "Market execution. Left alone, it closes itself at expiry." A MetaTrader position has no
+        expiry to close at, and on a brand with a price axis this one does not either in any sense a
+        trader would recognise: it ends at its stop, its target, a manual close, or a horizon that is
+        a backstop rather than the trade's character (docs/mt5/20-real-sl-tp.md 122-125).
+
+        A brand with NO axis is the one case where the contract really does end on a term, which
+        MetaTrader has no equivalent for. That divergence is stated once, plainly, and only there.
+      */}
+      {continuous ? null : (
+        <p className="text-[10px] text-[#8fa2b8]">
+          This contract runs to its term: {pos.durationS}s from opening.
+        </p>
+      )}
 
       {closing ? (
         <MT5ClosePosition
