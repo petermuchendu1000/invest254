@@ -114,7 +114,7 @@ export const useSymbolSetStore = create<SymbolSetState>()((set, get) => {
  *
  * Not in the store's initialiser: that runs during the server render too, where there is no
  * localStorage, and a store seeded differently on the two sides is a hydration mismatch. The same
- * reason `takeprofit` restores this way.
+ * reason `levelsStore` restores this way.
  *
  * An EMPTY stored list is respected rather than replaced with the default. `Hide All` is a thing a
  * trader can choose, and reviving eight symbols on the next reload would make it look broken.

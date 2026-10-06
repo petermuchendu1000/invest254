@@ -3,7 +3,8 @@
 import { useEffect } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
-import { useTakeProfitStore } from '@/lib/game/takeprofit';
+import { useLevelsStore } from '@/lib/game/levelsStore';
+import { levelPrice } from '@/lib/game/levelWatch';
 import type { ActivePosition } from '@/lib/game/betting';
 
 /**
@@ -29,7 +30,7 @@ const SL_ORANGE = '#dd5b4e';
 const TP_GREEN = '#0eb52e';
 
 export function MT5ModifyPosition({
-  pos, symbol, digits, openPrice, canTakeProfit, stepCents, onDismiss,
+  pos, symbol, digits, openPrice, canTakeProfit, onDismiss,
 }: {
   pos: ActivePosition;
   symbol: string;
@@ -37,12 +38,21 @@ export function MT5ModifyPosition({
   openPrice: number | null;
   /** False where the engine will not honour an early close, which makes a target unreachable. */
   canTakeProfit: boolean;
-  stepCents: number;
   onDismiss: () => void;
 }) {
   const money = useDisplayMoney();
-  const target = useTakeProfitStore((s) => s.targetCents);
-  const setTarget = useTakeProfitStore((s) => s.set);
+  /**
+   * The SAME levels the ticket and the chart use, as MetaTrader's Modify does.
+   *
+   * This dialog held a money target from its own store before, so modifying a position here could
+   * not move the level drawn on the chart, and the chart's level was invisible here.
+   */
+  const levels = useLevelsStore((s) => s.levels);
+  const setLevels = useLevelsStore((s) => s.set);
+  const levelRef = useLevelsStore((s) => s.ref);
+  const anchor = levelRef ?? openPrice;
+  const slPrice = levelPrice(levels, anchor, 'sl', digits);
+  const tpPrice = levelPrice(levels, anchor, 'tp', digits);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
@@ -50,9 +60,11 @@ export function MT5ModifyPosition({
     return () => window.removeEventListener('keydown', onKey);
   }, [onDismiss]);
 
+  /** One point at a time, which is what MetaTrader's own stepper on this row moves by. */
   const bump = (dir: 1 | -1) => {
-    const next = (target ?? 0) + dir * stepCents;
-    setTarget(next <= 0 ? null : next);
+    if (anchor === null) return;
+    const cur = levels.tpPoints;
+    setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, openPrice);
   };
 
   return (
@@ -79,12 +91,13 @@ export function MT5ModifyPosition({
           <div className="flex items-center justify-between gap-3 border-b px-3 py-3" style={{ borderColor: SL_ORANGE }}>
             <span className="text-[12px] text-[#8fa2b8]">Stop Loss</span>
             <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
-              {money.fmt(pos.stakeCents)} <span className="text-[11px]">(max loss)</span>
+              {slPrice === null ? 'not set' : slPrice.toFixed(digits)}{' '}
+              <span className="text-[11px]">(risks {money.fmt(pos.stakeCents)})</span>
             </span>
           </div>
           <p className="px-3 py-2 text-[11px] leading-snug text-[#8fa2b8]">
-            Fixed. This contract settles at expiry and cannot be closed at a loss, so the stake is
-            the whole of the downside and there is no level at which a stop could fire.
+            The level is the trader&apos;s, and it cannot fire: this contract settles at expiry and
+            cannot be closed at a loss, so the stake is the whole of the downside.
           </p>
 
           <div className="flex items-center justify-between gap-2 border-b px-3 py-3" style={{ borderColor: TP_GREEN }}>
@@ -93,19 +106,19 @@ export function MT5ModifyPosition({
               <button
                 type="button"
                 onClick={() => bump(-1)}
-                disabled={!canTakeProfit || target === null}
+                disabled={!canTakeProfit || anchor === null}
                 aria-label="Lower take profit"
                 className="h-8 w-9 rounded border border-[#2b3543] font-mono text-[13px] transition hover:border-[#3183ff] disabled:opacity-40"
               >
                 −
               </button>
               <span className="min-w-[5.5rem] text-center font-mono text-[13px] tabular-nums">
-                {!canTakeProfit ? 'at expiry' : target === null ? 'not set' : money.fmt(target)}
+                {!canTakeProfit ? 'at expiry' : tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
               </span>
               <button
                 type="button"
                 onClick={() => bump(1)}
-                disabled={!canTakeProfit}
+                disabled={!canTakeProfit || anchor === null}
                 aria-label="Raise take profit"
                 className="h-8 w-9 rounded border border-[#2b3543] font-mono text-[13px] transition hover:border-[#3183ff] disabled:opacity-40"
               >
@@ -115,7 +128,7 @@ export function MT5ModifyPosition({
           </div>
           <p className="px-3 py-2 text-[11px] leading-snug text-[#8fa2b8]">
             {canTakeProfit
-              ? 'An amount, not a price: this payout rises with elapsed time rather than with price, so a price level would pay an amount unrelated to that level.'
+              ? 'A PRICE, as MetaTrader\u2019s is: the contract closes when the price reaches it. What that close pays rises with elapsed time rather than with the distance to the level.'
               : 'This brand settles every contract at expiry, so a profit target cannot close one early.'}
           </p>
         </div>

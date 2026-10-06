@@ -1351,19 +1351,25 @@ export function CandleChart({
               the chart beneath it. Phone only, and only once a level is set: the same `levels`
               store the dialog writes, so dragging the line moves the dialog's figure and stepping
               the dialog's figure moves the line. */}
-          {phone ? (
-            <MT5ChartLevels
-              project={projection}
-              width={plotSize.w}
-              height={plotSize.h}
-              digits={instrument.digits}
-              /* The legend's close is the chart's own current price: it is the forming bar's last
-                 value, which is what the level distances have to be measured from if the lines are
-                 to sit where the trader sees the price. */
-              price={legend?.c ?? null}
-              stakeCents={levelStakeCents}
-            />
-          ) : null}
+          {/**
+            * MetaTrader draws SL and TP on EVERY chart, so this is no longer phone-only.
+            *
+            * It was gated on the `phone` prop, which is why "SL/TP does not work on desktop": the
+            * desktop chart never mounted the levels at all, so there was nothing to see and nothing
+            * to drag. One store feeds both, so a level set in the docked ticket is drawn here and a
+            * drag here moves the ticket's figure.
+            */}
+          <MT5ChartLevels
+            project={projection}
+            width={plotSize.w}
+            height={plotSize.h}
+            digits={instrument.digits}
+            /* The legend's close is the chart's own current price: it is the forming bar's last
+               value, which is what the level distances have to be measured from if the lines are
+               to sit where the trader sees the price. */
+            price={legend?.c ?? null}
+            stakeCents={levelStakeCents}
+          />
           <ChartDrawings
             tool={tool}
             project={projection}

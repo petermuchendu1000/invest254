@@ -253,7 +253,6 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
           digits={digits}
           openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
           canTakeProfit={earlyCloseEnabled}
-          stepCents={10_000}
           onDismiss={() => setSheet(null)}
         />
       ) : null}
