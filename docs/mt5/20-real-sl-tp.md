@@ -124,15 +124,33 @@ stop, its target, a manual close, or the brand's horizon, and choosing a term al
 be two contradictory ways to end one trade. The horizon is the BRAND's: a brand with a price axis
 ignores whatever duration the client sends.
 
-### The horizon, and why its default did not move
+### The horizon: why there is one, and why it is an hour
 
-`defaultDurationS` stays at **10 seconds**, deliberately. At ten seconds a stop barely has room to
-be reached, so the levels only really earn their keep at a longer horizon, and an operator who wants
-MetaTrader's open-ended positions raises it per brand (the bound is 3600).
+Asked directly: *"Do we really need defaultDurationS here? what was the point of SL and TP?"*
 
-That is their call rather than a side effect of shipping this. Raising the shipped default was tried
-and reverted: it changes every brand's character at once, and it broke 10 engine tests whose
-fixtures assume a ten-second term. The economics do not constrain the choice, because the
+Fair, and the first answer shipped was a hedge. The default was left at ten seconds and called the
+operator's call. At ten seconds a stop has no room to be reached, so the levels were decoration.
+
+**Is a horizon needed at all?** MetaTrader has none: a position lives until it is closed or margin
+stops it out. This engine cannot quite do that, for two reasons that are about correctness rather
+than taste:
+
+* **The settlement curve is per day.** A position is valued from `entryT`, an offset into the day it
+  opened in, and the price axis re-anchors at every UTC midnight. A position cannot meaningfully
+  outlive its own day, and the code already treats one re-armed across a boundary as a special case.
+* **There is no margin call to end an abandoned position.** The payout floors at zero, so a position
+  can never go so far against a trader that it must be closed. Without a horizon an abandoned one
+  would sit in the engine's in-memory book for ever.
+
+So a horizon is real. What it must not be is short.
+
+**And it is not a free knob.** The break-even cost is calibrated AT the horizon and scales as its
+square root. A brand holding positions for an hour while pricing them for ten seconds would charge a
+ten-second spread against hour-sized moves and hand the trader the house edge. The horizon a position
+is VALUED over and the horizon it is HELD to have to be the same number.
+
+It is therefore the configured maximum, 3600s: as close to MetaTrader's open-ended position as a
+per-day curve and an in-memory book allow. The economics do not constrain the choice, because the
 calibration re-solves for whatever horizon it is given:
 
 | horizon | measured RTP (target 25%) | break-even cost |
@@ -142,7 +160,8 @@ calibration re-solves for whatever horizon it is given:
 | 300s | 25.33% | 0.01708 |
 | 3600s | 24.97% | 0.05767 |
 
-The cost scales as the square root of the horizon, which is what a martingale implies.
+An operator who wants short contracts lowers it per brand, and in doing so shortens the leash on
+every stop, which is the trade-off stated rather than hidden.
 
 ### Known gap
 

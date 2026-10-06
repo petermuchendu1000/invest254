@@ -18,7 +18,21 @@ import { PoolController, InMemoryPoolRepo, eatDay } from "./poolcontroller.js";
  * It is deterministic. Every seed, clock and draw is fixed, so a failure here reproduces exactly.
  */
 const SITE = "site-soak";
-const cfg = { ...DEFAULT_CONFIG };
+/**
+ * A TEN-SECOND contract, pinned rather than read from the shipped default.
+ *
+ * This soak marches a clock through tens of thousands of contracts back to back, so the horizon it
+ * uses decides how much simulated TIME it covers. The shipped default is now fifteen minutes (a
+ * stop needs room to be reached), and 20,000 of those would span 208 days against a curve that is
+ * built for one: the walk clamps past its day and the economics it is measuring collapse (measured
+ * RTP 0.0082 against a 0.25 target, and the suite's own guard reporting that it "ran past the day
+ * it was priced for").
+ *
+ * What this file tests is money conservation and that the committed payout is the payout paid.
+ * Neither depends on the horizon, so it pins the short one that lets 20,000 contracts fit inside a
+ * single day's curve.
+ */
+const cfg = { ...DEFAULT_CONFIG, defaultDurationS: 10 };
 cfg.minWithdrawalCents = 999_999_999;   // keep the withdrawal-line lever out of the pool decision
 const DAY_START = Date.UTC(2026, 7, 16, 0, 0, 0);
 const T0 = DAY_START + 9 * 3600_000;

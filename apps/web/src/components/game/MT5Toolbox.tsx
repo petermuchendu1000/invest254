@@ -52,7 +52,7 @@ import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
 type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
-  const { activePosition, status, earlyCloseEnabled } = useGameSocket();
+  const { activePosition, status, earlyCloseEnabled, setLevels: pushLevels } = useGameSocket();
   const { getLastTick, getMarket, sell } = useGameSocketApi();
   const { data: wallet } = useWallet();
   const money = useDisplayMoney();
@@ -192,10 +192,33 @@ export function MT5Toolbox() {
   // `livePrice` is already a callback on this component, so the value is read through it.
   const nowPrice = livePrice();
   const anchor = levelRef ?? nowPrice;
-  const slPrice = levelPrice(levels, anchor, 'sl', digits);
-  const tpPrice = levelPrice(levels, anchor, 'tp', digits);
-  /** One point at a time, which is what MetaTrader's own "− value +" on this row steps by. */
+  /**
+   * The S/L and T/P columns show the ENGINE's levels for the open position, not the ticket's.
+   *
+   * These read `levelPrice(levels, ...)`, which is the working copy a trader drags around BEFORE an
+   * order exists. Once a position is open that copy is no longer what will fire: the engine holds
+   * the levels and settles on them. A Toolbox row printing the ticket's numbers would show a stop
+   * that does not exist, and the two would drift apart the moment the ticket was touched again.
+   *
+   * Falls back to the ticket's copy only when nothing is open, which is when that is the only
+   * meaning the row can have.
+   */
+  const slPrice = live?.slPrice ?? (live ? null : levelPrice(levels, anchor, 'sl', digits));
+  const tpPrice = live?.tpPrice ?? (live ? null : levelPrice(levels, anchor, 'tp', digits));
+  /**
+   * One point at a time, which is what MetaTrader's own "− value +" on this row steps by.
+   *
+   * On an OPEN position this is Modify position, so it goes to the engine: stepping it only in the
+   * local store would move a number on screen and leave the stop that actually fires where it was.
+   */
   const stepTp = (dir: 1 | -1) => {
+    const point = 1 / 10 ** digits;
+    if (live && live.phase === 'open') {
+      const base = live.tpPrice ?? nowPrice;
+      if (base === null) return;
+      pushLevels(live.slPrice, Number((base + dir * point).toFixed(digits)));
+      return;
+    }
     if (anchor === null) return;
     const cur = levels.tpPoints;
     setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, nowPrice);
