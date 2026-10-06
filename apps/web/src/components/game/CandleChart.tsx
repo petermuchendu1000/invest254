@@ -13,6 +13,9 @@ import {
   TOOLS, parseDrawings, serializeDrawings, storageKey, type Drawing, type DrawingKind, type ToolId,
 } from '@/lib/chart/drawings';
 import { OBJECT_GROUPS, objectOf } from '@/lib/chart/objects';
+import {
+  atLiveEdge, widthOf, liveWindow, clampBars, zoomedWindow, RIGHT_OFFSET_BARS,
+} from '@/lib/chart/follow';
 import type { Colours } from '@/lib/chart/chartProperties';
 import {
   DEFAULT_PROPERTIES, parseProperties, serializeProperties, storageKey as propsKey,
@@ -108,8 +111,16 @@ const PAGE_TRIGGER_BARS = 40;
 /** Ceiling on bars held client-side, so a long session cannot grow without bound. */
 const MAX_HELD_BARS = 6000;
 
-const MIN_BARS = 8, MAX_BARS = 600, ZOOM_STEP = 0.7, RIGHT_OFFSET_BARS = 3;
-const RESUME_MS = 3000; // auto-return to the live edge after this idle time following manual pan/zoom
+const ZOOM_STEP = 0.7;
+/**
+ * There is no "resume following" timer, and that is the fix rather than an omission.
+ *
+ * A three-second timer used to fire on any wheel, pointerdown or touchstart anywhere on the chart
+ * and force a hard-coded 120-bar window at the live edge, so zooming in on one candle was undone a
+ * moment later at a zoom the trader never chose. MetaTrader has one rule instead, and it is in
+ * lib/chart/follow.ts: a NEW BAR scrolls to the latest bar if the chart was already showing it,
+ * keeping the window's width.
+ */
 
 /**
  * MetaTrader 5's dark theme, sampled from the product (see lib/ui/mt5.ts for the counts).
@@ -258,7 +269,6 @@ export function CandleChart({
   symbolRef.current = symbol;
   const hoverRef = useRef(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
-  const resumeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Guards against firing a page request on every scroll frame, and against racing the initial load. */
   const pagingRef = useRef(false);
   const exhaustedRef = useRef(false);
@@ -313,6 +323,24 @@ export function CandleChart({
   const plotRef = useRef<HTMLDivElement>(null);
   const resizeObsRef = useRef<ResizeObserver | null>(null);
   const followingRef = useRef(true);
+  /**
+   * MetaTrader's "Chart auto scroll", read from inside the animation loop.
+   *
+   * A ref because the loop is installed once and closes over what it can see; the value read at
+   * install time would never change again.
+   */
+  const autoScrollRef = useRef(true);
+  autoScrollRef.current = props.autoScroll;
+  /** The last `scaleFix` written to the price scale, so the effect below writes it only on change. */
+  const scaleFixAppliedRef = useRef<boolean | null>(null);
+  /**
+   * MetaTrader's "Free chart movement": the vertical scale is the trader's, not the bars'.
+   *
+   * True once the price axis has been dragged, and it is what keeps that stretch: the library sets
+   * its own `autoScale: false` on the drag, and this stops the app writing `true` back over it.
+   * MetaTrader's "Auto scale" and "Reset vertical scale" commands are the two ways out.
+   */
+  const [priceManual, setPriceManual] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [legend, setLegend] = useState<Legend | null>(null);
   const visibleBarsRef = useRef(120);
@@ -489,22 +517,49 @@ export function CandleChart({
   const propsForDialog = useMemo(() => ({ ...props, kind: shownKind }), [props, shownKind]);
 
   const setFollow = useCallback((v: boolean) => { followingRef.current = v; }, []);
-  // Chart auto scroll: with it off the chart stays where the trader left it as new bars arrive.
-  useEffect(() => { if (!props.autoScroll) followingRef.current = false; }, [props.autoScroll]);
   const legendOf = (c: Candle): Legend => ({ o: c.open, h: c.high, l: c.low, c: c.close, changePct: c.open ? ((c.close - c.open) / c.open) * 100 : 0 });
 
+  /**
+   * Shift the view to the latest bar, KEEPING THE WIDTH the trader last zoomed to.
+   *
+   * The width is read from the chart rather than from a constant. The old version wrote a
+   * hard-coded 120 bars, so every call silently replaced the trader's zoom with a figure nobody had
+   * chosen; `visibleBarsRef` was only ever written by the toolbar's own +/- buttons.
+   */
   const snapToLive = useCallback(() => {
     const chart = chartRef.current, n = candlesRef.current.length;
     if (!chart || n === 0) return;
-    chart.timeScale().setVisibleLogicalRange({ from: n - 1 - visibleBarsRef.current, to: n - 1 + RIGHT_OFFSET_BARS });
+    const w = widthOf(chart.timeScale().getVisibleLogicalRange(), visibleBarsRef.current);
+    chart.timeScale().setVisibleLogicalRange(liveWindow(n, w));
   }, []);
-  const zoom = useCallback((dir: 'in' | 'out') => {
-    const next = dir === 'in' ? visibleBarsRef.current * ZOOM_STEP : visibleBarsRef.current / ZOOM_STEP;
-    visibleBarsRef.current = Math.min(MAX_BARS, Math.max(MIN_BARS, Math.round(next)));
+  /**
+   * MetaTrader's three vertical-scale commands, which this chart had none of.
+   *
+   * Its chart menu carries `Auto scale`, `Free chart movement` and `Reset vertical scale`, and they
+   * are the control surface for exactly the behaviour a trader complains about when a zoom will not
+   * stay put: auto-scale lets the bars set the scale, free movement hands it to the trader, and
+   * reset puts a stretched scale back. Without them a manual stretch was only escapable by
+   * reloading the page.
+   */
+  const setAutoScale = useCallback((on: boolean) => {
     const chart = chartRef.current; if (!chart) return;
-    if (followingRef.current) snapToLive();
-    else { const r = chart.timeScale().getVisibleLogicalRange(); if (r) chart.timeScale().setVisibleLogicalRange({ from: r.to - visibleBarsRef.current, to: r.to }); }
-  }, [snapToLive]);
+    chart.priceScale('right').applyOptions({ autoScale: on });
+    setPriceManual(!on);
+  }, []);
+  /** MetaTrader's "Reset vertical scale": back to auto, which is the scale it started on. */
+  const resetVerticalScale = useCallback(() => setAutoScale(true), [setAutoScale]);
+  const zoom = useCallback((dir: 'in' | 'out') => {
+    const chart = chartRef.current; if (!chart) return;
+    const r = chart.timeScale().getVisibleLogicalRange();
+    const from = widthOf(r, visibleBarsRef.current);
+    const bars = clampBars(dir === 'in' ? from * ZOOM_STEP : from / ZOOM_STEP);
+    visibleBarsRef.current = bars;
+    // Zooming holds the RIGHT edge still, in history as at the live edge, so the candle being read
+    // does not move out from under the pointer.
+    chart.timeScale().setVisibleLogicalRange(
+      followingRef.current ? liveWindow(candlesRef.current.length, bars) : zoomedWindow(r, bars, candlesRef.current.length),
+    );
+  }, []);
 
   /**
    * Draw whatever is switched on, and remove whatever is not.
@@ -710,9 +765,20 @@ export function CandleChart({
      * scale follows the bars, which is MetaTrader's default. One to one is MetaTrader's third mode
      * and this renderer has no equivalent of it, so it pins the scale the same way rather than
      * claiming a square aspect it cannot hold.
+     *
+     * NOT re-asserted on every run of this effect. This effect depends on the whole properties
+     * object, so it re-ran on any chart setting and on every symbol change, and each run wrote
+     * `autoScale: true` over the `autoScale: false` that dragging the price axis had just set:
+     * stretching the scale by hand and then touching any other setting lost the stretch. It is
+     * written only when `scaleFix` itself changes, or when the trader asks for auto-scale back
+     * through MetaTrader's own command (see `setAutoScale`).
      */
-    chart.priceScale('right').applyOptions({ autoScale: !props.scaleFix });
-  }, [props]);
+    if (scaleFixAppliedRef.current !== props.scaleFix) {
+      scaleFixAppliedRef.current = props.scaleFix;
+      chart.priceScale('right').applyOptions({ autoScale: !props.scaleFix });
+      setPriceManual(false);
+    }
+  }, [props, setPriceManual]);
 
   /**
    * Fixed maximum / Fixed minimum. lightweight-charts has no "set this range" call, so the series
@@ -761,6 +827,20 @@ export function CandleChart({
     setLoadError(null);
     exhaustedRef.current = false;
     pagingRef.current = true; // no paging until the first page has landed
+    /**
+     * Where the trader was looking, in TIME, before the refetch replaces the bars.
+     *
+     * A reconnect and the midnight reseed both land here, and both used to force the view back to
+     * the live edge: a trader reading a candle from this morning lost their place because the
+     * socket blinked. Time rather than logical index, because the array is replaced wholesale and
+     * every index moves; the bar times do not.
+     *
+     * Only kept when the trader was NOT at the live edge. At the edge, going back to the edge is
+     * what they want, and it is also where the new bars are.
+     */
+    const heldView = followingRef.current
+      ? null
+      : chartRef.current?.timeScale().getVisibleRange() ?? null;
     requestCandles(tf, INITIAL_BARS)
       .then((reply) => {
         if (cancelled) return;
@@ -770,8 +850,15 @@ export function CandleChart({
         setInstrument(reply.instrument);
         paint();
         if (reply.bars.length) setLegend(legendOf(reply.bars[reply.bars.length - 1]!));
-        setFollow(true);
-        snapToLive();
+        if (heldView === null) {
+          setFollow(true);
+          snapToLive();
+        } else {
+          // Put them back where they were. The visible-range subscription re-derives `following`
+          // from the restored view, so nothing has to be told that they are still in history.
+          try { chartRef.current?.timeScale().setVisibleRange(heldView); }
+          catch { setFollow(true); snapToLive(); }
+        }
         setLoading(false);
         pagingRef.current = false;
       })
@@ -835,14 +922,29 @@ export function CandleChart({
   useEffect(() => {
     let disposed = false, raf = 0;
     const host = hostRef.current; if (!host) return;
-    const detach = () => {
-      setFollow(false);
-      if (resumeRef.current) clearTimeout(resumeRef.current);
-      resumeRef.current = setTimeout(() => { setFollow(true); snapToLive(); }, RESUME_MS);
+    /**
+     * A drag on the PRICE AXIS is MetaTrader's "free chart movement": the trader has taken the
+     * vertical scale, so the app must stop handing it back to the bars. The library has already set
+     * its own `autoScale: false`; this records it so no later effect writes `true` over it.
+     *
+     * Scoped to the axis, not the plot, because a drag on the plot pans and does not touch the
+     * scale. The axis is the right 56px of the host (`minimumWidth`), which is where the library
+     * draws it.
+     */
+    const onAxisDrag = (e: PointerEvent) => {
+      const box = host.getBoundingClientRect();
+      if (e.clientX >= box.right - 56) setPriceManual(true);
     };
-    host.addEventListener('wheel', detach, { passive: true });
-    host.addEventListener('pointerdown', detach);
-    host.addEventListener('touchstart', detach, { passive: true });
+    host.addEventListener('pointerdown', onAxisDrag);
+
+    /**
+     * Nothing is attached to wheel, pointerdown or touchstart any more.
+     *
+     * Those three listeners armed the resume timer, which is what undid a manual zoom. Following is
+     * now a FACT ABOUT THE VIEW, read off the visible range below, so a gesture needs no handler:
+     * pan away from the last bar and the chart stops following because it is no longer showing it;
+     * pan back and it follows again, with no mode to toggle either way.
+     */
 
     (async () => {
       const lc = await import('lightweight-charts');
@@ -918,6 +1020,28 @@ export function CandleChart({
       // Scrolled near the left edge ⇒ fetch the page before it (MT5/TradingView lazy history).
       chart.timeScale().subscribeVisibleLogicalRangeChange((range: LogicalRange | null) => {
         if (range && range.from < PAGE_TRIGGER_BARS) loadOlder();
+        /**
+         * The trader's own zoom and position, recorded from the view itself.
+         *
+         * This is where a manual pinch, wheel or drag becomes known: the library reports the new
+         * range, the width is remembered so a new bar can preserve it, and whether the chart is
+         * still showing the latest bar decides whether it follows at all.
+         */
+        visibleBarsRef.current = widthOf(range, visibleBarsRef.current);
+        followingRef.current = atLiveEdge(range, candlesRef.current.length);
+        /**
+         * The view, published on the plot.
+         *
+         * A test seam, and the honest one: there is no way to ask the chart its visible range from
+         * outside, and asserting on a React ref asserts on nothing a trader can see. These two say
+         * how wide the window is and whether it is following, which is exactly what broke. Written
+         * to the DOM rather than to state so this handler does not re-render on every pan.
+         */
+        const host = plotRef.current;
+        if (host) {
+          host.dataset.chartBars = String(Math.round(visibleBarsRef.current));
+          host.dataset.chartFollowing = followingRef.current ? '1' : '0';
+        }
         // Objects live in time/price, so every view change has to re-project them onto their bars.
         setRevision((r) => r + 1);
       });
@@ -988,7 +1112,16 @@ export function CandleChart({
           // indicators are in play, and recomputing costs a pass per switched-on indicator.
           if (indRef.current.size > 0) refreshIndicators();
           if (!hoverRef.current) setLegend(legendOf(bar));
-          if (followingRef.current) snapToLive();
+          /**
+           * MetaTrader's "Chart auto scroll", and its whole rule: a NEW BAR scrolls to the latest
+           * bar, if the chart was already showing the latest bar.
+           *
+           * `closedOne` is the new bar. This used to run on EVERY animation frame while following,
+           * which made the chart un-zoomable: any manual range change was overwritten within
+           * 16ms. Gated on the setting too, which is what the setting is for; it was previously
+           * read once and then overridden by the resume timer three seconds later.
+           */
+          if (closedOne && autoScrollRef.current && followingRef.current) snapToLive();
         }
         raf = requestAnimationFrame(loop);
       };
@@ -998,10 +1131,7 @@ export function CandleChart({
     return () => {
       disposed = true;
       if (raf) cancelAnimationFrame(raf);
-      if (resumeRef.current) clearTimeout(resumeRef.current);
-      host.removeEventListener('wheel', detach);
-      host.removeEventListener('pointerdown', detach);
-      host.removeEventListener('touchstart', detach);
+      host.removeEventListener('pointerdown', onAxisDrag);
       chartRef.current?.remove();
       resizeObsRef.current?.disconnect();
       resizeObsRef.current = null;
@@ -1108,14 +1238,43 @@ export function CandleChart({
                         ))}
                       </div>
                     </Section>
+                    {/* MetaTrader's own three vertical-scale commands, in its own words. The
+                        trader who has stretched the price axis by hand had no way back before
+                        these; now Auto scale hands it to the bars, Free chart movement keeps it
+                        theirs, and Reset vertical scale undoes the stretch. */}
+                    <Section title="Scale">
+                      <div className="grid gap-1">
+                        <Toggle on={!priceManual} onClick={() => setAutoScale(true)}>Auto scale</Toggle>
+                        <Toggle on={priceManual} onClick={() => setAutoScale(false)}>Free chart movement</Toggle>
+                        <button
+                          type="button"
+                          onClick={() => { setMenuOpen(false); resetVerticalScale(); }}
+                          className={cn(pill, idle, 'w-full')}
+                        >
+                          Reset vertical scale
+                        </button>
+                      </div>
+                    </Section>
                     <Section title="Chart">
-                      <button
-                        type="button"
-                        onClick={() => { setMenuOpen(false); setPropertiesOpen(true); }}
-                        className={cn(pill, idle, 'w-full')}
-                      >
-                        Properties… F8
-                      </button>
+                      <div className="grid gap-1">
+                        {/* MetaTrader's "Chart auto scroll": a new bar scrolls to the latest bar,
+                            if the chart is already showing it. Its own checkbox lives on the
+                            Properties dialog too; it is here because it is the one setting that
+                            decides whether the view moves on its own. */}
+                        <Toggle
+                          on={props.autoScroll}
+                          onClick={() => changeProps({ ...props, autoScroll: !props.autoScroll })}
+                        >
+                          Chart auto scroll
+                        </Toggle>
+                        <button
+                          type="button"
+                          onClick={() => { setMenuOpen(false); setPropertiesOpen(true); }}
+                          className={cn(pill, idle, 'w-full')}
+                        >
+                          Properties… F8
+                        </button>
+                      </div>
                     </Section>
                     {/* MetaTrader's Navigator tree: its groups, its order, its names. Scrolls because the
                         list is long — which is the point of it. */}
