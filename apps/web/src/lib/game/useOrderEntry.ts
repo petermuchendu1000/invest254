@@ -154,7 +154,15 @@ export function useOrderEntry(): OrderEntry {
   const settledSymbol = market?.instrument.symbol ?? 'XAUUSD';
   const symbol = charted ?? settledSymbol;
   const digits = quote?.instrument.digits ?? market?.instrument.digits ?? 2;
-  const tick = getLastTick();
+  /**
+   * The live quote, which must be one the ENGINE sent.
+   *
+   * The tick buffer can hold invented ticks on a classic brand (see `Tick.synthetic`); pricing one
+   * would put a number on the ticket that no server ever quoted, directly above the Buy and Sell
+   * buttons. No quote at all is the honest state, and every field below already renders it.
+   */
+  const lastTick = getLastTick();
+  const tick = lastTick && lastTick.synthetic !== true ? lastTick : null;
   const priceOfRate = (rate: number | null | undefined): number | null =>
     market && rate !== null && rate !== undefined
       ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue)
