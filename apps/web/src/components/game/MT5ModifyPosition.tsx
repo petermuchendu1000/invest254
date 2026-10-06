@@ -7,7 +7,7 @@ import { useLevelsStore } from '@/lib/game/levelsStore';
 import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
-import type { ActivePosition } from '@/lib/game/betting';
+import { ticketLabel, type ActivePosition } from '@/lib/game/betting';
 
 /**
  * MetaTrader's Modify position screen: the one that edits Stop Loss and Take Profit on a position
@@ -122,7 +122,7 @@ export function MT5ModifyPosition({
           <button type="button" onClick={onDismiss} aria-label="Back" className="-ml-1 shrink-0 px-1 text-[20px] leading-none text-[#8fa2b8] transition hover:text-white">‹</button>
           <span className="min-w-0">
             <span className="block truncate text-[15px] font-semibold leading-tight">
-              Modify position #{pos.positionId ? pos.positionId.slice(0, 8) : '…'}
+              Modify position #{ticketLabel(pos)}
             </span>
             <span className="block truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">
               {pos.direction} {lotsOfStake(pos.stakeCents, volumeDigits)} {symbol} at {openPrice === null ? '-' : openPrice.toFixed(digits)}

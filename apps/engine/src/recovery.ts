@@ -208,6 +208,9 @@ export class RecoveryService {
               nonce: decision.nonce ?? row.nonce, poolControlled: true,
               // A pool trade is never continuous: the controller decided it, not the curve.
               continuous: false, slPrice: null, tpPrice: null,
+              // The SAME ticket the trader has been quoting since the trade opened (0184). A restart
+              // must not renumber a live position.
+              ticket: row.ticket ?? null,
             };
             if (this.game.rearm(p)) report.rearmed++; else report.noop++;
           }
@@ -265,6 +268,9 @@ export class RecoveryService {
             continuous: this.game.hasPriceAxis,
             slPrice: row.slPrice ?? null,
             tpPrice: row.tpPrice ?? null,
+            // The ticket the trade opened under (0184), for the same reason the levels are here: a
+            // deploy must not change the number a trader is looking at.
+            ticket: row.ticket ?? null,
           };
           if (this.game.rearm(p)) report.rearmed++; else report.noop++;
         }

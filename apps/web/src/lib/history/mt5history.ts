@@ -66,7 +66,7 @@ export const priceKnown = (atMs: number, anchorDate: string | null | undefined):
 // ───────────────────────────────── period ─────────────────────────────────
 
 /** MetaTrader's period menu, in its order. */
-export type PeriodKey = 'today' | 'week' | 'month' | 'quarter' | 'custom';
+export type PeriodKey = 'all' | 'today' | 'week' | 'month' | 'quarter' | 'custom';
 
 export const PERIODS: ReadonlyArray<{ key: PeriodKey; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -74,6 +74,24 @@ export const PERIODS: ReadonlyArray<{ key: PeriodKey; label: string }> = [
   { key: 'month', label: 'Last month' },
   { key: 'quarter', label: 'Last 3 months' },
   { key: 'custom', label: 'Custom period' },
+];
+
+/**
+ * The DESKTOP period presets, which are a different list from the mobile five above.
+ *
+ * docs/mt5/09-toolbox.md 667-677 reads them off `history.png`: four entries, Title Case, and
+ * "There is no 'Today', no 'Last 3 days', no 'Last week'" on desktop. 683-685 records the mobile
+ * list as "different again", so the two lists coexist rather than one replacing the other, and
+ * `PERIODS` stays the mobile History screen's.
+ *
+ * No entry carries a tick in the published menu, unlike the view-mode block right above it
+ * (:658), so which one opens selected is the caller's decision rather than a reading.
+ */
+export const DESKTOP_PERIODS: ReadonlyArray<{ key: PeriodKey; label: string }> = [
+  { key: 'all', label: 'All History' },
+  { key: 'quarter', label: 'Last 3 Months' },
+  { key: 'month', label: 'Last Month' },
+  { key: 'custom', label: 'Custom Period' },
 ];
 
 export interface Range {
@@ -100,6 +118,9 @@ export function periodRange(key: PeriodKey, nowMs: number, custom?: Partial<Rang
   const today = startOfDay(nowMs);
   const toMs = today + DAY_MS;
   switch (key) {
+    // `All History` (09-toolbox.md 670) has no start: every record the account has ever held.
+    case 'all':
+      return { fromMs: 0, toMs };
     case 'today':
       return { fromMs: today, toMs };
     case 'week':
@@ -196,6 +217,15 @@ export interface DealRow {
   amountCents: number | null;
   /** The price this execution happened at — entry on an `in` deal, exit on an `out` one. */
   price: number | null;
+  /**
+   * The price the round trip OPENED at, carried on both of its deals.
+   *
+   * The pair to `openMs`, and there for the same reason: MetaTrader's `Change` column is "a
+   * percentage change in the asset price at the time when profit/loss is locked in"
+   * (09-toolbox.md 636), which is a figure over the whole round trip, so an `out` deal cannot
+   * state it from its own exit price alone.
+   */
+  openPrice: number | null;
 }
 
 /**
@@ -223,8 +253,26 @@ export interface PositionRow {
   exitPrice: number | null;
 }
 
-/** MetaTrader shows a ticket as a plain number; ours are uuids, so the leading block stands in. */
+/**
+ * The stand-in ticket for a record that genuinely has no number of its own.
+ *
+ * A BALANCE operation is the only such record left: a deposit or a withdrawal is a transaction, not
+ * a position, and nothing allocates it a ticket. MetaTrader does give balance deals a ticket, so
+ * this keeps the column populated and the row identifiable rather than blank, but it is a uuid
+ * fragment and is labelled as one here so nobody mistakes it for a number a trader can quote.
+ */
 export const ticketOf = (id: string): string => id.replace(/-/g, '').slice(0, 8);
+
+/**
+ * A position's ticket: MetaTrader's own, the short ascending integer from migration 0184.
+ *
+ * The fallback is for a row written before that column existed and never backfilled. The migration
+ * backfills every row it finds, in opening order, so in practice this cannot be reached; it is here
+ * so a history grid pointed at an older database still identifies its rows instead of printing a
+ * column of dashes.
+ */
+export const positionTicket = (p: PositionDto): string =>
+  p.ticket === null || p.ticket === undefined ? ticketOf(p.id) : String(p.ticket);
 
 const inRange = (ms: number, r: Range) => ms >= r.fromMs && ms < r.toMs;
 
@@ -253,7 +301,7 @@ export function orderRows(
     const canceled = p.result === 'void';
     out.push({
       id: p.id,
-      ticket: ticketOf(p.id),
+      ticket: positionTicket(p),
       // The instrument this order was for (migration 0182). The parameter is the FALLBACK, for a
       // row written before the column existed, which means the brand's own symbol.
       symbol: p.symbol ?? symbol,
@@ -283,19 +331,21 @@ export function dealRows(
     const lots = lotsOf(p.stakeCents);
     if (inRange(p.openedAt, range)) {
       out.push({
-        id: `${p.id}:in`, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
+        id: `${p.id}:in`, ticket: positionTicket(p), kind: 'trade', symbol: p.symbol ?? symbol,
         side: p.direction, entry: 'in', lots, label: null, atMs: p.openedAt, amountCents: null,
         openMs: p.openedAt, closeMs: p.settledAt, price: p.entryPrice ?? null,
+        openPrice: p.entryPrice ?? null,
       });
     }
     // Closing a BUY is a sell execution, and vice versa — MetaTrader reports the deal's own
     // direction, not the position's.
     if (p.settledAt !== null && inRange(p.settledAt, range)) {
       out.push({
-        id: `${p.id}:out`, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
+        id: `${p.id}:out`, ticket: positionTicket(p), kind: 'trade', symbol: p.symbol ?? symbol,
         side: p.direction === 'buy' ? 'sell' : 'buy', entry: 'out', lots, label: null,
         atMs: p.settledAt, openMs: p.openedAt, closeMs: p.settledAt,
         amountCents: p.pnlCents, price: p.exitPrice ?? null,
+        openPrice: p.entryPrice ?? null,
       });
     }
   }
@@ -306,6 +356,7 @@ export function dealRows(
       side: null, entry: null, lots: null,
       label: t.kind === 'withdrawal' ? 'Withdrawal' : 'Deposit',
       atMs: t.ts, openMs: t.ts, closeMs: t.ts, amountCents: signedCents(t), price: null,
+      openPrice: null,
     });
   }
   return out;
@@ -325,7 +376,7 @@ export function positionRows(
     if (p.settledAt === null || p.result === 'void') continue;
     if (!inRange(p.settledAt, range)) continue;
     out.push({
-      id: p.id, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
+      id: p.id, ticket: positionTicket(p), kind: 'trade', symbol: p.symbol ?? symbol,
       side: p.direction, lots: lotsOf(p.stakeCents), label: null,
       atMs: p.settledAt, openMs: p.openedAt, closeMs: p.settledAt, amountCents: p.pnlCents,
       entryPrice: p.entryPrice ?? null, exitPrice: p.exitPrice ?? null,
@@ -383,6 +434,77 @@ export function moneySummary(rows: ReadonlyArray<{ kind: 'trade' | 'balance'; am
   return { profitCents, depositCents, balanceCents: profitCents + depositCents };
 }
 
+/**
+ * The DESKTOP Toolbox History summary strip, which is a different line from `moneySummary`.
+ *
+ * docs/mt5/09-toolbox.md 722-739 gives five fields in this order and defines each verbatim:
+ * "Profit — profit or loss relative to the initial deposit / Credit — amount credited by the
+ * brokerage company / Deposit — deposit of the account (the sum of balance type operations with a
+ * positive value) / Withdrawal — amount withdrawn from the account (the sum of balance type
+ * operations with a negative value)", and "The current account balance is displayed at the end of
+ * the line". So Deposit and Withdrawal are the two SIGNED halves of the balance operations, where
+ * `moneySummary` nets them into one Deposit figure for the mobile screen's three-line summary.
+ *
+ * CREDIT is structurally zero here and is still printed, because MetaTrader prints it as `0.00`
+ * in its own screenshot (:725) rather than dropping it: a credit is money the broker lends the
+ * account, and this platform lends none. The field is a fact about the account, not a gap.
+ *
+ * Balance is the three added up, which is exactly how MetaTrader's own strip adds up
+ * (591.31 + 3 000.00 - 250.00 = 3 341.31 at :725) — it is the account's balance over the period
+ * the strip is describing, not the wallet's figure today, which would disagree with the rows
+ * above it whenever the period is not All History.
+ */
+export interface HistoryStrip {
+  profitCents: number;
+  creditCents: number;
+  depositCents: number;
+  withdrawalCents: number;
+  balanceCents: number;
+}
+
+export function historyStrip(
+  rows: ReadonlyArray<{ kind: 'trade' | 'balance'; amountCents: number | null }>,
+): HistoryStrip {
+  let profitCents = 0;
+  let depositCents = 0;
+  let withdrawalCents = 0;
+  for (const r of rows) {
+    if (r.amountCents === null) continue;
+    if (r.kind !== 'balance') profitCents += r.amountCents;
+    else if (r.amountCents >= 0) depositCents += r.amountCents;
+    else withdrawalCents += r.amountCents;
+  }
+  return {
+    profitCents,
+    creditCents: 0,
+    depositCents,
+    withdrawalCents,
+    balanceCents: profitCents + depositCents + withdrawalCents,
+  };
+}
+
+/**
+ * MetaTrader's `Change` column: the percentage the ASSET PRICE moved over the round trip.
+ *
+ * 09-toolbox.md 636 defines it as "a percentage change in the asset price at the time when
+ * profit/loss is locked in", which is the price's own move and not the trade's result — so a
+ * winning SELL prints a negative Change, and that is right rather than a sign bug.
+ *
+ * Null wherever either end is unknown: a trade placed before the engine stamped execution prices
+ * (migration 0180) has no price to measure, and an invented percentage would be worse than a
+ * blank cell.
+ */
+export function priceChangePct(from: number | null, to: number | null): number | null {
+  if (typeof from !== 'number' || typeof to !== 'number') return null;
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === 0) return null;
+  return ((to - from) / from) * 100;
+}
+
+/** `2.18 %` / `-0.01 %` — the spacing MetaTrader's own cells carry (09-toolbox.md 645). */
+export function changeText(pct: number | null): string {
+  return pct === null ? '' : `${pct.toFixed(2)} %`;
+}
+
 // ───────────────────────────────── sorting ─────────────────────────────────
 
 /**
@@ -422,6 +544,24 @@ interface Sortable {
  * A row with no close time sorts on the one time it has rather than being pushed to an end, because
  * a cancelled order is not older or newer than a settled one, it simply never closed.
  */
+/**
+ * Compare two tickets the way a trader expects them ordered.
+ *
+ * MetaTrader's tickets are integers, and sorting them as text puts `1000000` before `999999` the
+ * moment the sequence crosses a digit boundary, which is the one thing a ticket sort must not do.
+ * Numbers therefore compare as numbers; a balance operation's uuid fragment is not a number, so it
+ * falls back to text and sorts after the real tickets rather than interleaving with them.
+ */
+function compareTickets(a: string, b: string): number {
+  const na = Number(a);
+  const nb = Number(b);
+  const aNum = a !== '' && Number.isFinite(na);
+  const bNum = b !== '' && Number.isFinite(nb);
+  if (aNum && bNum) return na - nb;
+  if (aNum !== bNum) return aNum ? -1 : 1;
+  return a.localeCompare(b);
+}
+
 export function sortRows<T extends Sortable>(rows: readonly T[], key: SortKey, ascending: boolean): T[] {
   const dir = ascending ? 1 : -1;
   const timeOf = (r: Sortable): number =>
@@ -430,7 +570,7 @@ export function sortRows<T extends Sortable>(rows: readonly T[], key: SortKey, a
   out.sort((a, b) => {
     let d = 0;
     if (key === 'symbol') d = a.symbol.localeCompare(b.symbol);
-    else if (key === 'ticket') d = a.ticket.localeCompare(b.ticket);
+    else if (key === 'ticket') d = compareTickets(a.ticket, b.ticket);
     else if (key === 'profit') d = (a.amountCents ?? 0) - (b.amountCents ?? 0);
     else d = timeOf(a) - timeOf(b);
     if (d !== 0) return dir * d;

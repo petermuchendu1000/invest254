@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  periodRange, periodSubtitle, dateOnly, stamp, ticketOf, isCompleted, signedCents, tradeDateOf, priceKnown,
+  periodRange, periodSubtitle, dateOnly, stamp, ticketOf, positionTicket, isCompleted, signedCents, tradeDateOf, priceKnown,
   orderRows, dealRows, positionRows, ordersSummary, moneySummary, sortRows, priceText, EXECUTION_PRICE,
 } from './mt5history.js';
 import type { PositionDto, TransactionDto } from '../api/types.js';
@@ -78,8 +78,29 @@ test('a price is only knowable on the day its axis is anchored to', () => {
   for (const a of [null, undefined, '']) assert.ok(!priceKnown(noon, a), String(a));
 });
 
-test('ticketOf: a uuid becomes a short MetaTrader-looking ticket', () => {
+test('ticketOf: a record with no ticket of its own falls back to a uuid fragment', () => {
+  // The only such record left is a BALANCE operation: a deposit is a transaction, not a position,
+  // and nothing allocates it a number.
   assert.equal(ticketOf('3f2a1b4c-5d6e-7f80-9112-233445566778'), '3f2a1b4c');
+});
+
+test('positionTicket: a position shows MetaTrader\u2019s own ticket, not eight hex characters', () => {
+  // Migration 0184. The hex fragment was never a ticket: it does not order, and it cannot be read
+  // out over a phone call to support.
+  assert.equal(positionTicket(pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW, ticket: 328674 })), '328674');
+  // A row from before the column (the migration backfills every one it finds, so this is the
+  // older-database case) keeps an identifier rather than printing a blank column.
+  assert.equal(positionTicket(pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW })), '3f2a1b4c');
+  assert.equal(positionTicket(pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW, ticket: null })), '3f2a1b4c');
+});
+
+test('the history grids carry the real ticket through to every row kind', () => {
+  const p = pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW, ticket: 328674 });
+  const range = { fromMs: NOW - DAY, toMs: NOW + DAY };
+  assert.deepEqual(orderRows([p], range, 'XAUUSD', lots).map((r) => r.ticket), ['328674']);
+  // A deal row per side of the round trip, both under the position's one ticket.
+  assert.deepEqual(dealRows([p], [], range, 'XAUUSD', lots).map((r) => r.ticket), ['328674', '328674']);
+  assert.deepEqual(positionRows([p], [], range, 'XAUUSD', lots).map((r) => r.ticket), ['328674']);
 });
 
 test('only money that actually moved is a balance operation', () => {
@@ -195,6 +216,25 @@ test('sortRows: every key sorts both ways and never mutates the input', () => {
   // A row with no result sorts as zero, between the loss and the win.
   assert.deepEqual(sortRows(rows, 'profit', true).map((r) => r.amountCents), [-5, null, 10]);
   assert.equal(JSON.stringify(rows), before, 'input untouched');
+});
+
+test('sortRows: tickets sort as numbers, so a digit boundary does not reorder them', () => {
+  // MetaTrader's tickets are integers. Sorted as text, `1000000` lands before `999999` the moment
+  // the sequence crosses a digit boundary, which is the one thing a ticket sort must not do.
+  const rows = [
+    { symbol: 'A', ticket: '1000000', atMs: 300 },
+    { symbol: 'A', ticket: '999999', atMs: 200 },
+    { symbol: 'A', ticket: '100000', atMs: 100 },
+  ];
+  assert.deepEqual(sortRows(rows, 'ticket', true).map((r) => r.ticket), ['100000', '999999', '1000000']);
+  // A balance operation's uuid fragment is not a number, so it groups after the real tickets rather
+  // than interleaving with them at whatever its first hex character happens to be.
+  const mixed = [
+    { symbol: 'A', ticket: '3f2a1b4c', atMs: 300 },
+    { symbol: 'A', ticket: '100001', atMs: 200 },
+    { symbol: 'A', ticket: '100000', atMs: 100 },
+  ];
+  assert.deepEqual(sortRows(mixed, 'ticket', true).map((r) => r.ticket), ['100000', '100001', '3f2a1b4c']);
 });
 
 /** History's sort is `Symbol · Ticket · Open time · Close time · Profit` (04-mobile-app.md 422). */

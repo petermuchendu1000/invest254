@@ -6,7 +6,7 @@ import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useDisplayMoney } from '@/lib/money';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { dealResultLabel } from '@/lib/game/dealWording';
-import { priceText } from '@/lib/history/mt5history';
+import { positionTicket, priceText } from '@/lib/history/mt5history';
 import { XAUUSD } from '@invest254/shared/candles';
 import { MT5TitleBar, MT5Summary, MT5SummaryLine } from '@/components/mt5/kit';
 import { cn } from '@/lib/cn';
@@ -75,7 +75,7 @@ function MT5PositionDetail({ id, onClose }: { id: string | null; onClose: () => 
         <MT5TitleBar
           embedded
           title="Position detail"
-          subtitle={data ? `#${data.id.slice(0, 8)}` : undefined}
+          subtitle={data ? `#${positionTicket(data)}` : undefined}
           actions={
             <button type="button" onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded text-white">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-4 w-4" aria-hidden>

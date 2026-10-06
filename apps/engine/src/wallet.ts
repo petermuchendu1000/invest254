@@ -25,7 +25,18 @@ export interface OpenArgs {
   siteId?: string | null;
 }
 export interface SettleArgs { positionId: string; exitRate: number; result: "win" | "loss"; multiplier: number; payoutCents: Cents; }
-export interface OpenResult { positionId: string; newBalance: Cents; }
+export interface OpenResult {
+  positionId: string; newBalance: Cents;
+  /**
+   * MetaTrader's TICKET: the short ascending integer a trader quotes (migration 0184).
+   *
+   * Read back from the row the money RPC just inserted, as its own SELECT — `fn_open_position`'s
+   * signature is untouched (0182 explains why it must stay that way), and the column fills itself
+   * from a sequence DEFAULT inside that same INSERT. Null only when the read-back could not be done,
+   * which the surfaces render the way they already render an unstamped display price.
+   */
+  ticket: number | null;
+}
 /** Open args for a Phase-2 contract (digit/multiplier): OpenArgs + the contract kind & params. */
 export interface OpenContractArgs extends OpenArgs { kind: "digit" | "multiplier"; contract: unknown; }
 export interface SettleResult { settled: boolean; newBalance: Cents; }
@@ -53,6 +64,12 @@ export interface OpenPositionRow {
    */
   slPrice?: number | null;
   tpPrice?: number | null;
+  /**
+   * The ticket this position was opened under (migration 0184), so a position re-armed after a
+   * restart comes back carrying the SAME number the trader has been quoting. Optional so an older
+   * repository fake keeps compiling; absent reads as "unknown", exactly as it did before the column.
+   */
+  ticket?: number | null;
 }
 
 /** Public fairness record for a day (commitment always; seed only after reveal). */
@@ -84,6 +101,14 @@ export interface PositionRecord {
   entryPrice: number | null; exitPrice: number | null;
   /** Instrument traded (migration 0182). Null means the brand's own symbol. */
   symbol: string | null;
+  /**
+   * MetaTrader's ticket (migration 0184): the number this trade is known by.
+   *
+   * `id` stays the uuid every internal path keys on; this is the one a trader reads, quotes and
+   * sorts by. Null on a row written before the column existed, which the surfaces print as a dash
+   * rather than inventing a number.
+   */
+  ticket: number | null;
 }
 
 /** A single position plus its day's public fairness data (seed hidden until reveal). */
@@ -185,6 +210,8 @@ interface MemPos {
   /** Migration 0183's columns, so recovery can be exercised without a database. */
   slPrice?: number | null;
   tpPrice?: number | null;
+  /** Migration 0184's ticket, allocated the same way the sequence does: ascending, from 100000. */
+  ticket: number;
 }
 interface MemLedger {
   id: number; userId: string; type: string; amount: Cents; balanceKind: string;
@@ -217,6 +244,11 @@ export class InMemoryGameRepository implements GameRepository {
   private seedVersions = new Map<string, number>();
   private nextDayId = 1;
   private posSeq = 0;
+  /**
+   * The in-memory stand-in for `position_ticket_seq` (migration 0184), starting where the sequence
+   * starts so a ticket looks the same against this repository as against Postgres.
+   */
+  private ticketSeq = 100_000;
   private ledgerSeq = 0;
   readonly ledger: MemLedger[] = [];
 
@@ -269,15 +301,17 @@ export class InMemoryGameRepository implements GameRepository {
     if (bal < a.stakeCents) throw new Error("INSUFFICIENT_FUNDS");
     const next = bal - a.stakeCents; book.set(a.userId, next);
     const id = randomUUID();
+    const ticket = this.ticketSeq++;
     this.positions.set(id, {
       id, userId: a.userId, stake: a.stakeCents, status: "open",
       direction: a.direction, durationS: a.durationS, openedAtMs: a.openedAtMs,
       entryRate: a.entryRate, gameDayId: a.gameDayId, nonce: a.nonce,
       configVersion: a.configVersion ?? null, seq: ++this.posSeq, siteId: a.siteId ?? null,
       exitRate: null, multiplier: null, payout: null, pnl: null, result: null, settledAtMs: null, demo: marketer,
+      ticket,
     });
     this.pushLedger(a.userId, "stake", -a.stakeCents, kind, "positions", id, null, a.siteId ?? null);
-    return { positionId: id, newBalance: next };
+    return { positionId: id, newBalance: next, ticket };
   }
 
   async openContract(a: OpenContractArgs): Promise<OpenResult> {
@@ -344,7 +378,7 @@ export class InMemoryGameRepository implements GameRepository {
     for (const p of this.positions.values()) {
       if (p.status !== "open") continue;
       const meta = this.contractMeta.get(p.id);
-      out.push({ id: p.id, userId: p.userId, stakeCents: p.stake, direction: p.direction, durationS: p.durationS, openedAtMs: p.openedAtMs, entryRate: p.entryRate, gameDayId: p.gameDayId, nonce: p.nonce, configVersion: p.configVersion, siteId: p.siteId, kind: meta?.kind ?? "rise_fall", contract: meta?.contract ?? null, slPrice: p.slPrice ?? null, tpPrice: p.tpPrice ?? null });
+      out.push({ id: p.id, userId: p.userId, stakeCents: p.stake, direction: p.direction, durationS: p.durationS, openedAtMs: p.openedAtMs, entryRate: p.entryRate, gameDayId: p.gameDayId, nonce: p.nonce, configVersion: p.configVersion, siteId: p.siteId, kind: meta?.kind ?? "rise_fall", contract: meta?.contract ?? null, slPrice: p.slPrice ?? null, tpPrice: p.tpPrice ?? null, ticket: p.ticket ?? null });
     }
     return out;
   }
@@ -448,6 +482,7 @@ function toPositionRecord(p: MemPos): PositionRecord {
     // The dev/test repository stores no display prices: there is no day chain behind it to anchor
     // them to, and "at market" is the honest fallback (migration 0180).
     entryPrice: null, exitPrice: null, symbol: null,
+    ticket: p.ticket ?? null,
   };
 }
 
@@ -491,14 +526,39 @@ export class PgGameRepository implements GameRepository {
     // matches migration 0047: fn_open_position(user,stake,direction,entry_rate,duration_s,game_day,nonce,opened_at,config_version,site_id)
     const r = await this.q.query("select position_id, new_balance from fn_open_position($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
       [a.userId, a.stakeCents, a.direction, a.entryRate, a.durationS, a.gameDayId, a.nonce, new Date(a.openedAtMs).toISOString(), a.configVersion, a.siteId ?? null]);
-    return { positionId: r.rows[0].position_id, newBalance: toCents(r.rows[0].new_balance) };
+    const positionId = String(r.rows[0].position_id);
+    return { positionId, newBalance: toCents(r.rows[0].new_balance), ticket: await this.readTicket(positionId) };
   }
   async openContract(a: OpenContractArgs): Promise<OpenResult> {
     // migration 0113: fn_open_contract(user,stake,kind,contract,direction,entry_rate,duration_s,game_day,nonce,opened_at,config_version,site_id)
     const r = await this.q.query(
       "select position_id, new_balance from fn_open_contract($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
       [a.userId, a.stakeCents, a.kind, JSON.stringify(a.contract ?? {}), a.direction, a.entryRate, a.durationS, a.gameDayId, a.nonce, new Date(a.openedAtMs).toISOString(), a.configVersion, a.siteId ?? null]);
-    return { positionId: r.rows[0].position_id, newBalance: toCents(r.rows[0].new_balance) };
+    const positionId = String(r.rows[0].position_id);
+    return { positionId, newBalance: toCents(r.rows[0].new_balance), ticket: await this.readTicket(positionId) };
+  }
+
+  /**
+   * Read back the ticket the sequence DEFAULT just allocated (migration 0184).
+   *
+   * Its OWN statement, after the money RPC has returned and committed, for the reason 0184 spells
+   * out: `fn_open_position`'s ten-argument signature cannot change, so the ticket cannot come back
+   * through it. Folding the read into the same statement with a CTE would not work either — under
+   * READ COMMITTED a join does not see the row the function inserted in that same command.
+   *
+   * A primary-key lookup, so it is the cheapest query the open path makes. It NEVER fails the open:
+   * the money has already moved, and refusing a trade that succeeded because its display number
+   * could not be read would be the worse outcome by a wide margin. A null ticket renders as a dash,
+   * exactly like an unstamped display price.
+   */
+  private async readTicket(positionId: string): Promise<number | null> {
+    try {
+      const r = await this.q.query("select ticket from positions where id = $1::uuid", [positionId]);
+      const t = r.rows[0]?.ticket;
+      return t === null || t === undefined ? null : Number(t);
+    } catch {
+      return null;
+    }
   }
   async settlePosition(a: SettleArgs): Promise<SettleResult> {
     const r = await this.q.query("select settled, new_balance from fn_settle_position($1,$2,$3,$4,$5)",
@@ -532,7 +592,7 @@ export class PgGameRepository implements GameRepository {
   }
   async listOpenPositions(): Promise<OpenPositionRow[]> {
     const r = await this.q.query(
-      "select id, user_id, stake, direction, duration_s, opened_at, entry_rate, game_day_id, nonce, config_version, site_id, kind, contract, sl_price, tp_price from positions where status = 'open' order by opened_at", []);
+      "select id, user_id, stake, direction, duration_s, opened_at, entry_rate, game_day_id, nonce, config_version, site_id, kind, contract, sl_price, tp_price, ticket from positions where status = 'open' order by opened_at", []);
     return r.rows.map((x) => ({
       id: String(x.id), userId: String(x.user_id), stakeCents: toCents(x.stake), direction: x.direction as Direction,
       durationS: Number(x.duration_s), openedAtMs: toMs(x.opened_at), entryRate: Number(x.entry_rate),
@@ -543,6 +603,7 @@ export class PgGameRepository implements GameRepository {
       contract: x.contract ?? null,
       slPrice: x.sl_price === null || x.sl_price === undefined ? null : Number(x.sl_price),
       tpPrice: x.tp_price === null || x.tp_price === undefined ? null : Number(x.tp_price),
+      ticket: x.ticket === null || x.ticket === undefined ? null : Number(x.ticket),
     }));
   }
   async getFairness(tradeDate: string): Promise<FairnessRecord | null> {
@@ -580,7 +641,7 @@ export class PgGameRepository implements GameRepository {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
-      `select id, user_id, game_day_id, direction, stake, entry_rate, exit_rate, entry_price, exit_price, symbol, multiplier, payout, pnl, result, duration_s, status, opened_at, settled_at
+      `select id, user_id, game_day_id, direction, stake, entry_rate, exit_rate, entry_price, exit_price, symbol, ticket, multiplier, payout, pnl, result, duration_s, status, opened_at, settled_at
          from positions
         where user_id = $1
           and ($6::uuid is null or site_id = $6)
@@ -622,7 +683,7 @@ export class PgGameRepository implements GameRepository {
 
   async getPositionDetail(userId: string, positionId: string, siteId?: string): Promise<PositionDetail | null> {
     const r = await this.q.query(
-      `select p.id, p.user_id, p.game_day_id, p.direction, p.stake, p.entry_rate, p.exit_rate, p.entry_price, p.exit_price, p.symbol, p.multiplier, p.payout, p.pnl, p.result, p.duration_s, p.status, p.opened_at, p.settled_at,
+      `select p.id, p.user_id, p.game_day_id, p.direction, p.stake, p.entry_rate, p.exit_rate, p.entry_price, p.exit_price, p.symbol, p.ticket, p.multiplier, p.payout, p.pnl, p.result, p.duration_s, p.status, p.opened_at, p.settled_at,
               f.id as f_id, f.trade_date as f_trade_date, f.server_seed_hash as f_hash, f.server_seed as f_seed, f.revealed_at as f_revealed
          from positions p
          left join v_fairness f on f.id = p.game_day_id
@@ -712,6 +773,9 @@ function mapPositionRow(x: any): PositionRecord {
     // The instrument (0182). Null on any row written before the column, which the client reads as
     // the brand's own symbol: exactly what every row meant before this existed.
     symbol: x.symbol === null || x.symbol === undefined ? null : String(x.symbol),
+    // The ticket (0184). Null only on a row that predates the column; every row written since
+    // carries one, because the sequence DEFAULT fires inside the money RPC's own INSERT.
+    ticket: x.ticket === null || x.ticket === undefined ? null : Number(x.ticket),
   };
 }
 

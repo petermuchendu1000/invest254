@@ -217,6 +217,9 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
     return {
       positions: rt.game.openPositionsOf(userId).map((p) => ({
         positionId: p.id,
+        // MetaTrader's ticket (0184). A refreshed tab gets the trade back under the SAME number it
+        // was showing before, which is the whole point of a ticket.
+        ticket: p.ticket,
         direction: p.direction,
         stakeCents: p.stakeCents,
         durationS: p.durationS,
@@ -359,6 +362,9 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
         onSettled: (e) => {
           toSiteUser(siteId, e.position.userId, "position_settled", {
             positionId: e.position.id,
+            // The ticket, so the deal the terminal reports closed is named the way MetaTrader names
+            // one ("Close #328906"), including when the settle arrives after a reconnect.
+            ticket: e.position.ticket,
             // On a continuous contract the result is whatever the close actually paid, not a
             // decision taken at open, so it is read off the money rather than off `outcome`.
             result: e.position.continuous ? (e.payoutCents > e.position.stakeCents ? "win" : "loss") : e.position.outcome.result,
@@ -491,7 +497,7 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                 role: roleOf.get(ws) ?? "player",
                 slPrice: lvl(msg.data.slPrice), tpPrice: lvl(msg.data.tpPrice),
               });
-              send(ws, "position_opened", { positionId: p.id, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs, slPrice: p.slPrice, tpPrice: p.tpPrice });
+              send(ws, "position_opened", { positionId: p.id, ticket: p.ticket, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs, slPrice: p.slPrice, tpPrice: p.tpPrice });
               // Bonus-first staking (0094) spends bonus_balance before real, so the stake usually
               // moves BOTH buckets — push the full snapshot or the client bonus figure goes stale.
               const afterOpen = await opts.repo.getWalletSnapshot(userId);

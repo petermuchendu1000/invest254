@@ -7,7 +7,7 @@ import { useDisplayMoney } from '@/lib/money';
 import { useLevelsStore } from '@/lib/game/levelsStore';
 import { levelPrice } from '@/lib/game/levelWatch';
 import { cn } from '@/lib/cn';
-import type { ActivePosition } from '@/lib/game/betting';
+import { ticketLabel, type ActivePosition } from '@/lib/game/betting';
 
 /**
  * MetaTrader's Close position screen.
@@ -215,7 +215,7 @@ function Row({ label, children, accent }: { label: string; children: React.React
   );
 }
 
-/** MetaTrader shows a ticket, and so do we: the engine's position id, shortened as the tables do. */
+/** MetaTrader's ticket, the one the confirmation names: `Close #328906 …`, 01-order-and-close-dialogs.md 155. */
 function ticketOf(pos: ActivePosition): string {
-  return pos.positionId ? pos.positionId.slice(0, 8) : '…';
+  return ticketLabel(pos);
 }

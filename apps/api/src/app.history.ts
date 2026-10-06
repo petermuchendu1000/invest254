@@ -39,6 +39,10 @@ const positionDto = (p: PositionRecord) => ({
   // The chart prices the contract executed at (migration 0180), or null when unstamped — the
   // terminal's receipt screens print "at market" rather than a price they cannot know.
   entryPrice: p.entryPrice, exitPrice: p.exitPrice, symbol: p.symbol,
+  // MetaTrader's ticket (migration 0184): the number the History screens print and a trader quotes.
+  // Null on a row older than the column, which those screens show as a dash rather than a uuid
+  // fragment.
+  ticket: p.ticket,
 });
 
 const fairnessDto = (f: FairnessRecord) => ({

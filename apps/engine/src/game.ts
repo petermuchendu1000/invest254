@@ -43,6 +43,15 @@ export interface Position {
   /** MetaTrader's protective levels, as PRICES on the chart. Null means not set. */
   slPrice: number | null;
   tpPrice: number | null;
+  /**
+   * MetaTrader's TICKET (migration 0184): the number the trader knows this position by.
+   *
+   * `id` is the uuid every internal path keys on and stays that way; this is the one that goes on
+   * screen, into a close confirmation and into a support call. Carried on the position rather than
+   * looked up per frame so a re-armed position keeps the same number across a restart. Null means
+   * the row predates the column or its read-back missed, which every surface prints as a dash.
+   */
+  ticket: number | null;
 }
 /** What ended a continuous position, which is MetaTrader's own vocabulary for a closed deal. */
 export type CloseReason = "sl" | "tp" | "horizon";
@@ -372,7 +381,7 @@ export class GameServer {
     if (poolPath && this.pool && ctx.seed) {
       const entryRate = ctx.curve.rate(entryT);
       const exitRate = ctx.curve.rate(entryT + durationS);
-      const { positionId, newBalance } = await this.repo.openPosition({
+      const { positionId, newBalance, ticket } = await this.repo.openPosition({
         userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
         entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
         configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
@@ -401,6 +410,7 @@ export class GameServer {
         // to be measured against and no continuous value to close at. docs/25 decision B already
         // refuses a manual close here for the same reason.
         continuous: false, slPrice: null, tpPrice: null,
+        ticket: ticket ?? null,
       };
       this.positions.set(positionId, p);
       return { position: p, balance: newBalance };
@@ -411,7 +421,7 @@ export class GameServer {
     const outcome = ctx.seed
       ? engine.settleVariable(input.stakeCents, input.direction, entryT, nonce, ctx.seed)
       : engine.settle(input.stakeCents, input.direction, entryT);
-    const { positionId, newBalance } = await this.repo.openPosition({
+    const { positionId, newBalance, ticket } = await this.repo.openPosition({
       userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
       entryRate: outcome.entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
       configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
@@ -428,6 +438,7 @@ export class GameServer {
       continuous,
       slPrice: continuous && Number.isFinite(input.slPrice as number) ? input.slPrice ?? null : null,
       tpPrice: continuous && Number.isFinite(input.tpPrice as number) ? input.tpPrice ?? null : null,
+      ticket: ticket ?? null,
     };
     this.positions.set(positionId, p);
     // Levels sent WITH the order are persisted too, or a restart in the first seconds of a trade

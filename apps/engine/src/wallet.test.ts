@@ -32,6 +32,9 @@ test("Pg repo: calls the RPCs with correct params and parses bigint strings", as
     async query(text, params) {
       calls.push({ text, params });
       if (text.includes("fn_open_position")) return { rows: [{ position_id: "p-1", new_balance: "80000" }] };
+      // The ticket read-back (migration 0184): its own statement after the money RPC, because
+      // fn_open_position's signature cannot change to return it. bigint arrives as a string.
+      if (text.includes("select ticket from positions")) return { rows: [{ ticket: "100000" }] };
       if (text.includes("fn_settle_position")) return { rows: [{ settled: true, new_balance: "130000" }] };
       // getBalance now resolves the spendable bucket (demo for marketers, else real) via
       // fn_is_marketer_account and aliases it `bal` (migration 0084).
@@ -41,8 +44,12 @@ test("Pg repo: calls the RPCs with correct params and parses bigint strings", as
   };
   const r = new PgGameRepository(fake);
   const o = await r.openPosition({ userId: "u", stakeCents: 20000, direction: "buy", entryRate: 0.21, durationS: 10, gameDayId: null, nonce: 7, openedAtMs: 1781778933000 , configVersion: 1});
-  assert.deepEqual(o, { positionId: "p-1", newBalance: 80000 });
+  assert.deepEqual(o, { positionId: "p-1", newBalance: 80000, ticket: 100000 });
   assert.ok(calls[0]!.text.includes("fn_open_position"));
+  // The read-back is a SEPARATE statement, and it is the SECOND one: the money moves first, and
+  // nothing about the ticket can delay or alter it.
+  assert.ok(calls[1]!.text.includes("select ticket from positions"), "the ticket is read back on its own");
+  assert.deepEqual(calls[1]!.params, ["p-1"]);
   assert.deepEqual(calls[0]!.params, ["u", 20000, "buy", 0.21, 10, null, 7, new Date(1781778933000).toISOString(), 1, null]);
   assert.ok(calls[0]!.text.includes("$8"), "open RPC must pass opened_at as the 8th arg (migration 0012)");
   assert.ok(calls[0]!.text.includes("$9"), "open RPC must pass config_version as the 9th arg (migration 0028)");
@@ -80,7 +87,10 @@ test("InMemory repo: listOpenPositions returns recovery metadata; excludes settl
   assert.equal(open.length, 1);
   // `slPrice`/`tpPrice` (migration 0183) are on the work list because recovery re-arms a continuous
   // position WITH its levels; a position opened without them reads null, not absent.
-  assert.deepEqual(open[0], { id: o.positionId, userId: "u", stakeCents: 20000, direction: "sell", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 5, nonce: 3, configVersion: 1, siteId: null, kind: "rise_fall", contract: null, slPrice: null, tpPrice: null });
+  // `ticket` (migration 0184) is on the work list too: a position re-armed after a restart must come
+  // back under the SAME number the trader has been quoting, not a fresh one.
+  assert.deepEqual(open[0], { id: o.positionId, userId: "u", stakeCents: 20000, direction: "sell", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 5, nonce: 3, configVersion: 1, siteId: null, kind: "rise_fall", contract: null, slPrice: null, tpPrice: null, ticket: 100_000 });
+  assert.equal(o.ticket, 100_000, "the ticket the open returned is the one the position carries");
   // And a level written through the repository comes back on it.
   await r.setPositionLevels(o.positionId, 3065.5, 3080.25);
   assert.deepEqual(
@@ -100,7 +110,7 @@ test("Pg repo: ensureGameDay/revealSeed/listOpenPositions/getFairness map to RPC
       calls.push({ text, params });
       if (text.includes("fn_ensure_game_day")) return { rows: [{ id: "42" }] };
       if (text.includes("fn_reveal_game_day")) return { rows: [{ ok: true }] };
-      if (text.includes("from positions")) return { rows: [{ id: "p-9", user_id: "u", stake: "20000", direction: "buy", duration_s: 10, opened_at: new Date(1781778933000), entry_rate: "0.21", game_day_id: "42", nonce: "3", config_version: "7", sl_price: "3065.50000", tp_price: null }] };
+      if (text.includes("from positions")) return { rows: [{ id: "p-9", user_id: "u", stake: "20000", direction: "buy", duration_s: 10, opened_at: new Date(1781778933000), entry_rate: "0.21", game_day_id: "42", nonce: "3", config_version: "7", sl_price: "3065.50000", tp_price: null, ticket: "100042" }] };
       if (text.includes("v_fairness")) return { rows: [{ id: "42", trade_date: "2026-06-17", server_seed_hash: "h", server_seed: null, revealed_at: null }] };
       return { rows: [] };
     },
@@ -113,7 +123,9 @@ test("Pg repo: ensureGameDay/revealSeed/listOpenPositions/getFairness map to RPC
   const open = await r.listOpenPositions();
   // `sl_price` arrives from pg as a NUMERIC string and has to come back a number; `tp_price` null
   // means "not set" rather than zero (migration 0183).
-  assert.deepEqual(open[0], { id: "p-9", userId: "u", stakeCents: 20000, direction: "buy", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 42, nonce: 3, configVersion: 7, siteId: null, kind: "rise_fall", contract: null, slPrice: 3065.5, tpPrice: null });
+  // `ticket` is a bigint, so pg hands it over as a string; it has to come back a number or every
+  // grid would sort it as text (migration 0184).
+  assert.deepEqual(open[0], { id: "p-9", userId: "u", stakeCents: 20000, direction: "buy", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 42, nonce: 3, configVersion: 7, siteId: null, kind: "rise_fall", contract: null, slPrice: 3065.5, tpPrice: null, ticket: 100042 });
   // The writer is a plain assignment scoped to an open position: moving and CLEARING a level are
   // what Modify position is, so a `coalesce` here would make a cleared stop un-clearable.
   await r.setPositionLevels("p-9", null, 3080.25);

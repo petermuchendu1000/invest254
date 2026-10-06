@@ -13,6 +13,7 @@ import {
   MT5SwipeRow, SwipeCloseIcon, SwipeEditIcon, SwipePlusIcon, SwipeChartIcon, SwipeDepthIcon,
   type SwipeCommand,
 } from '@/components/game/mobile/MT5SwipeRow';
+import { ticketLabel } from '@/lib/game/betting';
 import { cn } from '@/lib/cn';
 
 /**
@@ -219,7 +220,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
       {live && sheet === 'menu' ? (
         <MT5PositionMenu
           title={`${settledSymbol}, ${live.direction} ${lotsOfStake(live.stakeCents, volDigits)}`}
-          subtitle={`#${live.positionId ? live.positionId.slice(0, 8) : '…'} at ${px(live.entryRate)}`}
+          subtitle={`#${ticketLabel(live)} at ${px(live.entryRate)}`}
           onDismiss={() => setSheet(null)}
           items={[
             {

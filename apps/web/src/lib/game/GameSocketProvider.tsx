@@ -45,6 +45,7 @@ import type {
   PositionUpdateData,
   WsErrorData,
 } from '@/lib/game/betting';
+import { ticketLabel } from '@/lib/game/betting';
 import type { InstrumentTick } from '@/lib/game/useInstrument';
 
 const MAX_TICKS = 3000;
@@ -597,6 +598,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         stakeCents: input.stakeCents,
         durationS: input.durationS,
         phase: 'pending',
+        // No ticket yet: the database allocates it, and there is no row until the engine takes the
+        // order. `ticketLabel` prints this as "…", not as a missing one.
+        ticket: null,
         entryRate: last?.rate ?? null,
         expiresAtMs: now + input.durationS * 1000,
         liveMultiplier: 1,
@@ -862,7 +866,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
          */
         case 'open_positions': {
           const d = data as { positions?: readonly {
-            positionId: string; direction: Direction; stakeCents: number; durationS: number;
+            positionId: string; ticket?: number | null; direction: Direction; stakeCents: number; durationS: number;
             openedAtMs: number; expiresAtMs: number; entryRate: number; sellable: boolean;
             slPrice?: number | null; tpPrice?: number | null;
           }[] };
@@ -892,11 +896,14 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
               toast.push({ tone: 'error', title: 'Order not accepted', description: 'The server has no record of it. Your balance is unchanged.' });
               break;
             }
-            logJournal('ok', 'Trade', `#${first.positionId.slice(0, 8)} confirmed by the server after a lost acknowledgement`);
+            logJournal('ok', 'Trade', `#${ticketLabel({ ticket: first.ticket ?? null, positionId: first.positionId })} confirmed by the server after a lost acknowledgement`);
           } else if (!first || activeRef.current) break;
-          if (!answeringWatchdog) logJournal('ok', 'Trade', `#${first.positionId.slice(0, 8)} recovered after reconnect`);
+          if (!answeringWatchdog) logJournal('ok', 'Trade', `#${ticketLabel({ ticket: first.ticket ?? null, positionId: first.positionId })} recovered after reconnect`);
           setActive({
             positionId: first.positionId,
+            // The engine's ticket, so a recovered position is named the same number it was named
+            // before the reload rather than renumbered.
+            ticket: first.ticket ?? null,
             clientId: `srv${first.positionId}`,
             direction: first.direction,
             stakeCents: first.stakeCents,
@@ -922,13 +929,16 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         }
         case 'position_opened': {
           {
-            const o = data as { positionId?: string; direction?: string; stakeCents?: number; entryRate?: number };
-            logJournal('ok', 'Trade', `#${(o.positionId ?? '').slice(0, 8)} ${o.direction} accepted at ${o.entryRate?.toFixed?.(6) ?? '?'}`);
+            const o = data as { positionId?: string; ticket?: number | null; direction?: string; stakeCents?: number; entryRate?: number };
+            logJournal('ok', 'Trade', `#${ticketLabel({ ticket: o.ticket ?? null, positionId: o.positionId ?? null })} ${o.direction} accepted at ${o.entryRate?.toFixed?.(6) ?? '?'}`);
           }
           const d = data as PositionOpenedData;
           clearOpenAck(); // acknowledged: the watchdog has nothing left to guard
           setActive((cur) => ({
             positionId: d.positionId,
+            // The ticket the database allocated inside the money RPC's own INSERT. It arrives with
+            // the acknowledgement, so the number is on screen the moment the trade is real.
+            ticket: d.ticket ?? null,
             clientId: cur?.clientId ?? `srv${d.positionId}`,
             direction: d.direction,
             stakeCents: d.stakeCents,
