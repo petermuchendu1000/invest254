@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import type { Direction } from '@invest254/shared';
 import { formatKes } from '@invest254/shared/money';
 import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
 import { env } from '@/lib/env';
@@ -772,6 +773,50 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             const ws = wsRef.current;
             for (const m of q) ws?.send(JSON.stringify({ type: m.type, data: m.data }));
           }
+          break;
+        }
+        /**
+         * What this user already had running when the socket authed, so a refresh does not hide it.
+         *
+         * A reload destroyed `activePosition`, which lives only in React state, and nothing re-asked
+         * the engine. The contract kept running, its `position_update` frames kept arriving at the
+         * new socket, and every one was dropped: that handler only ever MUTATES a position it
+         * already has (`cur && cur.positionId === d.positionId`), so with nothing to attach them to
+         * the live P/L, the countdown and `sellable` all went nowhere, and the trade settled into a
+         * balance change the trader could not account for.
+         *
+         * Only taken when nothing is already active, so this can never overwrite an optimistic open
+         * that the trader raised in this page's life: that one is reconciled by `position_opened`.
+         * Pool and digit contracts are not here at all, because the engine holds those in their own
+         * maps and this frame reports only rise/fall positions.
+         */
+        case 'open_positions': {
+          const d = data as { positions?: readonly {
+            positionId: string; direction: Direction; stakeCents: number; durationS: number;
+            openedAtMs: number; expiresAtMs: number; entryRate: number; sellable: boolean;
+          }[] };
+          const first = d.positions?.[0];
+          if (!first || activeRef.current) break;
+          logJournal('ok', 'Trade', `#${first.positionId.slice(0, 8)} recovered after reconnect`);
+          setActive({
+            positionId: first.positionId,
+            clientId: `srv${first.positionId}`,
+            direction: first.direction,
+            stakeCents: first.stakeCents,
+            durationS: first.durationS,
+            phase: 'open',
+            entryRate: first.entryRate,
+            expiresAtMs: first.expiresAtMs,
+            /**
+             * The live figures are the engine's and arrive on its next tick, which is within one
+             * tick interval. Seeded neutral rather than guessed: a multiplier invented here would
+             * print a P/L the engine never said, for as long as it took the first update to land.
+             */
+            liveMultiplier: 1,
+            livePnlCents: 0,
+            secondsLeft: Math.max(0, Math.round((first.expiresAtMs - Date.now()) / 1000)),
+            sellable: first.sellable,
+          });
           break;
         }
         case 'position_opened': {

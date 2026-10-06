@@ -772,6 +772,23 @@ export class GameServer {
 
   getPosition(id: string): Position | undefined { return this.positions.get(id); }
   openCount(): number { let n = 0; for (const p of this.positions.values()) if (p.status === "open") n++; return n; }
+  /**
+   * This user's still-running contracts, so a client that reconnected can be told about them.
+   *
+   * A refreshed browser knew nothing about a contract it had opened before the reload: the client
+   * holds `activePosition` in React state, and the engine had no way to be asked. Its tick updates
+   * were already arriving at the new socket (fan-out is keyed by site and user, resolved at emit
+   * time) and were being dropped for want of a position to attach them to.
+   *
+   * A scan rather than a per-user index, deliberately: an index is a second copy of the truth that
+   * has to be kept in step with every open, settle and recovery path, and this map holds the
+   * OPEN contracts of one brand, which is a handful. Read-only, and it decides nothing.
+   */
+  openPositionsOf(userId: string): Position[] {
+    const out: Position[] = [];
+    for (const p of this.positions.values()) if (p.status === "open" && p.userId === userId) out.push(p);
+    return out;
+  }
   onlineConfigSnapshot() {
     const c = this.cfg;
     return {
