@@ -8,7 +8,8 @@ import { useOrderResult } from '@/lib/game/useOrderResult';
 import { MT5OrderResult } from '@/components/game/mobile/MT5OrderResult';
 import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas } from '@/components/game/CurveCanvas';
-import { useRestoreTakeProfit, useTakeProfitStore } from '@/lib/game/takeprofit';
+import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
+import { levelPrice } from '@/lib/game/levelWatch';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { volumeSteps } from '@/lib/game/volumeSteps';
 import { MT5Price } from '@/components/game/MT5Price';
@@ -68,14 +69,32 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
     priceOfRate,
   } = useOrderEntry();
 
-  const tpTarget = useTakeProfitStore((s) => s.targetCents);
-  const setTp = useTakeProfitStore((s) => s.set);
-  useRestoreTakeProfit();
-  const tpStepCents = Math.max(10_000, Math.round(limits.minCents / 2));
+  /**
+   * The SAME levels the advanced dialog and the chart use.
+   *
+   * This ticket held a money target and the dialog held price levels, so the phone's own two order
+   * screens disagreed: set a target here and the dialog still said "not set", and nothing this
+   * screen set was ever drawn on the chart.
+   */
+  const levels = useLevelsStore((s) => s.levels);
+  const setLevels = useLevelsStore((s) => s.set);
+  const levelRef = useLevelsStore((s) => s.ref);
+  useRestoreLevels();
+  const anchor = levelRef ?? price;
+  const slPrice = levelPrice(levels, anchor, 'sl', digits);
+  const tpPrice = levelPrice(levels, anchor, 'tp', digits);
+  /** One point at a time, which is what MetaTrader's own stepper on these rows moves by. */
   const bumpTp = (dir: 1 | -1) => {
-    const next = (tpTarget ?? 0) + dir * tpStepCents;
-    setTp(next <= 0 ? null : next);
+    if (anchor === null) return;
+    const cur = levels.tpPoints;
+    setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, price);
   };
+  const bumpSl = (dir: 1 | -1) => {
+    if (anchor === null) return;
+    const cur = levels.slPoints;
+    setLevels({ ...levels, slPoints: cur === null ? -dir * 100 : cur + dir }, price);
+  };
+
 
   /** "tap the centre value to type on the keyboard" — MetaTrader's own affordance for the volume. */
   const [typing, setTyping] = useState<string | null>(null);
@@ -201,20 +220,22 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
         <LevelRow
           label="SL"
           underline="#FF9300"
-          value={money.fmt(stakeCents)}
-          note="Fixed at the stake: this contract settles at expiry and cannot lose more."
+          value={anchor === null ? 'waiting' : slPrice === null ? 'not set' : slPrice.toFixed(digits)}
+          onDown={() => bumpSl(-1)}
+          onUp={() => bumpSl(1)}
+          downDisabled={anchor === null}
         />
         <LevelRow
           label="TP"
           underline="#0EB52E"
-          value={!earlyCloseEnabled ? 'at expiry' : tpTarget === null ? 'not set' : money.fmt(tpTarget)}
+          value={!earlyCloseEnabled ? 'at expiry' : anchor === null ? 'waiting' : tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
           {...(earlyCloseEnabled
-            ? { onDown: () => bumpTp(-1), onUp: () => bumpTp(1), downDisabled: tpTarget === null }
-            : { note: 'This brand settles every contract at expiry, so a profit target cannot close one early.' })}
+            ? { onDown: () => bumpTp(-1), onUp: () => bumpTp(1), downDisabled: anchor === null }
+            : { note: 'This brand settles every contract at expiry, so a target cannot close one early.' })}
         />
         <p className="px-3 pb-2 text-[10px] leading-snug text-[#8fa2b8]">
           {earlyCloseEnabled
-            ? 'The target is an AMOUNT, not a price: an open contract’s payout rises with time, so there is no level for it to sit on.'
+            ? `The stop risks ${money.fmt(stakeCents)}, the stake, and cannot fire: a losing contract settles at expiry. The target closes this one when the price reaches it.`
             : 'The stop is the stake, and the target cannot fire, because this contract settles at expiry whatever the price does.'}
         </p>
 

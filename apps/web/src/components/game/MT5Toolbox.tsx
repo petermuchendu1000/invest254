@@ -11,7 +11,8 @@ import { useSession } from '@/lib/auth/session';
 import { useMyNotifications } from '@/lib/notifications/hooks';
 import { useJournal, logJournal } from '@/lib/game/journal';
 import { useAlertsStore, usePriceAlertWatch, type PriceAlert } from '@/lib/game/alerts';
-import { useTakeProfitStore, useTakeProfitWatch } from '@/lib/game/takeprofit';
+import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
+import { levelPrice } from '@/lib/game/levelWatch';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
@@ -176,9 +177,29 @@ export function MT5Toolbox() {
   // ── Take profit ────────────────────────────────────────────────────────────────────────────────
   // The target lives in the shared store because MetaTrader carries T/P on the ticket AND lets you
   // modify it on an open position; both surfaces read and write the one value.
-  const tpTarget = useTakeProfitStore((st) => st.targetCents);
-  const setTp = useTakeProfitStore((st) => st.set);
-  useTakeProfitWatch(live, sell, money.fmt, earlyCloseEnabled);
+  /**
+   * The SAME levels the ticket and the chart use, so this row modifies one thing.
+   *
+   * It held a target floating PROFIT in cents before, from its own store, which no other surface
+   * could see and the chart could not draw. The watcher that acted on it was armed HERE, inside the
+   * desktop Toolbox, so on a phone a target could be set and nothing would ever fire it; the level
+   * watcher is armed in TradeSurface instead, which is the one parent both shells hang off.
+   */
+  const levels = useLevelsStore((st) => st.levels);
+  const setLevels = useLevelsStore((st) => st.set);
+  const levelRef = useLevelsStore((st) => st.ref);
+  useRestoreLevels();
+  // `livePrice` is already a callback on this component, so the value is read through it.
+  const nowPrice = livePrice();
+  const anchor = levelRef ?? nowPrice;
+  const slPrice = levelPrice(levels, anchor, 'sl', digits);
+  const tpPrice = levelPrice(levels, anchor, 'tp', digits);
+  /** One point at a time, which is what MetaTrader's own "− value +" on this row steps by. */
+  const stepTp = (dir: 1 | -1) => {
+    if (anchor === null) return;
+    const cur = levels.tpPoints;
+    setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, nowPrice);
+  };
 
   // ── Tab data ───────────────────────────────────────────────────────────────────────────────────
   const { data: history } = useQuery({
@@ -328,7 +349,7 @@ export function MT5Toolbox() {
                     to={px(getLastTick()?.rate ?? null)}
                     profit={money.fmt(live.livePnlCents)}
                     profitCents={live.livePnlCents}
-                    note={earlyCloseEnabled && tpTarget !== null ? `T/P ${money.fmt(tpTarget)}` : `Max loss ${money.fmt(live.stakeCents)}`}
+                    note={earlyCloseEnabled && tpPrice !== null ? `T/P ${tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(live.stakeCents)}`}
                   />
                   <div className="hidden sm:block">
                     <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
@@ -344,28 +365,31 @@ export function MT5Toolbox() {
                         <Td>{lotsOfStake(live.stakeCents)}</Td>
                         <Td>{px(live.entryRate)}</Td>
                         <Td>
-                          {/* MetaTrader's S/L column, stated rather than offered. The engine settles
-                              a losing contract at expiry and refuses to close one early, so the stop
-                              is fixed at the stake: the most this position can lose, always. A
-                              figure the trader can read beats a dash that explains nothing. */}
+                          {/* MetaTrader's S/L column: the LEVEL, as a price, the same one the ticket
+                              sets and the chart draws. It used to print the stake instead, because
+                              there was no stop to show: the whole column was a sentence about the
+                              engine. The stop still cannot fire, which the ticket says in full;
+                              this is the level the trader set, which is what the column is for. */}
                           <span
                             className="text-[#8fa2b8]"
-                            title="Fixed: this contract settles at expiry and cannot lose more than its stake."
+                            title="This contract settles a loss at expiry, so the stop cannot fire. The level is the trader's."
                           >
-                            {money.fmt(live.stakeCents)}
+                            {slPrice === null ? '-' : slPrice.toFixed(digits)}
                           </span>
                         </Td>
                         <Td>
-                          {/* MetaTrader's "− value +", the same control the ticket carries. */}
+                          {/* MetaTrader's T/P column: the level as a price, stepped in the
+                              instrument's own points. It held a money TARGET before, which is a
+                              different concept the chart could not draw and the phone never fired. */}
                           {earlyCloseEnabled ? (
                             <span className="flex items-center gap-1">
-                              <button type="button" onClick={() => setTp(tpTarget === null ? null : Math.max(0, tpTarget - 10_000) || null)} disabled={tpTarget === null} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
-                              <span className="min-w-14 text-center">{tpTarget === null ? 'none' : money.fmt(tpTarget)}</span>
-                              <button type="button" onClick={() => setTp((tpTarget ?? 0) + 10_000)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
+                              <button type="button" onClick={() => stepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
+                              <span className="min-w-16 text-center">{tpPrice === null ? 'none' : tpPrice.toFixed(digits)}</span>
+                              <button type="button" onClick={() => stepTp(1)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
                             </span>
                           ) : (
                             // A target that can never fire is not a setting, it is a decoration.
-                            <span className="text-[#8fa2b8]" title="This brand settles every contract at expiry, so a profit target cannot close it early.">
+                            <span className="text-[#8fa2b8]" title="This brand settles every contract at expiry, so a target cannot close it early.">
                               at expiry
                             </span>
                           )}
@@ -586,7 +610,6 @@ export function MT5Toolbox() {
           digits={digits}
           openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
           canTakeProfit={earlyCloseEnabled}
-          stepCents={10_000}
           onDismiss={() => setSheet(null)}
         />
       ) : null}

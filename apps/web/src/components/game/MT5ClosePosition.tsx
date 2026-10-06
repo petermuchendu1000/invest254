@@ -3,7 +3,8 @@
 import { useEffect } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
-import { useTakeProfitStore } from '@/lib/game/takeprofit';
+import { useLevelsStore } from '@/lib/game/levelsStore';
+import { levelPrice } from '@/lib/game/levelWatch';
 import { cn } from '@/lib/cn';
 import type { ActivePosition } from '@/lib/game/betting';
 
@@ -57,7 +58,10 @@ export function MT5ClosePosition({
   busy: boolean;
 }) {
   const money = useDisplayMoney();
-  const tpTarget = useTakeProfitStore((s) => s.targetCents);
+  /** The same level the ticket set and the chart drew, so this screen names the one TP there is. */
+  const levels = useLevelsStore((s) => s.levels);
+  const levelRef = useLevelsStore((s) => s.ref);
+  const tpPrice = levelPrice(levels, levelRef ?? openPrice, 'tp', digits);
   const lots = lotsOfStake(pos.stakeCents);
 
   // Escape closes the screen, as every MetaTrader dialog does.
@@ -126,7 +130,7 @@ export function MT5ClosePosition({
           </Row>
           <Row label="T / P" accent={TP_GREEN}>
             <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
-              {tpTarget === null ? 'not set' : money.fmt(tpTarget)}
+              {tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
             </span>
           </Row>
           <Row label="Fill policy">

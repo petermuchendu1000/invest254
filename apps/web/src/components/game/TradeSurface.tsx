@@ -17,6 +17,10 @@ import { useRestoreSymbolSet } from '@/lib/game/symbolSet';
 import { useRestoreChartSymbol, useQuoteSubscription } from '@/lib/game/chartSymbol';
 import { MT5MobileShell } from '@/components/game/mobile/MT5MobileShell';
 import { useIsPhone } from '@/lib/ui/useIsPhone';
+import { useOrderEntry } from '@/lib/game/useOrderEntry';
+import { useGameSocket } from '@/lib/game/GameSocketProvider';
+import { useLevelsStore } from '@/lib/game/levelsStore';
+import { levelPrice, useTakeProfitLevelWatch } from '@/lib/game/levelWatch';
 
 /**
  * Chooses the trade layout for the current brand:
@@ -57,6 +61,36 @@ export function TradeSurface() {
    * their stores; this screen is what talks to the socket.
    */
   const phone = useIsPhone();
+  /**
+   * What a contract at the current volume risks, for the chart's Stop Loss level.
+   *
+   * Read here rather than inside the chart because `useOrderEntry` is the one place the volume and
+   * the brand's limits live, and the chart is handed figures rather than deriving them. BEFORE the
+   * early returns below, because React matches hooks by call order.
+   */
+  const order = useOrderEntry();
+  const levelStake = order.stakeCents;
+  /**
+   * MetaTrader's Take Profit, armed HERE because this is the one parent both shells hang off.
+   *
+   * The money target it replaces was armed inside the desktop Toolbox, so on a phone it never fired
+   * at all: a trader could set a target on the phone ticket and nothing would ever act on it.
+   *
+   * The level is read as a price from the shared store, so the ticket, the chart and the Modify
+   * dialog are all setting the same thing, and closing goes through the ordinary manual sell under
+   * the engine's own two conditions. See lib/game/levelWatch.ts.
+   */
+  const levels = useLevelsStore((st) => st.levels);
+  const levelRef = useLevelsStore((st) => st.ref);
+  const { activePosition, sell, earlyCloseEnabled } = useGameSocket();
+  useTakeProfitLevelWatch({
+    position: activePosition,
+    price: order.price,
+    target: levelPrice(levels, levelRef ?? order.price, 'tp', order.digits),
+    sell,
+    enabled: earlyCloseEnabled,
+    digits: order.digits,
+  });
   useRestoreSymbolSet();
   useRestoreChartSymbol();
   useQuoteSubscription(isTerminalBrand && !isMarketer);
@@ -111,7 +145,10 @@ export function TradeSurface() {
           <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
         )}
         <div className="min-h-[160px] flex-1">
-          <GameCurve />
+          {/* `levelStakeCents` is what a contract at the current volume risks, which is the money
+              MetaTrader shows against a Stop Loss level. The desktop chart passed nothing, so even
+              once the levels were drawn the stop had no figure. */}
+          <GameCurve levelStakeCents={levelStake} />
         </div>
         {/* MetaTrader's Toolbox: account summary, the open position's live P/L, closed trades, the
             newswire, messages, alerts and the journal. Candlestick brands only — the line shell is

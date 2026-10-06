@@ -1,12 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { useDisplayMoney } from '@/lib/money';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useOrderEntry, DURATION_OPTIONS, durationLabel } from '@/lib/game/useOrderEntry';
 import { useOrderResult } from '@/lib/game/useOrderResult';
 import { MT5OrderResult } from '@/components/game/mobile/MT5OrderResult';
 import { MT5LivePosition } from '@/components/game/MT5LivePosition';
-import { useRestoreTakeProfit, useTakeProfitStore } from '@/lib/game/takeprofit';
+import { useRestoreLevels } from '@/lib/game/levelsStore';
+import { MT5LevelRows } from '@/components/game/MT5LevelRows';
 import { MT5Price } from '@/components/game/MT5Price';
 import { cn } from '@/lib/cn';
 
@@ -39,11 +41,13 @@ import { cn } from '@/lib/cn';
  */
 export { DURATION_OPTIONS, durationLabel };
 /**
- * The two increments the "+"/"−" cells offer, derived from the SYMBOL's own step.
+ * The increments the "+"/"−" cells offer: the symbol's own step and ten of it.
  *
- * MetaTrader's volume step is per symbol: hundredths on a major, tenths on an index. A fixed
- * `[0.01, 0.1]` offered a hundredth of an index lot, which is not a volume on one, and offered the
- * same two figures at 0.03 lots and at 30.
+ * MetaTrader's volume step is per symbol, hundredths on a major and tenths on an index, and its
+ * cells SCALE with the volume. A fixed `[0.01, 0.1]` offered a hundredth of an index lot, which is
+ * not a volume on one, and offered the same two figures at 0.03 lots and at 30 — which is a large
+ * part of why the amount control read as broken: reaching 1.00 lot from a 0.025 minimum took ten
+ * taps, and anything above it dozens.
  */
 const volumeStepsOf = (step: number): readonly number[] => [step, step * 10];
 
@@ -56,7 +60,7 @@ export function MT5OrderTicket() {
   const order = useOrderEntry();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, volStep, bump, stakeCents, overBalance, signedIn,
+    lots, minLots, maxLots, volDigits, volStep, setLots, bump, stakeCents, overBalance, signedIn,
     durationS, setDurationS, durations, place, activePosition, earlyCloseEnabled,
     tick, priceOfRate, market,
   } = order;
@@ -64,20 +68,24 @@ export function MT5OrderTicket() {
   const limits = useStakeLimits();
   const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
   const steps = volumeStepsOf(volStep);
+  const [typingVol, setTypingVol] = useState<string | null>(null);
+  const commitVol = () => {
+    if (typingVol === null) return;
+    const n = Number(typingVol);
+    // `setLots` snaps to the symbol's grid and clamps to the brand's range, so a typed figure
+    // cannot land off-grid or outside what the engine will accept.
+    if (Number.isFinite(n) && n > 0) setLots(n);
+    setTypingVol(null);
+  };
   const send = (dir: 'buy' | 'sell') => report(dir, place(dir));
 
-  // S/L and T/P sit on the ticket in MetaTrader, so they sit here. The target is shared with the
-  // Toolbox row, which modifies it on an open contract exactly as MetaTrader does.
-  const tpTarget = useTakeProfitStore((st) => st.targetCents);
-  const setTp = useTakeProfitStore((st) => st.set);
-  // The saved target comes back after mount, never during the server render: a store seeded
-  // differently on the two sides is a hydration mismatch.
-  useRestoreTakeProfit();
-  const tpStepCents = Math.max(10_000, Math.round(limits.minCents / 2)); // half the minimum stake
-  const bumpTp = (dir: 1 | -1) => {
-    const next = (tpTarget ?? 0) + dir * tpStepCents;
-    setTp(next <= 0 ? null : next);
-  };
+  /**
+   * The levels are restored here too, because the desktop is a surface that shows them.
+   *
+   * It never called this, so a desktop session did not even read the saved pair out of storage: a
+   * level set on the phone layout was invisible until the window was narrowed back.
+   */
+  useRestoreLevels();
 
   if (!ready) {
     return <div className="h-40 animate-pulse rounded-xl border border-[#2b3543] bg-[#0f1720]" />;
@@ -130,12 +138,33 @@ export function MT5OrderTicket() {
             −{st.toFixed(volDigits)}
           </button>
         ))}
-        <span
-          aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
-          className="flex h-8 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-bold text-white tabular-nums"
-        >
-          {lots.toFixed(volDigits)}
-        </span>
+        {/**
+          * Tap the centre value to type it, which is MetaTrader's own affordance ("tap the centre
+          * value to type on the keyboard") and the thing this ticket had no version of: it was a
+          * `<span>`. With a 0.025 minimum and two fixed steps, a trader who wanted 5 lots had no
+          * way to get there but to hold down a button.
+          */}
+        {typingVol === null ? (
+          <button
+            type="button"
+            onClick={() => setTypingVol(lots.toFixed(volDigits))}
+            aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
+            className="flex h-8 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-bold text-white tabular-nums transition hover:border-[#3183ff]"
+          >
+            {lots.toFixed(volDigits)}
+          </button>
+        ) : (
+          <input
+            autoFocus
+            value={typingVol}
+            inputMode="decimal"
+            aria-label="Volume in lots"
+            onChange={(e) => setTypingVol(e.target.value)}
+            onBlur={commitVol}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitVol(); if (e.key === 'Escape') setTypingVol(null); }}
+            className="flex h-8 w-full items-center justify-center rounded border border-[#3183ff] bg-[#0f1720] text-center font-mono text-[14px] font-bold text-white tabular-nums outline-none"
+          />
+        )}
         {steps.map((st) => (
           <button key={`+${st}`} type="button" onClick={() => bump(st)} disabled={lots >= maxLots} className={stepBtn} aria-label={`Increase volume by ${st}`}>
             +{st.toFixed(volDigits)}
@@ -147,39 +176,22 @@ export function MT5OrderTicket() {
         <span className="ml-auto">min {minLots.toFixed(volDigits)}{limits.maxCents === undefined ? '' : ` / max ${maxLots.toFixed(volDigits)}`}</span>
       </div>
 
-      {/* Stop Loss and Take Profit. MetaTrader's ORDER TICKET writes these out in full; "S / L"
-          and "T / P" are the Toolbox column headers, which is a different surface. */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className={rowLabel}>Stop Loss</span>
-        {/* MetaTrader's S/L, stated rather than offered, and now carrying the figure it stands for.
-            The engine settles a losing contract at expiry and refuses to close one early, so the
-            stop on this contract is fixed at the stake: that is the most it can lose, whatever the
-            price does. A number a trader can read beats a greyed box that only says "no". */}
-        <span
-          className="flex h-8 flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[12px] font-semibold text-[#8fa2b8] tabular-nums"
-          title="Fixed at the stake: this contract settles at expiry and cannot lose more."
-        >
-          {money.fmt(stakeCents)}
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className={rowLabel}>Take Profit</span>
-        {/* A target that the engine can never act on is not a setting, so where early close is off
-            the steppers are off with it and the row states what actually happens. */}
-        <button type="button" onClick={() => bumpTp(-1)} disabled={!earlyCloseEnabled || tpTarget === null} className={stepBtn} aria-label="Lower take profit">−</button>
-        <span className={cn(
-          'flex h-8 min-w-[4.5rem] flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[12px] font-semibold tabular-nums',
-          earlyCloseEnabled ? 'text-[#ffffff]' : 'text-[#8fa2b8]',
-        )}>
-          {!earlyCloseEnabled ? 'at expiry' : tpTarget === null ? 'not set' : money.fmt(tpTarget)}
-        </span>
-        <button type="button" onClick={() => bumpTp(1)} disabled={!earlyCloseEnabled} className={stepBtn} aria-label="Raise take profit">+</button>
-      </div>
-      <p className="pl-[4.25rem] text-[11px] text-[#8fa2b8] lg:pl-0">
-        {earlyCloseEnabled
-          ? <>Closes on PROFIT reaching this amount, not a price, because an open contract&apos;s payout rises with time.</>
-          : <>This brand settles every contract at expiry, so a profit target cannot close one early.</>}
-      </p>
+      {/**
+        * MetaTrader's Stop Loss and Take Profit, on the SAME model the phone uses.
+        *
+        * What was here: a Stop Loss that was a read-only label printing the stake, and a Take
+        * Profit that was a target floating PROFIT in cents from a different store, with no unit
+        * selector, no ratio lock, no side swap, and nothing drawn on the chart. The stop could not
+        * be set at all and the target was a different concept wearing MetaTrader's label, so the
+        * two shells disagreed about both.
+        */}
+      <MT5LevelRows
+        price={price}
+        digits={digits}
+        stakeCents={stakeCents}
+        earlyCloseEnabled={earlyCloseEnabled}
+        durationLabel={durationLabel(durationS)}
+      />
 
       {/* Fill policy. MetaTrader's ticket carries this row; under Market Execution the only option
           is "Fill or Kill", rendered as the selected word rather than a dropdown. This engine fills
