@@ -62,7 +62,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   const live = activePosition && activePosition.phase !== 'settling' ? activePosition : null;
   const floatingCents = live ? live.livePnlCents : 0;
   const summary = accountSummary({
-    balanceCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
+    walletCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
     openStakeCents: live ? live.stakeCents : 0,
     floatingPnlCents: floatingCents,
   });

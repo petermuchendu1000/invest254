@@ -8,9 +8,15 @@ import type { Cents } from "./money.js";
  * one is mapped onto a quantity that genuinely exists, so every figure on screen traces back to the
  * wallet or to an open contract:
  *
- *   Balance      the settled wallet
+ *   Balance      the settled wallet PLUS the stake held against open contracts. MetaTrader is
+ *                explicit that Balance is "money on the account, results of currently open positions
+ *                not included" (docs/mt5/09-toolbox.md 470), and this engine debits the stake the
+ *                moment a position opens, so the wallet alone is not it: Balance fell by the stake
+ *                at open, which on a real account it never does. Adding the committed stake back is
+ *                what makes the figure MetaTrader's. Nothing about the ledger changes; the money is
+ *                debited exactly as before and this is the read-only view of it.
  *   Margin       stake committed to open contracts — funds reserved and unusable, which is the job
- *                margin does on a real account
+ *                margin does on a real account, and where the debited stake shows up instead
  *   Equity       Balance + the floating result, i.e. what the account is worth closed right now
  *   Free Margin  Equity - Margin
  *   Margin Level Equity / Margin * 100 — MetaTrader's own formula
@@ -19,8 +25,13 @@ import type { Cents } from "./money.js";
  * feeds settlement; this is a read-only view.
  */
 export interface AccountInput {
-  /** Settled wallet, in cents. */
-  balanceCents: Cents;
+  /**
+   * What the WALLET actually holds, in cents, after the engine's open-time debit.
+   *
+   * Named for the wallet rather than for Balance because the two differ while a position is open,
+   * and conflating them is the bug this field is named after: see Balance above.
+   */
+  walletCents: Cents;
   /** Stake committed to contracts that are still open, in cents. */
   openStakeCents: Cents;
   /** Engine-reported floating profit/loss on those contracts, in cents (negative while losing). */
@@ -43,7 +54,12 @@ export interface AccountSummary {
 }
 
 export function accountSummary(input: AccountInput): AccountSummary {
-  const { balanceCents, openStakeCents, floatingPnlCents } = input;
+  const { walletCents, openStakeCents, floatingPnlCents } = input;
+  // MetaTrader's Balance excludes the results of open positions, so the committed stake is still the
+  // trader's money until the contract settles: it moves to Margin, it does not leave the account.
+  const balanceCents = walletCents + openStakeCents;
+  // Floating P/L is reported against the STAKE, so Equity comes out as the untouched wallet plus
+  // what the open position is worth right now, which is MetaTrader's "closed out at this instant".
   const equityCents = balanceCents + floatingPnlCents;
   return {
     balanceCents,
@@ -62,8 +78,17 @@ export function accountSummary(input: AccountInput): AccountSummary {
  */
 export const LOT_STAKE_CENTS = 1_000_000; // 1.00 lot = KES 10,000 staked
 
-/** A stake rendered as MetaTrader's volume, to two decimals. */
-export const lotsOfStake = (stakeCents: Cents): string => (stakeCents / LOT_STAKE_CENTS).toFixed(2);
+/**
+ * A stake rendered as MetaTrader's volume.
+ *
+ * `digits` is the SYMBOL's volume digits (`volumeDigitsOf` in ./symbols), because MetaTrader prints
+ * a volume to the same number of places in every grid row that the ticket offers it in
+ * (docs/mt5/09-toolbox.md 300, rows at 313-318). The two decimals that used to be hard-coded here
+ * are the default only so a caller with no symbol in scope still gets the catalogue's commonest
+ * step; a surface showing a real position passes the symbol's own.
+ */
+export const lotsOfStake = (stakeCents: Cents, digits = 2): string =>
+  (stakeCents / LOT_STAKE_CENTS).toFixed(digits);
 
 /**
  * MetaTrader's Exposure tab, computed from the contracts that are open.

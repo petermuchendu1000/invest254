@@ -20,7 +20,7 @@ import { makeSystemLogPersister } from "./systemlog.js";
 import { SharedSiteConfigListener } from "./siteconfiglisten.js";
 import {
   DEFAULT_VERSIONED_CONFIG, PlatformGate, chartStyleOf, curveProfileForChartStyle,
-  defaultConfigForProfile, type CurveProfile, type VersionedGameConfig,
+  defaultConfigForProfile, TERMINAL_VERSIONED_CONFIG, type CurveProfile, type VersionedGameConfig,
 } from "@invest254/shared";
 
 /**
@@ -207,7 +207,16 @@ if (usingDb) {
   repo = mem;
   siteAliases.set(DEFAULT_SITE, DEFAULT_SITE);
   siteAliases.set("default", DEFAULT_SITE);
-  configFor = () => new StaticConfigProvider(DEFAULT_VERSIONED_CONFIG);
+  /**
+   * The dev brand is a TERMINAL brand, so it gets the terminal economy.
+   *
+   * `SiteRegistry` defaults an unresolved curve profile to `market` (siteregistry.ts 107), which is
+   * what this path leaves it as, so the in-memory brand charts candlesticks and settles its
+   * positions continuously. Handing it DEFAULT_VERSIONED_CONFIG gave it the step economy's 75% edge,
+   * which cannot price a continuous position: every position opened in local dev was worth about
+   * 0.02x the instant it opened. See TERMINAL_CONFIG in shared/config.ts.
+   */
+  configFor = () => new StaticConfigProvider(TERMINAL_VERSIONED_CONFIG);
   resolver = new SiteResolver({ aliases: siteAliases }); // no live lookup in dev — a miss stays a miss
   console.log("[engine] no DATABASE_URL — in-memory single default brand (dev)");
 }
