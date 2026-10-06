@@ -2,12 +2,12 @@
 
 import { useEffect } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
-import { useDisplayMoney } from '@/lib/money';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useLevelsStore } from '@/lib/game/levelsStore';
 import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
-import type { ActivePosition } from '@/lib/game/betting';
+import { ticketLabel, type ActivePosition } from '@/lib/game/betting';
 
 /**
  * MetaTrader's Modify position screen: the one that edits Stop Loss and Take Profit on a position
@@ -44,8 +44,10 @@ export function MT5ModifyPosition({
   canTakeProfit: boolean;
   onDismiss: () => void;
 }) {
-  const money = useDisplayMoney();
   const brand = useBrand();
+  // Volume to the SYMBOL's own volume digits, so every surface states one lot size for one position
+  // (docs/mt5/09-toolbox.md 300, rows at 313-318).
+  const volumeDigits = useVolumeDigits(symbol);
   /**
    * Whether the engine will act on these levels at all. `canTakeProfit` is the brand's early-close
    * flag, which is one of the two facts; the other is whether the brand has a price axis.
@@ -73,21 +75,39 @@ export function MT5ModifyPosition({
   }, [onDismiss]);
 
   /**
-   * One point at a time, which is what MetaTrader's own stepper on this row moves by.
+   * Move one level, by `delta` POINTS, and tell the engine.
    *
-   * The move goes to the ENGINE as well as to the local store. Modifying a position here used to
-   * change only what this tab drew; the level that would actually fire now lives on the server, so
-   * a Modify that did not reach it would be a dialog quietly lying about what it had done.
+   * Both rows go through here, which is the fix as much as the stepper itself: the Stop Loss row was
+   * a read-only `<span>` and `bump` only ever wrote `tpPoints`, so a screen titled "Modify position"
+   * could not modify the stop at all. MetaTrader's own dialog gives BOTH rows two bound spinners
+   * (docs/mt5/01-order-and-close-dialogs.md 212-218), and the stop is the half that protects money.
+   *
+   * The first press seeds the level 100 points on the side that makes it a stop or a target for THIS
+   * position's direction, rather than on the side of the button that was pressed: a stop above a buy
+   * is not a stop.
+   *
+   * The move goes to the ENGINE as well as to the local store. The level that will actually fire
+   * lives on the server, so a Modify that did not reach it would be a dialog quietly lying about
+   * what it had done.
    */
-  const bump = (dir: 1 | -1) => {
+  const move = (field: 'sl' | 'tp', delta: number) => {
     if (anchor === null) return;
-    const cur = levels.tpPoints;
-    const next = { ...levels, tpPoints: cur === null ? dir * 100 : cur + dir };
+    const cur = field === 'sl' ? levels.slPoints : levels.tpPoints;
+    // A stop sits below a buy and above a sell; a target is the mirror of that.
+    const away = pos.direction === 'buy' ? -1 : 1;
+    const seed = (field === 'sl' ? away : -away) * 100;
+    const next = { ...levels, [field === 'sl' ? 'slPoints' : 'tpPoints']: cur === null ? seed : cur + delta };
     setLevels(next, openPrice);
     pushLevels(
       levelPrice(next, openPrice, 'sl', digits),
       levelPrice(next, openPrice, 'tp', digits),
     );
+  };
+  /** Clear a level, which is MetaTrader's empty field rather than a zero. */
+  const clear = (field: 'sl' | 'tp') => {
+    const next = { ...levels, [field === 'sl' ? 'slPoints' : 'tpPoints']: null };
+    setLevels(next, openPrice);
+    pushLevels(levelPrice(next, openPrice, 'sl', digits), levelPrice(next, openPrice, 'tp', digits));
   };
 
   return (
@@ -102,54 +122,41 @@ export function MT5ModifyPosition({
           <button type="button" onClick={onDismiss} aria-label="Back" className="-ml-1 shrink-0 px-1 text-[20px] leading-none text-[#8fa2b8] transition hover:text-white">‹</button>
           <span className="min-w-0">
             <span className="block truncate text-[15px] font-semibold leading-tight">
-              Modify position #{pos.positionId ? pos.positionId.slice(0, 8) : '…'}
+              Modify position #{ticketLabel(pos)}
             </span>
             <span className="block truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">
-              {pos.direction} {lotsOfStake(pos.stakeCents)} {symbol} at {openPrice === null ? '-' : openPrice.toFixed(digits)}
+              {pos.direction} {lotsOfStake(pos.stakeCents, volumeDigits)} {symbol} at {openPrice === null ? '-' : openPrice.toFixed(digits)}
             </span>
           </span>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex items-center justify-between gap-3 border-b px-3 py-3" style={{ borderColor: SL_ORANGE }}>
-            <span className="text-[12px] text-[#8fa2b8]">Stop Loss</span>
-            <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
-              {slPrice === null ? 'not set' : slPrice.toFixed(digits)}{' '}
-              <span className="text-[11px]">(max loss {money.fmt(pos.stakeCents)})</span>
-            </span>
-          </div>
+          <LevelRow
+            label="Stop Loss"
+            accent={SL_ORANGE}
+            price={slPrice}
+            points={levels.slPoints}
+            digits={digits}
+            disabled={!continuous || anchor === null}
+            onMove={(d) => move('sl', d)}
+            onClear={() => clear('sl')}
+          />
           <p className="px-3 py-2 text-[11px] leading-snug text-[#8fa2b8]">
             {continuous
               ? 'The stop closes the position at this price, for what it is worth there, so part of the stake can come back. Stops processing is performed on the server side.'
               : 'The level is the trader’s, and it cannot fire: this contract settles at expiry and cannot be closed at a loss, so the stake is the whole of the downside.'}
           </p>
 
-          <div className="flex items-center justify-between gap-2 border-b px-3 py-3" style={{ borderColor: TP_GREEN }}>
-            <span className="text-[12px] text-[#8fa2b8]">Take Profit</span>
-            <span className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => bump(-1)}
-                disabled={!continuous || anchor === null}
-                aria-label="Lower take profit"
-                className="h-8 w-9 rounded border border-[#2b3543] font-mono text-[13px] transition hover:border-[#3183ff] disabled:opacity-40"
-              >
-                −
-              </button>
-              <span className="min-w-[5.5rem] text-center font-mono text-[13px] tabular-nums">
-                {!continuous ? 'not available' : tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
-              </span>
-              <button
-                type="button"
-                onClick={() => bump(1)}
-                disabled={!continuous || anchor === null}
-                aria-label="Raise take profit"
-                className="h-8 w-9 rounded border border-[#2b3543] font-mono text-[13px] transition hover:border-[#3183ff] disabled:opacity-40"
-              >
-                +
-              </button>
-            </span>
-          </div>
+          <LevelRow
+            label="Take Profit"
+            accent={TP_GREEN}
+            price={tpPrice}
+            points={levels.tpPoints}
+            digits={digits}
+            disabled={!continuous || anchor === null}
+            onMove={(d) => move('tp', d)}
+            onClear={() => clear('tp')}
+          />
           <p className="px-3 py-2 text-[11px] leading-snug text-[#8fa2b8]">
             {continuous
               ? 'A PRICE, as MetaTrader\u2019s is: the position closes when the price reaches it, for what it is worth there.'
@@ -164,6 +171,57 @@ export function MT5ModifyPosition({
         >
           Done
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One of MetaTrader's two Modify rows: the level as a PRICE and as a DISTANCE IN POINTS, each with
+ * its own spinner, bound to the same stored level.
+ *
+ * Measured from MetaQuotes' own modify_position.png and recorded at
+ * docs/mt5/01-order-and-close-dialogs.md 212-218:
+ *
+ *     Stop Loss:   [ 214.531 ⇅ ]   [ 1860 ⇅ ] points
+ *     Take Profit: [ 219.526 ⇅ ]   [  135 ⇅ ] points
+ *
+ * "The left spinner is the absolute price, the right spinner the distance in points from the
+ * position's open price; they are bound bidirectionally. The literal word `points` is the suffix
+ * label on both rows." Both spinners move the same stored value, so the binding is the storage
+ * rather than two fields kept in step: a price step is one point, and a points step is one point.
+ */
+function LevelRow({ label, accent, price, points, digits, disabled, onMove, onClear }: {
+  label: string;
+  accent: string;
+  price: number | null;
+  points: number | null;
+  digits: number;
+  disabled: boolean;
+  onMove: (deltaPoints: number) => void;
+  onClear: () => void;
+}) {
+  const step = 'h-8 w-8 shrink-0 rounded border border-[#2b3543] font-mono text-[13px] text-[#3183ff] transition hover:border-[#3183ff] disabled:opacity-40';
+  return (
+    <div className="border-b px-3 py-2.5" style={{ borderColor: accent }}>
+      <div className="flex items-center gap-2">
+        <span className="w-20 shrink-0 text-[12px]" style={{ color: accent }}>{label}</span>
+        <button type="button" onClick={() => onMove(-1)} disabled={disabled} aria-label={`Lower ${label}`} className={step}>−</button>
+        <span className="min-w-[4.5rem] flex-1 text-center font-mono text-[13px] tabular-nums">
+          {price === null ? 'not set' : price.toFixed(digits)}
+        </span>
+        <button type="button" onClick={() => onMove(1)} disabled={disabled} aria-label={`Raise ${label}`} className={step}>+</button>
+      </div>
+      <div className="mt-1.5 flex items-center gap-2">
+        <span className="w-20 shrink-0" />
+        <button type="button" onClick={() => onMove(-10)} disabled={disabled} aria-label={`Lower ${label} by ten points`} className={step}>−</button>
+        <span className="min-w-[4.5rem] flex-1 text-center font-mono text-[13px] tabular-nums text-[#8fa2b8]">
+          {points === null ? '-' : Math.round(points)} <span className="text-[11px]">points</span>
+        </span>
+        <button type="button" onClick={() => onMove(10)} disabled={disabled} aria-label={`Raise ${label} by ten points`} className={step}>+</button>
+        {price === null ? null : (
+          <button type="button" onClick={onClear} aria-label={`Clear ${label}`} className="shrink-0 px-1 text-[11px] text-[#3183ff]">clear</button>
+        )}
       </div>
     </div>
   );

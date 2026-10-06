@@ -13,6 +13,7 @@ import {
   MT5SwipeRow, SwipeCloseIcon, SwipeEditIcon, SwipePlusIcon, SwipeChartIcon, SwipeDepthIcon,
   type SwipeCommand,
 } from '@/components/game/mobile/MT5SwipeRow';
+import { ticketLabel } from '@/lib/game/betting';
 import { cn } from '@/lib/cn';
 
 /**
@@ -48,7 +49,10 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   const { data: wallet } = useWallet();
   const { activePosition, status, sell, earlyCloseEnabled } = useGameSocket();
   const { getLastTick } = useGameSocketApi();
-  const { settledSymbol, digits, priceOfRate } = useOrderEntry();
+  // `volDigits` is the ORDER TICKET's own volume digits, so the row states the same lot size the
+  // ticket that opened it showed (docs/mt5/09-toolbox.md 300, rows at 313-318). The row printed two
+  // places whatever the symbol's step was, so a 0.025-lot position read 0.03 here.
+  const { settledSymbol, digits, priceOfRate, volDigits } = useOrderEntry();
 
   // The floating figures ride the tick stream, which does not re-render React on its own.
   // `useOrderEntry` already drives that re-render on its own 250ms timer, and a second one here
@@ -62,7 +66,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   const live = activePosition && activePosition.phase !== 'settling' ? activePosition : null;
   const floatingCents = live ? live.livePnlCents : 0;
   const summary = accountSummary({
-    balanceCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
+    walletCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
     openStakeCents: live ? live.stakeCents : 0,
     floatingPnlCents: floatingCents,
   });
@@ -136,6 +140,9 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
               floatingCents > 0 ? 'text-[#3183ff]' : floatingCents < 0 ? 'text-[#f23645]' : 'text-[#3183ff]',
             )}
           >
+            {/* The ONE figure on this screen that names the currency: "the total floating profit
+                beneath it in blue ("34.95 EUR")" (docs/mt5/04-mobile-app.md 211). The position
+                rows below it are bare (242-248), and so is the account block (mobileAccountRows). */}
             {mtAmount(money.toDisplay(floatingCents))} {money.currency}
           </div>
         </div>
@@ -193,10 +200,10 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
             <MobilePositionRow
               symbol={settledSymbol}
               direction={live.direction}
-              lots={lotsOfStake(live.stakeCents)}
+              lots={lotsOfStake(live.stakeCents, volDigits)}
               from={px(live.entryRate)}
               to={px(getLastTick()?.rate ?? null)}
-              profit={money.fmt(live.livePnlCents)}
+              profit={money.mt(live.livePnlCents)}
               profitCents={live.livePnlCents}
               onOpenMenu={() => setSheet('menu')}
             />
@@ -212,8 +219,8 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
           position at a time, so there is nothing to pre-fill a second one from. */}
       {live && sheet === 'menu' ? (
         <MT5PositionMenu
-          title={`${settledSymbol}, ${live.direction} ${lotsOfStake(live.stakeCents)}`}
-          subtitle={`#${live.positionId ? live.positionId.slice(0, 8) : '…'} at ${px(live.entryRate)}`}
+          title={`${settledSymbol}, ${live.direction} ${lotsOfStake(live.stakeCents, volDigits)}`}
+          subtitle={`#${ticketLabel(live)} at ${px(live.entryRate)}`}
           onDismiss={() => setSheet(null)}
           items={[
             {

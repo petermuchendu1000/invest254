@@ -133,6 +133,21 @@ export function LiveChatLauncher() {
     <button type="button" onClick={() => setOpen(true)} aria-label={`Live chat${unread ? ` (${unread} new)` : ''}`}
       className={cn(
         'fixed bottom-6 right-4 z-40 hidden h-12 w-12 place-items-center rounded-full md:grid',
+        /**
+         * Lifted clear of the trading controls on a SHORT screen, which is a phone on its side.
+         *
+         * The launcher is `md:`-gated, so portrait never draws it, but a phone in landscape is
+         * 800x360 or 844x390 and that is wide enough: at both sizes the 48x48 button landed at
+         * (736,288) / (780,318), on top of the one-click panel's BUY block
+         * (MT5OneClickPanel.tsx:109, measured at (462,289,330,51)). It covered 13% of BUY, and
+         * every pixel of BUY's right-hand end opened live chat instead of the order ticket, which
+         * `document.elementFromPoint` reported as the launcher rather than the button. The panel is
+         * 72px of the bottom edge, so 96px of offset clears it with 24px to spare and leaves the
+         * launcher over bare chart: MetaTrader's landscape is a full-screen chart with no controls
+         * of its own down there ("rotate to landscape = full-screen mode, automatically",
+         * docs/mt5/04-mobile-app.md:187). It stays a tap away, which is the point of keeping it.
+         */
+        '[@media(max-height:480px)]:bottom-24',
         // The one brand-green element left floating over the terminal.
         mt5 ? 'bg-[#3183ff] text-white shadow-lg shadow-black/40' : 'bg-accent text-accent-fg shadow-[0_6px_22px_-6px_var(--pp-accent)]',
       )}>

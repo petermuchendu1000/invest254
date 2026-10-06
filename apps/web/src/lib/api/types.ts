@@ -152,6 +152,15 @@ export interface PositionDto {
    * symbol, which is what every row meant before the column existed.
    */
   symbol?: string | null;
+  /**
+   * MetaTrader's TICKET (migration 0184): the short ascending integer this trade is known by.
+   *
+   * `id` stays the uuid the API keys on; this is the one the History grids print and a trader
+   * quotes. Optional and nullable so an older API still typechecks, and null means a row written
+   * before the column, which reads as a dash rather than as eight hex characters pretending to be a
+   * ticket.
+   */
+  ticket?: number | null;
 }
 
 /** Provable-fairness commitment for a game-day (`serverSeed` is null until revealed). */

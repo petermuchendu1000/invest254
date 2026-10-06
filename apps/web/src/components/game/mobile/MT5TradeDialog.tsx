@@ -355,9 +355,9 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
             </p>
           ) : null}
 
-          {/* 10 and 11. */}
+          {/* 10 and 11. Expiry only where the brand still has one: see MT5MobileOrder's note. */}
           <Leader label="Fill policy" value="Fill or Kill" />
-          <Leader label="Expiry" value={durationLabel(durationS)} />
+          {continuous ? null : <Leader label="Expiry" value={durationLabel(durationS)} />}
           <div className="flex items-baseline gap-2 py-1.5 text-[11px]">
             <span className="text-[#8fa2b8]">Comment</span>
             <span className="ml-auto text-[#8fa2b8]" title="MetaTrader attaches a comment of up to 31 characters to an order. Nothing on this platform reads one back, so the field is not offered.">

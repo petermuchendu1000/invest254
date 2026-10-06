@@ -3,8 +3,11 @@
 import { useEffect, useState } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
+import { isContinuousBrand } from '@/lib/game/levelWatch';
+import { useBrand } from '@/lib/brand/BrandProvider';
 import { cn } from '@/lib/cn';
 import type { ActivePosition } from '@/lib/game/betting';
 
@@ -29,7 +32,17 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
   openPrice: number | null;
 }) {
   const money = useDisplayMoney();
+  // Volume to the SYMBOL's own volume digits, so this card and the ticket that opened the position
+  // state one lot size (docs/mt5/09-toolbox.md 300).
+  const volumeDigits = useVolumeDigits(symbol);
+  const lots = lotsOfStake(pos.stakeCents, volumeDigits);
   const { sell, earlyCloseEnabled } = useGameSocket();
+  const brand = useBrand();
+  /**
+   * Whether the engine acts on the levels at all: a brand with a price axis, pool mode off. The same
+   * test `openPosition` makes, and NOT `earlyCloseEnabled` alone, which a line brand also reports.
+   */
+  const continuous = isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled });
   // MetaTrader does not close a position straight off a button: it opens the Close position form.
   // See docs/mt5/01-order-and-close-dialogs.md; the one-click close without confirmation is the
   // cross in the Trade tab's Profit column, which is a different control and already correct.
@@ -72,7 +85,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-[13px] font-bold text-white">{symbol}</span>
         <span className="shrink-0 font-mono text-[12px] font-semibold uppercase" style={{ color: side }}>
-          {pos.direction} {lotsOfStake(pos.stakeCents)}
+          {pos.direction} {lots}
         </span>
       </div>
 
@@ -80,7 +93,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
       <div className="flex items-end justify-between gap-2">
         <span className="text-[10px] uppercase tracking-wide text-[#8fa2b8]">Profit</span>
         <span className={cn('font-mono text-[22px] font-semibold leading-none tabular-nums', pnlTone)}>
-          {pnl > 0 ? '+' : ''}{money.fmt(pnl)}
+          {pnl > 0 ? '+' : ''}{money.mt(pnl)}
         </span>
       </div>
 
@@ -93,14 +106,23 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
         * moment the horizon became an hour-long backstop rather than the trade's whole character.
         *
         * S/L and T/P are the ENGINE's, read off the position rather than the ticket's working copy,
-        * because those are the ones that will actually fire. "not set" rather than a blank, which is
-        * MetaTrader's own wording for an empty level.
+        * because those are the ones that will actually fire. An unset one is BLANK: docs/mt5/09-toolbox.md
+        * 336-338, "the cell is blank and no × is drawn". This card said "not set" while the Trade
+        * grid said "-" and the close form said "not set" again, so one position had three answers.
         */}
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums">
-        <Row label="Volume" value={lotsOfStake(pos.stakeCents)} />
+        <Row label="Volume" value={lots} />
+        {/* MetaTrader's row carries BOTH prices: the one it opened at and the one it is at now.
+            Without the open price the S/L and T/P rows are numbers with nothing to read them
+            against, which is the state this card was in. */}
+        <Row label="Price" value={openPrice === null ? '-' : openPrice.toFixed(digits)} />
+        <Row label="S / L" value={pos.slPrice === null ? '' : pos.slPrice.toFixed(digits)} />
+        <Row label="T / P" value={pos.tpPrice === null ? '' : pos.tpPrice.toFixed(digits)} />
+        <Row label="Price" value={price === null ? '-' : price.toFixed(digits)} />
+        {/* The one figure on this card that names its currency, and the only row here that is not
+            one of MetaTrader's: the strip names the code once after Balance and leaves every other
+            figure bare (09-toolbox.md 429), and this card has no strip to name it. */}
         <Row label="Stake" value={money.fmt(pos.stakeCents)} />
-        <Row label="S / L" value={pos.slPrice === null ? 'not set' : pos.slPrice.toFixed(digits)} />
-        <Row label="T / P" value={pos.tpPrice === null ? 'not set' : pos.tpPrice.toFixed(digits)} />
         {pos.phase === 'open' ? null : <Row label="State" value={state} />}
       </dl>
 
@@ -123,18 +145,25 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           {closeWhy}
         </button>
       ) : null}
-      <p className="text-[10px] text-[#8fa2b8]">
-        {earlyCloseEnabled
-          ? 'Market execution. Left alone, it closes itself at expiry.'
-          : 'Closes automatically at expiry: market execution.'}
-      </p>
-      {/* MetaTrader's S/L, stated rather than offered: this compact surface carries no level
-          controls, and the ticket, the Toolbox and Modify position all do. The stake is the figure
-          that holds either way, because the continuous payout floors at zero, so it is the most
-          this position can lose whatever the price does and whatever closes it. */}
-      <p className="text-[10px] text-[#8fa2b8]">
-        Max loss {money.fmt(pos.stakeCents)} (the stake). This contract cannot lose more.
-      </p>
+      {/*
+        MetaTrader prints NO sentence under a position.
+
+        Its row is Symbol / Ticket / Time / Type / Volume / Price / S/L / T/P / Price / Profit and
+        stops there (docs/mt5/09-toolbox.md 258). This card carried two lines that were not
+        MetaTrader's and were no longer true: "Closes automatically at expiry: market execution." and
+        "Market execution. Left alone, it closes itself at expiry." A MetaTrader position has no
+        expiry to close at, and on a brand with a price axis this one does not either in any sense a
+        trader would recognise: it ends at its stop, its target, a manual close, or a horizon that is
+        a backstop rather than the trade's character (docs/mt5/20-real-sl-tp.md 122-125).
+
+        A brand with NO axis is the one case where the contract really does end on a term, which
+        MetaTrader has no equivalent for. That divergence is stated once, plainly, and only there.
+      */}
+      {continuous ? null : (
+        <p className="text-[10px] text-[#8fa2b8]">
+          This contract runs to its term: {pos.durationS}s from opening.
+        </p>
+      )}
 
       {closing ? (
         <MT5ClosePosition

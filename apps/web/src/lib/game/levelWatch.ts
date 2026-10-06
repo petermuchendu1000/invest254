@@ -7,7 +7,7 @@ import { chartStyleOf, curveProfileForChartStyle } from '@invest254/shared/chart
 // module's pure half is unit-tested.
 import { logJournal } from './journal.js';
 import { priceOfPoints, type Levels } from './levels.js';
-import type { ActivePosition } from './betting.js';
+import { ticketLabel, type ActivePosition } from './betting.js';
 
 /**
  * Where a Stop Loss and a Take Profit are a PRICE this engine will actually close a position at.
@@ -106,6 +106,8 @@ export function useTakeProfitLevelWatch(
   sellRef.current = sell;
 
   const positionId = position?.positionId ?? null;
+  // The ticket, for the journal line only: it names the deal the way MetaTrader names one.
+  const ticket = position?.ticket ?? null;
   const sellable = position?.sellable ?? false;
   const direction = position?.direction ?? 'buy';
 
@@ -120,8 +122,8 @@ export function useTakeProfitLevelWatch(
     firedRef.current = positionId;
     logJournal(
       'ok', 'Trade',
-      `#${positionId.slice(0, 8)} take profit reached at ${(price ?? 0).toFixed(digits)}, closing`,
+      `#${ticketLabel({ ticket, positionId })} take profit reached at ${(price ?? 0).toFixed(digits)}, closing`,
     );
     sellRef.current();
-  }, [enabled, positionId, sellable, direction, target, price, digits]);
+  }, [enabled, positionId, ticket, sellable, direction, target, price, digits]);
 }

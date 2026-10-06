@@ -2,6 +2,8 @@
 
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
+import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { cn } from '@/lib/cn';
 import type { OutcomeFx } from '@/lib/game/outcomeFx';
 
@@ -23,6 +25,19 @@ export function MT5CloseNotice({ fx, visible, onDismiss }: {
   onDismiss: () => void;
 }) {
   const money = useDisplayMoney();
+  /**
+   * The volume prints to the SETTLED symbol's digits, like every other surface.
+   *
+   * `OutcomeFx` carries the closed position's ticket and side but not its symbol, and this is the
+   * one place a volume was still left on the two-place default: a position that reads `0.025` in the
+   * ticket, the Trade grid and the History grid announced itself as `0.03` on closing. Reading the
+   * brand's settled instrument is exact rather than a guess, because that is the only instrument an
+   * order can be opened on (`useOrderEntry`: every other symbol is quoted and charted with
+   * MetaTrader's `Disabled` trade mode), so it is necessarily the symbol of the position that just
+   * closed. If a brand ever settles more than one, the symbol belongs on `OutcomeFx` instead.
+   */
+  const settledSymbol = useGameSocketApi().getMarket()?.instrument.symbol ?? 'XAUUSD';
+  const volDigits = useVolumeDigits(settledSymbol);
   const won = fx.result === 'win';
   // MetaTrader's money colours: blue for a profit, red for a loss. Never green.
   const tone = fx.pnlCents > 0 ? 'text-[#3183ff]' : fx.pnlCents < 0 ? 'text-[#f23645]' : 'text-white';
@@ -63,7 +78,7 @@ export function MT5CloseNotice({ fx, visible, onDismiss }: {
           <span className="min-w-0 truncate text-[#8fa2b8]">
             {fx.ticket ? <span className="text-white">#{fx.ticket.slice(0, 8)}</span> : null}{' '}
             {fx.direction ? <span className={sideTone}>{fx.direction}</span> : null}{' '}
-            {lotsOfStake(fx.stakeCents)}
+            {lotsOfStake(fx.stakeCents, volDigits)}
           </span>
           <span className={cn('shrink-0 text-[15px] font-semibold', tone)}>
             {won ? '+' : ''}{money.fmt(fx.pnlCents)}

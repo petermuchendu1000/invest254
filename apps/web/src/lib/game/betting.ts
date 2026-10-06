@@ -9,6 +9,8 @@ import type { Direction } from '@invest254/shared';
 /** S→C: engine ack that a position was opened (authoritative entry data). */
 export interface PositionOpenedData {
   positionId: string;
+  /** MetaTrader's ticket (migration 0184); null on a brand or row that has none. */
+  ticket?: number | null;
   entryRate: number;
   direction: Direction;
   stakeCents: number;
@@ -91,6 +93,15 @@ export type ActivePositionPhase = 'pending' | 'open' | 'settling';
 export interface ActivePosition {
   /** Engine id; null while still purely optimistic (`pending`). */
   positionId: string | null;
+  /**
+   * MetaTrader's TICKET: the number the trader knows this position by (migration 0184).
+   *
+   * Allocated by the database inside the same INSERT that moved the money, so it exists from the
+   * instant the engine accepts the order and never changes. Null while the open is still optimistic
+   * (there is no position yet to have a number), and on a position opened before the column
+   * existed. `ticketLabel` turns those two cases into the two different things they mean.
+   */
+  ticket: number | null;
   /** Local correlation id for the optimistic open. */
   clientId: string;
   direction: Direction;
@@ -113,4 +124,18 @@ export interface ActivePosition {
    */
   slPrice: number | null;
   tpPrice: number | null;
+}
+
+/**
+ * A ticket as MetaTrader prints one.
+ *
+ * Every open-position surface used to print `positionId.slice(0, 8)`: `86373d49` on the Trade grid,
+ * `#2fc6b2f2` on the close form. A hex fragment is not a ticket. It does not order, it cannot be
+ * read back over a phone call, and MetaTrader's own is a short ascending integer (`328674`,
+ * docs/mt5/09-toolbox.md 313). Two distinct blanks, because they mean different things: an order
+ * still in flight has no ticket YET, while a position that predates migration 0184 never had one.
+ */
+export function ticketLabel(pos: { ticket: number | null; positionId: string | null }): string {
+  if (pos.ticket !== null && pos.ticket !== undefined) return String(pos.ticket);
+  return pos.positionId ? '-' : '…';
 }

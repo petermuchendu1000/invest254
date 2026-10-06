@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { formatMoney, formatKes, isForeignDisplay, displayToKesCents, kesCentsToDisplay, type Cents } from '@invest254/shared/money';
+import { mtAmount } from '@invest254/shared/account';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { POINTS_UNIT, formatPoints } from '@/lib/marketer/points';
@@ -49,9 +50,24 @@ export function useDisplayMoney() {
     // MARKETER: neutral game POINTS, no currency identity. The stake maths (toDisplay/toKesCents) and
     // `isForeign` stay REAL so amount entry/conversion is unchanged — only the visible text is points.
     const pts = (cents: Cents) => `${formatPoints(kesCentsToDisplay(cents, foreign ? fxRateFromKes : 1), locale)} ${POINTS_UNIT}`;
+    /**
+     * A figure in MetaTrader's own grid format: space thousands separator, point decimal, and NO
+     * currency code.
+     *
+     * docs/mt5/09-toolbox.md 429 reads the code off five screenshots: it "appears only once, after
+     * the Balance value", and "all other figures bare". Line 729 is stricter still for the History
+     * summary strip, which carries no code "not even after Balance". Every Profit cell, every
+     * History figure and the phone's position row therefore use this and not `fmt`, which is the
+     * brand's wallet formatter and rightly names the currency.
+     *
+     * It is the same text on a marketer skin, where a bare number is also what that skin wants: the
+     * point of `pts` is to withhold a currency identity, and this withholds one too.
+     */
+    const mt = (cents: Cents) => mtAmount(kesCentsToDisplay(cents, foreign ? fxRateFromKes : 1));
     if (isMarketer) {
       return {
         fmt: pts,
+        mt,
         currency,
         locale,
         fxRateFromKes,
@@ -71,6 +87,8 @@ export function useDisplayMoney() {
     return {
       /** Format KES cents in the brand's display currency (KES fallback when no FX). */
       fmt: (cents: Cents) => formatMoney(cents, opts),
+      /** The same amount bare, in MetaTrader's grid format. See `mt` above. */
+      mt,
       currency,
       locale,
       fxRateFromKes,

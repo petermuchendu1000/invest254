@@ -122,7 +122,12 @@ export function TradeSurface() {
      * one chart in the tree — rendering a second copy per breakpoint would mean two live sockets
      * and two sets of state.
      */
-    <section className={cn('flex h-full min-h-0 flex-col gap-2 md:gap-3', terminal && 'lg:flex-row lg:gap-3')}>
+    <section className="flex h-full min-h-0 flex-col gap-2 md:gap-3">
+      {/*
+        The three DOCKED panels, side by side: Market Watch left, chart in the middle, ticket right.
+        The Toolbox is deliberately NOT one of them, and sits below this row instead: see its note.
+      */}
+      <div className={cn('flex min-h-0 flex-1 flex-col gap-2 md:gap-3', terminal && 'lg:flex-row lg:gap-3')}>
       {terminal ? <MarketWatch className="hidden lg:flex lg:w-60 lg:shrink-0 xl:w-72" /> : null}
 
       {/* `min-w-0` is load-bearing on the desktop row: without it this column refuses to shrink
@@ -147,17 +152,34 @@ export function TradeSurface() {
               once the levels were drawn the stop had no figure. */}
           <GameCurve levelStakeCents={levelStake} />
         </div>
-        {/* MetaTrader's Toolbox: account summary, the open position's live P/L, closed trades, the
-            newswire, messages, alerts and the journal. Candlestick brands only — the line shell is
-            the simple one — and never on a marketer screen, where an equity/margin table would be
-            the loudest possible "this is trading" tell. */}
-        {terminal ? <MT5Toolbox /> : null}
       </div>
 
       <div className={cn(terminal && 'lg:w-72 lg:shrink-0 lg:overflow-y-auto xl:w-80')}>
         {/* A terminal brand gets MetaTrader's ticket; every other shell keeps the classic panel. */}
         {terminal ? <MT5OrderTicket /> : <BetPanel />}
       </div>
+      </div>
+
+      {/*
+        MetaTrader's Toolbox: account summary, the open position's live P/L, closed trades, the
+        newswire, messages, alerts and the journal. Candlestick brands only (the line shell is the
+        simple one) and never on a marketer screen, where an equity/margin table would be the
+        loudest possible "this is trading" tell.
+
+        DOCKED ACROSS THE WHOLE WINDOW, not under the chart. docs/mt5/09-toolbox.md 119 describes
+        MetaTrader's docked Toolbox as sitting "at the bottom of the main window", which is to say it
+        runs under Market Watch and the ticket as well as under the chart. Ours was nested inside the
+        chart column, so its pane was only that column: 446px at 1024 and 700px at 1366, against a
+        ten-column Trade grid whose own content is 720-733px. That is why `Profit`, MetaTrader's
+        rightmost and most-read column, sat off the pane on every laptop below 1440. Spanning the
+        window is both the faithful arrangement and the fix, because it gives the grid the width the
+        real thing gives it.
+
+        Only a terminal brand reaches this layout below `lg` at all: `useIsPhone` is
+        `max-width: 1023.98px` and a terminal phone returns `MT5MobileShell` above, so moving the
+        Toolbox out of the chart column changes nothing for any other shell.
+      */}
+      {terminal ? <MT5Toolbox /> : null}
     </section>
   );
 }

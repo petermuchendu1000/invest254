@@ -45,6 +45,7 @@ import type {
   PositionUpdateData,
   WsErrorData,
 } from '@/lib/game/betting';
+import { ticketLabel } from '@/lib/game/betting';
 import type { InstrumentTick } from '@/lib/game/useInstrument';
 
 const MAX_TICKS = 3000;
@@ -365,6 +366,32 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     [],
   );
 
+  /**
+   * The order-acknowledgement watchdog.
+   *
+   * `open_position` is the one request on this socket that moves money, and it was the only one with
+   * no bound on the wait: candles and anchors time out at 20s, symbols and news have their own
+   * waiters, auth at 8s, and an order had nothing. A lost `position_opened` therefore left the card
+   * reading "Opening…" with the stake optimistically debited, for the life of the page. The engine
+   * cannot be the slow part: measured against it, an order is acknowledged in 0.4ms at the median,
+   * 1.9ms at p95 and 4.1ms at the worst of 25 (scratchpad/acklat2.mjs), so everything past that is
+   * network. 8s matches the auth timeout already in this file, which is the same judgement about the
+   * same socket.
+   *
+   * On firing it does NOT roll back. Rolling back a position the engine really opened would leave a
+   * trader unable to see or close it, which is worse than the freeze; keeping one that was never
+   * opened shows money committed to nothing. So it asks: `sync_positions` is answered with the
+   * authoritative list, and `open_positions` below resolves the pending order against it either way.
+   */
+  const OPEN_ACK_TIMEOUT_MS = 8_000;
+  const openAckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** True between the watchdog firing and the `open_positions` that answers it. */
+  const awaitingSync = useRef(false);
+  const clearOpenAck = useCallback(() => {
+    if (openAckTimer.current) { clearTimeout(openAckTimer.current); openAckTimer.current = null; }
+    awaitingSync.current = false;
+  }, []);
+
   const getTicks = useCallback(() => ticksRef.current, []);
   const getLastTick = useCallback(
     () => (ticksRef.current.length > 0 ? ticksRef.current[ticksRef.current.length - 1]! : null),
@@ -571,6 +598,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         stakeCents: input.stakeCents,
         durationS: input.durationS,
         phase: 'pending',
+        // No ticket yet: the database allocates it, and there is no row until the engine takes the
+        // order. `ticketLabel` prints this as "…", not as a missing one.
+        ticket: null,
         entryRate: last?.rate ?? null,
         expiresAtMs: now + input.durationS * 1000,
         liveMultiplier: 1,
@@ -581,6 +611,23 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         slPrice: input.slPrice ?? null,
         tpPrice: input.tpPrice ?? null,
       });
+      // Bound the wait. See OPEN_ACK_TIMEOUT_MS: on firing this asks the engine rather than guessing.
+      if (openAckTimer.current) clearTimeout(openAckTimer.current);
+      openAckTimer.current = setTimeout(() => {
+        openAckTimer.current = null;
+        const a = activeRef.current;
+        if (!a || a.positionId) return; // acked while the timer was in flight
+        logJournal('warn', 'Trade', 'No acknowledgement in 8s: asking the server what is open');
+        awaitingSync.current = true;
+        if (!sendTrade('sync_positions', {})) {
+          // The socket is gone, so nothing can answer. Roll back and let the reconnect's own
+          // `open_positions` re-adopt the position if the engine does hold one.
+          awaitingSync.current = false;
+          setActive(null);
+          void qc.invalidateQueries({ queryKey: ['wallet'] });
+          toast.push({ tone: 'error', title: 'Order not confirmed', description: 'Reconnecting: your positions will reappear if the order was taken.' });
+        }
+      }, OPEN_ACK_TIMEOUT_MS);
       // Optimistic debit; reconciled by the authoritative `balance` push.
       qc.setQueryData<WalletDto>(['wallet'], (old) =>
         old ? { ...old, real: Math.max(0, old.real - input.stakeCents) } : old,
@@ -819,15 +866,44 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
          */
         case 'open_positions': {
           const d = data as { positions?: readonly {
-            positionId: string; direction: Direction; stakeCents: number; durationS: number;
+            positionId: string; ticket?: number | null; direction: Direction; stakeCents: number; durationS: number;
             openedAtMs: number; expiresAtMs: number; entryRate: number; sellable: boolean;
             slPrice?: number | null; tpPrice?: number | null;
           }[] };
           const first = d.positions?.[0];
-          if (!first || activeRef.current) break;
-          logJournal('ok', 'Trade', `#${first.positionId.slice(0, 8)} recovered after reconnect`);
+          /**
+           * Two callers, and the difference matters.
+           *
+           * Normally this is the auth reply and is taken only when nothing is active, so it can
+           * never overwrite an optimistic open the trader raised in this page's life: that one is
+           * reconciled by `position_opened`.
+           *
+           * When the acknowledgement watchdog asked (`awaitingSync`), the optimistic open is exactly
+           * what has to be resolved, and this frame is the authoritative answer to "did the engine
+           * take my order". A PENDING position is adopted or dropped on its evidence; an ACKED one
+           * is still never touched, because it already has the truth.
+           */
+          const pending = activeRef.current && !activeRef.current.positionId;
+          const answeringWatchdog = awaitingSync.current && pending;
+          if (answeringWatchdog) {
+            awaitingSync.current = false;
+            if (!first) {
+              // The engine has nothing open for this user, so the order was never taken. Roll the
+              // optimistic debit back and say so, rather than leaving money committed to nothing.
+              logJournal('error', 'Trade', 'The server has no such position: the order was not taken');
+              setActive(null);
+              void qc.invalidateQueries({ queryKey: ['wallet'] });
+              toast.push({ tone: 'error', title: 'Order not accepted', description: 'The server has no record of it. Your balance is unchanged.' });
+              break;
+            }
+            logJournal('ok', 'Trade', `#${ticketLabel({ ticket: first.ticket ?? null, positionId: first.positionId })} confirmed by the server after a lost acknowledgement`);
+          } else if (!first || activeRef.current) break;
+          if (!answeringWatchdog) logJournal('ok', 'Trade', `#${ticketLabel({ ticket: first.ticket ?? null, positionId: first.positionId })} recovered after reconnect`);
           setActive({
             positionId: first.positionId,
+            // The engine's ticket, so a recovered position is named the same number it was named
+            // before the reload rather than renumbered.
+            ticket: first.ticket ?? null,
             clientId: `srv${first.positionId}`,
             direction: first.direction,
             stakeCents: first.stakeCents,
@@ -853,12 +929,16 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         }
         case 'position_opened': {
           {
-            const o = data as { positionId?: string; direction?: string; stakeCents?: number; entryRate?: number };
-            logJournal('ok', 'Trade', `#${(o.positionId ?? '').slice(0, 8)} ${o.direction} accepted at ${o.entryRate?.toFixed?.(6) ?? '?'}`);
+            const o = data as { positionId?: string; ticket?: number | null; direction?: string; stakeCents?: number; entryRate?: number };
+            logJournal('ok', 'Trade', `#${ticketLabel({ ticket: o.ticket ?? null, positionId: o.positionId ?? null })} ${o.direction} accepted at ${o.entryRate?.toFixed?.(6) ?? '?'}`);
           }
           const d = data as PositionOpenedData;
+          clearOpenAck(); // acknowledged: the watchdog has nothing left to guard
           setActive((cur) => ({
             positionId: d.positionId,
+            // The ticket the database allocated inside the money RPC's own INSERT. It arrives with
+            // the acknowledgement, so the number is on screen the moment the trade is real.
+            ticket: d.ticket ?? null,
             clientId: cur?.clientId ?? `srv${d.positionId}`,
             direction: d.direction,
             stakeCents: d.stakeCents,
@@ -1136,7 +1216,8 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             rejectDigit(String(d.code ?? ''), String(d.message ?? ''));
           const a = activeRef.current;
           if (a && !a.positionId) {
-            // optimistic open never acked → roll back and re-sync balance
+            // optimistic open refused → roll back and re-sync balance
+            clearOpenAck();
             setActive(null);
             void qc.invalidateQueries({ queryKey: ['wallet'] });
           } else if (a && a.phase === 'settling') {

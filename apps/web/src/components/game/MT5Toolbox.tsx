@@ -17,7 +17,8 @@ import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
-import { EXECUTION_PRICE, tradeDateOf } from '@/lib/history/mt5history';
+import { EXECUTION_PRICE, stamp, tradeDateOf } from '@/lib/history/mt5history';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
 import {
@@ -106,6 +107,13 @@ export function MT5Toolbox() {
   const market = getMarket();
   const symbol = market?.instrument.symbol ?? 'XAUUSD';
   const digits = market?.instrument.digits ?? 2;
+  /**
+   * Volume prints to the SYMBOL's volume digits, which is what the order ticket offers
+   * (09-toolbox.md 300, rows at 313-318). These cells printed two places whatever the symbol's step
+   * was, so a position the ticket opened at 0.025 lots appeared in its own row as 0.03.
+   */
+  const volumeDigits = useVolumeDigits(symbol);
+  const lots = (stakeCents: number) => lotsOfStake(stakeCents, volumeDigits);
 
   const priceOfRate = useCallback((rate: number): number | null => {
     const m = getMarket();
@@ -161,7 +169,7 @@ export function MT5Toolbox() {
   const live = activePosition && activePosition.phase !== 'settling' ? activePosition : null;
   const floatingCents = live ? live.livePnlCents : 0;
   const summary = accountSummary({
-    balanceCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
+    walletCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
     openStakeCents: live ? live.stakeCents : 0,
     floatingPnlCents: floatingCents,
   });
@@ -365,7 +373,28 @@ export function MT5Toolbox() {
           >
             {/* MetaTrader shows a position as a two-line entry on a phone and as a wide table on a
                 desktop, because ten columns cannot be read on a 430px screen. Both are rendered from
-                the same values and swapped at `sm`, rather than the table being squeezed. */}
+                the same values, rather than the table being squeezed.
+
+                The swap used to happen at `sm`, as if the viewport were the constraint. It is not:
+                this pane is only the CHART column, with Market Watch docked to its left and the
+                ticket to its right, so a 1024px laptop gives it 446px, which is the 430px phone
+                case under another name. The ten columns measured 720px there and the `Profit`
+                header, the one column a trader is actually watching and the one carrying the
+                × close control, sat 274px past the right edge of the pane (at 1152 165px, at 1280
+                126px, at 1366 36px; 1440 is the first width at which it lands inside). The pane
+                scrolls, so none of it was clipped, but a column you have to go and find is not on
+                screen. Nothing can be done to the table itself here: ten columns of prices cannot
+                be truncated into 446px and still be read, and MetaTrader truncates a column rather
+                than dropping one (`Currency` drawn as `Curr…`, docs/mt5/09-toolbox.md:841), so the
+                order below stays exactly its order (docs/mt5/09-toolbox.md:258).
+
+                That 446px was the real defect and it is fixed where it was caused, in
+                `TradeSurface`: this panel is now docked across the whole window as MetaTrader's is
+                ("at the bottom of the main window", docs/mt5/09-toolbox.md:119) rather than nested
+                inside the chart column, so the pane is the window's width and the grid's own
+                720-733px of content fits from 1024 up. The `sm` swap below is therefore back to
+                being about the PHONE, which is what MetaTrader's two-line entry is for, instead of
+                hiding the grid from every laptop. */}
             {tab === 'trade' ? (
               live ? (
                 <>
@@ -374,10 +403,10 @@ export function MT5Toolbox() {
                     onOpenMenu={() => setSheet('menu')}
                     symbol={symbol}
                     direction={live.direction}
-                    lots={lotsOfStake(live.stakeCents)}
+                    lots={lots(live.stakeCents)}
                     from={px(live.entryRate)}
                     to={px(getLastTick()?.rate ?? null)}
-                    profit={money.fmt(live.livePnlCents)}
+                    profit={money.mt(live.livePnlCents)}
                     profitCents={live.livePnlCents}
                     note={continuous && tpPrice !== null ? `T/P ${tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(live.stakeCents)}`}
                   />
@@ -388,35 +417,47 @@ export function MT5Toolbox() {
                         onClick={() => setSheet('menu')}
                         title="Open the position menu"
                       >
-                        <Td>{symbol}</Td>
+                        <Td first>{symbol}</Td>
                         <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
-                        <Td>{live.expiresAtMs ? clock(live.expiresAtMs - live.durationS * 1000) : '-'}</Td>
+                        {/* MetaTrader's Time column: `YYYY.MM.DD HH:MM` plus the seconds its own
+                            rendered values carry, in the broker's server time (09-toolbox.md
+                            289-291). This read `06.10 12:25:30` from a local helper here — no year,
+                            the day before the month, and the browser's zone rather than the
+                            server's — while /history printed the same instant correctly. There is
+                            one formatter now, `stamp`, and it says which zone the server keeps. */}
+                        <Td>{live.expiresAtMs ? stamp(live.expiresAtMs - live.durationS * 1000) : '-'}</Td>
                         <Td className={live.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{live.direction}</Td>
-                        <Td>{lotsOfStake(live.stakeCents)}</Td>
+                        <Td>{lots(live.stakeCents)}</Td>
                         <Td>{px(live.entryRate)}</Td>
                         <Td>
                           {/* MetaTrader's S/L column: the LEVEL, as a price, the same one the ticket
                               sets and the chart draws. It used to print the stake instead, because
                               there was no stop to show: the whole column was a sentence about the
                               engine. On a continuous brand the engine checks this level every tick
-                              and closes the position there, which is what the column is for. */}
+                              and closes the position there, which is what the column is for.
+
+                              An UNSET level leaves the cell BLANK and draws no cross: 09-toolbox.md
+                              336-338, "the cell is blank and no × is drawn". It printed "-" here
+                              while the live panel said "not set" and the close form said the same:
+                              three answers to one question. */}
                           <span
                             className="text-[#8fa2b8]"
                             title={continuous
                               ? 'The stop closes this position at its price, for what it is worth there. Stops processing is performed on the server side.'
                               : 'This contract settles a loss at expiry, so the stop cannot fire. The level is the trader\u2019s.'}
                           >
-                            {slPrice === null ? '-' : slPrice.toFixed(digits)}
+                            {slPrice === null ? '' : slPrice.toFixed(digits)}
                           </span>
                         </Td>
                         <Td>
                           {/* MetaTrader's T/P column: the level as a price, stepped in the
                               instrument's own points. It held a money TARGET before, which is a
-                              different concept the chart could not draw and the phone never fired. */}
+                              different concept the chart could not draw and the phone never fired.
+                              Unset, it is blank for the same reason the S/L cell is. */}
                           {continuous ? (
                             <span className="flex items-center gap-1">
                               <button type="button" onClick={() => stepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
-                              <span className="min-w-16 text-center">{tpPrice === null ? 'none' : tpPrice.toFixed(digits)}</span>
+                              <span className="min-w-16 text-center">{tpPrice === null ? '' : tpPrice.toFixed(digits)}</span>
                               <button type="button" onClick={() => stepTp(1)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
                             </span>
                           ) : (
@@ -429,7 +470,7 @@ export function MT5Toolbox() {
                         <Td>{px(getLastTick()?.rate ?? null)}</Td>
                         <Td className={cn('font-semibold', live.livePnlCents > 0 ? 'text-[#3183ff]' : live.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
                           <span className="flex items-center justify-end gap-2">
-                            {money.fmt(live.livePnlCents)}
+                            {money.mt(live.livePnlCents)}
                             {/* MetaTrader closes a position from its row with a small ×. Shown only
                                 where the engine will honour a manual close. */}
                             {earlyCloseEnabled ? (
@@ -464,12 +505,12 @@ export function MT5Toolbox() {
                       key={p.id}
                       symbol={symbol}
                       direction={p.direction}
-                      lots={lotsOfStake(p.stakeCents)}
+                      lots={lots(p.stakeCents)}
                       from={pxOn(p.entryRate, p.openedAt, p.entryPrice)}
                       to={pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}
-                      profit={p.pnlCents === null ? '-' : money.fmt(p.pnlCents)}
+                      profit={p.pnlCents === null ? '-' : money.mt(p.pnlCents)}
                       profitCents={p.pnlCents ?? 0}
-                      note={clock(p.openedAt)}
+                      note={stamp(p.openedAt)}
                     />
                   ))}
                 </div>
@@ -477,15 +518,15 @@ export function MT5Toolbox() {
                 <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'Close', 'Profit']}>
                   {rows.map((p: PositionDto) => (
                     <tr key={p.id} className="border-t border-[#2b3543]/60">
-                      <Td>{symbol}</Td>
+                      <Td first>{symbol}</Td>
                       <Td>{p.id.slice(0, 8)}</Td>
-                      <Td>{clock(p.openedAt)}</Td>
+                      <Td>{stamp(p.openedAt)}</Td>
                       <Td className={p.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{p.direction}</Td>
-                      <Td>{lotsOfStake(p.stakeCents)}</Td>
+                      <Td>{lots(p.stakeCents)}</Td>
                       <Td>{pxOn(p.entryRate, p.openedAt, p.entryPrice)}</Td>
                       <Td>{pxOn(p.exitRate, p.settledAt ?? p.openedAt, p.exitPrice)}</Td>
                       <Td className={cn('font-semibold', (p.pnlCents ?? 0) > 0 ? 'text-[#3183ff]' : (p.pnlCents ?? 0) < 0 ? 'text-[#f23645]' : '')}>
-                        {p.pnlCents === null ? '-' : money.fmt(p.pnlCents)}
+                        {p.pnlCents === null ? '-' : money.mt(p.pnlCents)}
                       </Td>
                     </tr>
                   ))}
@@ -509,7 +550,7 @@ export function MT5Toolbox() {
                       <div className="flex items-baseline gap-2">
                         <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', n.level === 'error' ? 'bg-[#f23645]' : n.level === 'warning' ? 'bg-[#f0b90b]' : n.level === 'success' ? 'bg-[#41be56]' : 'bg-[#3183ff]')} />
                         <span className="text-[11px] font-semibold text-white">{n.title}</span>
-                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#8fa2b8]">{clock(n.createdAtMs)}</span>
+                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#8fa2b8]">{stamp(n.createdAtMs)}</span>
                       </div>
                       <p className="mt-0.5 pl-3.5 text-[11px] leading-snug text-[#8fa2b8]">{n.body}</p>
                     </li>
@@ -529,7 +570,7 @@ export function MT5Toolbox() {
                 symbol={symbol}
                 live={live}
                 currency={money.currency}
-                fmt={(cents) => money.fmt(cents)}
+                fmt={(cents) => money.mt(cents)}
               />
             ) : null}
 
@@ -544,7 +585,7 @@ export function MT5Toolbox() {
                 <ul className="divide-y divide-[#2b3543]/40 font-mono text-[11px]">
                   {journal.slice().reverse().map((e) => (
                     <li key={e.id} className="flex gap-2 px-3 py-1">
-                      <span className="shrink-0 text-[#8fa2b8]">{clock(e.atMs)}</span>
+                      <span className="shrink-0 text-[#8fa2b8]">{stamp(e.atMs)}</span>
                       <span className="w-14 shrink-0 text-[#8fa2b8]/50">{e.tag}</span>
                       <span className={cn(e.level === 'error' ? 'text-[#f23645]' : e.level === 'warn' ? 'text-[#f0b90b]' : e.level === 'ok' ? 'text-[#41be56]' : 'text-[#8fa2b8]')}>{e.text}</span>
                     </li>
@@ -560,8 +601,21 @@ export function MT5Toolbox() {
               eleven of them drawn (Company is hidden, as MetaTrader hides it). Eleven cannot share
               a 390px phone evenly — "Code Base" alone would not fit in a thirty-pixel slot — so the
               strip SCROLLS rather than crushing the labels, which is what the period row above the
-              chart already does with twenty-one periods. On a wide screen they still fill the bar.
-              A count rides as a superscript, as MetaTrader's red subscript count does. */}
+              chart already does with twenty-one periods.
+              A count rides as a superscript, as MetaTrader's red subscript count does.
+
+              A LAPTOP is the same problem, which is why nothing here stretches the tabs any more.
+              `sm:flex-1` used to hand all eleven an equal share of the bar, and because the chart
+              column is only part of the window the share was too small to hold the label: measured
+              at 1024, eight of the eleven were cut (Code Base 23px, Exposure 16px, Calendar 14px,
+              Mailbox 7px, Articles 6px, Experts 6px, History 4px, Journal 3px, the strip reading
+              "MailboxCalendaAlerts Article Code BExpertJourna"), and again at exactly 1280, where
+              the `xl:` step widens Market Watch and the ticket and takes 80px back off this column.
+              Equal shares also killed the scroll: a flex item that has already been shrunk to fit
+              leaves the scroller nothing to scroll. MetaTrader never stretches them: its Toolbox
+              tabs are "flat labels separated by thin vertical rules" (docs/mt5/09-toolbox.md:140),
+              each its own width, and a panel tab strip with no room for them all grows
+              `◀ ▶` scroll arrows at its right end (docs/mt5/10-market-watch.md:96). */}
           <div className="flex items-stretch overflow-x-auto border-t border-[#2b3543] bg-[#202933] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {VISIBLE_TOOLBOX_TABS.map((t) => {
               const count = t.id === 'mailbox'
@@ -575,7 +629,7 @@ export function MT5Toolbox() {
                   aria-pressed={tab === t.id}
                   title={t.unavailable}
                   className={cn(
-                    'shrink-0 whitespace-nowrap px-2 py-1.5 text-[10.5px] font-semibold leading-tight transition sm:min-w-0 sm:flex-1 sm:px-0.5',
+                    'shrink-0 whitespace-nowrap px-2 py-1.5 text-[10.5px] font-semibold leading-tight transition',
                     tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
                     t.unavailable ? 'opacity-55' : '',
                   )}
@@ -596,7 +650,7 @@ export function MT5Toolbox() {
           collapsible pane, so dismissing the panel does not strand an open form. */}
       {live && sheet === 'menu' ? (
         <MT5PositionMenu
-          title={`${symbol}, ${live.direction} ${lotsOfStake(live.stakeCents)}`}
+          title={`${symbol}, ${live.direction} ${lots(live.stakeCents)}`}
           subtitle={`#${live.positionId ? live.positionId.slice(0, 8) : '…'} at ${px(live.entryRate)}`}
           onDismiss={() => setSheet(null)}
           items={[
@@ -682,7 +736,7 @@ function NewsTab({ active }: { active: boolean }) {
               player came from. The text itself is rendered as text — never as markup. */}
           <a href={n.url} target="_blank" rel="noopener noreferrer" className="block px-3 py-2 hover:bg-[#2b3543]/40">
             <div className="flex items-baseline gap-2">
-              <span className="shrink-0 font-mono text-[10px] text-[#8fa2b8]">{clock(n.publishedAtMs)}</span>
+              <span className="shrink-0 font-mono text-[10px] text-[#8fa2b8]">{stamp(n.publishedAtMs)}</span>
               <span className="shrink-0 rounded bg-[#2b3543] px-1 text-[10px] text-[#8fa2b8]">{n.source}</span>
               <span className="min-w-0 text-[11px] font-semibold leading-snug text-white">{n.title}</span>
             </div>
@@ -744,8 +798,12 @@ function AlertsTab({
               <Td>{a.symbol}</Td>
               <Td>{a.above ? 'Bid ≥' : 'Bid ≤'}</Td>
               <Td>{a.price.toFixed(digits)}</Td>
+              {/* `stamp` is server time, like every other record stamp in this panel. Note that
+                  MetaTrader's `Time =` alert CONDITION is the one field it specifies in local
+                  computer time ("Specify the local computer time", 09-toolbox.md 937) — a different
+                  field, and not one this panel offers: the only conditions here are on price. */}
               <Td className={a.triggeredAtMs ? 'text-[#f0b90b]' : 'text-[#41be56]'}>
-                {a.triggeredAtMs ? `fired ${clock(a.triggeredAtMs)}` : 'armed'}
+                {a.triggeredAtMs ? `fired ${stamp(a.triggeredAtMs)}` : 'armed'}
               </Td>
               <Td>
                 <span className="flex gap-2">
@@ -842,12 +900,6 @@ function PositionRow({
   );
 }
 
-const pad = (n: number) => String(n).padStart(2, '0');
-const clock = (ms: number): string => {
-  const d = new Date(ms);
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-};
-
 function Figure({ label, value, tone, className }: { label: string; value: string; tone?: 'up' | 'down' | undefined; className?: string | undefined }) {
   return (
     <span className={cn('flex shrink-0 items-baseline gap-1.5 whitespace-nowrap', className)}>
@@ -861,13 +913,24 @@ function Figure({ label, value, tone, className }: { label: string; value: strin
   );
 }
 
+/**
+ * MetaTrader's grid alignment: `Symbol` left, everything else right, HEADER INCLUDED.
+ *
+ * docs/mt5/09-toolbox.md 266-268 reads it off the screenshots: "`Symbol` is left-aligned … every
+ * column from `Ticket` rightwards is right-aligned, including its header", and :269 puts `Profit`
+ * rightmost. It is not decoration. These columns are tickets, volumes, prices and money, and a
+ * column of right-aligned figures lines its decimal points up so the eye can compare rows; left
+ * aligning them is most of why this read as a web table rather than a terminal grid.
+ *
+ * The first column is the one exception because it holds a NAME, and names read from the left.
+ */
 function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
   return (
-    <table className="w-full border-collapse text-left font-mono text-[11px] tabular-nums">
+    <table className="w-full border-collapse text-right font-mono text-[11px] tabular-nums">
       <thead>
         <tr className="text-[#8fa2b8]">
           {head.map((h, i) => (
-            <th key={`${h}:${i}`} className="whitespace-nowrap px-2 py-1 font-normal">{h}</th>
+            <th key={`${h}:${i}`} className={cn('whitespace-nowrap px-2 py-1 font-normal', i === 0 && 'text-left')}>{h}</th>
           ))}
         </tr>
       </thead>
@@ -876,8 +939,9 @@ function Table({ head, children }: { head: string[]; children: React.ReactNode }
   );
 }
 
-function Td({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn('whitespace-nowrap px-2 py-1', className)}>{children}</td>;
+/** A cell. `first` carries the symbol, so it keeps the left alignment names need. */
+function Td({ children, className, first }: { children: React.ReactNode; className?: string; first?: boolean }) {
+  return <td className={cn('whitespace-nowrap px-2 py-1', first && 'text-left', className)}>{children}</td>;
 }
 
 function Empty({ children }: { children: React.ReactNode }) {

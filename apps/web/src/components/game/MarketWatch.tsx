@@ -240,6 +240,9 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
   const activeQuote = quoteOf(active);
   const details = detailRows({
     digits: activeDigits,
+    // MetaTrader's `Face Value`: the contract's nominal value, which here is the fixed sum one lot
+    // stakes. Bare, like every other figure in the list (docs/mt5/09-toolbox.md 429).
+    faceValue: money.mt(LOT_STAKE_CENTS),
     last: activeQuote?.price ?? null,
     session: activeHours && activeQuote
       ? sessionSoFar(activeHours, activeQuote.anchor.tradeDate, activeQuote.price)
@@ -761,8 +764,17 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
           second bar under the five-tab bar would put two rows of chrome along the bottom of a
           360px screen. Details is reached from `Market statistics`, and the Specification from
           `Properties`. */}
+      {/* The strip has to FIT the panel it is drawn in, and it did not: the `aside` is `lg:w-60`
+          until `xl:w-72` (TradeSurface.tsx:126) and clips its overflow, so at every width below
+          1280 the four tabs measured 248px of content in a 238px box and `Ticks` ran from x 213 to
+          261 while the panel ended at 251. Ten of its pixels, part of the final "s" among them,
+          were painted over AND unclickable: `document.elementFromPoint` on that column returned the
+          panel, not the tab. `px-2` on a tab is what did not fit, so a tab is `px-1.5` and the four
+          come to 232px; the strip also scrolls now, which is MetaTrader's own answer to a tab strip
+          with no room ("when the panel is too narrow, `◀ ▶` scroll arrows appear at the right of
+          the strip", docs/mt5/10-market-watch.md:96) rather than a tab hidden under an edge. */}
       {phone ? null : (
-      <div data-mw-tabs="" className="flex gap-0.5 border-t border-[#2b3543] bg-[#202933] px-1 py-1">
+      <div data-mw-tabs="" className="flex gap-0.5 overflow-x-auto border-t border-[#2b3543] bg-[#202933] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -771,7 +783,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
             aria-pressed={tab === t.id}
             title={t.unavailable}
             className={cn(
-              'rounded px-2 py-0.5 text-[11px] font-semibold transition',
+              'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold transition',
               tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
               t.unavailable ? 'opacity-55' : '',
             )}

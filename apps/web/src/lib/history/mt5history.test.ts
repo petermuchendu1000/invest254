@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  periodRange, periodSubtitle, dateOnly, stamp, ticketOf, isCompleted, signedCents, tradeDateOf, priceKnown,
+  periodRange, periodSubtitle, dateOnly, stamp, ticketOf, positionTicket, isCompleted, signedCents, tradeDateOf, priceKnown,
   orderRows, dealRows, positionRows, ordersSummary, moneySummary, sortRows, priceText, EXECUTION_PRICE,
 } from './mt5history.js';
 import type { PositionDto, TransactionDto } from '../api/types.js';
@@ -59,7 +59,9 @@ test('periodSubtitle: one day collapses to a single date, a span prints both', (
 
 test('MetaTrader date and time formats', () => {
   assert.equal(dateOnly(NOW), '2026.06.15');
-  assert.equal(stamp(new Date(2026, 5, 15, 9, 7, 4).getTime()), '2026.06.15 09:07:04');
+  // Built with Date.UTC, because a record's time is the broker's SERVER time and `stamp` prints
+  // UTC: a local-time constructor would make this assertion pass only where TZ is UTC.
+  assert.equal(stamp(Date.UTC(2026, 5, 15, 9, 7, 4)), '2026.06.15 09:07:04');
 });
 
 test('a price is only knowable on the day its axis is anchored to', () => {
@@ -76,8 +78,29 @@ test('a price is only knowable on the day its axis is anchored to', () => {
   for (const a of [null, undefined, '']) assert.ok(!priceKnown(noon, a), String(a));
 });
 
-test('ticketOf: a uuid becomes a short MetaTrader-looking ticket', () => {
+test('ticketOf: a record with no ticket of its own falls back to a uuid fragment', () => {
+  // The only such record left is a BALANCE operation: a deposit is a transaction, not a position,
+  // and nothing allocates it a number.
   assert.equal(ticketOf('3f2a1b4c-5d6e-7f80-9112-233445566778'), '3f2a1b4c');
+});
+
+test('positionTicket: a position shows MetaTrader\u2019s own ticket, not eight hex characters', () => {
+  // Migration 0184. The hex fragment was never a ticket: it does not order, and it cannot be read
+  // out over a phone call to support.
+  assert.equal(positionTicket(pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW, ticket: 328674 })), '328674');
+  // A row from before the column (the migration backfills every one it finds, so this is the
+  // older-database case) keeps an identifier rather than printing a blank column.
+  assert.equal(positionTicket(pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW })), '3f2a1b4c');
+  assert.equal(positionTicket(pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW, ticket: null })), '3f2a1b4c');
+});
+
+test('the history grids carry the real ticket through to every row kind', () => {
+  const p = pos({ id: '3f2a1b4c-5d6e-7f80-9112-233445566778', openedAt: NOW, ticket: 328674 });
+  const range = { fromMs: NOW - DAY, toMs: NOW + DAY };
+  assert.deepEqual(orderRows([p], range, 'XAUUSD', lots).map((r) => r.ticket), ['328674']);
+  // A deal row per side of the round trip, both under the position's one ticket.
+  assert.deepEqual(dealRows([p], [], range, 'XAUUSD', lots).map((r) => r.ticket), ['328674', '328674']);
+  assert.deepEqual(positionRows([p], [], range, 'XAUUSD', lots).map((r) => r.ticket), ['328674']);
 });
 
 test('only money that actually moved is a balance operation', () => {
@@ -186,13 +209,44 @@ test('sortRows: every key sorts both ways and never mutates the input', () => {
     { symbol: 'C', ticket: '0001', atMs: 100, amountCents: null },
   ];
   const before = JSON.stringify(rows);
-  assert.deepEqual(sortRows(rows, 'time', false).map((r) => r.atMs), [300, 200, 100]);
-  assert.deepEqual(sortRows(rows, 'time', true).map((r) => r.atMs), [100, 200, 300]);
+  assert.deepEqual(sortRows(rows, 'closetime', false).map((r) => r.atMs), [300, 200, 100]);
+  assert.deepEqual(sortRows(rows, 'closetime', true).map((r) => r.atMs), [100, 200, 300]);
   assert.deepEqual(sortRows(rows, 'symbol', true).map((r) => r.symbol), ['A', 'B', 'C']);
   assert.deepEqual(sortRows(rows, 'ticket', true).map((r) => r.ticket), ['0001', '0002', '0003']);
   // A row with no result sorts as zero, between the loss and the win.
   assert.deepEqual(sortRows(rows, 'profit', true).map((r) => r.amountCents), [-5, null, 10]);
   assert.equal(JSON.stringify(rows), before, 'input untouched');
+});
+
+test('sortRows: tickets sort as numbers, so a digit boundary does not reorder them', () => {
+  // MetaTrader's tickets are integers. Sorted as text, `1000000` lands before `999999` the moment
+  // the sequence crosses a digit boundary, which is the one thing a ticket sort must not do.
+  const rows = [
+    { symbol: 'A', ticket: '1000000', atMs: 300 },
+    { symbol: 'A', ticket: '999999', atMs: 200 },
+    { symbol: 'A', ticket: '100000', atMs: 100 },
+  ];
+  assert.deepEqual(sortRows(rows, 'ticket', true).map((r) => r.ticket), ['100000', '999999', '1000000']);
+  // A balance operation's uuid fragment is not a number, so it groups after the real tickets rather
+  // than interleaving with them at whatever its first hex character happens to be.
+  const mixed = [
+    { symbol: 'A', ticket: '3f2a1b4c', atMs: 300 },
+    { symbol: 'A', ticket: '100001', atMs: 200 },
+    { symbol: 'A', ticket: '100000', atMs: 100 },
+  ];
+  assert.deepEqual(sortRows(mixed, 'ticket', true).map((r) => r.ticket), ['100000', '100001', '3f2a1b4c']);
+});
+
+/** History's sort is `Symbol · Ticket · Open time · Close time · Profit` (04-mobile-app.md 422). */
+test('sortRows: Open time and Close time are two different orders', () => {
+  const rows = [
+    { symbol: 'A', ticket: '1', atMs: 500, openMs: 100, closeMs: 500 },  // opened first, closed last
+    { symbol: 'A', ticket: '2', atMs: 300, openMs: 200, closeMs: 300 },
+    // A cancelled order never closed, so it sorts on the one time it has.
+    { symbol: 'A', ticket: '3', atMs: 400, openMs: 400, closeMs: null },
+  ];
+  assert.deepEqual(sortRows(rows, 'opentime', true).map((r) => r.ticket), ['1', '2', '3']);
+  assert.deepEqual(sortRows(rows, 'closetime', true).map((r) => r.ticket), ['2', '3', '1']);
 });
 
 test('sortRows: ties fall back to newest-first, so the order is reproducible', () => {

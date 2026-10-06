@@ -206,6 +206,35 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
     return entry;
   }
 
+  /**
+   * Everything this user currently has running, in the one shape both callers send.
+   *
+   * Two callers: the auth reply, so a refreshed tab picks its position back up, and `sync_positions`,
+   * so a client whose acknowledgement was lost can ask rather than guess. One builder, so the two
+   * can never drift into reporting different things about the same position.
+   */
+  function openPositionsPayload(rt: Awaited<ReturnType<typeof ensureSite>>, userId: string) {
+    return {
+      positions: rt.game.openPositionsOf(userId).map((p) => ({
+        positionId: p.id,
+        // MetaTrader's ticket (0184). A refreshed tab gets the trade back under the SAME number it
+        // was showing before, which is the whole point of a ticket.
+        ticket: p.ticket,
+        direction: p.direction,
+        stakeCents: p.stakeCents,
+        durationS: p.durationS,
+        openedAtMs: p.openedAtMs,
+        expiresAtMs: p.expiresAtMs,
+        // The protective levels the ENGINE is holding. A refreshed tab gets back the stop it set
+        // rather than an empty ticket, because the engine never lost it.
+        slPrice: p.slPrice,
+        tpPrice: p.tpPrice,
+        entryRate: p.outcome.entryRate,
+        sellable: p.sellable,
+      })),
+    };
+  }
+
   /** Backfill the last `n` authoritative ticks so a freshly subscribed chart is full immediately. */
   function sendInstHistory(ws: WebSocket, rt: Awaited<ReturnType<typeof ensureSite>>, instrumentId: string, n = 120) {
     const cur = rt.game.instrumentTick(instrumentId);
@@ -333,6 +362,9 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
         onSettled: (e) => {
           toSiteUser(siteId, e.position.userId, "position_settled", {
             positionId: e.position.id,
+            // The ticket, so the deal the terminal reports closed is named the way MetaTrader names
+            // one ("Close #328906"), including when the settle arrives after a reconnect.
+            ticket: e.position.ticket,
             // On a continuous contract the result is whatever the close actually paid, not a
             // decision taken at open, so it is read off the money rather than off `outcome`.
             result: e.position.continuous ? (e.payoutCents > e.position.stakeCents ? "win" : "loss") : e.position.outcome.result,
@@ -429,23 +461,26 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                * already holds, and the live multiplier, the countdown and `sellable` all arrive on
                * the next tick as they already did.
                */
-              const running = rt.game.openPositionsOf(userId);
-              return send(ws, "open_positions", {
-                positions: running.map((p) => ({
-                  positionId: p.id,
-                  direction: p.direction,
-                  stakeCents: p.stakeCents,
-                  durationS: p.durationS,
-                  openedAtMs: p.openedAtMs,
-                  expiresAtMs: p.expiresAtMs,
-                  // The protective levels the ENGINE is holding. A refreshed tab gets back the
-                  // stop it set rather than an empty ticket, because the engine never lost it.
-                  slPrice: p.slPrice,
-                  tpPrice: p.tpPrice,
-                  entryRate: p.outcome.entryRate,
-                  sellable: p.sellable,
-                })),
-              });
+              return send(ws, "open_positions", openPositionsPayload(rt, userId));
+            }
+            /**
+             * The same list, on demand, because an ACK can be lost.
+             *
+             * `open_position` is the one request on this socket that moves money, and it was the one
+             * request with no way to ask again. A client whose `position_opened` never arrived (a
+             * dropped frame, a socket that died between the send and the reply) was left showing an
+             * optimistic "Opening…" position and an optimistic debit, for ever: the frame above is
+             * sent only on the auth reply, so nothing could re-ask without reconnecting.
+             *
+             * This decides nothing and changes nothing. It reports what the engine already holds, so
+             * a client that times out waiting for an ack can ask the authoritative question, "do I
+             * have this position or not", instead of guessing. Guessing either way is a real error:
+             * roll back a position that exists and the trader cannot see or close it; keep one that
+             * does not and the trader sees money committed to nothing.
+             */
+            case "sync_positions": {
+              const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
+              return send(ws, "open_positions", openPositionsPayload(rt, userId));
             }
             case "open_position": {
               const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
@@ -462,7 +497,7 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                 role: roleOf.get(ws) ?? "player",
                 slPrice: lvl(msg.data.slPrice), tpPrice: lvl(msg.data.tpPrice),
               });
-              send(ws, "position_opened", { positionId: p.id, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs, slPrice: p.slPrice, tpPrice: p.tpPrice });
+              send(ws, "position_opened", { positionId: p.id, ticket: p.ticket, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs, slPrice: p.slPrice, tpPrice: p.tpPrice });
               // Bonus-first staking (0094) spends bonus_balance before real, so the stake usually
               // moves BOTH buckets — push the full snapshot or the client bonus figure goes stale.
               const afterOpen = await opts.repo.getWalletSnapshot(userId);

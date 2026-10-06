@@ -2,8 +2,24 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { accountSummary, exposureRows, lotsOfStake, LOT_STAKE_CENTS, accountStripFields, mtAmount, mobileAccountRows } from "./account.js";
 
+test("OPENING a position does not move the Balance, which is what MetaTrader means by it", () => {
+  /**
+   * The engine debits the stake the moment a position opens, so the WALLET falls by it. MetaTrader's
+   * Balance is "money on the account, results of currently open positions not included"
+   * (docs/mt5/09-toolbox.md 470), and a real account's Balance does not move when you open a trade:
+   * the money goes to Margin, it does not leave. Measured before this: a 1,000.00 account opening a
+   * 250.00 position read "Balance: 750.00", which is a betting slip, not a terminal.
+   */
+  const flat = accountSummary({ walletCents: 100_000, openStakeCents: 0, floatingPnlCents: 0 });
+  // The same account one instant later, the stake debited from the wallet and the position flat.
+  const opened = accountSummary({ walletCents: 75_000, openStakeCents: 25_000, floatingPnlCents: 0 });
+  assert.equal(opened.balanceCents, flat.balanceCents, "Balance must not move on opening a position");
+  assert.equal(opened.marginCents, 25_000, "the stake shows up as Margin, where a real account puts it");
+  assert.equal(opened.equityCents, flat.equityCents, "and a position worth exactly its stake leaves Equity alone");
+});
+
 test("a flat account: equity is the balance and there is no margin level", () => {
-  const a = accountSummary({ balanceCents: 500_000, openStakeCents: 0, floatingPnlCents: 0 });
+  const a = accountSummary({ walletCents: 500_000, openStakeCents: 0, floatingPnlCents: 0 });
   assert.equal(a.equityCents, 500_000);
   assert.equal(a.marginCents, 0);
   assert.equal(a.freeMarginCents, 500_000);
@@ -13,8 +29,9 @@ test("a flat account: equity is the balance and there is no margin level", () =>
 });
 
 test("a winning position lifts equity and free margin, leaving the balance alone", () => {
-  // Balance is the SETTLED wallet, so it must not move until the contract settles.
-  const a = accountSummary({ balanceCents: 500_000, openStakeCents: 100_000, floatingPnlCents: 40_000 });
+  // 400_000 left in the wallet with 100_000 committed is a 500_000 Balance: the stake is still the
+  // trader's money, it is just reserved. Balance then moves only on settlement.
+  const a = accountSummary({ walletCents: 400_000, openStakeCents: 100_000, floatingPnlCents: 40_000 });
   assert.equal(a.balanceCents, 500_000, "balance moves only on settlement");
   assert.equal(a.equityCents, 540_000);
   assert.equal(a.marginCents, 100_000);
@@ -23,7 +40,7 @@ test("a winning position lifts equity and free margin, leaving the balance alone
 });
 
 test("a losing position lowers equity by exactly the engine's floating loss", () => {
-  const a = accountSummary({ balanceCents: 500_000, openStakeCents: 100_000, floatingPnlCents: -100_000 });
+  const a = accountSummary({ walletCents: 400_000, openStakeCents: 100_000, floatingPnlCents: -100_000 });
   assert.equal(a.equityCents, 400_000);
   assert.equal(a.freeMarginCents, 300_000);
   assert.equal(a.marginLevelPct, 400);
@@ -31,14 +48,14 @@ test("a losing position lowers equity by exactly the engine's floating loss", ()
 
 test("margin level is Equity/Margin x 100 — MetaTrader's formula, not an approximation", () => {
   for (const [balance, stake, floating] of [[250_000, 50_000, 0], [1_000_000, 300_000, -120_000], [75_000, 25_000, 60_000]] as const) {
-    const a = accountSummary({ balanceCents: balance, openStakeCents: stake, floatingPnlCents: floating });
+    const a = accountSummary({ walletCents: balance - stake, openStakeCents: stake, floatingPnlCents: floating });
     assert.equal(a.marginLevelPct, (a.equityCents / a.marginCents) * 100);
   }
 });
 
 test("equity can fall below the stake without going negative on a total loss", () => {
   // The worst a contract can do is lose its whole stake, so equity bottoms out at balance - stake.
-  const a = accountSummary({ balanceCents: 120_000, openStakeCents: 120_000, floatingPnlCents: -120_000 });
+  const a = accountSummary({ walletCents: 0, openStakeCents: 120_000, floatingPnlCents: -120_000 });
   assert.equal(a.equityCents, 0);
   assert.equal(a.freeMarginCents, -120_000);
   assert.equal(a.marginLevelPct, 0);

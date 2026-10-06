@@ -5,6 +5,7 @@ import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas, type MarketerBeat } from '@/components/game/CurveCanvas';
 import { CandleChart } from '@/components/game/CandleChart';
 import { lotsOfStake } from '@invest254/shared/account';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { InterfaceModeToggle } from '@/components/game/InterfaceModeToggle';
@@ -72,6 +73,9 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
   /** The symbol this brand settles, which is what a drop of it means "back to the default". */
   const defaultSymbol = getMarket()?.instrument.symbol ?? null;
   const symbol = charted ?? undefined;
+  // Volume to the SYMBOL's own volume digits, which is the figure the ticket offers and the Trade
+  // grid prints (docs/mt5/09-toolbox.md 300, rows at 313-318).
+  const volumeDigits = useVolumeDigits(charted ?? defaultSymbol ?? '');
   const chartCandles = useCallback(
     (tf: Timeframe, count: number, to?: number) => requestCandles(tf, count, to, symbol),
     [requestCandles, symbol],
@@ -157,7 +161,7 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
           {...(fullScreen === undefined ? {} : { fullScreen })}
           {...(onFullScreen === undefined ? {} : { onFullScreen })}
           openPosition={activePosition && activePosition.entryRate !== null
-            ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents) }
+            ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents, volumeDigits) }
             : null}
         />
       ) : (

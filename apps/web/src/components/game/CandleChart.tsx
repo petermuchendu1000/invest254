@@ -87,6 +87,23 @@ const CHART_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
   { id: 'line', label: 'Line chart' },
   { id: 'heikin', label: 'Heikin Ashi' },
 ];
+/**
+ * The chart types a surface may offer, which is not the same list on both.
+ *
+ * `docs/mt5/03-chart-ui.md` 18-19 and 47-50: "Heikin Ashi is a native chart type on MOBILE but not
+ * on desktop. The single biggest desktop/mobile divergence in the chart." On desktop MetaTrader has
+ * exactly three (`ENUM_CHART_MODE` has three members and no API surface for a fourth) and ships
+ * Heikin Ashi only as a bundled custom indicator, so offering it as a fourth type on the desktop
+ * menu is one step past the fact. Dropping Area and Baseline from this list was right for the same
+ * reason; this is the one that was missed.
+ *
+ * A chart already SET to Heikin Ashi still lists it, on either surface, because hiding the option
+ * that is currently in force would leave a trader looking at bars they cannot name or change back
+ * from. That is the same rule `ADDON_TYPES` already uses for a brand's own extra type.
+ */
+function chartTypesFor(phone: boolean, current: MainType): ReadonlyArray<{ id: MainType; label: string }> {
+  return phone ? CHART_TYPES : CHART_TYPES.filter((c) => c.id !== 'heikin' || current === 'heikin');
+}
 /** The add-on systems that are not MetaTrader types; shown only to the brand that owns one. */
 const ADDON_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
   { id: 'area', label: 'Area' }, { id: 'baseline', label: 'Baseline' },
@@ -1250,8 +1267,15 @@ export function CandleChart({
                 {menuOpen ? (
                   <div className="absolute right-0 top-8 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
                     <Section title="Chart type">
-                      <div className="grid grid-cols-3 gap-1">
-                        {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === initialType)].map((c) => (
+                      {/* One per row, not three across. This menu is a fixed `w-60`, so a third of
+                          it is a 71px cell, and `Candlesticks` needs 84px: it spilled 13px outside
+                          its own highlight box at every width while `Bar chart` and `Line chart`
+                          wrapped onto a second line inside a 24px pill. MetaTrader stacks these
+                          three vertically too, as the radio group on the Properties dialog's
+                          Common tab (docs/mt5/03-chart-ui.md:67), and it is how the Scale and
+                          Chart sections just below already read. */}
+                      <div className="grid gap-1">
+                        {[...chartTypesFor(false, chartType), ...ADDON_TYPES.filter((a) => a.id === initialType)].map((c) => (
                           <button key={c.id} type="button" onClick={() => setChartType(c.id)} className={cn(pill, 'w-full', chartType === c.id ? active : idle)}>{c.label}</button>
                         ))}
                       </div>
@@ -1302,7 +1326,13 @@ export function CandleChart({
                         invented volume would draw a confident line that means nothing. */}
                     {INDICATOR_GROUPS.map((g) => (
                       <Section key={g.group} title={g.label}>
-                        <div className="grid gap-1">
+                        {/* `grid-cols-1`, not a bare `grid`: an implicit grid track is sized to its
+                            MAX-CONTENT, and a row of nowrap text has no smaller max-content, so the
+                            track grew to the longest indicator name and carried all 38 rows 70px
+                            past the menu's right edge however much the label inside was willing to
+                            shrink. Tailwind's `grid-cols-1` is `minmax(0, 1fr)`, which is the track
+                            that cannot outgrow the menu. */}
+                        <div className="grid grid-cols-1 gap-1">
                           {g.items.map((def) => (
                             <Toggle
                               key={def.id}
@@ -1683,8 +1713,15 @@ function Toggle({ on, onClick, children, disabled, title }: {
         disabled && 'cursor-not-allowed opacity-45 hover:text-[#8fa2b8]',
       )}
     >
-      <span>{children}</span>
-      <span className={cn('ml-1 h-1.5 w-1.5 rounded-full', on ? 'bg-accent' : 'bg-border')} />
+      {/* `min-w-0 flex-1` is what lets the label be truncated. A flex item's default
+          `min-width: auto` is its content, so this span refused to shrink and the 38 indicator
+          rows pushed their text 70px past the right edge of the `w-60` menu (content 309px in a
+          238px box): `Average Directional Movement Index Wilder (14)` was cut mid-word with no
+          ellipsis, because the `truncate` the row asks for cannot bite on a box that is never
+          narrower than its text. Truncation here is what MetaTrader does with a column too narrow
+          for its own label (`Currency` drawn as `Curr…`, docs/mt5/09-toolbox.md:841). */}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <span className={cn('ml-1 h-1.5 w-1.5 shrink-0 rounded-full', on ? 'bg-accent' : 'bg-border')} />
     </button>
   );
 }
@@ -2000,7 +2037,7 @@ function MobileChartBar({
         <MobileSheet title="Indicators" onClose={() => setOpen(null)}>
           <Section title="Chart type">
             <div className="grid grid-cols-3 gap-1">
-              {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === chartType)].map((c) => (
+              {[...chartTypesFor(true, chartType), ...ADDON_TYPES.filter((a) => a.id === chartType)].map((c) => (
                 <button
                   key={c.id}
                   type="button"

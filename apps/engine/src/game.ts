@@ -43,6 +43,15 @@ export interface Position {
   /** MetaTrader's protective levels, as PRICES on the chart. Null means not set. */
   slPrice: number | null;
   tpPrice: number | null;
+  /**
+   * MetaTrader's TICKET (migration 0184): the number the trader knows this position by.
+   *
+   * `id` is the uuid every internal path keys on and stays that way; this is the one that goes on
+   * screen, into a close confirmation and into a support call. Carried on the position rather than
+   * looked up per frame so a re-armed position keeps the same number across a restart. Null means
+   * the row predates the column or its read-back missed, which every surface prints as a dash.
+   */
+  ticket: number | null;
 }
 /** What ended a continuous position, which is MetaTrader's own vocabulary for a closed deal. */
 export type CloseReason = "sl" | "tp" | "horizon";
@@ -372,7 +381,7 @@ export class GameServer {
     if (poolPath && this.pool && ctx.seed) {
       const entryRate = ctx.curve.rate(entryT);
       const exitRate = ctx.curve.rate(entryT + durationS);
-      const { positionId, newBalance } = await this.repo.openPosition({
+      const { positionId, newBalance, ticket } = await this.repo.openPosition({
         userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
         entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
         configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
@@ -401,6 +410,7 @@ export class GameServer {
         // to be measured against and no continuous value to close at. docs/25 decision B already
         // refuses a manual close here for the same reason.
         continuous: false, slPrice: null, tpPrice: null,
+        ticket: ticket ?? null,
       };
       this.positions.set(positionId, p);
       return { position: p, balance: newBalance };
@@ -411,7 +421,7 @@ export class GameServer {
     const outcome = ctx.seed
       ? engine.settleVariable(input.stakeCents, input.direction, entryT, nonce, ctx.seed)
       : engine.settle(input.stakeCents, input.direction, entryT);
-    const { positionId, newBalance } = await this.repo.openPosition({
+    const { positionId, newBalance, ticket } = await this.repo.openPosition({
       userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
       entryRate: outcome.entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
       configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
@@ -428,8 +438,12 @@ export class GameServer {
       continuous,
       slPrice: continuous && Number.isFinite(input.slPrice as number) ? input.slPrice ?? null : null,
       tpPrice: continuous && Number.isFinite(input.tpPrice as number) ? input.tpPrice ?? null : null,
+      ticket: ticket ?? null,
     };
     this.positions.set(positionId, p);
+    // Levels sent WITH the order are persisted too, or a restart in the first seconds of a trade
+    // would lose exactly the stop the trader opened with.
+    if (p.slPrice !== null || p.tpPrice !== null) this.persistLevels(p);
     return { position: p, balance: newBalance };
   }
 
@@ -886,7 +900,38 @@ export class GameServer {
     if (!p.continuous) throw new Error("LEVELS_UNSUPPORTED: this contract settles at expiry");
     p.slPrice = Number.isFinite(slPrice as number) ? slPrice : null;
     p.tpPrice = Number.isFinite(tpPrice as number) ? tpPrice : null;
+    this.persistLevels(p);
     return p;
+  }
+
+  /**
+   * Write the levels to the position's row, so a restart does not lose them (migration 0183).
+   *
+   * FIRE-AND-FORGET, on the same terms as the display-price stamp in pricestamp.ts: it is issued
+   * after the in-memory levels are already set, never awaited, and a failure is logged rather than
+   * thrown. A level the trader can see is worth more than a level that refuses to be set because
+   * the database hiccuped, and a missed write leaves exactly the behaviour this replaced.
+   *
+   * The repository method is optional, so the in-memory dev repository and every existing fake keep
+   * working without it.
+   */
+  private persistLevels(p: Position): void {
+    const write = this.repo.setPositionLevels?.bind(this.repo);
+    if (!write) return;
+    void write(p.id, p.slPrice, p.tpPrice).catch((err: unknown) => {
+      // Not fatal: see the note above. Logged so a persistently failing write is visible.
+      console.warn(`[levels] persisting ${p.id} failed:`, (err as Error)?.message ?? err);
+    });
+  }
+
+  /**
+   * Does this brand price positions continuously, so a protective level can fire?
+   *
+   * The same test `openPosition` makes. Crash recovery needs it to re-arm a position the way it was
+   * opened rather than guessing, which is why it is exposed rather than inferred from the row.
+   */
+  get hasPriceAxis(): boolean {
+    return this.priceAxis !== undefined;
   }
 
   async sell(positionId: string, userId: string): Promise<SettledEvent> {

@@ -25,11 +25,20 @@
  *       describes a fixed-stake contract, and picking the nearest would misstate how it settles.
  *   Stops level       the minimum distance a stop may sit from the price. The engine imposes none:
  *       it takes a stop anywhere and checks it on every tick, so there is no distance to state.
- *   Tick value        the money one tick is worth. It follows from the payout's gain and its
- *       break-even cost, neither of which the engine publishes to the client, so stating a figure
- *       would be inventing one.
- *   Option type / Underlying / Strike price / Face value / Accrued interest   not a derivative of
- *       a listed instrument.
+ *   Tick value        the money one tick is worth. The old reason here was that the payout followed
+ *       elapsed time rather than the price; that stopped being true when the live path was rewritten
+ *       to follow the PRICE (packages/shared/src/livepnl.ts). The reason that still holds is
+ *       narrower: a tick is worth `stake * gain`, and `gain` is calibrated by the settlement engine
+ *       PER DIRECTION and never sent to the client, so a tick is worth different money on a buy than
+ *       on a sell of the same symbol and the client is told neither figure. One number here would be
+ *       invented twice over.
+ *   Option type / Underlying / Strike price / Accrued interest   not a derivative of a listed
+ *       instrument.
+ *
+ * `Face value` was in that last list and should not have been. It is the contract's nominal value,
+ * and here the brand sets one: a lot stakes a fixed sum, which is the whole of what a lot is. The
+ * Market Watch Details tab states it (lib/game/symbolDetails); this dialog states the same quantity
+ * under MetaTrader's own `Contract size`, which is the label it uses for a per-lot figure.
  */
 
 /** MetaTrader draws a type glyph against each row: `ab` string, `01` integer, `½` fraction, `≡` enum. */

@@ -59,6 +59,19 @@ export interface GameConfigStoreOptions {
   /** Brand DISPLAY currency (sites.currency). When non-KES, the store resolves the near-miss
    *  withdrawal line to KES cents at the live FX rate (docs/25 §16). Omit / 'KES' ⇒ legacy value. */
   currency?: string;
+  /**
+   * The economy to use until a stored row is read, and if the brand has none.
+   *
+   * A candlestick brand settles CONTINUOUSLY, and the step economy's 75% edge cannot price a
+   * continuous position: the best a trader could ever be shown on opening is the RTP, so at that
+   * edge every position starts near a total loss. See TERMINAL_CONFIG in shared/config.ts for the
+   * measurements. Pass `defaultConfigForProfile(profile)` so a terminal brand falls back to the
+   * spread economy and a line brand falls back to the step one.
+   *
+   * It is only a FALLBACK. A brand with a stored `site_game_config_versions` row keeps exactly what
+   * the operator saved, so this can never reprice a live brand.
+   */
+  fallback?: VersionedGameConfig;
 }
 
 export type ConfigChangeListener = (next: VersionedGameConfig, prev: VersionedGameConfig) => void;
@@ -303,7 +316,7 @@ export const SITE_CONFIG_CHANNEL = "site_game_config_changed";
  * fails `checkFeasible` is rejected so a bad save can never crash-loop or mis-price a brand.
  */
 export class SiteGameConfigStore implements ConfigProvider {
-  private cfg: VersionedGameConfig = DEFAULT_VERSIONED_CONFIG;
+  private cfg: VersionedGameConfig;
   private loaded = false;
   private readonly history = new Map<number, VersionedGameConfig>();
   private readonly listeners = new Set<ConfigChangeListener>();
@@ -317,7 +330,10 @@ export class SiteGameConfigStore implements ConfigProvider {
     private readonly siteId: string,
     private readonly q: Querier,
     private readonly opts: GameConfigStoreOptions = {},
-  ) {}
+  ) {
+    // See GameConfigStoreOptions.fallback: a terminal brand cannot be priced by the step economy.
+    this.cfg = opts.fallback ?? DEFAULT_VERSIONED_CONFIG;
+  }
 
   private report(err: Error, ctx: string): void {
     if (this.opts.onError) this.opts.onError(err, `${ctx} [site ${this.siteId}]`);
