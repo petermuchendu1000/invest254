@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_VERSIONED_CONFIG, type VersionedGameConfig, type Direction } from "@invest254/shared";
+import { DEFAULT_VERSIONED_CONFIG, type VersionedGameConfig, type Direction, CALIBRATION_WINDOW_S } from "@invest254/shared";
 import { buildSiteContext } from "./sitecontext.js";
 
 const MASTER = "platform-master-xyz";
@@ -15,12 +15,23 @@ const cfgA: VersionedGameConfig = { ...DEFAULT_VERSIONED_CONFIG, version: 1 };
 const cfgB: VersionedGameConfig = { ...DEFAULT_VERSIONED_CONFIG, version: 1, houseEdge: 0.90, targetWinRate: 0.05 };
 
 /** Held-out realized RTP over many random entry times, both directions (hold-to-expiry). */
+/**
+ * Realised RTP, sampled over the window the engine was CALIBRATED on.
+ *
+ * It used to draw its entries from the first hour of the day. That was only accidentally valid
+ * while a contract lasted ten seconds: entries that close ten seconds apart barely overlap, so an
+ * hour held tens of thousands of near-independent samples. The horizon is now fifteen minutes (a
+ * stop needs room to be reached), and entries drawn from one hour then all look through very nearly
+ * the SAME window, so the estimate is dominated by whatever that one window did: measured RTP 0.425
+ * against a 0.25 target. Sampling the whole calibration window keeps the draws independent at any
+ * horizon the config can express.
+ */
 function realizedRtp(ctx: ReturnType<typeof buildSiteContext>, n = 40_000): number {
   const stake = 100_000;
   let paid = 0;
   const dirs: Direction[] = ["buy", "sell"];
   for (let i = 0; i < n; i++) {
-    const entryT = Math.random() * 3600;
+    const entryT = Math.random() * CALIBRATION_WINDOW_S;
     const dir = dirs[i % 2]!;
     paid += ctx.settlement.settle(stake, dir, entryT).payoutCents;
   }
