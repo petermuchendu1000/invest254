@@ -24,7 +24,48 @@ different places on the two:
 A row that used the same selector on both would be testing this shell's sameness, not MetaTrader's
 parity.
 
-## The gap this found
+## The matrix
+
+20 of 21, after the two gaps below were closed.
+
+| feature | desktop | phone |
+| --- | :-: | :-: |
+| Market Watch / symbol list | yes | yes |
+| Add a symbol | yes | yes |
+| Timeframes (all 21) | yes | yes |
+| Chart type (4) | yes | yes |
+| Indicators (38) | yes | yes |
+| Chart Properties (F8) | yes | yes |
+| Auto scale / free movement | yes | yes *(was no)* |
+| Objects: INSERT an object | yes | yes *(was no)* |
+| Objects List | yes | yes |
+| Crosshair | yes | yes |
+| One-click trading panel | yes | yes |
+| Order ticket: volume | yes | yes |
+| Order ticket: Stop Loss | yes | yes |
+| Order ticket: Take Profit | yes | yes |
+| Levels in Price \| Pips \| Currency | yes | **no** |
+| Expiry | yes | yes |
+| Sell / Buy by market | yes | yes |
+| Account summary line | yes | yes |
+| Open positions list | yes | yes |
+| History: Positions / Orders / Deals | yes | yes |
+| Messages / notifications | yes | yes |
+
+## The one row still unequal, and why it was NOT "fixed"
+
+`Levels in Price | Pips | Currency` is on the desktop ticket and not the phone's. The phone ticket
+sets a stop and a target perfectly well — `Lower SL` / `Raise SL` / `Lower TP` / `Raise TP`, as
+prices. What it has no control for is the UNIT those figures are stated in.
+
+This is left alone deliberately. `04-mobile-app.md` does not document that control on MetaTrader's
+mobile new-order screen in either direction; the only related researched fact is that while dragging
+a level on the chart, *"potential P/L shows in points and in money"* (section 3). Adding a unit
+selector because the desktop has one would be inventing MetaTrader behaviour from this shell's own
+symmetry, which is the opposite of what this whole exercise is for. **Open question for a future
+research pass**, not a defect to patch.
+
+## The first gap: no way to create an object on a phone
 
 **A phone trader could not create a graphical object.** The desktop object rail is
 `{phone ? null : <DrawRail .../>}` in `CandleChart.tsx`, and the phone's indicator sheet carried
@@ -63,7 +104,7 @@ accident, with a finger. All three are now in the phone's chart sheet, driving t
 
 ## Not gaps, and why
 
-Six rows of the first matrix read "not reachable" and were the PROBE, not the product. Each was
+Seven rows of the first matrices read "not reachable" and were the PROBE, not the product. Each was
 checked by hand before anything was changed, which is the only reason none of them turned into a
 pointless fix:
 
@@ -73,6 +114,7 @@ pointless fix:
 | Order ticket SL / TP (phone) | the ticket has `Lower SL` / `Raise SL` / `Lower TP` / `Raise TP` — it abbreviates, as MetaTrader's own phone ticket does |
 | History tabs (both) | `POSITIONS ORDERS DEALS` are on both; the probe's settle was too short for a route that fetches positions AND transactions |
 | Messages (desktop) | `Ctrl+T` opens the full Toolbox: Trade, Exposure, History, News, **Mailbox**, Calendar, Alerts, Articles, Code Base, Experts, Journal |
+| History tabs, again | the tabs are capitalised in the markup and uppercased in CSS, so `innerText` reads `ORDERS` while the DOM text a selector matches reads `Orders` |
 | Indicators (desktop) | all 38 open from the `⚙ Tools` menu |
 | Auto scale (desktop) | in that same menu |
 
