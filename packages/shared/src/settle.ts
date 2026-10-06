@@ -173,7 +173,21 @@ export class SettlementEngine {
     const entryRate = this.curve.rate(entryT);
     const exitRate = this.curve.rate(entryT + this.durationS);
     if (move >= p.tau) {
-      const multiplier = Math.min(1 + p.gain * move, this.cfg.maxMultiplier);
+      /**
+       * Floored at zero, because money cannot be negative.
+       *
+       * `tau` is the (1 - targetWinRate) quantile, so a brand with a HIGH target win rate has a
+       * NEGATIVE tau and a contract can win on an adverse move. `1 + gain * move` then goes below
+       * zero once the move passes `-1 / gain`, and `mulCents` rejects it: "invalid factor:
+       * -0.2436...". Reproduced on the live v230 config (edge 0.03, win rate 0.95) at a
+       * fifteen-minute horizon, on the 16th trade.
+       *
+       * It was unreachable rather than impossible before: at a ten-second horizon that config needs
+       * a move past -0.009 to break, which the walk does not make in ten seconds, while at fifteen
+       * minutes -0.12 is an ordinary tail. The same floor is already applied by
+       * `livePriceMultiplier` and assumed by `GameServer.finalize`, which pays nothing below 1x.
+       */
+      const multiplier = Math.max(0, Math.min(1 + p.gain * move, this.cfg.maxMultiplier));
       const payoutCents = mulCents(stakeCents, multiplier);
       return { result: "win", multiplier, payoutCents, pnlCents: payoutCents - stakeCents, entryRate, exitRate, signedMove: move };
     }

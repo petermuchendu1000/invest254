@@ -66,16 +66,39 @@ for (const lc of LIVE) {
 }
 
 // ── calibration window generalises to the WHOLE day (stationarity check) ──
+/**
+ * Calibration generalises across the day, measured ACROSS DAYS rather than within one.
+ *
+ * A contract is held for `defaultDurationS` (900s), so entries less than that apart look through
+ * overlapping windows and count as very nearly one observation. A 4h bucket therefore holds about
+ * 14_400 / 900 = 16 independent samples however many entries are drawn from it, and a single day's
+ * bucket win-rate scatters far too widely for a ±0.05 gate: the old single-seed form failed on
+ * roughly one honest run in ten per bucket. It passed historically only because a ten-second
+ * contract gave each bucket 1,440 independent windows instead of 16.
+ *
+ * Averaging each bucket across seeds is also the question worth asking. One day's hot afternoon is
+ * that day's path, which a player cannot know in advance because the seed is secret and rotates; a
+ * bucket that sits off target on day after day is a mispricing. See the longer argument and the
+ * positive control in curve.exploit.test.ts, which gates the same property for the house edge.
+ */
 test("calibration generalises to entryT across the full 24h day", () => {
   const cfg = cfgFor(0.05, 0.65);
-  const eng = new SettlementEngine(new CurveGenerator(SEEDS[0]!, cfg), cfg, "calibration", cfg.defaultDurationS, CALIBRATION_WINDOW_S, CAL);
-  const rnd = new SeededRng(SEEDS[0]!, "gen");
-  const bucket = new Array(6).fill(0), cnt = new Array(6).fill(0);
-  for (let i = 0; i < 60_000; i++) {
-    const t = rnd.range(0, 86_400); const b = Math.min(5, Math.floor(t / 14_400));
-    cnt[b]++; if (eng.settle(25000, i % 2 ? "buy" : "sell", t).result === "win") bucket[b]++;
+  const seeds = Array.from({ length: 24 }, (_, i) => `gen-day-${i}`);
+  const perSeed = seeds.map((seed) => {
+    const eng = new SettlementEngine(new CurveGenerator(seed, cfg), cfg, "calibration", cfg.defaultDurationS, CALIBRATION_WINDOW_S, CAL);
+    const rnd = new SeededRng(seed, "gen");
+    const bucket = new Array(6).fill(0), cnt = new Array(6).fill(0);
+    for (let i = 0; i < 6_000; i++) {
+      const t = rnd.range(0, 86_400); const b = Math.min(5, Math.floor(t / 14_400));
+      cnt[b]++; if (eng.settle(25000, i % 2 ? "buy" : "sell", t).result === "win") bucket[b]++;
+    }
+    return bucket.map((w, b) => w / cnt[b]);
+  });
+  for (let b = 0; b < 6; b++) {
+    const col = perSeed.map((r) => r[b]!);
+    const m = col.reduce((s, x) => s + x, 0) / col.length;
+    assert.ok(Math.abs(m - 0.65) <= 0.03, `4h bucket ${b} across-seed wr ${m.toFixed(3)} drifts from target`);
   }
-  for (let b = 0; b < 6; b++) assert.ok(Math.abs(bucket[b] / cnt[b] - 0.65) <= 0.05, `4h bucket ${b} wr ${(bucket[b]/cnt[b]).toFixed(3)} drifts from target`);
 });
 
 // ── winMultiplier — RTP-preserving: E[multiplier|win] == meanMult, bounded in (lo, cap] ──

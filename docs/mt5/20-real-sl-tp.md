@@ -124,7 +124,7 @@ stop, its target, a manual close, or the brand's horizon, and choosing a term al
 be two contradictory ways to end one trade. The horizon is the BRAND's: a brand with a price axis
 ignores whatever duration the client sends.
 
-### The horizon: why there is one, and why it is an hour
+### The horizon: why there is one, and why it is fifteen minutes
 
 Asked directly: *"Do we really need defaultDurationS here? what was the point of SL and TP?"*
 
@@ -149,19 +149,94 @@ square root. A brand holding positions for an hour while pricing them for ten se
 ten-second spread against hour-sized moves and hand the trader the house edge. The horizon a position
 is VALUED over and the horizon it is HELD to have to be the same number.
 
-It is therefore the configured maximum, 3600s: as close to MetaTrader's open-ended position as a
-per-day curve and an in-memory book allow. The economics do not constrain the choice, because the
-calibration re-solves for whatever horizon it is given:
+**The economics do not constrain the choice.** The calibration re-solves for whatever horizon it is
+given, and the realized RTP lands on target at every one of them (one seed, 200k entries drawn over
+the whole calibration window, both directions):
 
-| horizon | measured RTP (target 25%) | break-even cost |
-| --: | --: | --: |
-| 10s | 25.14% | 0.00289 |
-| 60s | 25.47% | 0.00728 |
-| 300s | 25.33% | 0.01708 |
-| 3600s | 24.97% | 0.05767 |
+| horizon | measured RTP (target 25%) | measured win-rate (target 0.125) | break-even cost |
+| --: | --: | --: | --: |
+| 10s | 24.93% | 0.1247 | 0.00291 |
+| 60s | 25.05% | 0.1252 | 0.00726 |
+| 300s | 24.82% | 0.1241 | 0.01702 |
+| 900s | 24.83% | 0.1240 | 0.03119 |
+| 1800s | 24.99% | 0.1250 | 0.04538 |
+| 3600s | 25.12% | 0.1257 | 0.06981 |
 
-An operator who wants short contracts lowers it per brand, and in doing so shortens the leash on
+**The CURVE constrains it, at exactly 900s.** The `market` walk is a `Float64Array` of
+`86_400 + 900 + 2` one-second samples, and `CurveGenerator.walkAt` CLAMPS its index to the end of
+that array. A position entered at `t` is valued at `t + horizon`, so a horizon above the 900s of
+headroom means late-day entries are valued against a FROZEN price: the exit index saturates, the
+move stops growing, and nothing can reach the win threshold. It is not a rounding concern, it is
+total:
+
+| horizon | entries valued against a frozen price | win-rate, last hour of the day | RTP, last hour |
+| --: | --: | --: | --: |
+| 900s | none | 0.1539 | 29.45% |
+| 1800s | the last 900s | 0.1000 | 18.50% |
+| 3600s | the last 2700s | **0.0000** | **0.00%** |
+
+A trader who opened a position in the last hour of a UTC day under a 3600s horizon could not win,
+whatever the price did. The whole-day average hides it completely (24.91% at 3600s) because the
+calibration sees the same frozen tail and compensates by selling the rest of the day cheaper, which
+is why this is caught by bucketing the day rather than by the aggregate RTP gate.
+
+900s is therefore not a compromise, it is the largest horizon at which NO entry in the day is valued
+against a clamped price. `CONFIG_BOUNDS.defaultDurationS.max` is pinned there so an operator cannot
+configure the frozen tail back in. Raising it means extending `WALK_POINTS` by the same amount, which
+changes every historical day's path and is therefore a migration, not a setting.
+
+An operator who wants shorter contracts lowers it per brand, and in doing so shortens the leash on
 every stop, which is the trade-off stated rather than hidden.
+
+### The longer horizon broke the anti-exploit gates, and the gates were wrong
+
+Lengthening the horizon from ten seconds to fifteen minutes turned three green tests red:
+
+```
+EXPLOIT: the PRICE LEVEL carries no edge    low band beats its control by 0.0753 (t=1.77)
+EXPLOIT: the TIME OF DAY carries no edge    seed xau-day-1 bucket 5: win-rate 0.1758 vs target 0.125
+calibration generalises to entryT           4h bucket 2 wr 0.702 drifts from target
+```
+
+Three gates on the house edge going red is the one result you do not widen a tolerance to make go
+away. They were investigated to a conclusion instead, and the conclusion is that the curve is clean
+and both gates were measuring the wrong thing.
+
+**The curve cannot leak either of them, and that is a proof rather than a measurement.**
+`CurveGenerator.value` on the `market` profile is `bias + scale * walkAt(t)`, with `squash` the
+identity because the walk never reaches its knee. `walkAt` is a fixed linear combination of four
+neighbouring samples of a walk with iid increments. The settled move is
+`±(value(t + horizon) - value(t))`, an affine image of a sum of iid increments, so its distribution
+does not depend on `t` and does not depend on `value(t)`. Any measured dependence is therefore either
+sampling noise or a selection rule reading something the price does not contain. Both turned out to
+be present, one of each.
+
+**Time of day: noise, because a day is only 96 samples long.** A contract held 900s means two entries
+less than 900s apart look through overlapping windows and count as nearly one observation, so a day
+holds about `86_400 / 900 = 96` independent samples and a 4h bucket about 16, however many entries
+are drawn. Measured over 150 seeds the per-seed bucket win-rate has a standard deviation of 0.033 to
+0.038, so **15% of honest buckets fall outside the old ±0.05 gate** and a run of 18 of them failed
+about 88% of the time. At ten seconds a bucket held 1,440 independent windows and the same gate was
+sound. Across 48 seeds every bucket's mean sits on target to within 0.0065.
+
+**Price level: the rule was reading the future.** It normalised the price against the day's FULL
+realized `[lo, hi]`, extremes that include times after the entry. Conditioning on them biases the
+forward move mechanically: at the day's realized maximum the forward move cannot be upward at all, so
+the middle of the range is exactly where the unconstrained moves live. That is not a rule any player
+can run, and it measured a spurious +0.0586 (t = 2.81) on a process that provably has no level
+dependence. Against the RUNNING range, which is all a trader or MetaTrader ever sees, the three
+terciles come in at +0.0033, +0.0006 and -0.0039, every one inside t = 0.7.
+
+**Both gates now carry a positive control, asserted in the same test.** A tolerance that no longer
+catches a leak is not a weaker test, it is not a test:
+
+| gate | honest `market` curve | the leak it must still catch |
+| --- | --: | --- |
+| time of day, across 48 seeds | worst bucket deviation **0.0065** | a day-scale volatility ramp: **0.1160**, t = 68.7 |
+| price level, running-range terciles | worst deviation **0.0039** | the `wave` (tanh) profile: **0.1420**, t = 20.1 |
+
+The gates sit at 0.02, which leaves the honest curve three times the room it needs and fails every
+control by three to seven times over.
 
 ### Known gap
 
