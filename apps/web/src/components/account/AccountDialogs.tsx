@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { cn } from '@/lib/cn';
+import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
+import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 import { api } from '@/lib/api/endpoints';
 import { ApiError } from '@/lib/api/client';
 import { useSession } from '@/lib/auth/session';
@@ -19,11 +21,28 @@ function Shell({ title, sub, icon, onClose, children }: { title: string; sub?: s
     document.addEventListener('keydown', k);
     return () => document.removeEventListener('keydown', k);
   }, [onClose]);
+  const mt5 = useTerminalSkin();
   return (
     <div className="fixed inset-0 z-[70] grid place-items-center p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
       <button aria-label="Close" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative flex max-h-[92vh] w-full max-w-[460px] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
-        <header className="flex items-center gap-3 border-b border-border bg-gradient-to-r from-accent/10 to-transparent px-5 py-4">
+      {/**
+        * MetaTrader's palette on a terminal brand, through the token repaint.
+        *
+        * This dialog builds its own `fixed inset-0` overlay rather than going through `ui/Modal`, so
+        * nothing above it could repaint it: it reached the terminal's account screen in the app's
+        * own brand, with a soft 2xl radius, a brand-accent header gradient and accent buttons. The
+        * tokens are the established answer here (see lib/ui/mt5Tokens) because every class in the
+        * subtree already resolves through `--pp-*`, so the whole form changes palette with no diff
+        * through its logic.
+        */}
+      <div
+        className={cn(
+          'relative flex max-h-[92vh] w-full max-w-[460px] flex-col overflow-hidden border border-border bg-surface shadow-2xl',
+          mt5 ? 'mt5-square rounded-sm' : 'rounded-2xl',
+        )}
+        {...(mt5 ? { style: MT5_TOKENS } : {})}
+      >
+        <header className={cn('flex items-center gap-3 border-b border-border px-5 py-4', mt5 ? 'bg-surface-2' : 'bg-gradient-to-r from-accent/10 to-transparent')}>
           <span className="grid h-9 w-9 place-items-center rounded-xl border border-accent/40 bg-accent/10 text-accent"><DIcon name={icon} className="h-5 w-5" /></span>
           <div className="flex-1"><h2 className="text-[14px] font-semibold text-fg">{title}</h2>{sub ? <p className="text-[11px] text-muted">{sub}</p> : null}</div>
           <button type="button" onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:text-fg"><DIcon name="close" className="h-4 w-4" /></button>

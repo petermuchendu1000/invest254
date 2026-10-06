@@ -78,7 +78,7 @@ export function MT5AccountPanel() {
   const demoCents = figures.demoBalance;
 
   return (
-    <section className="overflow-hidden rounded-md border border-[#2b3543] bg-[#0f1720]">
+    <section className="overflow-hidden rounded-sm border border-[#2b3543] bg-[#0f1720]">
       <header className="bg-[#3183ff] px-3 py-2 text-[13px] font-semibold text-white">
         Trading account: {brand.name || brand.slug || 'invest254'}
       </header>
@@ -153,7 +153,10 @@ export function MT5AccountPanel() {
             type="button"
             onClick={() => (demo ? setMode.mutate('real') : openDeposit({}))}
             disabled={setMode.isPending}
-            className="rounded bg-[#41be56] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#2e9d41] disabled:opacity-60"
+            // MetaTrader's primary action is BLUE. This was the app's own accent green, which is
+            // the one colour that still said "casino" on an otherwise MetaTrader screen. The deposit
+            // and withdraw sheets this opens are already blue, through MT5_TOKENS.
+            className="rounded bg-[#3183ff] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#2567cc] disabled:opacity-60"
           >
             {demo ? 'Switch to your live account' : 'Fund your account'}
           </button>

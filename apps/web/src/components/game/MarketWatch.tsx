@@ -282,7 +282,9 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
     <aside className={cn(
       'flex flex-col overflow-hidden bg-[#0f1720] text-[#ffffff]',
       // On a phone this IS the Quotes tab, filling the screen, so it has no card edge to draw.
-      phone ? '' : 'rounded-xl border border-[#2b3543]',
+      // MetaTrader's desktop panes are FLUSH: a 1px rule and a square corner, not a floating card.
+      // This drew a 14px radius, which is the app shell's own card edge on a MetaTrader-coloured box.
+      phone ? '' : 'rounded-sm border border-[#2b3543]',
       className,
     )}>
       {/* On a phone, a tab other than Symbols is a SCREEN pushed over the list, so its bar is a back

@@ -240,7 +240,7 @@ export function MT5Toolbox() {
   const alerts = useAlertsStore((s) => s.alerts);
 
   return (
-    <div className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-[#2b3543] bg-[#0f1720] text-[#ffffff]">
+    <div className="flex shrink-0 flex-col overflow-hidden rounded-sm border border-[#2b3543] bg-[#0f1720] text-[#ffffff]">
       {/* The account line is the toggle, and the only place these figures appear. Collapsed it is a
           single scrolling row so the chart keeps its height on a phone; open, it wraps to
           MetaTrader's full five. The chevron sits outside the scrolling area, or it rides off. */}

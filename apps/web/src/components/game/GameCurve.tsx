@@ -133,10 +133,10 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
         setCharted(dropped === defaultSymbol ? null : dropped);
       }}
       className={cn(
-        'relative h-full min-h-0 w-full overflow-hidden bg-surface',
+        'relative h-full min-h-0 w-full overflow-hidden bg-[#0f1720]',
         // On a phone the chart IS the screen, the way MetaTrader's Charts tab is: a card border and
         // rounded corners around a full-bleed view would only take pixels off the plot.
-        phone ? '' : 'rounded-xl border border-border',
+        phone ? '' : 'rounded-sm border border-[#2b3543]',
       )}
     >
       {/* Candlestick/OHLC brands render the TradingView view; line brands render the wave. The wave's

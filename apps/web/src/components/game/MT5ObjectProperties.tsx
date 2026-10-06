@@ -336,7 +336,7 @@ function LevelsTab({ draft, set }: { draft: Drawing; set: Setter }) {
   const write = (next: ObjectLevel[]) => set('levels', next);
   return (
     <div>
-      <div className="mb-1 flex gap-1.5 border-b border-[#2b3543] pb-1 text-[9px] font-semibold uppercase tracking-wider text-muted">
+      <div className="mb-1 flex gap-1.5 border-b border-[#2b3543] pb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">
         <span className="w-20">Level</span>
         <span className="flex-1">Description</span>
       </div>
