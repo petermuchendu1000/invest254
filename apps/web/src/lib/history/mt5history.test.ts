@@ -271,3 +271,22 @@ test('a trade from before migration 0180 reads "at market" rather than a wrong n
   assert.equal(row!.entryPrice, null);
   assert.equal(priceText(row!.entryPrice, 2), EXECUTION_PRICE);
 });
+
+/**
+ * A row names the instrument it was actually traded on (migration 0182).
+ *
+ * Every history screen used to print the one symbol the terminal quotes, because the trade record
+ * did not carry its own. The parameter is now the FALLBACK for a row written before the column.
+ */
+test('each row reports its own symbol, falling back to the brand default', () => {
+  const rows = positionRows(
+    [
+      pos({ id: 'a', openedAt: NOW - 1000, settledAt: NOW - 500, result: 'win', pnlCents: 10, symbol: 'EURUSD' }),
+      pos({ id: 'b', openedAt: NOW - 2000, settledAt: NOW - 1500, result: 'loss', pnlCents: -10 }),
+    ],
+    [], { fromMs: 0, toMs: NOW + 1 }, 'XAUUSD', (c) => String(c),
+  );
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  assert.equal(byId.get('a')?.symbol, 'EURUSD', 'a stamped row names its own instrument');
+  assert.equal(byId.get('b')?.symbol, 'XAUUSD', 'an unstamped row means the brand default');
+});

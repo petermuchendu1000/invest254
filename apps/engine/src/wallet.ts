@@ -73,6 +73,8 @@ export interface PositionRecord {
    * settlement reads them, and null simply means the screen shows "at market".
    */
   entryPrice: number | null; exitPrice: number | null;
+  /** Instrument traded (migration 0182). Null means the brand's own symbol. */
+  symbol: string | null;
 }
 
 /** A single position plus its day's public fairness data (seed hidden until reveal). */
@@ -146,7 +148,7 @@ export interface GameRepository {
    * Optional so the in-memory repository and every test fake keep compiling — absent means a brand
    * simply stores no display prices.
    */
-  setExecutionPrices?(positionId: string, axis: PriceAxis): Promise<void>;
+  setExecutionPrices?(positionId: string, axis: PriceAxis, symbol?: string): Promise<void>;
 }
 
 /** Minimal query surface compatible with `pg`'s Pool/Client. */
@@ -415,7 +417,7 @@ function toPositionRecord(p: MemPos): PositionRecord {
     openedAtMs: p.openedAtMs, settledAtMs: p.settledAtMs,
     // The dev/test repository stores no display prices: there is no day chain behind it to anchor
     // them to, and "at market" is the honest fallback (migration 0180).
-    entryPrice: null, exitPrice: null,
+    entryPrice: null, exitPrice: null, symbol: null,
   };
 }
 
@@ -546,7 +548,7 @@ export class PgGameRepository implements GameRepository {
     const limit = clampLimit(q.limit);
     const cur = decodeKeyset(q.cursor);
     const r = await this.q.query(
-      `select id, user_id, game_day_id, direction, stake, entry_rate, exit_rate, entry_price, exit_price, multiplier, payout, pnl, result, duration_s, status, opened_at, settled_at
+      `select id, user_id, game_day_id, direction, stake, entry_rate, exit_rate, entry_price, exit_price, symbol, multiplier, payout, pnl, result, duration_s, status, opened_at, settled_at
          from positions
         where user_id = $1
           and ($6::uuid is null or site_id = $6)
@@ -588,7 +590,7 @@ export class PgGameRepository implements GameRepository {
 
   async getPositionDetail(userId: string, positionId: string, siteId?: string): Promise<PositionDetail | null> {
     const r = await this.q.query(
-      `select p.id, p.user_id, p.game_day_id, p.direction, p.stake, p.entry_rate, p.exit_rate, p.entry_price, p.exit_price, p.multiplier, p.payout, p.pnl, p.result, p.duration_s, p.status, p.opened_at, p.settled_at,
+      `select p.id, p.user_id, p.game_day_id, p.direction, p.stake, p.entry_rate, p.exit_rate, p.entry_price, p.exit_price, p.symbol, p.multiplier, p.payout, p.pnl, p.result, p.duration_s, p.status, p.opened_at, p.settled_at,
               f.id as f_id, f.trade_date as f_trade_date, f.server_seed_hash as f_hash, f.server_seed as f_seed, f.revealed_at as f_revealed
          from positions p
          left join v_fairness f on f.id = p.game_day_id
@@ -619,9 +621,9 @@ export class PgGameRepository implements GameRepository {
    * open call fills the entry, the settle call fills the exit, and neither can overwrite the other
    * if the day chain is later rebuilt under a different config.
    */
-  async setExecutionPrices(positionId: string, axis: PriceAxis): Promise<void> {
+  async setExecutionPrices(positionId: string, axis: PriceAxis, symbol?: string): Promise<void> {
     const r = await this.q.query(
-      "select opened_at, settled_at, entry_rate, exit_rate, entry_price, exit_price from positions where id = $1::uuid",
+      "select opened_at, settled_at, entry_rate, exit_rate, entry_price, exit_price, symbol from positions where id = $1::uuid",
       [positionId]);
     if (!r.rows.length) return;
     const x = r.rows[0];
@@ -631,10 +633,18 @@ export class PgGameRepository implements GameRepository {
     const exit = (x.exit_price === null || x.exit_price === undefined) && x.exit_rate !== null && x.exit_rate !== undefined && x.settled_at
       ? priceAtRate(axis, toMs(x.settled_at), Number(x.exit_rate))
       : null;
-    if (entry === null && exit === null) return;
+    /**
+     * The instrument, on the same UPDATE (migration 0182).
+     *
+     * It rides here rather than in the money RPC for the reason this whole wrapper exists: the
+     * atomic open and settle are called with exactly the arguments they always were. `coalesce`
+     * makes it first-write-wins like the prices, so a later stamp cannot relabel a settled trade.
+     */
+    const sym = (x.symbol === null || x.symbol === undefined) && symbol ? symbol : null;
+    if (entry === null && exit === null && sym === null) return;
     await this.q.query(
-      "update positions set entry_price = coalesce(entry_price, $2), exit_price = coalesce(exit_price, $3) where id = $1::uuid",
-      [positionId, entry, exit]);
+      "update positions set entry_price = coalesce(entry_price, $2), exit_price = coalesce(exit_price, $3), symbol = coalesce(symbol, $4) where id = $1::uuid",
+      [positionId, entry, exit, sym]);
   }
 }
 
@@ -654,6 +664,9 @@ function mapPositionRow(x: any): PositionRecord {
     // charts a line rather than candles — both read back as null, which the client shows as "at market".
     entryPrice: x.entry_price === null || x.entry_price === undefined ? null : Number(x.entry_price),
     exitPrice: x.exit_price === null || x.exit_price === undefined ? null : Number(x.exit_price),
+    // The instrument (0182). Null on any row written before the column, which the client reads as
+    // the brand's own symbol: exactly what every row meant before this existed.
+    symbol: x.symbol === null || x.symbol === undefined ? null : String(x.symbol),
   };
 }
 

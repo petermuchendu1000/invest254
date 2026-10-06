@@ -145,6 +145,13 @@ export interface PositionDto {
    */
   entryPrice?: number | null;
   exitPrice?: number | null;
+  /**
+   * The instrument this position was traded on (migration 0182).
+   *
+   * Optional and nullable so an older engine still typechecks, and null means the brand's own
+   * symbol, which is what every row meant before the column existed.
+   */
+  symbol?: string | null;
 }
 
 /** Provable-fairness commitment for a game-day (`serverSeed` is null until revealed). */

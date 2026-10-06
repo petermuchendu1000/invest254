@@ -214,6 +214,7 @@ export const signedCents = (t: TransactionDto): number =>
 export function orderRows(
   positions: readonly PositionDto[],
   range: Range,
+  /** The brand's own symbol, used when a row does not carry its own (see migration 0182). */
   symbol: string,
   lotsOf: (stakeCents: number) => string,
 ): OrderRow[] {
@@ -226,7 +227,9 @@ export function orderRows(
     out.push({
       id: p.id,
       ticket: ticketOf(p.id),
-      symbol,
+      // The instrument this order was for (migration 0182). The parameter is the FALLBACK, for a
+      // row written before the column existed, which means the brand's own symbol.
+      symbol: p.symbol ?? symbol,
       side: p.direction,
       lots: lotsOf(p.stakeCents),
       filledLots: canceled ? lotsOf(0) : lotsOf(p.stakeCents),
@@ -251,7 +254,7 @@ export function dealRows(
     const lots = lotsOf(p.stakeCents);
     if (inRange(p.openedAt, range)) {
       out.push({
-        id: `${p.id}:in`, ticket: ticketOf(p.id), kind: 'trade', symbol,
+        id: `${p.id}:in`, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
         side: p.direction, entry: 'in', lots, label: null, atMs: p.openedAt, amountCents: null,
         price: p.entryPrice ?? null,
       });
@@ -260,7 +263,7 @@ export function dealRows(
     // direction, not the position's.
     if (p.settledAt !== null && inRange(p.settledAt, range)) {
       out.push({
-        id: `${p.id}:out`, ticket: ticketOf(p.id), kind: 'trade', symbol,
+        id: `${p.id}:out`, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
         side: p.direction === 'buy' ? 'sell' : 'buy', entry: 'out', lots, label: null,
         atMs: p.settledAt, amountCents: p.pnlCents, price: p.exitPrice ?? null,
       });
@@ -292,7 +295,7 @@ export function positionRows(
     if (p.settledAt === null || p.result === 'void') continue;
     if (!inRange(p.settledAt, range)) continue;
     out.push({
-      id: p.id, ticket: ticketOf(p.id), kind: 'trade', symbol,
+      id: p.id, ticket: ticketOf(p.id), kind: 'trade', symbol: p.symbol ?? symbol,
       side: p.direction, lots: lotsOf(p.stakeCents), label: null,
       atMs: p.settledAt, amountCents: p.pnlCents,
       entryPrice: p.entryPrice ?? null, exitPrice: p.exitPrice ?? null,

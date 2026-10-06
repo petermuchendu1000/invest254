@@ -88,10 +88,10 @@ function MT5PositionDetail({ id, onClose }: { id: string | null; onClose: () => 
           <MT5Summary>
             {/* MetaTrader's own vocabulary on a settled trade: a CLOSED DEAL, with the signed and
                 coloured Profit figure saying whether it made money. See lib/game/dealWording. */}
-            {/* MetaTrader names the instrument on every record. The trade does not carry its own
-                symbol yet (task 64, blocked on the money-RPC migration), so this reads the one the
-                terminal quotes, exactly as the history table one layer behind it does. */}
-            <MT5SummaryLine label="Symbol" value={XAUUSD.symbol} />
+            {/* MetaTrader names the instrument on every record. The trade carries its own now
+                (migration 0182); a row written before that column reads null, which means the
+                brand's own symbol, which is what every row meant before it existed. */}
+            <MT5SummaryLine label="Symbol" value={data.symbol ?? XAUUSD.symbol} />
             <MT5SummaryLine label="Type" value={data.direction} />
             <MT5SummaryLine label="Volume" value={lotsOfStake(data.stakeCents)} />
             <MT5SummaryLine label="Price" value={px(data.entryPrice)} />
