@@ -5,7 +5,12 @@ import { mulCents } from "./money.js";
 import { winMultiplier, DEFAULT_WIN_SPREAD, type WinSpread } from "./engagement.js";
 import type { Direction, Outcome } from "./types.js";
 
-interface DirParams { tau: number; gain: number; }
+interface DirParams {
+  tau: number;
+  gain: number;
+  /** The continuous payout's break-even move, solved on the same samples. See `solveCost`. */
+  cost: number;
+}
 
 /**
  * Entry-time span the calibrator samples over. It MUST cover the curve's slowest timescale, or the
@@ -104,7 +109,61 @@ export class SettlementEngine {
       const mid = (lo + hi) / 2;
       if (meanWinMult(mid) < targetMeanWinMult) lo = mid; else hi = mid;
     }
-    return { tau, gain: (lo + hi) / 2 };
+    const gain = (lo + hi) / 2;
+    return { tau, gain, cost: this.solveCost(moves, gain) };
+  }
+
+  /**
+   * The continuous payout's cost, solved on the SAME samples the step calibration just drew.
+   *
+   * Sharing the draw is not only thrift. Calibrating lazily on first use meant 200,000 fresh samples
+   * inside the tick loop, which blocked the event loop long enough to stall the websocket tick
+   * stream: two multiengine tests went from passing to timing out. One pass, both parameters.
+   *
+   * Monotone decreasing in cost (a bigger cost lowers every payout), so a bisection is exact.
+   */
+  private solveCost(moves: readonly number[], gain: number): number {
+    const n = moves.length;
+    const M = this.cfg.maxMultiplier;
+    /**
+     * Sort once, prefix-sum once, then every bisection step is two binary searches.
+     *
+     * The obvious implementation walks all 200,000 samples per step, which at 80 steps is 16M
+     * operations per direction. That is paid synchronously at construction, and it cost ~140ms a
+     * brand: enough to eat half the 600ms window two multiengine tests give the tick stream, which
+     * took them from passing to failing.
+     *
+     * The structure makes that unnecessary. For a cost `c` the payout is piecewise linear in the
+     * move: samples at or below `c - 1/gain` are on the floor and pay 0, samples at or above
+     * `c + (M-1)/gain` are on the cap and pay M, and the band between them pays `1 + gain*(m - c)`,
+     * whose sum needs only the COUNT and the TOTAL of the moves in that band. Both come straight
+     * off a prefix sum, so no sample is ever revisited and the whole solve uses every one of them
+     * rather than a subsample.
+     */
+    const asc = Float64Array.from(moves).sort();
+    const prefix = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i]! + asc[i]!;
+    /** The first index whose move is >= x, by binary search. */
+    const lowerBound = (x: number): number => {
+      let lo = 0, hi = n;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (asc[mid]! < x) lo = mid + 1; else hi = mid; }
+      return lo;
+    };
+    const meanPayout = (cost: number): number => {
+      const floorAt = lowerBound(cost - 1 / gain);        // below this, the payout is 0
+      const capAt = lowerBound(cost + (M - 1) / gain);    // at or above this, the payout is M
+      const band = capAt - floorAt;
+      const bandSum = prefix[capAt]! - prefix[floorAt]!;
+      return (band + gain * (bandSum - band * cost) + (n - capAt) * M) / n;
+    };
+    // The payout is zero everywhere once the cost exceeds the largest move, so the bracket is
+    // finite. `asc[n-1]` is that largest move, already to hand from the sort.
+    let lo = 0, hi = 1 / gain + (asc[n - 1] ?? 0) + 1e-9;
+    for (let i = 0; i < 80; i++) {
+      const mid = (lo + hi) / 2;
+      if (meanPayout(mid) > rtp(this.cfg)) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
   }
 
   /** Settle a position at expiry (hold-to-expiry / auto-sell). */
@@ -170,44 +229,10 @@ export class SettlementEngine {
    * target for every sane stopping rule (held to horizon, tight stops, wide stops, target only,
    * stop only), where the step payout leaked to 33%. No stopping rule beats the house.
    */
-  private continuous: Record<Direction, { cost: number; gain: number }> | null = null;
-
-  /**
-   * Solve `cost` so a contract held to the horizon returns exactly the configured RTP.
-   *
-   * Monotone decreasing in cost (a bigger cost can only lower every payout), so a bisection is
-   * exact to the bit. Sampled from the same process and window the step calibration uses, so the
-   * two are comparable and a brand that switches between them keeps its economics.
-   */
-  private calibrateContinuous(dir: Direction, seed: string, windowS: number, n: number): { cost: number; gain: number } {
-    const rng = new SeededRng(seed, `cont:${dir}`);
-    const moves: number[] = new Array(n);
-    for (let i = 0; i < n; i++) moves[i] = this.signedMove(dir, rng.range(0, windowS));
-    const gain = this.params[dir].gain;
-    const target = rtp(this.cfg);
-    const meanPayout = (cost: number): number => {
-      let s = 0;
-      for (const m of moves) s += Math.max(0, Math.min(1 + gain * (m - cost), this.cfg.maxMultiplier));
-      return s / moves.length;
-    };
-    // The payout is 0 everywhere once cost exceeds the largest move, so the bracket is finite.
-    let lo = 0, hi = 1 / gain + Math.max(...moves) + 1e-9;
-    for (let i = 0; i < 80; i++) {
-      const mid = (lo + hi) / 2;
-      if (meanPayout(mid) > target) lo = mid; else hi = mid;
-    }
-    return { cost: (lo + hi) / 2, gain };
-  }
-
-  /** The continuous parameters, calibrated on first use and cached. */
+  /** The continuous parameters, solved in the same pass as tau and gain. */
   continuousParams(dir: Direction): { cost: number; gain: number } {
-    if (!this.continuous) {
-      this.continuous = {
-        buy: this.calibrateContinuous("buy", this.calibrationSeed, this.sampleWindowS, this.nSamples),
-        sell: this.calibrateContinuous("sell", this.calibrationSeed, this.sampleWindowS, this.nSamples),
-      };
-    }
-    return this.continuous[dir];
+    const p = this.params[dir];
+    return { cost: p.cost, gain: p.gain };
   }
 
   /**

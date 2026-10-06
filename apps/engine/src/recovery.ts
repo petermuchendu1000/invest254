@@ -206,6 +206,8 @@ export class RecoveryService {
               durationS: row.durationS, openedAtMs: row.openedAtMs, expiresAtMs, entryT, outcome,
               status: "open", sellable: false, gameDayId: row.gameDayId, configVersion: ctx.configVersion,
               nonce: decision.nonce ?? row.nonce, poolControlled: true,
+              // A pool trade is never continuous: the controller decided it, not the curve.
+              continuous: false, slPrice: null, tpPrice: null,
             };
             if (this.game.rearm(p)) report.rearmed++; else report.noop++;
           }
@@ -241,6 +243,18 @@ export class RecoveryService {
             status: "open", sellable: outcome.result === "win", gameDayId: row.gameDayId,
             configVersion: ctx.configVersion,
             nonce: row.nonce, poolControlled: false,
+            /**
+             * A RE-ARMED position keeps the committed contract, even on a brand whose new trades
+             * are continuous.
+             *
+             * The levels are not persisted yet (they need the same kind of forward-only column the
+             * execution prices got in migration 0180), so a restart cannot know what stop the
+             * trader had set. Re-arming it as continuous would settle it on a model whose inputs
+             * were lost, which is worse than settling it the way it opened: the committed outcome
+             * is still right here in `outcome`, reconstructed from the seed. Recorded in
+             * docs/mt5/20-real-sl-tp.md as the gap that closes when the columns land.
+             */
+            continuous: false, slPrice: null, tpPrice: null,
           };
           if (this.game.rearm(p)) report.rearmed++; else report.noop++;
         }
