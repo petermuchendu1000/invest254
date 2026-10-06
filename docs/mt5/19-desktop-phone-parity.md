@@ -49,7 +49,38 @@ desktop rail drives, into the same `ChartDrawings` surface, which was already re
 and simply had nothing to arm it. The sheet also carries Cursor (a phone has no Esc to cancel a
 pending object with) and the Objects list.
 
+## The second gap: no vertical-scale control on the phone
+
+MetaTrader documents three vertical-scale commands for **both** mobile platforms
+([04-mobile-app.md](./04-mobile-app.md) section 6): *"There is an **Auto-scale** mode that restricts
+movement to horizontal only and auto-fits the price range; **Free chart movement** returns to 2-D.
+**Reset vertical scale** restores the original scale. (Both platforms.)"*
+
+The desktop Tools menu carried all three. The phone carried none — so a phone trader who stretched
+the price axis had no way back but a reload, on the one shell where that stretch happens by
+accident, with a finger. All three are now in the phone's chart sheet, driving the same
+`setAutoScale` / `resetVerticalScale` the desktop menu drives.
+
 ## Not gaps, and why
+
+Six rows of the first matrix read "not reachable" and were the PROBE, not the product. Each was
+checked by hand before anything was changed, which is the only reason none of them turned into a
+pointless fix:
+
+| row | what was really true |
+| --- | --- |
+| Add a symbol (phone) | the Quotes screen has its own `Add symbol` button; the probe looked for the desktop row's "click to add" wording |
+| Order ticket SL / TP (phone) | the ticket has `Lower SL` / `Raise SL` / `Lower TP` / `Raise TP` — it abbreviates, as MetaTrader's own phone ticket does |
+| History tabs (both) | `POSITIONS ORDERS DEALS` are on both; the probe's settle was too short for a route that fetches positions AND transactions |
+| Messages (desktop) | `Ctrl+T` opens the full Toolbox: Trade, Exposure, History, News, **Mailbox**, Calendar, Alerts, Articles, Code Base, Experts, Journal |
+| Indicators (desktop) | all 38 open from the `⚙ Tools` menu |
+| Auto scale (desktop) | in that same menu |
+
+The last two were an artefact of the probe itself: four rows open the Tools menu, and when the probe
+stopped reloading between rows, the second click on an already-open menu CLOSED it. Each row gets a
+fresh page for that reason.
+
+
 
 * **Pending order.** Present on the phone bar and DISABLED, with the reason on it: every contract
   here is market execution. Absent on the desktop ticket, which states `Market Execution` instead.
@@ -65,6 +96,8 @@ pending object with) and the Objects list.
 ## Probes
 
 * `scratchpad/parity.mjs` — the reachability matrix above, both shells.
+* `scratchpad/verify.mjs`, `scratchpad/verify2.mjs` — the by-hand check of every row that read "not
+  reachable", which is what separated the one real gap from the six false ones.
 * `scratchpad/phoneobjects.mjs` — 6/6. Opens the Objects button on a 360x800 touch screen, picks
   Trendline, taps twice on the plot, and reads MetaTrader's own
   `Objects on XAUUSD,M1 (1)` heading back off the Objects list.

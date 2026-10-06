@@ -1226,6 +1226,9 @@ export function CandleChart({
           onObjectsList={() => setObjectsListOpen(true)}
           tool={tool}
           onPickTool={(id) => { setSelectedDrawing(null); setTool(id); }}
+          priceManual={priceManual}
+          setAutoScale={setAutoScale}
+          resetVerticalScale={resetVerticalScale}
           {...(fullScreen === undefined ? {} : { fullScreen })}
           {...(onFullScreen === undefined ? {} : { onFullScreen })}
         />
@@ -1709,7 +1712,8 @@ function Toggle({ on, onClick, children, disabled, title }: {
  */
 function MobileChartBar({
   tf, chooseTf, crosshair, onCrosshair, chartType, setChartType, ind, toggleIndicator,
-  onProperties, onObjectsList, tool, onPickTool, fullScreen, onFullScreen,
+  onProperties, onObjectsList, tool, onPickTool, priceManual, setAutoScale, resetVerticalScale,
+  fullScreen, onFullScreen,
 }: {
   tf: Timeframe;
   chooseTf: (tf: Timeframe) => void;
@@ -1724,6 +1728,10 @@ function MobileChartBar({
   /** The drawing tool now armed, and how to arm one. See the Objects sheet below. */
   tool: ToolId;
   onPickTool: (id: ToolId) => void;
+  /** MetaTrader's three vertical-scale modes, which it documents on BOTH phone platforms. */
+  priceManual: boolean;
+  setAutoScale: (on: boolean) => void;
+  resetVerticalScale: () => void;
   /** Landscape only: whether the app's chrome is hidden. Undefined in portrait. */
   fullScreen?: boolean | undefined;
   onFullScreen?: ((full: boolean) => void) | undefined;
@@ -2011,6 +2019,27 @@ function MobileChartBar({
             <div className="grid grid-cols-2 gap-1">
               <button type="button" onClick={() => { setOpen(null); onProperties(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Properties</button>
               <button type="button" onClick={() => { setOpen(null); onObjectsList(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Objects list</button>
+            </div>
+          </Section>
+          {/*
+            * MetaTrader's three vertical-scale modes, which it documents on BOTH phone platforms:
+            * "There is an Auto-scale mode that restricts movement to horizontal only and auto-fits
+            * the price range; Free chart movement returns to 2-D. Reset vertical scale restores the
+            * original scale. (Both platforms.)" The desktop Tools menu carried all three and the
+            * phone carried none, so a phone trader who stretched the price axis had no way back but
+            * a reload — on the one shell where the stretch happens by accident, with a finger.
+            */}
+          <Section title="Scale">
+            <div className="grid gap-1">
+              <Toggle on={!priceManual} onClick={() => setAutoScale(true)}>Auto scale</Toggle>
+              <Toggle on={priceManual} onClick={() => setAutoScale(false)}>Free chart movement</Toggle>
+              <button
+                type="button"
+                onClick={() => { setOpen(null); resetVerticalScale(); }}
+                className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]"
+              >
+                Reset vertical scale
+              </button>
             </div>
           </Section>
           {INDICATOR_GROUPS.map((g) => (
