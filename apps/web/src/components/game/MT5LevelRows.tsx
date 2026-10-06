@@ -106,10 +106,18 @@ export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLa
 
   return (
     <>
-      {/* MetaTrader's unit control, and its ratio lock at the end of the same row. */}
+      {/*
+        MetaTrader's unit control, and its ratio lock at the end of the same row.
+
+        BARE, with no leading text: `docs/mt5/01-order-and-close-dialogs.md` 574 records the control
+        as "Segmented control for stop-level units: `Price` | `Pips` | `USD`", a segmented control on
+        its own. It carried a 80px "Levels in" label here, which is both an invention and the reason
+        "Currency" rendered as "Currenc": the three segments shared what was left of a ~310px panel
+        and the longest label overflowed its button by 4px. The name moves to the group's aria-label,
+        so a screen reader still hears what the three buttons are for.
+      */}
       <div className="flex items-center gap-1.5">
-        <span className={rowLabel}>Levels in</span>
-        <div className="flex min-w-0 flex-1 overflow-hidden rounded border border-[#2b3543]">
+        <div role="group" aria-label="Stop Loss and Take Profit units" className="flex min-w-0 flex-1 overflow-hidden rounded border border-[#2b3543]">
           {LEVEL_UNITS.map((u) => (
             <button
               key={u.id}
@@ -117,7 +125,7 @@ export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLa
               onClick={() => setUnit(u.id)}
               aria-pressed={unit === u.id}
               className={cn(
-                'min-w-0 flex-1 px-1 py-1 text-[11px] font-semibold transition',
+                'min-w-0 flex-1 px-2 py-1 text-[11px] font-semibold transition',
                 unit === u.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
               )}
             >
