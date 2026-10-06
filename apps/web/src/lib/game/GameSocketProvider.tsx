@@ -83,6 +83,13 @@ interface GameSocketValue {
    */
   openPosition: (input: OpenPositionInput) => LocalRefusal | null;
   /**
+   * Move or clear the protective levels on the open position (MetaTrader's Modify position).
+   *
+   * Returns false when there is nothing open or the socket is down. The engine's reply is the
+   * truth; this only asks.
+   */
+  setLevels: (slPrice: number | null, tpPrice: number | null) => boolean;
+  /**
    * The last trade error the engine sent, for the order window to show as MetaTrader's rejection.
    *
    * Carries the same title and detail the toast uses, from `lib/game/orderResult`, so the two
@@ -570,6 +577,9 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         livePnlCents: 0,
         secondsLeft: input.durationS,
         sellable: false,
+        // What was ASKED for. `position_opened` replaces these with what the engine actually took.
+        slPrice: input.slPrice ?? null,
+        tpPrice: input.tpPrice ?? null,
       });
       // Optimistic debit; reconciled by the authoritative `balance` push.
       qc.setQueryData<WalletDto>(['wallet'], (old) =>
@@ -579,6 +589,23 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     },
     [qc, send, setActive, toast],
   );
+
+  /**
+   * MetaTrader's Modify position, sent to the ENGINE.
+   *
+   * The levels do not live here. This asks the engine to hold them, and the engine's `levels_set`
+   * reply is what the UI believes afterwards, so a tab that lost a race against another device is
+   * corrected rather than left showing a stop the server never took.
+   */
+  const setLevels = useCallback((slPrice: number | null, tpPrice: number | null): boolean => {
+    const a = activeRef.current;
+    if (!a || !a.positionId || a.phase !== 'open') return false;
+    if (!send('set_levels', { positionId: a.positionId, slPrice, tpPrice })) {
+      toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: your levels were not changed.' });
+      return false;
+    }
+    return true;
+  }, [send, toast]);
 
   const sell = useCallback(() => {
     const a = activeRef.current;
@@ -794,6 +821,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           const d = data as { positions?: readonly {
             positionId: string; direction: Direction; stakeCents: number; durationS: number;
             openedAtMs: number; expiresAtMs: number; entryRate: number; sellable: boolean;
+            slPrice?: number | null; tpPrice?: number | null;
           }[] };
           const first = d.positions?.[0];
           if (!first || activeRef.current) break;
@@ -816,6 +844,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             livePnlCents: 0,
             secondsLeft: Math.max(0, Math.round((first.expiresAtMs - Date.now()) / 1000)),
             sellable: first.sellable,
+            // The stop the ENGINE still holds. A refreshed tab gets its levels back because the
+            // engine never lost them, which is the whole reason they live there.
+            slPrice: first.slPrice ?? null,
+            tpPrice: first.tpPrice ?? null,
           });
           break;
         }
@@ -838,6 +870,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             livePnlCents: cur?.livePnlCents ?? 0,
             secondsLeft: cur?.secondsLeft ?? d.durationS,
             sellable: cur?.sellable ?? false,
+            // What the engine ACTUALLY took, which can differ from what was asked (a level it
+            // refused comes back null). The ack is the truth, not the optimistic copy above.
+            slPrice: d.slPrice ?? null,
+            tpPrice: d.tpPrice ?? null,
           }));
           /**
            * No popup on a terminal brand, because MetaTrader has none.
@@ -864,6 +900,19 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
               description: `Auto-sell in ${d.durationS}s`,
             });
           }
+          break;
+        }
+        /**
+         * The engine's answer to Modify position: what it NOW holds.
+         *
+         * Taken as the truth rather than merged with the local request. Two devices can both move a
+         * stop, and the one that lost should show the level that will actually fire, not its own.
+         */
+        case 'levels_set': {
+          const d = data as { positionId?: string; slPrice?: number | null; tpPrice?: number | null };
+          setActive((cur) => (cur && cur.positionId === d.positionId
+            ? { ...cur, slPrice: d.slPrice ?? null, tpPrice: d.tpPrice ?? null }
+            : cur));
           break;
         }
         case 'position_update': {
@@ -1239,11 +1288,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   // Perf (BUGLOG #92): the value used to be a new object every render, and `online` changes on every
   // connect/disconnect across the brand — re-rendering the whole trade screen and chart each time.
   const apiValue = useMemo<GameSocketApi>(() => ({
-    getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
+    getTicks, getLastTick, openPosition, setLevels, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
     requestSymbols, subscribeSymbols, getSymbolQuote,
-  }), [getTicks, getLastTick, openPosition, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
+  }), [getTicks, getLastTick, openPosition, setLevels, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
     requestSymbols, subscribeSymbols, getSymbolQuote]);

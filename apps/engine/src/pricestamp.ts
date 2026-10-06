@@ -46,7 +46,11 @@ export function withPriceStamp(repo: GameRepository, opts: PriceStampOptions): G
     // is logged rather than becoming an unhandled rejection that could take the engine down.
     void (async () => {
       try {
-        await stampOne(positionId, opts.axis());
+        // The axis knows its own instrument, so the symbol needs no extra plumbing to reach here
+        // (migration 0182). Every trade settles on the brand's default instrument today, which is
+        // exactly what this names; it becomes the ORDER's symbol when multi-symbol trading lands.
+        const axis = opts.axis();
+        await stampOne(positionId, axis, axis.instrument.symbol);
       } catch (err) {
         opts.onError?.(err as Error, `price-stamp ${positionId}`);
       }

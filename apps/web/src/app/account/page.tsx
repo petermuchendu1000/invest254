@@ -14,6 +14,7 @@ import { ReferralInviteCard } from '@/components/account/ReferralInviteCard';
 import { SecurityCard } from '@/components/account/SecurityCard';
 import { MT5AccountPanel } from '@/components/account/MT5AccountPanel';
 import { MT5Settings } from '@/components/account/MT5Settings';
+import { MT5Screen } from '@/components/mt5/kit';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { isTerminalScreen } from '@/lib/ui/terminalScreen';
 import { useBrand } from '@/lib/brand/BrandProvider';
@@ -36,18 +37,32 @@ export default function AccountPage() {
   // panel at its top. A marketer screen never gets terminal chrome.
   const mt5 = isTerminalScreen(terminal, isMarketer);
 
-  if (!hydrated) return <Skeleton className="h-48 w-full" />;
+  /**
+   * Every state of this route keeps MetaTrader's title bar, because on a phone that bar carries the
+   * hamburger and is the only navigation on screen (see MT5TitleBar). A skeleton with no bar would
+   * be a screen with no way off it.
+   */
+  if (!hydrated) {
+    return mt5
+      ? <MT5Screen title="Settings"><div className="p-3"><Skeleton className="h-48 w-full" /></div></MT5Screen>
+      : <Skeleton className="h-48 w-full" />;
+  }
 
   if (!token) {
-    return (
+    const signIn = (
       <EmptyState
         title="Account"
         action={<Button onClick={() => openAuth('login')}>Log in</Button>}
       />
     );
+    return mt5 ? <MT5Screen title="Settings">{signIn}</MT5Screen> : signIn;
   }
 
-  if (!user) return <Skeleton className="h-48 w-full" />;
+  if (!user) {
+    return mt5
+      ? <MT5Screen title="Settings"><div className="p-3"><Skeleton className="h-48 w-full" /></div></MT5Screen>
+      : <Skeleton className="h-48 w-full" />;
+  }
 
   if (mt5) return <MT5Settings />;
 

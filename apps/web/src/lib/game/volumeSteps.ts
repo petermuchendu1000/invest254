@@ -60,3 +60,29 @@ export function volumeSteps(
 
 /** `0.50` prints as `0.5` and `1.00` as `1`, which is how MetaTrader labels these cells. */
 const trim = (n: number): string => String(Number(n.toFixed(6)));
+
+/**
+ * Why a TYPED volume was not taken as written, in the trader's words, or null when it was.
+ *
+ * MetaTrader's `Volume:` is a numeric spinner that accepts keystrokes and validates them
+ * (docs/mt5/01-order-and-close-dialogs.md 1.3; its advanced mobile dialog "highlights the field in
+ * red" on an invalid value rather than refusing the keystroke, 7.4). Quietly swapping the number
+ * for another is the one thing it does not do, and that silence is what made this field read as
+ * dead: type 1, get 0.058 back, no reason given.
+ *
+ * The two reasons are different and a trader can act on the difference: a figure outside the range
+ * is a LIMIT, while a figure inside it that still moved was snapped to the symbol's step grid,
+ * which starts at the brand's minimum rather than at a round number.
+ */
+export function volClampReason(
+  typed: number,
+  applied: number,
+  { minLots, maxLots, volStep, volDigits }: { minLots: number; maxLots: number; volStep: number; volDigits: number },
+): string | null {
+  if (Math.abs(applied - typed) < 1e-9) return null;
+  const used = `${applied.toFixed(volDigits)} lots was used`;
+  if (typed < minLots || typed > maxLots) {
+    return `${typed} is outside the ${minLots.toFixed(volDigits)} to ${maxLots.toFixed(volDigits)} lots this symbol allows, so ${used}.`;
+  }
+  return `This symbol steps in ${volStep} lots from its ${minLots.toFixed(volDigits)} minimum, so ${used}.`;
+}

@@ -38,7 +38,7 @@ const positionDto = (p: PositionRecord) => ({
   durationS: p.durationS, status: p.status, openedAt: p.openedAtMs, settledAt: p.settledAtMs,
   // The chart prices the contract executed at (migration 0180), or null when unstamped — the
   // terminal's receipt screens print "at market" rather than a price they cannot know.
-  entryPrice: p.entryPrice, exitPrice: p.exitPrice,
+  entryPrice: p.entryPrice, exitPrice: p.exitPrice, symbol: p.symbol,
 });
 
 const fairnessDto = (f: FairnessRecord) => ({

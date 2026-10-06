@@ -37,9 +37,24 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
   const money = useDisplayMoney();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, bump, stakeCents, durationS, place,
+    lots, minLots, maxLots, volDigits, bump, setLots, volNote, stakeCents, durationS, place,
     chartSettled,
   } = useOrderEntry();
+  /**
+   * MetaTrader's one-click volume is a FIELD, not a readout: "the volume field sits between them
+   * with a dropdown caret on the left and a spinner on the right"
+   * (docs/mt5/01-order-and-close-dialogs.md 4.1). Ours was a `<span>`, so when the brand's
+   * minimum met its maximum both chevrons disabled and the panel had no volume control left.
+   */
+  const [typingVol, setTypingVol] = useState<string | null>(null);
+  const commitVol = () => {
+    if (typingVol === null) return;
+    const n = Number(typingVol);
+    setTypingVol(null);
+    if (Number.isFinite(n) && n > 0) setLots(n);
+  };
+  const atMin = `Minimum volume ${minLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`;
+  const atMax = `Maximum volume ${maxLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`;
   const instant = useOneClickStore((s) => s.instant);
 
   /**
@@ -131,21 +146,39 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
               type="button"
               onClick={() => bump(-0.01)}
               disabled={lots <= minLots}
+              title={lots <= minLots ? atMin : undefined}
               aria-label="Decrease volume"
               className={chev}
             >
               <Chevron down />
             </button>
-            <span
-              aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
-              className="min-w-0 flex-1 text-center font-mono text-[13px] font-bold text-[#0f1720] tabular-nums"
-            >
-              {lots.toFixed(volDigits)}
-            </span>
+            {typingVol === null ? (
+              <button
+                type="button"
+                onClick={() => setTypingVol(lots.toFixed(volDigits))}
+                title={`Volume in lots. Type a value between ${minLots.toFixed(volDigits)} and ${maxLots.toFixed(volDigits)}.`}
+                aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
+                className="min-w-0 flex-1 text-center font-mono text-[13px] font-bold text-[#0f1720] tabular-nums"
+              >
+                {lots.toFixed(volDigits)}
+              </button>
+            ) : (
+              <input
+                autoFocus
+                value={typingVol}
+                inputMode="decimal"
+                aria-label="Volume in lots"
+                onChange={(e) => setTypingVol(e.target.value)}
+                onBlur={commitVol}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitVol(); if (e.key === 'Escape') setTypingVol(null); }}
+                className="w-0 min-w-0 flex-1 bg-transparent text-center font-mono text-[13px] font-bold text-[#0f1720] outline-none tabular-nums"
+              />
+            )}
             <button
               type="button"
               onClick={() => bump(0.01)}
               disabled={lots >= maxLots}
+              title={lots >= maxLots ? atMax : undefined}
               aria-label="Increase volume"
               className={chev}
             >

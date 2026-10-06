@@ -19,8 +19,6 @@ import { MT5MobileShell } from '@/components/game/mobile/MT5MobileShell';
 import { useIsPhone } from '@/lib/ui/useIsPhone';
 import { useOrderEntry } from '@/lib/game/useOrderEntry';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
-import { useLevelsStore } from '@/lib/game/levelsStore';
-import { levelPrice, useTakeProfitLevelWatch } from '@/lib/game/levelWatch';
 
 /**
  * Chooses the trade layout for the current brand:
@@ -80,17 +78,16 @@ export function TradeSurface() {
    * dialog are all setting the same thing, and closing goes through the ordinary manual sell under
    * the engine's own two conditions. See lib/game/levelWatch.ts.
    */
-  const levels = useLevelsStore((st) => st.levels);
-  const levelRef = useLevelsStore((st) => st.ref);
   const { activePosition, sell, earlyCloseEnabled } = useGameSocket();
-  useTakeProfitLevelWatch({
-    position: activePosition,
-    price: order.price,
-    target: levelPrice(levels, levelRef ?? order.price, 'tp', order.digits),
-    sell,
-    enabled: earlyCloseEnabled,
-    digits: order.digits,
-  });
+  /**
+   * The browser no longer watches the target.
+   *
+   * `useTakeProfitLevelWatch` fired a manual sell from a React effect when the price reached the
+   * level. That only ever worked while this tab was open, focused enough to receive ticks, and
+   * connected: a trader who set a target and closed the laptop had no target at all. The ENGINE
+   * holds the levels now and fires them on its own tick, so the hook is gone rather than kept as a
+   * second, weaker copy of the same rule. See docs/mt5/20-real-sl-tp.md.
+   */
   useRestoreSymbolSet();
   useRestoreChartSymbol();
   useQuoteSubscription(isTerminalBrand && !isMarketer);

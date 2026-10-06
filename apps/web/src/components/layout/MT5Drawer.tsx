@@ -10,6 +10,7 @@ import { useAuthUi } from '@/lib/auth/ui';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useWallet, useWalletFigures } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { useDisplayMoney } from '@/lib/money';
 import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
@@ -107,7 +108,7 @@ export function MT5Drawer() {
   if (!mt5 || !open) return null;
 
   const demo = figures.demo;
-  const server = `${brand.name || brand.slug || 'invest254'}-${demo ? 'Demo' : 'Live'}`;
+  const server = mt5ServerName(brand, demo ? 'demo' : 'real');
   const balanceCents = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
 
   const close = () => setOpen(false);

@@ -84,11 +84,24 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
         </span>
       </div>
 
+      {/*
+        * MetaTrader's open position carries its LEVELS, not a countdown.
+        *
+        * Its position row is Symbol / Type / Volume / Price / S/L / T/P / Price / Swap / Profit:
+        * there is no expiry on a MetaTrader position, so there is nothing to count down. This said
+        * "Expires in 8s", which was honest while a contract had a term and became nonsense the
+        * moment the horizon became an hour-long backstop rather than the trade's whole character.
+        *
+        * S/L and T/P are the ENGINE's, read off the position rather than the ticket's working copy,
+        * because those are the ones that will actually fire. "not set" rather than a blank, which is
+        * MetaTrader's own wording for an empty level.
+        */}
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums">
         <Row label="Volume" value={lotsOfStake(pos.stakeCents)} />
         <Row label="Stake" value={money.fmt(pos.stakeCents)} />
-        <Row label="Multiplier" value={`×${pos.liveMultiplier.toFixed(2)}`} />
-        <Row label="Expires in" value={state} />
+        <Row label="S / L" value={pos.slPrice === null ? 'not set' : pos.slPrice.toFixed(digits)} />
+        <Row label="T / P" value={pos.tpPrice === null ? 'not set' : pos.tpPrice.toFixed(digits)} />
+        {pos.phase === 'open' ? null : <Row label="State" value={state} />}
       </dl>
 
       {/* A one-pixel rule rather than a coloured bar: it is chrome telling the time, and MetaTrader
@@ -115,9 +128,10 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           ? 'Market execution. Left alone, it closes itself at expiry.'
           : 'Closes automatically at expiry: market execution.'}
       </p>
-      {/* MetaTrader's S/L, stated rather than offered. The engine settles a losing contract at
-          expiry and will not close one early, so the stop is fixed at the stake: that is the most
-          this position can lose, whatever happens to the price. */}
+      {/* MetaTrader's S/L, stated rather than offered: this compact surface carries no level
+          controls, and the ticket, the Toolbox and Modify position all do. The stake is the figure
+          that holds either way, because the continuous payout floors at zero, so it is the most
+          this position can lose whatever the price does and whatever closes it. */}
       <p className="text-[10px] text-[#8fa2b8]">
         Max loss {money.fmt(pos.stakeCents)} (the stake). This contract cannot lose more.
       </p>

@@ -7,12 +7,13 @@ import { accountSummary, accountStripFields, mtAmount, lotsOfStake } from '@inve
 import { useGameSocket, useGameSocketApi, type NewsItemDto, type DayAnchor } from '@/lib/game/GameSocketProvider';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
+import { useBrand } from '@/lib/brand/BrandProvider';
 import { useSession } from '@/lib/auth/session';
 import { useMyNotifications } from '@/lib/notifications/hooks';
 import { useJournal, logJournal } from '@/lib/game/journal';
 import { useAlertsStore, usePriceAlertWatch, type PriceAlert } from '@/lib/game/alerts';
 import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
-import { levelPrice } from '@/lib/game/levelWatch';
+import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
@@ -52,7 +53,13 @@ import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
 type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
-  const { activePosition, status, earlyCloseEnabled } = useGameSocket();
+  const { activePosition, status, earlyCloseEnabled, setLevels: pushLevels } = useGameSocket();
+  const brand = useBrand();
+  /**
+   * Whether the engine acts on the S/L and T/P levels at all: a brand with a price axis, pool mode
+   * off. `earlyCloseEnabled` alone is not it. See `isContinuousBrand` in lib/game/levelWatch.ts.
+   */
+  const continuous = isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled });
   const { getLastTick, getMarket, sell } = useGameSocketApi();
   const { data: wallet } = useWallet();
   const money = useDisplayMoney();
@@ -192,10 +199,33 @@ export function MT5Toolbox() {
   // `livePrice` is already a callback on this component, so the value is read through it.
   const nowPrice = livePrice();
   const anchor = levelRef ?? nowPrice;
-  const slPrice = levelPrice(levels, anchor, 'sl', digits);
-  const tpPrice = levelPrice(levels, anchor, 'tp', digits);
-  /** One point at a time, which is what MetaTrader's own "− value +" on this row steps by. */
+  /**
+   * The S/L and T/P columns show the ENGINE's levels for the open position, not the ticket's.
+   *
+   * These read `levelPrice(levels, ...)`, which is the working copy a trader drags around BEFORE an
+   * order exists. Once a position is open that copy is no longer what will fire: the engine holds
+   * the levels and settles on them. A Toolbox row printing the ticket's numbers would show a stop
+   * that does not exist, and the two would drift apart the moment the ticket was touched again.
+   *
+   * Falls back to the ticket's copy only when nothing is open, which is when that is the only
+   * meaning the row can have.
+   */
+  const slPrice = live?.slPrice ?? (live ? null : levelPrice(levels, anchor, 'sl', digits));
+  const tpPrice = live?.tpPrice ?? (live ? null : levelPrice(levels, anchor, 'tp', digits));
+  /**
+   * One point at a time, which is what MetaTrader's own "− value +" on this row steps by.
+   *
+   * On an OPEN position this is Modify position, so it goes to the engine: stepping it only in the
+   * local store would move a number on screen and leave the stop that actually fires where it was.
+   */
   const stepTp = (dir: 1 | -1) => {
+    const point = 1 / 10 ** digits;
+    if (live && live.phase === 'open') {
+      const base = live.tpPrice ?? nowPrice;
+      if (base === null) return;
+      pushLevels(live.slPrice, Number((base + dir * point).toFixed(digits)));
+      return;
+    }
     if (anchor === null) return;
     const cur = levels.tpPoints;
     setLevels({ ...levels, tpPoints: cur === null ? dir * 100 : cur + dir }, nowPrice);
@@ -349,7 +379,7 @@ export function MT5Toolbox() {
                     to={px(getLastTick()?.rate ?? null)}
                     profit={money.fmt(live.livePnlCents)}
                     profitCents={live.livePnlCents}
-                    note={earlyCloseEnabled && tpPrice !== null ? `T/P ${tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(live.stakeCents)}`}
+                    note={continuous && tpPrice !== null ? `T/P ${tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(live.stakeCents)}`}
                   />
                   <div className="hidden sm:block">
                     <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
@@ -368,11 +398,13 @@ export function MT5Toolbox() {
                           {/* MetaTrader's S/L column: the LEVEL, as a price, the same one the ticket
                               sets and the chart draws. It used to print the stake instead, because
                               there was no stop to show: the whole column was a sentence about the
-                              engine. The stop still cannot fire, which the ticket says in full;
-                              this is the level the trader set, which is what the column is for. */}
+                              engine. On a continuous brand the engine checks this level every tick
+                              and closes the position there, which is what the column is for. */}
                           <span
                             className="text-[#8fa2b8]"
-                            title="This contract settles a loss at expiry, so the stop cannot fire. The level is the trader's."
+                            title={continuous
+                              ? 'The stop closes this position at its price, for what it is worth there. Stops processing is performed on the server side.'
+                              : 'This contract settles a loss at expiry, so the stop cannot fire. The level is the trader\u2019s.'}
                           >
                             {slPrice === null ? '-' : slPrice.toFixed(digits)}
                           </span>
@@ -381,7 +413,7 @@ export function MT5Toolbox() {
                           {/* MetaTrader's T/P column: the level as a price, stepped in the
                               instrument's own points. It held a money TARGET before, which is a
                               different concept the chart could not draw and the phone never fired. */}
-                          {earlyCloseEnabled ? (
+                          {continuous ? (
                             <span className="flex items-center gap-1">
                               <button type="button" onClick={() => stepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
                               <span className="min-w-16 text-center">{tpPrice === null ? 'none' : tpPrice.toFixed(digits)}</span>

@@ -7,6 +7,9 @@ import {
   pointsOfPrice, priceOfPoints, applyRatioLock, type Levels,
 } from '@/lib/game/levels';
 import { useLevelsStore } from '@/lib/game/levelsStore';
+import { isContinuousBrand } from '@/lib/game/levelWatch';
+import { useGameSocket } from '@/lib/game/GameSocketProvider';
+import { useBrand } from '@/lib/brand/BrandProvider';
 import { cn } from '@/lib/cn';
 
 /**
@@ -30,10 +33,14 @@ import { cn } from '@/lib/cn';
  *
  * ── What the money figure says ───────────────────────────────────────────────────────────────────
  * MetaTrader shows the potential P/L of the level being dragged. The distance in POINTS is real and
- * is shown. The money is not derivable the way MetaTrader's is: this contract's payout is a
- * multiplier assigned at open that rises with elapsed time, and no level determines it. So the stop
- * shows the stake, which is exactly what it risks, and the target says so rather than printing an
- * invented figure. The dialog's own notes carry the same two sentences.
+ * is shown; the money depends on how the brand is priced.
+ *
+ * On a CONTINUOUS brand the engine closes the position at the level, for what it is worth there, so
+ * the figure does follow from the distance — but it follows through a gain and a break-even cost the
+ * engine does not publish to the client, so no figure is printed rather than an invented one. On a
+ * committed contract the payout is a multiplier assigned at open that no level determines, so the
+ * stop shows the stake, which is exactly what it risks, and the target says it varies. The dialog's
+ * own notes carry the same distinction.
  */
 export const LEVEL_COLOUR = { sl: '#DD5B4E', tp: '#0EB52E' } as const;
 
@@ -48,6 +55,10 @@ export function MT5ChartLevels({ project, width, height, digits, price, stakeCen
   stakeCents: number;
 }) {
   const money = useDisplayMoney();
+  const brand = useBrand();
+  const { earlyCloseEnabled } = useGameSocket();
+  /** Whether the engine will act on these levels at all. See lib/game/levelWatch.ts. */
+  const continuous = isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled });
   const levels = useLevelsStore((s) => s.levels);
   const setLevels = useLevelsStore((s) => s.set);
   const levelRef = useLevelsStore((s) => s.ref);
@@ -99,6 +110,37 @@ export function MT5ChartLevels({ project, width, height, digits, price, stakeCen
    * at exactly the prices they are set to.
    */
   const TAG_H = 46;
+
+  /**
+   * The grab, shared by the tag and by the rule itself.
+   *
+   * MetaTrader does not make you hit the little label: "drag the SL/TP line (Drag'n'Drop)"
+   * (docs/mt5/01-order-and-close-dialogs.md section 3.5). The line IS the handle, so both the tag
+   * and the strip over the rule start the same drag.
+   */
+  const grab = (field: 'sl' | 'tp') => ({
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      e.stopPropagation();
+      // The plot underneath is lightweight-charts' own pan and pinch surface. Capture plus
+      // `touch-none` keeps the whole gesture here, so a finger that starts on a level drags the
+      // level rather than scrolling the chart out from under it.
+      e.preventDefault();
+      draggingRef.current = field;
+      setDragging(field);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      if (draggingRef.current !== field) return;
+      e.stopPropagation();
+      onDrag(field, e.clientY);
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      draggingRef.current = null;
+      setDragging(null);
+    },
+    onPointerCancel: () => { draggingRef.current = null; setDragging(null); },
+  });
   const yOfLevel = (points: number | null): number | null => {
     if (points === null) return null;
     const y = project.yOf(priceOfPoints(ref, points, digits));
@@ -136,36 +178,45 @@ export function MT5ChartLevels({ project, width, height, digits, price, stakeCen
             opacity: live ? 1 : 0.85,
           }}
         />
-        {/* MetaTrader's tag, on the price axis side, carrying the level and its label. */}
+        {/*
+          * The rule itself is a handle, 24px of it.
+          *
+          * MetaTrader modifies a level by Drag'n'Drop ON THE LINE, and on the phone by "Tap 'SL' /
+          * 'TP' then drag those levels" (docs/mt5/01-… 3.5, docs/mt5/04-mobile-app.md section 3).
+          * A 1px rule is not something a mouse can hit and not something a finger can hit at all,
+          * so the drag gets a band around it the way MetaTrader's own hit tolerance does. It is
+          * transparent and only 24px, so it never hides a candle and leaves the rest of the plot to
+          * the chart's pan and pinch.
+          */}
+        <div
+          aria-hidden
+          data-chart-level-line={field}
+          {...grab(field)}
+          className="pointer-events-auto absolute inset-x-0 h-6 -translate-y-1/2 cursor-ns-resize touch-none"
+          style={{ top: 0 }}
+        />
+        {/* MetaTrader's tag, on the price axis side, carrying the level and its label.
+            The button is 44px tall so a finger and a mouse have something to take hold of; the
+            coloured pill inside keeps MetaTrader's own slim label, which is what a trader reads.
+            Sized here rather than left to the global 44px tap-target rule, because that rule only
+            exists under `@media (pointer: coarse)` and a desktop mouse got a 14px target. */}
         <button
           type="button"
           data-chart-level={field}
           aria-label={`${field === 'sl' ? 'Stop loss' : 'Take profit'} at ${at.toFixed(digits)}, drag to move`}
-          onPointerDown={(e) => {
-            e.currentTarget.setPointerCapture(e.pointerId);
-            e.stopPropagation();
-            draggingRef.current = field;
-            setDragging(field);
-          }}
-          onPointerMove={(e) => {
-            if (draggingRef.current !== field) return;
-            e.stopPropagation();
-            onDrag(field, e.clientY);
-          }}
-          onPointerUp={(e) => {
-            e.currentTarget.releasePointerCapture(e.pointerId);
-            draggingRef.current = null;
-            setDragging(null);
-          }}
-          onPointerCancel={() => { draggingRef.current = null; setDragging(null); }}
-          className={cn(
-            'pointer-events-auto absolute right-0 -translate-y-1/2 touch-none rounded-l px-1.5 py-0.5',
-            'font-mono text-[10px] font-bold leading-none text-white tabular-nums',
-            live && 'ring-2 ring-white/60',
-          )}
-          style={{ background: colour, top: nudge[field] }}
+          {...grab(field)}
+          className="pointer-events-auto absolute right-0 flex h-11 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-end bg-transparent"
+          style={{ top: nudge[field] }}
         >
-          {field.toUpperCase()} {at.toFixed(digits)}
+          <span
+            className={cn(
+              'rounded-l px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-white tabular-nums',
+              live && 'ring-2 ring-white/60',
+            )}
+            style={{ background: colour }}
+          >
+            {field.toUpperCase()} {at.toFixed(digits)}
+          </span>
         </button>
         {/* While dragging, MetaTrader shows the potential result in points and in money. */}
         {live ? (
@@ -173,8 +224,8 @@ export function MT5ChartLevels({ project, width, height, digits, price, stakeCen
             className="pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-[#0f1720]/90 px-1.5 py-0.5 font-mono text-[10px] leading-none text-white tabular-nums"
             style={{ outline: `1px solid ${colour}`, top: nudge[field] }}
           >
-            {points > 0 ? '+' : ''}{points} pts ·{' '}
-            {field === 'sl' ? money.fmt(stakeCents) : 'varies'}
+            {points > 0 ? '+' : ''}{points} pts
+            {continuous ? null : <> · {field === 'sl' ? money.fmt(stakeCents) : 'varies'}</>}
           </span>
         ) : null}
       </div>

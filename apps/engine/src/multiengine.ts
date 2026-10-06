@@ -332,8 +332,15 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
         },
         onSettled: (e) => {
           toSiteUser(siteId, e.position.userId, "position_settled", {
-            positionId: e.position.id, result: e.position.outcome.result, lockedMultiplier: e.lockedMultiplier,
+            positionId: e.position.id,
+            // On a continuous contract the result is whatever the close actually paid, not a
+            // decision taken at open, so it is read off the money rather than off `outcome`.
+            result: e.position.continuous ? (e.payoutCents > e.position.stakeCents ? "win" : "loss") : e.position.outcome.result,
+            lockedMultiplier: e.lockedMultiplier,
             payoutCents: e.payoutCents, pnlCents: e.pnlCents, balance: e.balance, mode: e.mode, presentation: e.presentation,
+            // Which level ended it, so the terminal can say "Stop Loss triggered" the way
+            // MetaTrader does rather than describing every close the same way.
+            ...(e.closedBy ? { closedBy: e.closedBy } : {}),
             // The side, so a terminal can name the deal the way MetaTrader names one. Taken from the
             // position itself rather than left to the client to remember: the client may have
             // dropped it, or never had it (a settle after a reconnect).
@@ -431,6 +438,10 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
                   durationS: p.durationS,
                   openedAtMs: p.openedAtMs,
                   expiresAtMs: p.expiresAtMs,
+                  // The protective levels the ENGINE is holding. A refreshed tab gets back the
+                  // stop it set rather than an empty ticket, because the engine never lost it.
+                  slPrice: p.slPrice,
+                  tpPrice: p.tpPrice,
                   entryRate: p.outcome.entryRate,
                   sellable: p.sellable,
                 })),
@@ -440,11 +451,18 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
               if (opts.playAllowed && !(await opts.playAllowed()))
                 return send(ws, "error", { code: "SYSTEM_DISABLED", message: "Play is temporarily disabled by the platform." });
+              // MetaTrader arms the protective levels with the order itself, so they are part of
+              // the request rather than a second round trip the trader could lose a tick inside.
+              const lvl = (v: unknown): number | null => {
+                const n = Number(v);
+                return Number.isFinite(n) && n > 0 ? n : null;
+              };
               const { position: p, balance } = await rt.game.openPosition({
                 userId, stakeCents: Number(msg.data.stakeCents), direction: msg.data.direction as Direction, durationS: msg.data.durationS,
                 role: roleOf.get(ws) ?? "player",
+                slPrice: lvl(msg.data.slPrice), tpPrice: lvl(msg.data.tpPrice),
               });
-              send(ws, "position_opened", { positionId: p.id, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs });
+              send(ws, "position_opened", { positionId: p.id, entryRate: p.outcome.entryRate, direction: p.direction, stakeCents: p.stakeCents, durationS: p.durationS, expiresAtMs: p.expiresAtMs, slPrice: p.slPrice, tpPrice: p.tpPrice });
               // Bonus-first staking (0094) spends bonus_balance before real, so the stake usually
               // moves BOTH buckets — push the full snapshot or the client bonus figure goes stale.
               const afterOpen = await opts.repo.getWalletSnapshot(userId);
@@ -453,6 +471,27 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
             case "sell": {
               const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
               await rt.game.sell(String(msg.data.positionId), userId); return;
+            }
+            /**
+             * MetaTrader's Modify position: move or clear the protective levels on an open trade.
+             *
+             * The levels live on the ENGINE, not in the tab that set them. That is the whole point:
+             * a stop held in a browser disarms itself when the trader closes the laptop, and this
+             * one does not. The reply echoes what the engine now holds, so a client that lost the
+             * race (two devices, say) is corrected rather than left believing its own copy.
+             */
+            case "set_levels": {
+              const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
+              const lvl = (v: unknown): number | null => {
+                const n = Number(v);
+                return Number.isFinite(n) && n > 0 ? n : null;
+              };
+              try {
+                const p = rt.game.setLevels(String(msg.data.positionId), userId, lvl(msg.data.slPrice), lvl(msg.data.tpPrice));
+                return send(ws, "levels_set", { positionId: p.id, slPrice: p.slPrice, tpPrice: p.tpPrice });
+              } catch (err) {
+                return send(ws, "error", { code: "LEVELS_REJECTED", message: (err as Error).message });
+              }
             }
             // ── Phase 2: Deriv-style DIGIT contracts + per-instrument feed subscription ──────────
             case "subscribe_instrument": {

@@ -43,18 +43,18 @@ import { cn } from '@/lib/cn';
  * or money, defaulting buy-shaped, swapping when you tap Sell, held in ratio by the lock, red and
  * dead when they contradict themselves. All of that is in lib/game/levels and unit-tested there.
  *
- * What the ENGINE will act on is a different question with a blunt answer, and the dialog says it
- * rather than implying otherwise:
+ * What the ENGINE will act on is a different question, and the dialog says it rather than implying
+ * otherwise. It has two answers, and `isContinuousBrand` in lib/game/levelWatch.ts tells them apart:
  *
- *   `sell()` refuses a losing position ("NOT_SELLABLE: losing positions settle at expiry") and
- *   refuses every manual close on a pool brand ("SELL_DISABLED"). A position is sellable only when
- *   its outcome was decided a WIN at open.
+ *   CONTINUOUS      the engine checks both levels on every tick, stop first, and closes the position
+ *                   at what it is worth at that price. A stop is a real stop and can return part of
+ *                   the stake; a target is a real target.
+ *   not continuous  the outcome is committed at open and the contract runs to its horizon, so
+ *                   neither level fires.
  *
- * So the stop cannot fire, ever, and the target fires only on a trade already decided a winner, on
- * a brand with early close on. Row 9, where MetaTrader prints each level's money value, is where
- * this is stated: the stop's value is the stake, because that is the most this contract can lose
- * whatever the price does, and the target's is what the contract pays, which rises with elapsed
- * time rather than with distance.
+ * Row 9, where MetaTrader prints each level's money value, is where this is stated. On a continuous
+ * contract that money figure is NOT printed: it follows from the distance, but the engine does not
+ * publish the gain and the break-even cost it follows from, so any figure here would be invented.
  */
 const ORDER_TYPES = ['Market Execution', 'Buy Limit', 'Sell Limit', 'Buy Stop', 'Sell Stop'] as const;
 
@@ -63,8 +63,8 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
   const { data: wallet } = useWallet();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, volStep, bump, setLots, stakeCents, overBalance, signedIn,
-    durationS, place, earlyCloseEnabled, chartSettled,
+    lots, minLots, maxLots, volDigits, volStep, bump, setLots, volNote, stakeCents, overBalance, signedIn,
+    durationS, place, continuous, chartSettled,
     priceOfRate,
   } = useOrderEntry();
 
@@ -128,21 +128,21 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
    * How a level reads in the selected unit. MetaTrader's control changes the VALUE shown, not the
    * level itself, which is why everything is stored in points and converted here.
    *
-   * `currency` is MetaTrader's third mode, "an approximate money amount". On this contract the
-   * money a level is worth does NOT follow from its distance. The stop's is exact and fixed: the
-   * stake, always, because that is the most this contract can lose whatever the price does. The
-   * target's cannot be stated at all before the trade opens, since the payout is a multiplier the
-   * engine assigns then and it rises with elapsed time. Printing a figure there would be inventing
-   * one, so the mode says `varies` and the note underneath says why.
+   * `currency` is MetaTrader's third mode, "an approximate money amount", and what it can honestly
+   * say depends on how the brand is priced. On a CONTINUOUS contract both figures follow from the
+   * distance, but the engine publishes neither the gain nor the break-even cost they follow from, so
+   * both read `varies` rather than an invented number. On a committed contract the stop's is exact
+   * and fixed, the stake, because that is the whole of the downside; the target's still cannot be
+   * stated, since the payout is a multiplier assigned at open.
    */
   const levelText = (field: 'sl' | 'tp', points: number | null): string => {
     if (points === null) return 'not set';
     if (unit === 'points') return String(points);
     if (unit === 'price') return priceOfPoints(ref, points, digits).toFixed(digits);
-    // The stop's money value is exact and knowable: the stake, always. The target's is not, and
-    // printing a figure would be inventing one. The payout is a multiplier the engine assigns when
-    // the contract opens and it rises with elapsed time, so no level determines it.
-    return field === 'sl' ? money.fmt(stakeCents) : 'varies';
+    // A continuous close pays what the position is worth at the level, which the client is not told
+    // the parameters of; a committed contract's stop is exactly the stake. Either way the target's
+    // figure would be invented, so it says so.
+    return field === 'sl' && !continuous ? money.fmt(stakeCents) : 'varies';
   };
   const commitLevel = (field: 'sl' | 'tp', text: string) => {
     const n = Number(text);
@@ -223,6 +223,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
               onUp={() => bump(0.01)}
               downDisabled={lots <= minLots}
               upDisabled={lots >= maxLots}
+              boundTitle={`Volume ${minLots.toFixed(volDigits)} to ${maxLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`}
               value={lots.toFixed(volDigits)}
               ariaLabel={`Volume ${lots.toFixed(volDigits)} lots`}
               typing={typing?.field === 'volume' ? typing.text : null}
@@ -248,8 +249,15 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
             value={lots}
             onChange={(e) => setLots(Number(e.target.value))}
             aria-label="Volume slider"
+            title={`Volume ${minLots.toFixed(volDigits)} to ${maxLots.toFixed(volDigits)} lots.`}
             className="mt-2 h-1 w-full appearance-none rounded bg-[#2b3543] accent-[#3183ff]"
           />
+          {/* Why the slider has no travel, where it has none. A range input whose min equals its
+              max cannot move, and MetaTrader states a symbol's volume limits rather than leaving
+              a control that does nothing unexplained. */}
+          {volNote === null ? null : (
+            <p data-volume-note="" className="mt-1 text-[11px] leading-snug text-[#f0b90b]">{volNote}</p>
+          )}
 
           {/* 6. Margin on the left, free margin on the right. */}
           <div className="mt-2 flex items-baseline text-[11px]">
@@ -310,8 +318,10 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
               onType={(text) => setTyping({ field: 'sl', text })}
               onCommit={(text) => commitLevel('sl', text)}
               /* 9. Where MetaTrader prints the level's money value. */
-              note={`Risk ${money.fmt(stakeCents)}`}
-              detail="The stop cannot fire: this engine settles a losing contract at expiry and refuses an early close on one. The stake is the most it can lose, whatever the price does."
+              note={`Max loss ${money.fmt(stakeCents)}`}
+              detail={continuous
+                ? 'The stop closes the position at this price, for what it is worth there, so part of the stake can come back. Stops processing is performed on the server side.'
+                : 'The stop cannot fire: this engine settles a losing contract at expiry and refuses an early close on one. The stake is the most it can lose, whatever the price does.'}
             />
             <LevelChip
               label="TP"
@@ -326,9 +336,9 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
               onStartTyping={() => setTyping({ field: 'tp', text: levelText('tp', levels.tpPoints) === 'not set' ? '' : levelText('tp', levels.tpPoints) })}
               onType={(text) => setTyping({ field: 'tp', text })}
               onCommit={(text) => commitLevel('tp', text)}
-              note={earlyCloseEnabled ? `Pays at ${durationLabel(durationS)}` : `Settles at ${durationLabel(durationS)}`}
-              detail={earlyCloseEnabled
-                ? 'The target closes a contract already running in profit. What it pays rises with elapsed time rather than with the distance to this level.'
+              note={continuous ? 'Closes at this price' : `Settles at ${durationLabel(durationS)}`}
+              detail={continuous
+                ? 'A PRICE, as MetaTrader\u2019s is: the position closes when the price reaches it, for what it is worth there.'
                 : 'This brand settles every contract at expiry, so no target can close one early.'}
             />
           </div>
@@ -416,7 +426,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function Stepper({
-  value, ariaLabel, onDown, onUp, downDisabled, upDisabled, disabled, typing, onType, onStartTyping, onCommit,
+  value, ariaLabel, onDown, onUp, downDisabled, upDisabled, boundTitle, disabled, typing, onType, onStartTyping, onCommit,
 }: {
   value: string;
   ariaLabel: string;
@@ -424,6 +434,8 @@ function Stepper({
   onUp: () => void;
   downDisabled?: boolean;
   upDisabled?: boolean;
+  /** Why a disabled arrow is disabled. MetaTrader names the limit rather than greying in silence. */
+  boundTitle?: string | undefined;
   /** The whole control is inert: there is nothing yet to set a value against. */
   disabled?: boolean;
   typing: string | null;
@@ -437,7 +449,7 @@ function Stepper({
   const btn = 'grid h-8 shrink-0 place-items-center rounded px-1 text-[16px] font-semibold leading-none text-[#3183ff] disabled:opacity-30';
   return (
     <span className="flex min-w-0 flex-1 items-center rounded bg-[#202933]">
-      <button type="button" onClick={onDown} disabled={downDisabled === true || disabled === true} aria-label={`Decrease ${ariaLabel}`} className={btn}>−</button>
+      <button type="button" onClick={onDown} disabled={downDisabled === true || disabled === true} title={downDisabled === true ? boundTitle : undefined} aria-label={`Decrease ${ariaLabel}`} className={btn}>−</button>
       {typing === null ? (
         <button
           type="button"
@@ -460,7 +472,7 @@ function Stepper({
           className="w-0 min-w-0 flex-1 bg-transparent px-0.5 text-center font-mono text-[13px] font-bold text-white outline-none tabular-nums"
         />
       )}
-      <button type="button" onClick={onUp} disabled={upDisabled === true || disabled === true} aria-label={`Increase ${ariaLabel}`} className={btn}>+</button>
+      <button type="button" onClick={onUp} disabled={upDisabled === true || disabled === true} title={upDisabled === true ? boundTitle : undefined} aria-label={`Increase ${ariaLabel}`} className={btn}>+</button>
     </span>
   );
 }

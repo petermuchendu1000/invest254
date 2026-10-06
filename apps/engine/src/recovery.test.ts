@@ -13,7 +13,17 @@ const MASTER = "recovery-test-master";
 const OPTS = { calibrationSamples: 4000 };
 
 test("recovery: settles expired, re-arms in-flight, deterministically and idempotently", async () => {
-  const cfg = DEFAULT_VERSIONED_CONFIG;
+  /**
+   * A TEN-SECOND contract, pinned rather than read from the shipped default.
+   *
+   * This test is about recovery mechanics: an expired position is settled, an in-flight one is
+   * re-armed, both idempotently. Its clock arithmetic encodes that term directly (`recoverAtMs =
+   * C1 + 10000 + 1`, "P1 expired (opened C1, 10s)"), so it has always meant ten seconds rather than
+   * whatever the default happens to be. The shipped default is now fifteen minutes, because a stop
+   * needs room to be reached, and reading it here would leave P1 still running at the recovery
+   * instant and settle nothing.
+   */
+  const cfg = { ...DEFAULT_VERSIONED_CONFIG, defaultDurationS: 10 };
   const config = new StaticConfigProvider(cfg);
   const repo = new InMemoryGameRepository();
   repo.seed("u1", 100000);

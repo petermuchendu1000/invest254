@@ -29,15 +29,18 @@ import { cn } from '@/lib/cn';
  * price did not fit on one line. A docked ticket is wider and MetaTrader's own desktop ticket puts
  * each level on one row, so that is what this is: label, stepper, clear.
  */
-export function MT5LevelRows({ price, digits, stakeCents, earlyCloseEnabled, durationLabel }: {
+export function MT5LevelRows({ price, digits, stakeCents, continuous, durationLabel }: {
   /** The live price, which a first level is anchored against. Null before the first quote. */
   price: number | null;
   digits: number;
-  /** What this contract risks, which is what the stop is worth. */
+  /** The stake, which is the most this position can lose whichever model prices it. */
   stakeCents: number;
-  /** Whether the engine will honour a manual close on this brand at all. */
-  earlyCloseEnabled: boolean;
-  /** How this contract settles if nothing closes it, e.g. "1m". */
+  /**
+   * Whether the engine prices this brand's positions CONTINUOUSLY, so both levels really close one
+   * at their price. See `isContinuousBrand` in lib/game/levelWatch.ts.
+   */
+  continuous: boolean;
+  /** The horizon a position runs to if nothing closes it, e.g. "1m". */
   durationLabel: string;
 }) {
   const money = useDisplayMoney();
@@ -75,10 +78,12 @@ export function MT5LevelRows({ price, digits, stakeCents, earlyCloseEnabled, dur
    * How a level reads in the selected unit, which is what MetaTrader's segmented control changes:
    * the VALUE shown, not the level.
    *
-   * `currency` is its third mode, "an approximate money amount". The stop's is exact and fixed, the
-   * stake, because that is the most this contract can lose whatever the price does. The target's
-   * cannot be stated: the payout is a multiplier the engine assigns at open and it rises with
-   * elapsed time, so no level determines it, and printing a figure would be inventing one.
+   * `currency` is its third mode, "an approximate money amount", and what it can honestly say
+   * depends on how the brand is priced. On a CONTINUOUS contract both figures follow from the
+   * distance, but the engine publishes neither the gain nor the break-even cost they follow from, so
+   * both read `varies` rather than an invented number. On a committed contract the stop's is exact
+   * and fixed, the stake, because that is the whole of the downside; the target's still cannot be
+   * stated, since the payout is a multiplier assigned at open that no level determines.
    */
   const text = (field: 'sl' | 'tp'): string => {
     const points = field === 'sl' ? levels.slPoints : levels.tpPoints;
@@ -86,7 +91,7 @@ export function MT5LevelRows({ price, digits, stakeCents, earlyCloseEnabled, dur
     if (points === null) return 'not set';
     if (unit === 'points') return String(points);
     if (unit === 'price') return priceOfPoints(ref, points, digits).toFixed(digits);
-    return field === 'sl' ? money.fmt(stakeCents) : 'varies';
+    return field === 'sl' && !continuous ? money.fmt(stakeCents) : 'varies';
   };
   const commit = (field: 'sl' | 'tp', raw: string) => {
     const n = Number(raw);
@@ -180,17 +185,25 @@ export function MT5LevelRows({ price, digits, stakeCents, earlyCloseEnabled, dur
         );
       })}
 
-      {/* MetaTrader prints the money value of each level under them. What these say is argued in
-          lib/game/levelWatch.ts; the short of it is that the stop cannot fire and the target now
-          can, at the price it is set to. */}
+      {/* MetaTrader prints the money value of each level under them. Which of these two the brand
+          gets is argued in lib/game/levelWatch.ts: on a continuous brand the engine checks both
+          levels every tick and closes at what the position is worth there, so the stop is a real
+          stop; on any other brand neither level fires. */}
       <p className="text-[11px] leading-snug text-[#8fa2b8]">
-        <span style={{ color: '#DD5B4E' }}>Stop</span> risks {money.fmt(stakeCents)}, the stake, and
-        cannot fire: this engine settles a losing contract at expiry and refuses an early close on
-        one.{' '}
-        <span style={{ color: '#0EB52E' }}>Target</span>{' '}
-        {earlyCloseEnabled
-          ? 'closes the contract when the price reaches it. What that pays rises with elapsed time rather than with the distance to the level.'
-          : `cannot close one early on this brand, so every contract settles at ${durationLabel}.`}
+        {continuous ? (
+          <>
+            <span style={{ color: '#DD5B4E' }}>Stop</span> and{' '}
+            <span style={{ color: '#0EB52E' }}>Target</span> close the position at their price, for
+            what it is worth there, so a stop can return part of the stake. Max loss{' '}
+            {money.fmt(stakeCents)}. Stops processing is performed on the server side.
+          </>
+        ) : (
+          <>
+            <span style={{ color: '#DD5B4E' }}>Stop</span> risks {money.fmt(stakeCents)}, the stake.
+            Neither it nor <span style={{ color: '#0EB52E' }}>Target</span> fires on this brand: the
+            contract settles at {durationLabel}.
+          </>
+        )}
       </p>
 
       {shape === null && (levels.slPoints !== null || levels.tpPoints !== null) ? (

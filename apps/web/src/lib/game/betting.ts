@@ -14,6 +14,9 @@ export interface PositionOpenedData {
   stakeCents: number;
   durationS: number;
   expiresAtMs: number;
+  /** The protective levels the engine actually took, which may differ from what was asked. */
+  slPrice?: number | null;
+  tpPrice?: number | null;
 }
 
 /** S→C: per-tick live P&L for the open position. */
@@ -66,6 +69,14 @@ export interface OpenPositionInput {
   stakeCents: number;
   direction: Direction;
   durationS: number;
+  /**
+   * MetaTrader's protective levels, as chart PRICES, armed with the order itself.
+   *
+   * Sent to the engine rather than watched here. A stop that only this tab knows about is not a
+   * stop: close the tab and it is gone. The engine holds these and fires them on a tick.
+   */
+  slPrice?: number | null;
+  tpPrice?: number | null;
 }
 
 /**
@@ -92,4 +103,14 @@ export interface ActivePosition {
   livePnlCents: number;
   secondsLeft: number;
   sellable: boolean;
+  /**
+   * The protective levels the ENGINE is holding for this position, as chart prices.
+   *
+   * Not the ticket's working copy in `levelsStore`, which is what the trader drags around before an
+   * order exists. Once a position is open these are the ones that will actually fire, so they come
+   * from the engine's `position_opened` / `levels_set` / `open_positions` frames and are the only
+   * levels the open-position surfaces should show. Null means none set.
+   */
+  slPrice: number | null;
+  tpPrice: number | null;
 }

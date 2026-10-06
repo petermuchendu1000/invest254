@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { volumeSteps } from './volumeSteps.js';
+import { volumeSteps, volClampReason } from './volumeSteps.js';
 
 const labels = (v: number, lim = { min: 0.01, max: 100, step: 0.01 }) =>
   volumeSteps(v, lim).map((s) => s.label);
@@ -61,4 +61,20 @@ test('the row is ordered smallest-in-the-middle, as MetaTrader draws it', () => 
   const steps = volumeSteps(0.61, { min: 0.01, max: 100, step: 0.01 });
   const deltas = steps.map((s) => s.delta);
   assert.deepEqual(deltas, [-0.5, -0.1, -0.01, 0.01, 0.1, 0.5]);
+});
+
+/**
+ * A typed volume that was changed must say WHY it was changed. MetaTrader's Volume field validates
+ * and reports; it never swaps the number in silence, which is what made the field look broken when
+ * the brand's range had collapsed to one value.
+ */
+test('a typed volume that was taken as written needs no reason', () => {
+  assert.equal(volClampReason(0.5, 0.5, { minLots: 0.058, maxLots: 50, volStep: 0.01, volDigits: 3 }), null);
+});
+
+test('out of range and off the step grid are DIFFERENT reasons', () => {
+  const lim = { minLots: 0.058, maxLots: 50, volStep: 0.01, volDigits: 3 };
+  assert.match(volClampReason(9999, 50, lim)!, /outside the 0\.058 to 50\.000 lots this symbol allows/);
+  // 1 is inside the range but off a grid that starts at 0.058, so the nearest step is 0.998.
+  assert.match(volClampReason(1, 0.998, lim)!, /steps in 0\.01 lots from its 0\.058 minimum/);
 });

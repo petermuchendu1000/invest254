@@ -6,6 +6,7 @@ import {
   digitReturnCents, decisionDigit, withLastPip, poolMultiplierDurationMs,
   seededWin, decideDigitAtWinRate,
   multiplierPnlCents, evaluateMultiplier, dealCancellationFeeCents, livePriceMultiplier,
+  priceAtRate, type PriceAxis,
   type MultiplierState, type MultDir, type MultCloseReason,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
@@ -31,8 +32,26 @@ export interface Position {
   configVersion: number;                  // the game_config version that priced this outcome
   nonce: number;                          // per-position seed nonce (engagement + pool path/decision)
   poolControlled: boolean;                // docs/25: outcome decided by the pool controller, not the curve
+  /**
+   * Settled on the CONTINUOUS payout, so a stop and a target close it at a real price.
+   *
+   * False keeps the committed-outcome contract exactly as it was: the pool path (where the
+   * controller, not the curve, decides) and any brand with no price axis to put a level on. See
+   * docs/mt5/20-real-sl-tp.md for why the two models cannot be the same one.
+   */
+  continuous: boolean;
+  /** MetaTrader's protective levels, as PRICES on the chart. Null means not set. */
+  slPrice: number | null;
+  tpPrice: number | null;
 }
-export interface SettledEvent { position: Position; lockedMultiplier: number; payoutCents: number; pnlCents: number; balance: number; mode: "auto" | "manual"; presentation: OutcomePresentation; }
+/** What ended a continuous position, which is MetaTrader's own vocabulary for a closed deal. */
+export type CloseReason = "sl" | "tp" | "horizon";
+export interface SettledEvent {
+  position: Position; lockedMultiplier: number; payoutCents: number; pnlCents: number;
+  balance: number; mode: "auto" | "manual"; presentation: OutcomePresentation;
+  /** Absent on a committed contract, which has only ever ended one way. */
+  closedBy?: CloseReason;
+}
 export interface UpdateEvent { positionId: string; liveMultiplier: number; livePnlCents: number; secondsLeft: number; sellable: boolean; }
 type Listener = { onTick?: (t: Tick) => void; onUpdate?: (u: UpdateEvent) => void; onSettled?: (e: SettledEvent) => void; onError?: (err: Error, ctx: string) => void; };
 
@@ -102,7 +121,50 @@ export class GameServer {
      * disagree. Absent (tests/back-compat) -> fall back to the JWT `role` claim.
      */
     private readonly loadIsMarketer?: (userId: string) => Promise<boolean>,
+    /**
+     * This brand's price axis, so the engine can tell whether a protective level has been reached.
+     *
+     * A level is a PRICE on the chart; the engine works in curve rates. Rather than invert the
+     * axis (which is not invertible across a day boundary, and is the whole reason execution prices
+     * are stamped at all), every tick converts the CURRENT rate to a price and compares. Absent on a
+     * brand that charts a line, which therefore has no levels and keeps the committed contract.
+     */
+    private readonly priceAxis?: () => PriceAxis,
   ) {}
+
+  /**
+   * The price a level is measured against right now, or null when this brand has no axis.
+   *
+   * Never throws. The axis is built from the brand's day chain, which can be absent, mid-rebuild or
+   * simply not ready on the first ticks after boot, and this runs inside the tick loop: letting it
+   * throw would stop the price stream for everyone to protect a level that nobody may even have
+   * set. Null means "no level can be judged this tick", so a stop waits for the next one. This is
+   * the same rule `withPriceStamp` states for its own writes, that a display concern is never worth
+   * a trade.
+   */
+  private priceNow(rate: number, atMs: number): number | null {
+    try {
+      const axis = this.priceAxis?.();
+      return axis ? priceAtRate(axis, atMs, rate) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Which protective level, if either, this tick has reached.
+   *
+   * MetaTrader's rule, and the only one that is fair when both could be read as hit in the same
+   * tick: a BUY stops out at or below its stop and takes profit at or above its target, and a SELL
+   * is the mirror. The stop is checked FIRST, because a tick that spans both levels cannot be known
+   * to have touched the better one first and the trader is not given the benefit of that doubt.
+   */
+  private levelHit(p: Position, price: number): "sl" | "tp" | null {
+    const long = p.direction === "buy";
+    if (p.slPrice !== null && (long ? price <= p.slPrice : price >= p.slPrice)) return "sl";
+    if (p.tpPrice !== null && (long ? price >= p.tpPrice : price <= p.tpPrice)) return "tp";
+    return null;
+  }
 
   /** Per-user pricing settlements, cached by (configVersion, gameDay, winRate, maxMultiplier). */
   private readonly userSettlementCache = new Map<string, SettlementEngine>();
@@ -171,12 +233,37 @@ export class GameServer {
       this.lastRate = tick.rate;
       this.emitTick(tick);
       const expired: Position[] = [];
+      /** Positions a protective level has reached this tick, with which level it was. */
+      const stopped: Array<{ p: Position; reason: "sl" | "tp" }> = [];
+      /**
+       * The chart price, resolved AT MOST ONCE a tick and only when some position has a level on it.
+       *
+       * `priceAxis()` reaches into the brand's day chain, which is far more work than a tick loop
+       * should do unconditionally: computing it every tick regardless slowed the stream enough to
+       * fail two multiengine tests outright. Nobody with a stop set pays for this, and nobody
+       * without one pays for it at all.
+       */
+      let price: number | null | undefined;
+      const priceThisTick = (): number | null => {
+        if (price === undefined) price = this.priceNow(tick.rate, nowMs);
+        return price;
+      };
       for (const p of this.positions.values()) {
         if (p.status !== "open") continue;
         if (nowMs >= p.expiresAtMs) { expired.push(p); continue; }
+        // MetaTrader's protective levels, checked on the engine rather than in a browser tab. A
+        // stop that only exists on the client is not a stop: closing the tab would disarm it.
+        if (p.continuous && (p.slPrice !== null || p.tpPrice !== null)) {
+          const now = priceThisTick();
+          const hit = now === null ? null : this.levelHit(p, now);
+          if (hit) { stopped.push({ p, reason: hit }); continue; }
+        }
         const g = (nowMs - p.openedAtMs) / (p.durationS * 1000);
         const live = this.liveMultiplier(p, g, ctx.settlement);
         this.emitUpdate({ positionId: p.id, liveMultiplier: live, livePnlCents: Math.round(p.stakeCents * live) - p.stakeCents, secondsLeft: Math.max(0, (p.expiresAtMs - nowMs) / 1000), sellable: p.sellable });
+      }
+      for (const { p, reason } of stopped) {
+        try { await this.closeAtLevel(p, reason); } catch (err) { this.emitError(err as Error, `level-close ${p.id}`); }
       }
       for (const p of expired) { try { await this.settleAuto(p); } catch (err) { this.emitError(err as Error, `auto-settle ${p.id}`); } }
     } finally { this.stepping = false; }
@@ -209,6 +296,12 @@ export class GameServer {
   private liveMultiplier(p: Position, g: number, settlement: SettlementEngine): number {
     const ctx = this.getActiveContext();
     const ownDay = p.gameDayId === null || p.gameDayId === ctx.gameDayId;
+    // A continuous contract shows exactly what closing right now would pay. There is no committed
+    // endpoint to converge to and no cap derived from a decision already taken, so the live figure
+    // and the settlement are the same function read at the same moment: what you see is what a stop
+    // or a target would get you. A position re-armed from an earlier day keeps the old path below,
+    // for the reason the day note gives.
+    if (p.continuous && ownDay) return settlement.valueAt(p.direction, p.entryT, this.elapsedS(p));
     if (ownDay) {
       const elapsedS = Math.min(p.durationS, Math.max(0, g * p.durationS));
       return livePriceMultiplier({
@@ -233,7 +326,11 @@ export class GameServer {
   }
 
   /** Open a position: outcome committed in memory; stake+position+ledger persisted atomically by the repo. */
-  async openPosition(input: { userId: string; stakeCents: number; direction: Direction; durationS?: number; role?: string }): Promise<{ position: Position; balance: number }> {
+  async openPosition(input: {
+    userId: string; stakeCents: number; direction: Direction; durationS?: number; role?: string;
+    /** MetaTrader's protective levels, as chart prices, armed with the order itself. */
+    slPrice?: number | null; tpPrice?: number | null;
+  }): Promise<{ position: Position; balance: number }> {
     // docs/25: when the brand is in pool mode, NON-marketer trades are governed by the pool
     // controller (not the curve) and admin overrides are IGNORED for them (decision E). Marketers
     // keep the statistical path WITH their overrides and are pool-exempt (decision F).
@@ -243,7 +340,20 @@ export class GameServer {
     const poolActive = this.pool?.enabled() ?? false;
     const poolPath = poolActive && !isMarketer;
     const ov = (this.loadOverride && (!poolActive || isMarketer)) ? await this.loadOverride(input.userId) : null;
-    const durationS = input.durationS ?? ov?.tradeDurationS ?? this.cfg.defaultDurationS;
+    /**
+     * The horizon is the BRAND's, not the trader's.
+     *
+     * It used to be picked per order from an Expiry control, because the contract's whole character
+     * was its term. With real protective levels a position ends when its stop or target is reached,
+     * when the trader closes it, or at this backstop, and letting the trader also set the backstop
+     * would be two contradictory ways to end one trade. A brand with a price axis therefore ignores
+     * what the client asked for and uses its own configured horizon; everything else keeps the old
+     * per-order duration exactly. The economics are unaffected: the calibration re-solves for
+     * whatever horizon it is given, and RTP measures 24.97-25.47% against a 25% target from a 10
+     * second horizon out to an hour.
+     */
+    const horizon = ov?.tradeDurationS ?? this.cfg.defaultDurationS;
+    const durationS = this.priceAxis !== undefined ? horizon : (input.durationS ?? horizon);
     const minStake = ov?.minStakeCents ?? this.cfg.minStakeCents;
     const maxStake = ov?.maxStakeCents ?? this.cfg.maxStakeCents;
     if (!Number.isInteger(input.stakeCents)) throw new RangeError("stake must be integer cents");
@@ -287,6 +397,10 @@ export class GameServer {
         durationS, openedAtMs, expiresAtMs: openedAtMs + durationS * 1000, entryT, outcome,
         status: "open", sellable: false, gameDayId: ctx.gameDayId, configVersion: ctx.configVersion,
         nonce, poolControlled: true,
+        // The pool controller decides this trade, not the curve, so there is no price for a level
+        // to be measured against and no continuous value to close at. docs/25 decision B already
+        // refuses a manual close here for the same reason.
+        continuous: false, slPrice: null, tpPrice: null,
       };
       this.positions.set(positionId, p);
       return { position: p, balance: newBalance };
@@ -302,7 +416,19 @@ export class GameServer {
       entryRate: outcome.entryRate, durationS, gameDayId: ctx.gameDayId, nonce, openedAtMs,
       configVersion: ctx.configVersion, siteId: ctx.siteId ?? null,
     });
-    const p: Position = { id: positionId, userId: input.userId, stakeCents: input.stakeCents, direction: input.direction, durationS, openedAtMs, expiresAtMs: openedAtMs + durationS * 1000, entryT, outcome, status: "open", sellable: outcome.result === "win", gameDayId: ctx.gameDayId, configVersion: ctx.configVersion, nonce, poolControlled: false };
+    // A brand with a price axis settles on the CONTINUOUS payout, so its stop and target close the
+    // position at a real price. One without (a line brand) has nothing to put a level on and keeps
+    // the committed contract exactly as it was. See docs/mt5/20-real-sl-tp.md.
+    const continuous = this.priceAxis !== undefined;
+    const p: Position = {
+      id: positionId, userId: input.userId, stakeCents: input.stakeCents, direction: input.direction,
+      durationS, openedAtMs, expiresAtMs: openedAtMs + durationS * 1000, entryT, outcome,
+      status: "open", sellable: continuous || outcome.result === "win",
+      gameDayId: ctx.gameDayId, configVersion: ctx.configVersion, nonce, poolControlled: false,
+      continuous,
+      slPrice: continuous && Number.isFinite(input.slPrice as number) ? input.slPrice ?? null : null,
+      tpPrice: continuous && Number.isFinite(input.tpPrice as number) ? input.tpPrice ?? null : null,
+    };
     this.positions.set(positionId, p);
     return { position: p, balance: newBalance };
   }
@@ -729,6 +855,40 @@ export class GameServer {
     return true;
   }
 
+  /** The elapsed seconds a continuous position is valued at right now, clamped to its horizon. */
+  private elapsedS(p: Position): number {
+    return Math.min(p.durationS, Math.max(0, (this.now() - p.openedAtMs) / 1000));
+  }
+
+  /**
+   * Close a position because one of its protective levels was reached.
+   *
+   * It settles at what the continuous payout says the contract is worth AT THAT MOMENT, which is
+   * the whole point: a stop that pays the committed outcome rather than the price it fired at is
+   * not a stop. Because the payout is continuous, a stop is a PARTIAL loss and a target a real
+   * profit, and neither can be the all-or-nothing jump the step payout forced.
+   */
+  private async closeAtLevel(p: Position, reason: "sl" | "tp"): Promise<SettledEvent> {
+    const settlement = this.getActiveContext().settlement;
+    return this.finalize(p, settlement.valueAt(p.direction, p.entryT, this.elapsedS(p)), "auto", reason);
+  }
+
+  /**
+   * MetaTrader's Modify position: set, move or clear the protective levels.
+   *
+   * Server-side, because a level held only in the browser is decoration. A refreshed tab, a closed
+   * laptop or a dead connection all leave the engine holding the stop, and it fires regardless.
+   */
+  setLevels(positionId: string, userId: string, slPrice: number | null, tpPrice: number | null): Position {
+    const p = this.positions.get(positionId);
+    if (!p || p.userId !== userId) throw new Error("POSITION_NOT_FOUND");
+    if (p.status !== "open") throw new Error("ALREADY_SETTLED");
+    if (!p.continuous) throw new Error("LEVELS_UNSUPPORTED: this contract settles at expiry");
+    p.slPrice = Number.isFinite(slPrice as number) ? slPrice : null;
+    p.tpPrice = Number.isFinite(tpPrice as number) ? tpPrice : null;
+    return p;
+  }
+
   async sell(positionId: string, userId: string): Promise<SettledEvent> {
     // docs/25 decision B: manual SELL is disabled brand-wide in pool mode (a player must not cash
     // the green peak of a trade the controller decided will lose). Pool trades auto-settle at expiry.
@@ -736,17 +896,29 @@ export class GameServer {
     const p = this.positions.get(positionId);
     if (!p || p.userId !== userId) throw new Error("POSITION_NOT_FOUND");
     if (p.status !== "open") throw new Error("ALREADY_SETTLED");
+    // A continuous contract has no committed outcome to protect, so there is nothing to refuse:
+    // closing pays exactly what the price says it is worth, which is <= the stake on a loser. The
+    // `sellable` guard below still governs the committed contract, where cashing a decided loser
+    // early WOULD pay out a trade the engine had already priced as lost.
+    if (p.continuous) {
+      return this.finalize(p, this.getActiveContext().settlement.valueAt(p.direction, p.entryT, this.elapsedS(p)), "manual");
+    }
     if (!p.sellable) throw new Error("NOT_SELLABLE: losing positions settle at expiry");
     const g = (this.now() - p.openedAtMs) / (p.durationS * 1000);
     return this.finalize(p, this.getActiveContext().settlement.liveWinMultiplier(p.outcome.multiplier, g), "manual");
   }
 
   private async settleAuto(p: Position): Promise<SettledEvent> {
+    // A continuous contract has no committed endpoint: reaching the horizon is just another moment
+    // to be valued at, the same as a stop or a target reached one tick earlier.
+    if (p.continuous) {
+      return this.finalize(p, this.getActiveContext().settlement.valueAt(p.direction, p.entryT, p.durationS), "auto", "horizon");
+    }
     return this.finalize(p, p.outcome.result === "win" ? p.outcome.multiplier : 0, "auto");
   }
 
   /** Idempotent settlement. Status locked synchronously before the async repo call. */
-  private async finalize(p: Position, multiplier: number, mode: "auto" | "manual"): Promise<SettledEvent> {
+  private async finalize(p: Position, multiplier: number, mode: "auto" | "manual", closedBy?: CloseReason): Promise<SettledEvent> {
     if (p.status !== "open") throw new Error("ALREADY_SETTLED");
     p.status = "settled";
     const payoutCents = multiplier >= 1 ? Math.round(p.stakeCents * multiplier) : 0;
@@ -764,7 +936,11 @@ export class GameServer {
       }
       const tau = this.getActiveContext().settlement.params[p.direction].tau;
       const presentation = presentOutcome({ result, multiplier, signedMove: p.outcome.signedMove, tau });
-      const e: SettledEvent = { position: p, lockedMultiplier: multiplier, payoutCents, pnlCents: payoutCents - p.stakeCents, balance: newBalance, mode, presentation };
+      const e: SettledEvent = {
+        position: p, lockedMultiplier: multiplier, payoutCents, pnlCents: payoutCents - p.stakeCents,
+        balance: newBalance, mode, presentation,
+        ...(closedBy ? { closedBy } : {}),
+      };
       this.emitSettled(e);
       return e;
     } catch (err) { p.status = "open"; throw err; }

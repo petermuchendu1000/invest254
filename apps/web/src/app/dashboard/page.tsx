@@ -7,7 +7,7 @@ import { useSession } from '@/lib/auth/session';
 import { useIsMarketer } from '@/lib/marketer/isMarketer';
 import { useHydrated } from '@/lib/useHydrated';
 import { MarketerDashboardView } from '@/components/marketer/MarketerDashboardView';
-import { MT5TitleBar } from '@/components/mt5/kit';
+import { MT5TitleBar, MT5Screen } from '@/components/mt5/kit';
 import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 
@@ -39,9 +39,11 @@ export default function DashboardPage() {
     if (!token || (resolved && !isMarketer)) router.replace('/');
   }, [hydrated, token, resolved, isMarketer, router]);
 
-  // While hydrating, awaiting the profile, or redirecting a non-marketer, show a neutral skeleton.
+  // While hydrating, awaiting the profile, or redirecting a non-marketer, show a neutral skeleton —
+  // under the title bar, which on a phone is this screen's only navigation (MT5TitleBar).
   if (!hydrated || !token || !user || !resolved || !isMarketer) {
-    return <div className={mt5 ? 'p-3' : ''}><Skeleton className="h-64 w-full" /></div>;
+    const skeleton = <Skeleton className="h-64 w-full" />;
+    return mt5 ? <MT5Screen title="Dashboard"><div className="p-3">{skeleton}</div></MT5Screen> : skeleton;
   }
 
   if (!mt5) return <MarketerDashboardView />;

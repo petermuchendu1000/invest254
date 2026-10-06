@@ -70,7 +70,19 @@ export interface VersionedGameConfig extends GameConfig {
  */
 export const CONFIG_BOUNDS = {
   tickRateMs: { min: 50, max: 60_000 },
-  defaultDurationS: { min: 1, max: 3600 },
+  /**
+   * The ceiling is the CURVE's, not a preference.
+   *
+   * `WALK_POINTS = 86_400 + 900 + 2` gives the day's walk exactly 900 seconds of headroom past
+   * midnight, "so a round opened near midnight is not flattened by the clamp". A horizon longer
+   * than that margin asks for curve values which do not exist for an entry late in the day: the
+   * walk clamps, the sampled moves go degenerate, and the calibration silently collapses. Measured
+   * at a 3600s horizon: realised win rate 0.00 against a 0.125 target.
+   *
+   * 3600 was the old bound and was never reachable safely. Capping it at the margin makes the
+   * config unable to express a brand the engine cannot price.
+   */
+  defaultDurationS: { min: 1, max: 900 },
   driftBias: { min: -1, max: 1 },
 } as const;
 
@@ -80,7 +92,32 @@ export const DEFAULT_CONFIG: GameConfig = {
   minStakeCents: 25000,
   maxStakeCents: 5_000_000,
   minWithdrawalCents: 25000,
-  defaultDurationS: 10,
+  /**
+   * On a brand with protective levels this is the HORIZON a position is held to when neither its
+   * stop, its target nor the trader closes it first. It is no longer the trader's to pick: the
+   * Expiry control is gone, because choosing a term alongside a stop is two contradictory ways to
+   * end one trade.
+   *
+   * Fifteen minutes: the longest horizon this curve can price, and so the longest leash a stop can
+   * be given. At ten seconds a stop had no room to be reached and the levels were decoration.
+   *
+   * Two things pin it, and neither is taste:
+   *
+   *   The CURVE. The day's walk carries exactly 900 seconds of headroom past midnight, so a horizon
+   *   beyond that asks for values which do not exist for an entry late in the day. See
+   *   CONFIG_BOUNDS.
+   *
+   *   The CALIBRATION. The break-even cost is solved AT this horizon and scales as its square root,
+   *   so a brand holding positions for fifteen minutes while pricing them for ten seconds would
+   *   charge a ten-second spread against fifteen-minute moves and hand the trader the house edge.
+   *   The horizon a position is valued over and the one it is held to have to be the same number.
+   *
+   * The economics do not constrain the choice within those bounds: the calibration re-solves for
+   * whatever it is given. Measured RTP against a 25% target is 25.14% at 10s, 25.47% at 60s and
+   * 25.33% at 300s. An operator who wants shorter contracts lowers it per brand, and in doing so
+   * shortens the leash on every stop.
+   */
+  defaultDurationS: 900,
   tickRateMs: 150,
   driftBias: 0.30,
   volatility: 1.0,

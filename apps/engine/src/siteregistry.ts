@@ -154,6 +154,11 @@ export class SiteRegistry {
           ? { enabled: () => (this.opts.poolModeFor?.(siteId) ?? false), controller: this.opts.poolController }
           : undefined,
         this.opts.loadIsMarketer,
+        // The same axis the price stamper uses. It is what lets the engine hold MetaTrader's
+        // protective levels itself: a level is a chart PRICE, so every tick converts the current
+        // rate to a price and compares. A line brand has no axis, no levels, and keeps the
+        // committed contract. See docs/mt5/20-real-sl-tp.md.
+        ...(history ? [() => history!.axis()] as const : []),
       );
       const rt: SiteRuntime = {
         siteId, seeds, game, config, tradeRepo,

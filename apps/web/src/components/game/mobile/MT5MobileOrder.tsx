@@ -10,8 +10,7 @@ import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas } from '@/components/game/CurveCanvas';
 import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
 import { levelPrice } from '@/lib/game/levelWatch';
-import { useStakeLimits } from '@/lib/game/useStakeLimits';
-import { volumeSteps } from '@/lib/game/volumeSteps';
+import { volumeSteps, volClampReason } from '@/lib/game/volumeSteps';
 import { MT5Price } from '@/components/game/MT5Price';
 import { cn } from '@/lib/cn';
 
@@ -60,12 +59,11 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   onAdvanced: () => void;
 }) {
   const money = useDisplayMoney();
-  const limits = useStakeLimits();
   const { getTicks, getLastTick } = useGameSocketApi();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, volStep, bump, setLots, stakeCents, overBalance, signedIn,
-    durationS, setDurationS, durations, place, earlyCloseEnabled, chartSettled,
+    lots, minLots, maxLots, volDigits, volStep, bump, setLots, volNote, stakeCents, overBalance, signedIn,
+    durationS, setDurationS, durations, place, continuous, chartSettled,
     priceOfRate,
   } = useOrderEntry();
 
@@ -92,18 +90,45 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   const bumpSl = (dir: 1 | -1) => {
     if (anchor === null) return;
     const cur = levels.slPoints;
-    setLevels({ ...levels, slPoints: cur === null ? -dir * 100 : cur + dir }, price);
+    /**
+     * The first press seeds the stop on the side of the button that was pressed.
+     *
+     * This read `-dir * 100`, which inverted the FIRST press only: "Lower" seeded the stop 100
+     * points ABOVE the market and "Raise" seeded it below, while every press after that moved it
+     * the way its label said. Internally inconsistent, which is what makes it a bug rather than a
+     * convention, and on a tall portrait chart the inverted seed landed off the top of the visible
+     * scale, so the level was not drawn at all and looked like a control that did nothing.
+     *
+     * There is no direction to infer a natural side from: a MetaTrader new-order screen carries
+     * SL and TP before the trader has chosen Buy or Sell. So the button's own direction is the only
+     * honest answer, and it is what Take Profit beside it has always done.
+     */
+    setLevels({ ...levels, slPoints: cur === null ? dir * 100 : cur + dir }, price);
   };
 
 
   /** "tap the centre value to type on the keyboard" — MetaTrader's own affordance for the volume. */
   const [typing, setTyping] = useState<string | null>(null);
+  /**
+   * What became of the figure that was typed, when it was not taken as written.
+   *
+   * MetaTrader's volume field validates keystrokes and reports; it does not quietly swap the
+   * number. The phone ticket snapped silently, so typing 1 against a 0.058 ceiling put 0.058 back
+   * and read as a field that ignored the keyboard.
+   */
+  const [volClamp, setVolClamp] = useState<string | null>(null);
   const commit = () => {
     if (typing === null) return;
     const n = Number(typing);
-    if (Number.isFinite(n) && n > 0) setLots(n);
     setTyping(null);
+    if (!Number.isFinite(n) || n <= 0) {
+      setVolClamp(`"${typing}" is not a volume, so ${lots.toFixed(volDigits)} lots is kept.`);
+      return;
+    }
+    const applied = setLots(n);
+    setVolClamp(volClampReason(n, applied, { minLots, maxLots, volStep, volDigits }));
   };
+  const volMessage = volClamp ?? volNote;
   const description = symbolDef(symbol)?.description ?? '';
   const steps = volumeSteps(lots, { min: minLots, max: maxLots, step: volStep });
   const refused = tradeDisabled || connecting;
@@ -174,12 +199,15 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
                rule and the two screenshots it reproduces are in lib/game/volumeSteps. */}
         <div className="flex items-stretch border-b border-[#2b3543]">
           {steps.filter((s) => s.delta < 0).map((s) => (
-            <StepCell key={s.label} step={s} onPick={() => bump(s.delta)} />
+            <StepCell key={s.label} step={s} onPick={() => { setVolClamp(null); bump(s.delta); }} bound={`Minimum volume ${minLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`} />
           ))}
+          {/* The centre cell is NEVER disabled: MetaTrader's volume is a type-in and a brand whose
+              minimum equals its maximum sits every stepper cell on its bound at once. */}
           {typing === null ? (
             <button
               type="button"
               onClick={() => setTyping(lots.toFixed(volDigits))}
+              title={`Volume in lots. Type a value between ${minLots.toFixed(volDigits)} and ${maxLots.toFixed(volDigits)}.`}
               aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
               className="flex-[1.4] px-1 py-3 text-center font-mono text-[17px] font-bold text-white tabular-nums"
             >
@@ -198,16 +226,20 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
             />
           )}
           {steps.filter((s) => s.delta > 0).map((s) => (
-            <StepCell key={s.label} step={s} onPick={() => bump(s.delta)} />
+            <StepCell key={s.label} step={s} onPick={() => { setVolClamp(null); bump(s.delta); }} bound={`Maximum volume ${maxLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`} />
           ))}
         </div>
+        {/* Both bounds, always: they are the symbol's own limits intersected with the brand's,
+            which is the pair MetaTrader's contract specification states. */}
         <div className="flex items-baseline gap-2 px-3 py-1.5 text-[11px] text-[#8fa2b8]">
           <span>= {money.fmt(stakeCents)}</span>
           <span className="ml-auto">
-            min {minLots.toFixed(volDigits)}
-            {limits.maxCents === undefined ? '' : ` / max ${maxLots.toFixed(volDigits)}`}
+            min {minLots.toFixed(volDigits)} / max {maxLots.toFixed(volDigits)}
           </span>
         </div>
+        {volMessage === null ? null : (
+          <p data-volume-note="" className="px-3 pb-1.5 text-[11px] leading-snug text-[#f0b90b]">{volMessage}</p>
+        )}
 
         {/* 4. MetaTrader's Bid and Ask, large and side by side. One price here, so it is centred
                across the width both of them would have taken. */}
@@ -228,15 +260,15 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
         <LevelRow
           label="TP"
           underline="#0EB52E"
-          value={!earlyCloseEnabled ? 'at expiry' : anchor === null ? 'waiting' : tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
-          {...(earlyCloseEnabled
+          value={!continuous ? 'not available' : anchor === null ? 'waiting' : tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
+          {...(continuous
             ? { onDown: () => bumpTp(-1), onUp: () => bumpTp(1), downDisabled: anchor === null }
             : { note: 'This brand settles every contract at expiry, so a target cannot close one early.' })}
         />
         <p className="px-3 pb-2 text-[10px] leading-snug text-[#8fa2b8]">
-          {earlyCloseEnabled
-            ? `The stop risks ${money.fmt(stakeCents)}, the stake, and cannot fire: a losing contract settles at expiry. The target closes this one when the price reaches it.`
-            : 'The stop is the stake, and the target cannot fire, because this contract settles at expiry whatever the price does.'}
+          {continuous
+            ? `SL and TP close the position at their price, for what it is worth there, so a stop can return part of the stake. Max loss ${money.fmt(stakeCents)}.`
+            : `The stop is the stake, and neither level fires: this contract settles at ${durationLabel(durationS)} whatever the price does.`}
         </p>
 
         {/* 6. Fill policy, with the dotted leader the Trade screen uses. */}
@@ -332,13 +364,18 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   );
 }
 
-/** One cell of the seven. Disabled rather than dropped where it would leave the brand's range. */
-function StepCell({ step, onPick }: { step: { label: string; delta: number; enabled: boolean }; onPick: () => void }) {
+/**
+ * One cell of the seven. Disabled rather than dropped where it would leave the brand's range, and
+ * it carries WHICH bound stopped it: MetaTrader states a symbol's volume limits rather than
+ * offering a cell that does nothing and says nothing.
+ */
+function StepCell({ step, onPick, bound }: { step: { label: string; delta: number; enabled: boolean }; onPick: () => void; bound: string }) {
   return (
     <button
       type="button"
       onClick={onPick}
       disabled={!step.enabled}
+      title={step.enabled ? undefined : bound}
       aria-label={`${step.delta < 0 ? 'Decrease' : 'Increase'} volume by ${Math.abs(step.delta)}`}
       className="min-w-0 flex-1 px-0.5 py-3 text-center font-mono text-[12px] font-semibold text-[#3183ff] tabular-nums transition active:bg-[#202933] disabled:text-[#8fa2b8] disabled:opacity-40"
     >
