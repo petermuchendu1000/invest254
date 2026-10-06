@@ -6,20 +6,21 @@
  * `Toolbox` and opens on Ctrl+T; Ctrl+F9 opens the Trade tab and focuses it, and no other tab has a
  * shortcut.
  *
- * Six of the twelve were missing here, and they are not all the same kind of missing:
+ * ALL TWELVE CARRY REAL CONTENT. Four of them read MQL5.com or an external feed in MetaTrader, and
+ * each is filled from the thing this platform genuinely has in that place rather than left disabled:
  *
- *   Exposure    REAL. It is computed from the contracts that are open (see `exposureRows` in the
- *               shared package), so it carries true numbers rather than a placeholder.
- *   Company     HIDDEN, which is MetaTrader's own behaviour: "This tab is hidden if the web page is
- *               disabled by the broker." No brand here publishes one, so the tab is not drawn. That
- *               is fidelity, not omission.
- *   Calendar    present and DISABLED. MetaTrader fills it from an economic-calendar feed. There is
- *               no such feed behind this platform, and inventing releases would be worse than
- *               saying so.
- *   Articles    present and DISABLED. MQL5.com's article library.
- *   Code Base   present and DISABLED. MQL5.com's code library.
- *   Experts     present and DISABLED. The Expert Advisor log; this platform runs no Expert
- *               Advisors, which is the same reason seven of MetaTrader's objects are disabled.
+ *   Calendar    macroeconomic releases on their real recurrences, from `shared/calendar`.
+ *   Articles    the broker's own market analysis and education, from `lib/terminal/articles`.
+ *   Code Base   MetaTrader's is MQL5's program library; this terminal's program library is its own
+ *               38 indicators, and the tab applies them to the chart. The download MetaTrader
+ *               offers is an apply here, because a compiled MQL5 binary has no meaning in a
+ *               browser.
+ *   Experts     the log of what the programs on the chart did, which here is the indicators: they
+ *               genuinely initialise, get applied and get removed, and each writes a line.
+ *
+ * Company stays the one tab MetaTrader HIDES rather than disables, and the rule is now implemented
+ * rather than hard-coded: it is drawn when the brand publishes a company page (a licence line or a
+ * support channel) and hidden when it does not. See `companyPage` in lib/terminal/company.ts.
  *
  * MetaTrader also puts four right-aligned BUTTONS beside the tabs, not tabs: Market, Signals, VPS
  * and Tester. All four are MetaQuotes' own services, so none is drawn here.
@@ -33,22 +34,7 @@ export interface ToolboxTabDef {
   id: ToolboxTab;
   /** Exactly as MetaTrader's tab strip writes it. */
   label: string;
-  /** Set where MetaTrader has the tab and this platform cannot fill it. */
-  unavailable?: string;
-  /**
-   * MetaTrader hides a tab outright rather than disabling it, which it does for Company alone.
-   */
-  hidden?: boolean;
 }
-
-const NO_CALENDAR =
-  'MetaTrader fills this from an economic calendar feed. This platform has none, and inventing releases would be worse than leaving it empty.';
-const NO_MQL5 = (what: string) =>
-  `MetaTrader reads this from MQL5.com's ${what}. This platform is not connected to MQL5.com.`;
-const NO_EA =
-  'The Expert Advisor log. This platform runs no Expert Advisors, so there is nothing for it to report.';
-const NO_COMPANY =
-  'MetaTrader hides this tab when the broker publishes no web page, and no brand here publishes one.';
 
 export const TOOLBOX_TABS: readonly ToolboxTabDef[] = [
   { id: 'trade', label: 'Trade' },
@@ -56,21 +42,28 @@ export const TOOLBOX_TABS: readonly ToolboxTabDef[] = [
   { id: 'history', label: 'History' },
   { id: 'news', label: 'News' },
   { id: 'mailbox', label: 'Mailbox' },
-  { id: 'calendar', label: 'Calendar', unavailable: NO_CALENDAR },
-  { id: 'company', label: 'Company', unavailable: NO_COMPANY, hidden: true },
+  { id: 'calendar', label: 'Calendar' },
+  { id: 'company', label: 'Company' },
   { id: 'alerts', label: 'Alerts' },
-  { id: 'articles', label: 'Articles', unavailable: NO_MQL5('article library') },
-  { id: 'codebase', label: 'Code Base', unavailable: NO_MQL5('code library') },
-  { id: 'experts', label: 'Experts', unavailable: NO_EA },
+  { id: 'articles', label: 'Articles' },
+  { id: 'codebase', label: 'Code Base' },
+  { id: 'experts', label: 'Experts' },
   { id: 'journal', label: 'Journal' },
 ];
 
 /** MetaTrader's count, pinned so the strip can be checked against its own. */
 export const MT5_TOOLBOX_TAB_COUNT = 12;
 
-/** The tabs actually drawn: MetaTrader hides Company rather than disabling it. */
-export const VISIBLE_TOOLBOX_TABS: readonly ToolboxTabDef[] =
-  TOOLBOX_TABS.filter((t) => t.hidden !== true);
+/**
+ * The tabs actually drawn.
+ *
+ * Company is conditional, on MetaTrader's own rule: *"This tab is hidden if the web page is
+ * disabled by the broker."* Every other tab is unconditional in MetaTrader — not on an MQL5
+ * account, not on a hedging account, not on an Expert Advisor being attached (09-toolbox.md 192) —
+ * so no other tab is conditional here either.
+ */
+export const visibleToolboxTabs = (opts: { company: boolean }): readonly ToolboxTabDef[] =>
+  opts.company ? TOOLBOX_TABS : TOOLBOX_TABS.filter((t) => t.id !== 'company');
 
 export const toolboxTab = (id: ToolboxTab): ToolboxTabDef | undefined =>
   TOOLBOX_TABS.find((t) => t.id === id);
@@ -81,9 +74,10 @@ export const toolboxTab = (id: ToolboxTab): ToolboxTabDef | undefined =>
  * Two oddities are its, not typos here: the Trade tab carries TWO columns headed `Price` (the open
  * price, then the current one), and `S / L` and `T / P` are written with spaces around the slash.
  *
- * Code Base and Experts have no headers listed because MetaQuotes has never rendered either grid in
- * a screenshot and describes neither in prose. Guessing them would be the kind of invention this
- * whole exercise exists to avoid; docs/mt5/09-toolbox.md records both as unverified.
+ * Code Base and Experts are absent because MetaQuotes has never rendered either grid in a
+ * screenshot and describes neither in prose. Guessing them would be the kind of invention this
+ * whole exercise exists to avoid; docs/mt5/09-toolbox.md records both as unverified, and the
+ * headers those two tabs draw are this platform's own — see `PLATFORM_COLUMNS`.
  */
 export const TOOLBOX_COLUMNS: Partial<Record<ToolboxTab, readonly string[]>> = {
   trade: ['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit'],
@@ -96,4 +90,26 @@ export const TOOLBOX_COLUMNS: Partial<Record<ToolboxTab, readonly string[]>> = {
   alerts: ['Symbol', 'Condition', 'Counter', 'Limit', 'Timeout', 'Expiration', 'Event'],
   articles: ['Name', 'Category', 'Date'],
   journal: ['Time', 'Source', 'Message'],
+};
+
+/**
+ * Headers THIS PLATFORM defines, for the two tabs MetaQuotes leaves unverified.
+ *
+ * Kept apart from `TOOLBOX_COLUMNS` deliberately. That table is a record of MetaTrader's own
+ * grids and must stay checkable against its screenshots; these two are ours, chosen for the
+ * content the tabs actually carry, and the split is what stops a later reader mistaking one for
+ * the other.
+ *
+ *   codebase  an indicator has no publication date and nothing to download, so the Articles shape
+ *             (`Name | Category | Date`) that 09-toolbox.md offers as "a plausible guess" would be
+ *             a column of blanks. These four are what a program library row genuinely has:
+ *             MetaTrader's own name, the parameters it prints in a chart legend, its Navigator
+ *             group, and which pane it draws in.
+ *   experts   MetaQuotes documents the Experts journal as a log like Journal and gives a field list
+ *             only for Journal, so Journal's three are used. That is an inference from its own
+ *             prose, not a reading, and it is the narrowest one available.
+ */
+export const PLATFORM_COLUMNS: Partial<Record<ToolboxTab, readonly string[]>> = {
+  codebase: ['Name', 'Parameters', 'Group', 'Window'],
+  experts: ['Time', 'Source', 'Message'],
 };

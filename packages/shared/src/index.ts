@@ -30,3 +30,4 @@ export * from "./platformgate.js";
 export * from "./logger.js";
 export * from "./capabilities.js";
 export * from "./geo.js";
+export * from "./calendar.js";

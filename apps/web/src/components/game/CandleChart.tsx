@@ -8,6 +8,7 @@ import { heikinAshi, heikinAshiBar, type Candle } from '@invest254/shared/chart'
 import {
   INDICATOR_BY_ID, INDICATOR_GROUPS, VOLUME_GROUP_NOTE, type Plot,
 } from '@/lib/chart/indicatorCatalog';
+import { toggleIndicator, useEnabledIndicators } from '@/lib/chart/indicatorsStore';
 import { ChartDrawings, DrawingsBackdrop, type Projection } from '@/components/game/ChartDrawings';
 import {
   TOOLS, parseDrawings, serializeDrawings, storageKey, type Drawing, type DrawingKind, type ToolId,
@@ -221,7 +222,6 @@ const utcDateKey = (ms: number): string => new Date(ms).toISOString().slice(0, 1
 
 /** Which of MetaTrader's indicators are switched on, by catalogue id (lib/chart/indicatorCatalog). */
 type Enabled = ReadonlySet<string>;
-const IND_STORAGE_KEY = 'pp-chart-indicators';
 interface Legend { o: number; h: number; l: number; c: number; changePct: number }
 type Anchor = CandlesReply['anchor'];
 
@@ -325,7 +325,12 @@ export function CandleChart({
    * chart type rather than keeping a second copy of it.
    */
   const chartTypeRef = useRef<MainType>(initialType); chartTypeRef.current = chartType;
-  const [ind, setInd] = useState<Enabled>(() => new Set<string>());
+  /**
+   * The applied indicators, read from the shared store rather than held here: the Toolbox's Code
+   * Base tab lists the same library and applies from there, so the set cannot live in this
+   * component. `lib/chart/indicatorsStore` also owns the persistence this used to do inline.
+   */
+  const ind = useEnabledIndicators();
   const indRef = useRef<Enabled>(ind); indRef.current = ind;
   /**
    * The drawing rail's state. `revision` is bumped whenever the visible range moves, which is what
@@ -812,26 +817,6 @@ export function CandleChart({
     }
   }, []);
   useEffect(() => { refreshIndicators(); }, [ind, refreshIndicators]);
-
-  /** Toggle one indicator, and remember the set across sessions as MetaTrader does. */
-  const toggleIndicator = useCallback((id: string) => {
-    setInd((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      try { window.localStorage.setItem(IND_STORAGE_KEY, JSON.stringify([...next])); } catch { /* blocked storage */ }
-      return next;
-    });
-  }, []);
-
-  // Restore the indicators the player last had on.
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(IND_STORAGE_KEY);
-      if (!raw) return;
-      const ids = (JSON.parse(raw) as unknown);
-      if (Array.isArray(ids)) setInd(new Set(ids.filter((x): x is string => typeof x === 'string' && INDICATOR_BY_ID.has(x))));
-    } catch { /* private mode / corrupt value — no indicators is a fine default */ }
-  }, []);
 
   /**
    * The crosshair tool is not a drawing tool — it switches the chart's own crosshair to MAGNET,
