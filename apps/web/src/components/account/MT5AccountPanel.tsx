@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useSession } from '@/lib/auth/session';
 import { useWallet, useWalletFigures, useSetAccountMode, useTopupDemo } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { useDisplayMoney } from '@/lib/money';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { cn } from '@/lib/cn';
@@ -28,7 +29,18 @@ import { cn } from '@/lib/cn';
  * Every row is real: the name, the brand, the active account mode, the balance and the account id
  * all come from the session and the wallet.
  */
-export function MT5AccountPanel() {
+export function MT5AccountPanel({ embedded = false }: {
+  /**
+   * Opened from the account CARD on the phone Settings screen, which already names the account.
+   *
+   * MetaTrader's phone puts the account at the top of Settings as a card — *"Account card (top):
+   * `John Smith` / `40739870 - MetaQuotes-Demo` / `Access Point EU 3` … and a chevron -> opens
+   * saved-accounts management"* (docs/mt5/04-mobile-app.md section 7). This panel IS that
+   * saved-accounts management, so when it opens underneath the card its own blue header would be a
+   * second title for one thing, and a third blue band down a 360px screen.
+   */
+  embedded?: boolean | undefined;
+} = {}) {
   const user = useSession((s) => s.user);
   const { data: wallet } = useWallet();
   const brand = useBrand();
@@ -52,9 +64,9 @@ export function MT5AccountPanel() {
 
   const demo = figures.demo;
   const currency = wallet?.currency || brand.currency || 'KES';
-  // MetaTrader names the server "<Broker>-Demo" / "<Broker>-Live"; the same convention reads
-  // correctly here and is derived, not invented.
-  const server = `${brand.name || brand.slug || 'invest254'}-${demo ? 'Demo' : 'Live'}`;
+  // MetaTrader's own server naming ("<Broker>-Live07" / "<Broker>-Demo"), derived from the brand
+  // in one place so every surface prints the same string.
+  const server = mt5ServerName(brand, demo ? 'demo' : 'real');
   const balanceCents = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
 
   const copyId = async () => {
@@ -79,9 +91,11 @@ export function MT5AccountPanel() {
 
   return (
     <section className="overflow-hidden rounded-sm border border-[#2b3543] bg-[#0f1720]">
-      <header className="bg-[#3183ff] px-3 py-2 text-[13px] font-semibold text-white">
-        Trading account: {brand.name || brand.slug || 'invest254'}
-      </header>
+      {embedded ? null : (
+        <header className="bg-[#3183ff] px-3 py-2 text-[13px] font-semibold text-white">
+          Trading account: {brand.name || brand.slug || 'invest254'}
+        </header>
+      )}
 
       {/* MetaTrader's left column is an account SWITCHER, and there is a real one here: the Real and
           Demo accounts the wallet already carries. Listing them is the mock's structure driving a

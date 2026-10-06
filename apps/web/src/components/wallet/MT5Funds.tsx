@@ -6,6 +6,7 @@ import { useWallet, useWalletFigures, useTransactions } from '@/lib/wallet/hooks
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useDisplayMoney } from '@/lib/money';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { MT5TitleBar, MT5Summary, MT5SummaryLine, MT5Section, MT5Entry, MT5Amount, MT5Empty } from '@/components/mt5/kit';
 import { isCompleted, signedCents, stamp } from '@/lib/history/mt5history';
 import type { TransactionDto } from '@/lib/api/types';
@@ -41,7 +42,7 @@ export function MT5Funds() {
 
   const bonus = wallet?.bonus ?? 0;
   const balance = (wallet?.real ?? 0) + bonus;
-  const server = `${brand.name || brand.slug || 'invest254'}-${figures.demo ? 'Demo' : 'Live'}`;
+  const server = mt5ServerName(brand, figures.demo ? 'demo' : 'real');
 
   return (
     <div className="flex flex-1 flex-col bg-[#0f1720] text-white">

@@ -16,6 +16,8 @@ import { useReferral } from '@/lib/affiliate/hooks';
 import { useDisplayMoney } from '@/lib/money';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { MT5AccountPanel } from '@/components/account/MT5AccountPanel';
+import { useWallet, useWalletFigures } from '@/lib/wallet/hooks';
+import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { aboutRows, kycSub, kycTone } from '@/lib/account/mt5settings';
 import { MT5TitleBar, MT5Section as Section, MT5Row as Row } from '@/components/mt5/kit';
 import { cn } from '@/lib/cn';
@@ -44,6 +46,7 @@ export function MT5Settings() {
   const openDialog = useAccountUi((s) => s.open);
   const kyc = useMyKyc();
   const mayEarn = useCan('earn.referrals');
+  const [accountOpen, setAccountOpen] = useState(false);
 
   return (
     <div className="flex flex-1 flex-col bg-[#0f1720] text-white">
@@ -55,7 +58,26 @@ export function MT5Settings() {
           reading column — MetaTrader's own settings on a wide window are a panel, not an edge-to-edge
           list with the value a thousand pixels from its label. */}
       <div className="mx-auto w-full lg:max-w-3xl">
-        <div className="p-3">
+        {/*
+          MetaTrader's phone puts the account at the top of Settings as a CARD, not as a panel with a
+          blue header of its own: *"Account card (top): `John Smith` / `40739870 - MetaQuotes-Demo` /
+          `Access Point EU 3`, with a green "Demo" corner ribbon and a chevron -> opens saved-accounts
+          management"* (docs/mt5/04-mobile-app.md section 7).
+
+          The panel below IS that saved-accounts management, so on a phone it waits behind the card
+          rather than stacking a third blue band under the title bar and pushing every setting off
+          the first screen. On a wide window there is room for both and the panel stays open, which
+          is MetaTrader's desktop "Trading accounts" dialog.
+        */}
+        <div className="lg:hidden">
+          <AccountCard open={accountOpen} onToggle={() => setAccountOpen((v) => !v)} />
+          {accountOpen ? (
+            <div className="border-b border-[#2b3543] p-3">
+              <MT5AccountPanel embedded />
+            </div>
+          ) : null}
+        </div>
+        <div className="hidden p-3 lg:block">
           <MT5AccountPanel />
         </div>
 
@@ -99,6 +121,52 @@ export function MT5Settings() {
         <div className="h-6" />
       </div>
     </div>
+  );
+}
+
+/**
+ * MetaTrader's account card: who you are, the login and server under it, and the account's own
+ * balance, with the Demo/Real tag MetaTrader draws as a corner ribbon.
+ *
+ * Three lines and a chevron, because that is what MetaTrader's card is. The access point it prints
+ * on its third line has no equivalent here, so the line carries the balance, which is the figure
+ * this card is actually consulted for.
+ */
+function AccountCard({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const user = useSession((s) => s.user);
+  const { data: wallet } = useWallet();
+  const figures = useWalletFigures();
+  const brand = useBrand();
+  const money = useDisplayMoney();
+
+  if (!user) return null;
+  const demo = figures.demo;
+  const server = mt5ServerName(brand, demo ? 'demo' : 'real');
+  const balanceCents = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="flex w-full items-center gap-3 border-b border-[#2b3543] px-3 py-3 text-left"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 truncate text-[15px] font-semibold leading-tight text-white">{user.username}</span>
+          <span className="shrink-0 rounded-sm bg-[#2b3543] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8fa2b8]">
+            {demo ? 'Demo' : 'Real'}
+          </span>
+        </span>
+        <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">
+          {user.userId} - {server}
+        </span>
+        <span className="mt-0.5 block truncate font-mono text-[13px] leading-tight text-[#4597ff]">
+          {money.fmt(balanceCents)}
+        </span>
+      </span>
+      <span aria-hidden className={cn('shrink-0 text-[#8fa2b8] transition-transform', open && 'rotate-90')}>&#8250;</span>
+    </button>
   );
 }
 

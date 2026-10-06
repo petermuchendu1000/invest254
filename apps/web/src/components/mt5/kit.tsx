@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { useNavDrawer } from '@/lib/ui/drawer';
+import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 import { cn } from '@/lib/cn';
 
 /**
@@ -17,7 +19,16 @@ import { cn } from '@/lib/cn';
 
 /**
  * MetaTrader's title bar: the screen name, optionally over a second line, with the screen's own
- * controls on the right. Sticky under the app bar (h-14) so it behaves as one blue band.
+ * controls on the right. Sticky under the app bar on a wide window, and AT THE TOP on a phone,
+ * where it is the app's only bar.
+ *
+ * MetaTrader's phone has ONE bar across the top and the hamburger lives IN it:
+ * *"Top bar is `☰ | Quotes | ＋ | ✎`"* and *"Android: `☰` | title "Trade" … | sort button (↑↓) |
+ * new-order button"* (docs/mt5/04-mobile-app.md sections 2 and 4). So below `lg` this bar carries
+ * the drawer hamburger and `TopBar` stands down — three stacked blue bands was the app's bar, this
+ * one and the account panel's header all competing to be the navigation.
+ *
+ * Above `lg` the app's own title bar is on screen with its own hamburger, so this one draws none.
  */
 export function MT5TitleBar({
   title, subtitle, actions, children, embedded = false,
@@ -30,17 +41,54 @@ export function MT5TitleBar({
   /**
    * The bar is inside a scroller of its own rather than on a page that scrolls under the app bar.
    *
-   * On a ROUTE the whole page scrolls beneath a 56px fixed app bar, so the bar sticks 56px down.
-   * Inside the phone shell's tab the screen has its own scroll container that already starts below
-   * the app bar, and the same offset pushed the blue band down by a 56px strip of empty black on
-   * first paint — a sticky element whose natural position is above its threshold is shifted to it
-   * immediately, before any scrolling happens.
+   * On a ROUTE the whole page scrolls beneath the app bar, so on a wide window the bar sticks that
+   * bar's height down. Inside the phone shell's tab the screen has its own scroll container that
+   * already starts below the app bar, and the same offset pushed the blue band down by a strip of
+   * empty black on first paint — a sticky element whose natural position is above its threshold is
+   * shifted to it immediately, before any scrolling happens.
+   *
+   * It also decides who owns the hamburger: an embedded bar never draws one, because the app bar
+   * above it is still on screen with its own.
    */
   embedded?: boolean;
 }) {
+  const toggleDrawer = useNavDrawer((s) => s.toggle);
+  /**
+   * Embedded means the phone shell's own tab already sits under the app bar, so that bar is on
+   * screen and this one is a band inside a view. Only a ROUTE's bar is the app's bar.
+   */
+  const ownsBar = !embedded;
   return (
-    <div className={cn('sticky z-20 bg-[#3183ff]', embedded ? 'top-0' : 'top-14')}>
-      <div className={cn('flex items-center gap-3 px-3', subtitle ? 'pb-1 pt-2' : 'py-2.5')}>
+    <div
+      className={cn(
+        'sticky z-20 bg-[#3183ff]',
+        // 48px is the terminal app bar's height (TopBar, `h-12`); it used to be told 56 and left a
+        // 7px strip of page showing between the two bands.
+        embedded ? 'top-0' : 'top-0 lg:top-12',
+      )}
+    >
+      <div
+        className={cn(
+          'flex items-center gap-3 pr-3',
+          ownsBar ? 'pl-1 lg:pl-3' : 'pl-3',
+          subtitle ? 'pb-1 pt-2' : 'py-2.5',
+          // The hamburger is a 44px tap target and supplies the bar's height on a phone; the
+          // desktop bar has no button in it and keeps its own padding.
+          ownsBar && !subtitle && 'max-lg:py-1',
+        )}
+      >
+        {ownsBar ? (
+          <button
+            type="button"
+            onClick={toggleDrawer}
+            aria-label="Open menu"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded text-white transition hover:bg-white/20 lg:hidden"
+          >
+            <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+        ) : null}
         <div className="min-w-0">
           {subtitle ? <div className="text-[11px] leading-tight text-white/75">{title}</div> : null}
           <div className={cn('truncate font-semibold leading-tight', subtitle ? 'text-[15px]' : 'text-[15px]')}>
@@ -49,6 +97,25 @@ export function MT5TitleBar({
         </div>
         {actions ? <div className="relative ml-auto flex items-center gap-1">{actions}</div> : null}
       </div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A whole MetaTrader screen: its surface, with its title bar across the top.
+ *
+ * Every state of a terminal route needs it, not just the loaded one. Below `lg` this bar carries
+ * the hamburger and is the ONLY bar on the screen, so a route that drops it while it loads — or
+ * because nobody is signed in — drops the app's navigation with it and strands the screen.
+ */
+export function MT5Screen({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    // The tokens, because what these states hold is the app's own components — a Skeleton, an
+    // EmptyState with a Log in button — and on a MetaTrader screen that button is blue and square,
+    // not the app's green pill.
+    <div style={MT5_TOKENS} className="mt5-square flex flex-1 flex-col bg-[#0f1720] text-white">
+      <MT5TitleBar title={title} />
       {children}
     </div>
   );

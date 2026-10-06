@@ -12,6 +12,7 @@ import { useWalletFigures } from '@/lib/wallet/hooks';
 import { useHydrated } from '@/lib/useHydrated';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { MT5Funds } from '@/components/wallet/MT5Funds';
+import { MT5Screen } from '@/components/mt5/kit';
 
 export default function WalletPage() {
   const hydrated = useHydrated();
@@ -23,16 +24,22 @@ export default function WalletPage() {
   // A candlestick brand's funding screen is the terminal's, not the site's generic wallet page.
   const mt5 = useTerminalSkin();
 
-  if (!hydrated) return <Skeleton className="h-48 w-full" />;
+  // The title bar stays in every state: on a phone it is this screen's only navigation (MT5TitleBar).
+  if (!hydrated) {
+    return mt5
+      ? <MT5Screen title="Funds"><div className="p-3"><Skeleton className="h-48 w-full" /></div></MT5Screen>
+      : <Skeleton className="h-48 w-full" />;
+  }
 
   if (!token) {
-    return (
+    const signIn = (
       <EmptyState
         title="Sign in to view your wallet"
         description="Log in to deposit, withdraw, and see your transaction history."
         action={<Button onClick={() => openAuth('login')}>Log in</Button>}
       />
     );
+    return mt5 ? <MT5Screen title="Funds">{signIn}</MT5Screen> : signIn;
   }
 
   if (mt5) return <MT5Funds />;

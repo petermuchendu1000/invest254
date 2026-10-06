@@ -8,6 +8,8 @@ import { useBrand } from '@/lib/brand/BrandProvider';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { useNavDrawer } from '@/lib/ui/drawer';
 import { useFullScreenStore } from '@/lib/ui/fullscreen';
+import { isTerminalRoute } from '@/lib/ui/terminalScreen';
+import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
 
 export function TopBar() {
@@ -31,6 +33,25 @@ export function TopBar() {
    * chrome, or it means very little. The chart's own bar carries the way back (see MT5MobileShell).
    */
   const fullScreen = useFullScreenStore((s) => s.on);
+  /**
+   * On a phone, the MetaTrader screen the route renders IS this bar.
+   *
+   * MetaTrader's phone has one bar across the top, and the hamburger is inside it: *"Top bar is
+   * `☰ | Quotes | ＋ | ✎`"*, *"Android: `☰` | title "Trade" … | sort button | new-order button"*
+   * (docs/mt5/04-mobile-app.md sections 2 and 4). Stacking this bar, the screen's own title band and
+   * the account panel's header gave /account THREE full-width blue bars on a 360px phone.
+   *
+   * So below `lg` the screen's bar carries the hamburger (MT5TitleBar) and this one is not drawn.
+   * Hidden in CSS rather than unmounted: it is the same tree at both widths, and a JS width check
+   * would paint the bar and then take it away on mount. Above `lg` both bars stay, which is
+   * MetaTrader's desktop — a window title bar with the screen's own bar beneath it.
+   *
+   * Not `useFullScreenStore`: that flag means MetaTrader's landscape full-screen chart, declared in
+   * an effect by whatever is mounted. A route's chrome must be decided in the first paint, and the
+   * two must be able to be true at once without either releasing the other's bar.
+   */
+  const pathname = usePathname();
+  const screenOwnsBar = terminal && isTerminalRoute(pathname);
   if (fullScreen) return null;
 
   return (
@@ -38,6 +59,7 @@ export function TopBar() {
       className={cn(
         'sticky top-0 z-30 border-b',
         terminal ? 'border-[#2b3543] bg-[#3183ff]' : 'border-border bg-surface/90 backdrop-blur',
+        screenOwnsBar && 'hidden lg:block',
       )}
     >
       <div
