@@ -38,7 +38,7 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, bump, setLots, volNote, stakeCents, durationS, place,
-    chartSettled,
+    chartSettled, continuous,
   } = useOrderEntry();
   /**
    * MetaTrader's one-click volume is a FIELD, not a readout: "the volume field sits between them
@@ -188,8 +188,11 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
           {/* NOT MetaTrader's: lots are an abstraction over a staked amount here, and the amount is
               the thing a player is actually risking. Hiding it behind a lot figure on the one
               control that can open a position would be the least honest screen in the product. */}
+          {/* The amount, and a term ONLY where there still is one: a continuous brand ignores the
+              client's duration entirely (see MT5MobileOrder's Expiry note), so printing one here
+              would advertise a term this trade does not have. */}
           <span className="-mt-0.5 font-mono text-[9px] leading-none text-[#0f1720]/70 tabular-nums">
-            {money.fmt(stakeCents)} · {durationLabel(durationS)}
+            {money.fmt(stakeCents)}{continuous ? '' : ` · ${durationLabel(durationS)}`}
           </span>
         </div>
         {side('buy')}

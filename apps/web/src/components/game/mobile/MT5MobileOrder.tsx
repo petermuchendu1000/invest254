@@ -293,7 +293,18 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           </div>
         )}
 
-        {/* NOT MetaTrader's: its positions run until closed, these settle on a timer. */}
+        {/*
+          Expiry, and ONLY on a brand that still has one.
+
+          MetaTrader has no expiry on a position, and docs/mt5/20-real-sl-tp.md settled that the row
+          goes: "A position now ends at its stop, its target, a manual close, or the brand's
+          horizon." The desktop ticket dropped it then and this one did not, so the phone, which
+          13-phone-shell.md calls the primary shell, kept offering a control the engine ignores:
+          `GameServer.openPosition` takes the BRAND's horizon whenever it has a price axis and
+          discards whatever duration the client sent. A line brand has no axis, still commits its
+          outcome at open and still runs to the duration asked for, so there the row is real.
+        */}
+        {continuous ? null : (
         <div className="flex items-center gap-2 px-3 py-2">
           <span className="shrink-0 text-[12px] text-[#8fa2b8]">Expiry</span>
           <div className="flex flex-1 gap-1">
@@ -313,6 +324,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
             ))}
           </div>
         </div>
+        )}
 
         {/* 8. MetaTrader's warning line. Its own words are about market conditions and slippage;
                this engine fills at the next tick, so the line says the thing that is actually true

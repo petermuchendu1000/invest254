@@ -39,6 +39,9 @@ import type { ActivePosition } from '@/lib/game/betting';
 const ORANGE = '#ff9300'; // measured from MetaQuotes' own Android close_position.png
 const SL_ORANGE = '#dd5b4e'; // the S/L chip red/orange from the mobile order form
 const TP_GREEN = '#0eb52e'; // the T/P chip green from the mobile order form
+/** The terminal's own profit/loss pair, the same one every grid and the chart already use. */
+const PROFIT_BLUE = '#3183ff';
+const LOSS_RED = '#f23645';
 
 export function MT5ClosePosition({
   pos, symbol, digits, price, openPrice, onDismiss, onConfirm, busy,
@@ -61,8 +64,17 @@ export function MT5ClosePosition({
   /** The same level the ticket set and the chart drew, so this screen names the one TP there is. */
   const levels = useLevelsStore((s) => s.levels);
   const levelRef = useLevelsStore((s) => s.ref);
-  const tpPrice = levelPrice(levels, levelRef ?? openPrice, 'tp', digits);
+  const tpPrice = pos.tpPrice ?? levelPrice(levels, levelRef ?? openPrice, 'tp', digits);
+  /** The ENGINE's stop, falling back to the local store the way the T/P row does. */
+  const slPrice = pos.slPrice ?? levelPrice(levels, levelRef ?? openPrice, 'sl', digits);
   const lots = lotsOfStake(pos.stakeCents);
+  /**
+   * What this close actually does to the trader's money. A position exactly flat closes at neither,
+   * so it gets MetaTrader's bare verb rather than a sign it does not have.
+   */
+  const closeVerb = pos.livePnlCents > 0 ? 'Close with profit'
+    : pos.livePnlCents < 0 ? 'Close with loss'
+    : 'Close';
 
   // Escape closes the screen, as every MetaTrader dialog does.
   useEffect(() => {
@@ -120,12 +132,19 @@ export function MT5ClosePosition({
             </span>
           </div>
 
-          {/* MetaTrader's S/L is a PRICE. This contract has no price-level stop at all: it settles
-              at expiry and cannot lose more than its stake. So the row states the amount and says
-              which it is, rather than putting money where a price belongs. */}
+          {/*
+            MetaTrader's S/L is a PRICE, and so is ours now.
+
+            This row used to print the STAKE with "(max loss)" beside it, because the contract had no
+            price-level stop to show. It has had one since docs/mt5/20-real-sl-tp.md, so the old row
+            was claiming a stop was set on a position that might have none, while the Toolbox grid
+            said "-" and the live panel said "not set" for the same position: three surfaces, three
+            answers. `09-toolbox.md` 336-338 settles it, and MetaTrader's own answer for an unset
+            level is blank.
+          */}
           <Row label="S / L" accent={SL_ORANGE}>
             <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
-              {money.fmt(pos.stakeCents)} <span className="text-[11px]">(max loss)</span>
+              {slPrice === null ? 'not set' : slPrice.toFixed(digits)}
             </span>
           </Row>
           <Row label="T / P" accent={TP_GREEN}>
@@ -144,17 +163,35 @@ export function MT5ClosePosition({
           </p>
         </div>
 
-        {/* The action. MetaTrader's Android close screen makes this TEXT, not a filled button:
-            the words in orange and the amount in blue. */}
+        {/*
+          The action. MetaTrader's Android close screen makes this TEXT, not a filled button: the
+          words in orange and the amount in blue (`04-mobile-app.md` 314, `01` 584-586).
+
+          The words follow the SIGN, which they did not before. This screen used to hard-code
+          "Close with profit" on the reasoning, written into this file's own header, that "this
+          screen only ever opens on a position that CAN be closed, which here means one in profit".
+          That stopped being true when continuous pricing made a loser closable by hand: a trader
+          closing at -246.16 was told, in orange, that they were closing with a profit.
+
+          MetaQuotes' published screenshot happens to show a winner, so the docs record only the
+          profit string. Rather than invent a verbatim loss string, this mirrors the sense of the one
+          that IS recorded and colours the amount with the terminal's own profit-blue / loss-red
+          pair, which is the rule everywhere else in this shell.
+        */}
         <button
           type="button"
           onClick={onConfirm}
           disabled={busy}
           className="flex w-full shrink-0 items-center justify-center gap-2 border-t border-[#2b3543] px-3 py-4 text-[14px] font-bold uppercase tracking-wide transition disabled:opacity-50"
         >
-          <span style={{ color: ORANGE }}>{busy ? 'Closing…' : 'Close with profit'}</span>
+          <span style={{ color: ORANGE }}>{busy ? 'Closing…' : closeVerb}</span>
           {busy ? null : (
-            <span className="font-mono tabular-nums text-[#3183ff]">{money.fmt(pos.livePnlCents)}</span>
+            <span
+              className="font-mono tabular-nums"
+              style={{ color: pos.livePnlCents < 0 ? LOSS_RED : PROFIT_BLUE }}
+            >
+              {money.fmt(pos.livePnlCents)}
+            </span>
           )}
         </button>
       </div>
