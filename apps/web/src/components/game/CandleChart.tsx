@@ -1200,7 +1200,19 @@ export function CandleChart({
         // The symbol guard is the second half of the same rule as the day guard below it: draw only
         // when the tick, the anchor and the instrument all belong together.
         const sameSymbol = symbolRef.current === undefined || instRef.current.symbol === symbolRef.current;
-        if (last && anchor && series && sameSymbol && utcDateKey(last.t) === anchor.tradeDate) {
+        /**
+         * A price chart draws PRICES THE SERVER SENT, and nothing else.
+         *
+         * The client pre-fills its tick buffer with an invented curve for the classic shell's
+         * backdrop (see `Tick.synthetic`). One of those reaching here used to create the forming bar
+         * from a fabricated rate, so the bar opened tens of points off the market and kept that open,
+         * high and low for the rest of its minute. The source is fixed too, so this should never
+         * fire; it is here because a false print on a broker's chart is not a thing to leave to one
+         * guard, and because the next person to add a tick source has the rule written down.
+         */
+        const realTick = last && last.synthetic !== true ? last : null;
+        if (realTick && anchor && series && sameSymbol && utcDateKey(realTick.t) === anchor.tradeDate) {
+          const last = realTick;
           const inst = instRef.current;
           const raw = anchor.base + inst.scale * (valueOfRate(last.rate) - anchor.openValue);
           const f = 10 ** inst.digits;

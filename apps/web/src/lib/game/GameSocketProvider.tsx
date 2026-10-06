@@ -838,10 +838,29 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     return () => { multListenersRef.current.delete(cb); };
   }, []);
 
-  // Pre-fill the tick buffer with a smooth synthetic history so the curve is
-  // already full on load (never "fills in" from the right). Keeps emitting until
-  // the first real tick arrives, then stands down so live data takes over.
+  /**
+   * Pre-fill the tick buffer with a smooth synthetic history so the classic shell's curve is already
+   * full on load (never "fills in" from the right). Keeps emitting until the first real tick
+   * arrives, then stands down so live data takes over.
+   *
+   * ── NEVER ON A TERMINAL ─────────────────────────────────────────────────────────────────────────
+   * A terminal brand charts a PRICE: every tick is run through the day's anchor to get one. Feeding
+   * it an invented rate printed a price the server never sent, and the damage was not subtle. The
+   * forming candle is created from the first tick in its bucket, so a single synthetic tick landing
+   * before the first real one set that bar's open, high and low tens of points away from the market;
+   * the real ticks that followed pulled the close back, leaving one monstrous candle on the chart
+   * with a correct close and a fabricated open. It showed up "after refreshing a few times" because
+   * the window is exactly the gap between the chart's history arriving and the first live quote,
+   * which is network latency: nearly zero against a local engine, wide open against a real one.
+   *
+   * The same invented rate was also the ticket's quoted price, the Trade grid's current-price column
+   * and the phone's, so a trader could have read a made-up number and pressed Buy against it.
+   *
+   * So the synthesis is a classic-shell backdrop and nothing else. On a terminal the surfaces simply
+   * have no quote until the engine sends one, which is the truth and is what they already render.
+   */
   useEffect(() => {
+    if (terminalRef.current) return;
     const curve = synthCurveRef.current ?? (synthCurveRef.current = makeSynthCurve(synthProfileRef.current));
     if (ticksRef.current.length === 0) {
       const now = Date.now();
@@ -853,7 +872,8 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       for (let i = count; i > 0; i--) {
         const t = now - i * SYNTH_SPACING_MS;
         const rate = synthRate(curve((t - origin) / 1000));
-        seed.push({ t, rate, delta: rate - prevRate });
+        // Labelled as invented, so nothing downstream has to infer it from timing.
+        seed.push({ t, rate, delta: rate - prevRate, synthetic: true });
         prevRate = rate;
       }
       ticksRef.current = seed;
@@ -867,7 +887,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
       const t = Date.now();
       const prevRate = buf.length > 0 ? buf[buf.length - 1]!.rate : synthRate(curve(0));
       const rate = synthRate(curve((t - synthOriginRef.current) / 1000));
-      buf.push({ t, rate, delta: rate - prevRate });
+      buf.push({ t, rate, delta: rate - prevRate, synthetic: true });
       if (buf.length > MAX_TICKS) buf.splice(0, buf.length - MAX_TICKS);
     }, SYNTH_SPACING_MS);
     return () => clearInterval(id);
