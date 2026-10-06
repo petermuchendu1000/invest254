@@ -1172,12 +1172,21 @@ export function CandleChart({
     const anchor = anchorRef.current;
     const lc = lcRef.current;
     if (!series || !anchor || !lc) return;
+    /**
+     * A test seam, for the same reason `chartBars` is one: the level is drawn INTO a canvas by
+     * lightweight-charts, so from outside the only way to ask whether it is there is to count
+     * pixels of its colour on the price axis — and that colour is `#41be56`, which is also the up
+     * candle's, so the last-value price label paints ~780 pixels of it whenever the last bar closed
+     * up, position or no position. A pixel test therefore answers a different question than the one
+     * it looks like it answers. This says plainly whether the level is drawn.
+     */
+    const mark = (on: boolean) => { const host = plotRef.current; if (host) host.dataset.chartTradeLevel = on ? '1' : '0'; };
     const rate = openPosition?.entryRate ?? null;
     // Show trade levels, which MetaTrader carries on its Show tab and in Options as a global.
-    if (rate === null || !openPosition || !props.showTradeLevels) return;
+    if (rate === null || !openPosition || !props.showTradeLevels) { mark(false); return; }
     const inst = instRef.current;
     const price = anchor.base + inst.scale * (valueOfRate(rate) - anchor.openValue);
-    if (!Number.isFinite(price)) return;
+    if (!Number.isFinite(price)) { mark(false); return; }
     const line = series.createPriceLine({
       price,
       // MetaTrader colours a position's opening level with its `Volumes:` colour. That reads like a
@@ -1189,7 +1198,11 @@ export function CandleChart({
       axisLabelVisible: true,
       title: `${openPosition.direction} ${openPosition.lots}`,
     });
-    return () => { try { series.removePriceLine(line); } catch { /* series already gone */ } };
+    mark(true);
+    return () => {
+      mark(false);
+      try { series.removePriceLine(line); } catch { /* series already gone */ }
+    };
   }, [openPosition?.entryRate, openPosition?.direction, openPosition?.lots, revision, props.showTradeLevels, props.colours]);
 
   const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" aria-hidden />;
@@ -1211,6 +1224,11 @@ export function CandleChart({
           toggleIndicator={toggleIndicator}
           onProperties={() => setPropertiesOpen(true)}
           onObjectsList={() => setObjectsListOpen(true)}
+          tool={tool}
+          onPickTool={(id) => { setSelectedDrawing(null); setTool(id); }}
+          priceManual={priceManual}
+          setAutoScale={setAutoScale}
+          resetVerticalScale={resetVerticalScale}
           {...(fullScreen === undefined ? {} : { fullScreen })}
           {...(onFullScreen === undefined ? {} : { onFullScreen })}
         />
@@ -1694,7 +1712,8 @@ function Toggle({ on, onClick, children, disabled, title }: {
  */
 function MobileChartBar({
   tf, chooseTf, crosshair, onCrosshair, chartType, setChartType, ind, toggleIndicator,
-  onProperties, onObjectsList, fullScreen, onFullScreen,
+  onProperties, onObjectsList, tool, onPickTool, priceManual, setAutoScale, resetVerticalScale,
+  fullScreen, onFullScreen,
 }: {
   tf: Timeframe;
   chooseTf: (tf: Timeframe) => void;
@@ -1706,6 +1725,13 @@ function MobileChartBar({
   toggleIndicator: (id: string) => void;
   onProperties: () => void;
   onObjectsList: () => void;
+  /** The drawing tool now armed, and how to arm one. See the Objects sheet below. */
+  tool: ToolId;
+  onPickTool: (id: ToolId) => void;
+  /** MetaTrader's three vertical-scale modes, which it documents on BOTH phone platforms. */
+  priceManual: boolean;
+  setAutoScale: (on: boolean) => void;
+  resetVerticalScale: () => void;
   /** Landscape only: whether the app's chrome is hidden. Undefined in portrait. */
   fullScreen?: boolean | undefined;
   onFullScreen?: ((full: boolean) => void) | undefined;
@@ -1719,7 +1745,7 @@ function MobileChartBar({
   useRestoreOneClick();
 
   /** One sheet at a time, as MetaTrader's are: the strip, the full period sheet, or indicators. */
-  const [open, setOpen] = useState<null | 'strip' | 'periods' | 'indicators'>(null);
+  const [open, setOpen] = useState<null | 'strip' | 'periods' | 'indicators' | 'objects'>(null);
   /**
    * A long press adds or removes a period from the quick strip, which is MetaTrader's own gesture
    * for it. A phone has no right-click, so this is the only way to reach that behaviour.
@@ -1759,6 +1785,24 @@ function MobileChartBar({
           className={cn(btn, open === 'indicators' ? on : off)}
         >
           <BarIcon.Indicators />
+        </button>
+        {/*
+          * Objects.
+          *
+          * MetaTrader puts a dedicated Objects button in the phone chart's top bar on iOS, and
+          * reaches the same thing through Android's radial menu; its iOS chart context menu is
+          * "Trade / Indicators / Objects / Settings". This shell had NEITHER: the desktop rail is
+          * `phone ? null`, and the indicator sheet carried only the Objects LIST — a list of
+          * objects a phone trader had no way to create. This is the insert tree, as a sheet.
+          */}
+        <button
+          type="button"
+          onClick={() => setOpen(open === 'objects' ? null : 'objects')}
+          aria-expanded={open === 'objects'}
+          aria-label="Objects"
+          className={cn(btn, open === 'objects' || (tool !== 'cursor' && tool !== 'crosshair') ? on : off)}
+        >
+          <BarIcon.Objects />
         </button>
         {/* The period, which is also the button that opens the quick strip. */}
         <button
@@ -1895,6 +1939,61 @@ function MobileChartBar({
         </MobileSheet>
       ) : null}
 
+      {/*
+        * The Objects sheet: MetaTrader's 44-object Insert tree, in its own groups.
+        *
+        * Picking one arms the tool and closes the sheet, so the next tap lands on the chart - which
+        * is how MetaTrader's phone app places an object, and the same `setTool` the desktop rail
+        * drives. "Cursor" disarms, because a phone has no Esc key to cancel a pending object with.
+        */}
+      {open === 'objects' ? (
+        <MobileSheet title="Objects" onClose={() => setOpen(null)}>
+          <button
+            type="button"
+            onClick={() => { onPickTool('cursor'); setOpen(null); }}
+            className={cn(
+              'mb-2 h-9 w-full rounded text-[11px] font-semibold transition',
+              tool === 'cursor' ? 'bg-[#3183ff] text-white' : 'bg-[#202933] text-[#8fa2b8]',
+            )}
+          >
+            Cursor
+          </button>
+          <button
+            type="button"
+            onClick={() => { onObjectsList(); setOpen(null); }}
+            className="mb-3 h-9 w-full rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8] transition"
+          >
+            Objects list
+          </button>
+          {OBJECT_GROUPS.map((g) => (
+            <div key={g.group} className="mb-2 last:mb-0">
+              <div className="mb-1 text-[10px] font-semibold tracking-wide text-[#8fa2b8]">{g.label}</div>
+              <div className="grid gap-1">
+                {g.items.map((o) => (
+                  <button
+                    key={o.name}
+                    type="button"
+                    disabled={o.unavailable !== undefined}
+                    title={o.unavailable}
+                    aria-pressed={o.kind !== null && tool === o.kind}
+                    onClick={() => { if (o.kind) { onPickTool(o.kind as ToolId); setOpen(null); } }}
+                    className={cn(
+                      'flex h-9 items-center rounded border px-2 text-left text-[11px] font-semibold transition',
+                      o.kind !== null && tool === o.kind
+                        ? 'border-[#3183ff] bg-[#3183ff]/15 text-[#3183ff]'
+                        : 'border-[#2b3543] text-[#8fa2b8]',
+                      o.unavailable && 'cursor-not-allowed opacity-45',
+                    )}
+                  >
+                    <span className="truncate">{o.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </MobileSheet>
+      ) : null}
+
       {/* Indicators, chart type, properties and the objects list — the phone's equivalent of the
           desktop Tools menu, minus the object rail it has no room for. */}
       {open === 'indicators' ? (
@@ -1920,6 +2019,27 @@ function MobileChartBar({
             <div className="grid grid-cols-2 gap-1">
               <button type="button" onClick={() => { setOpen(null); onProperties(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Properties</button>
               <button type="button" onClick={() => { setOpen(null); onObjectsList(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Objects list</button>
+            </div>
+          </Section>
+          {/*
+            * MetaTrader's three vertical-scale modes, which it documents on BOTH phone platforms:
+            * "There is an Auto-scale mode that restricts movement to horizontal only and auto-fits
+            * the price range; Free chart movement returns to 2-D. Reset vertical scale restores the
+            * original scale. (Both platforms.)" The desktop Tools menu carried all three and the
+            * phone carried none, so a phone trader who stretched the price axis had no way back but
+            * a reload — on the one shell where the stretch happens by accident, with a finger.
+            */}
+          <Section title="Scale">
+            <div className="grid gap-1">
+              <Toggle on={!priceManual} onClick={() => setAutoScale(true)}>Auto scale</Toggle>
+              <Toggle on={priceManual} onClick={() => setAutoScale(false)}>Free chart movement</Toggle>
+              <button
+                type="button"
+                onClick={() => { setOpen(null); resetVerticalScale(); }}
+                className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]"
+              >
+                Reset vertical scale
+              </button>
             </div>
           </Section>
           {INDICATOR_GROUPS.map((g) => (
@@ -2014,6 +2134,14 @@ const BarIcon = {
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 3.5a8.5 8.5 0 010 17z" fill="currentColor" stroke="none" opacity="0.45" />
       <path d="M12 7.5V12l3 1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  /** iOS's Objects button: the trend-line glyph MetaTrader uses for Line Studies. */
+  Objects: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
+      <path d="M4 19L20 5" />
+      <circle cx="4.6" cy="18.4" r="1.9" fill="currentColor" stroke="none" />
+      <circle cx="19.4" cy="5.6" r="1.9" fill="currentColor" stroke="none" />
     </svg>
   ),
   /** The one-click panel toggle: a rounded rectangle with a pill inside it. */
