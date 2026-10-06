@@ -18,7 +18,10 @@ import { PoolRealtimeDistributor } from "./poolrealtime.js";
 import { makeVerifier } from "./auth.js";
 import { makeSystemLogPersister } from "./systemlog.js";
 import { SharedSiteConfigListener } from "./siteconfiglisten.js";
-import { DEFAULT_VERSIONED_CONFIG, PlatformGate, chartStyleOf, curveProfileForChartStyle, type CurveProfile } from "@invest254/shared";
+import {
+  DEFAULT_VERSIONED_CONFIG, PlatformGate, chartStyleOf, curveProfileForChartStyle,
+  defaultConfigForProfile, type CurveProfile, type VersionedGameConfig,
+} from "@invest254/shared";
 
 /**
  * Multiplexed engine entrypoint (multi-tenant).
@@ -155,7 +158,20 @@ if (usingDb) {
       const cr = await q.query("select currency from sites where id = $1::uuid limit 1", [siteId]);
       if (cr.rows.length) currency = String((cr.rows[0] as Record<string, unknown>).currency ?? "KES");
     } catch { /* default KES → near-miss uses the legacy min_withdrawal */ }
-    const store = new SiteGameConfigStore(siteId, q, { currency }); // poll-only; push comes from the shared listener
+    /**
+     * The fallback economy follows the brand's CURVE, because the two are not interchangeable.
+     *
+     * A candlestick brand settles continuously, and a continuous position's value at open can never
+     * exceed the RTP, so the step economy's 75% edge would open every position at a near-total loss
+     * (see TERMINAL_CONFIG in shared/config.ts). A line brand keeps the step contract and its edge
+     * untouched. This is only what the store holds until the brand's own row is read: an operator's
+     * saved `site_game_config_versions` row always wins, so no live brand is repriced by it.
+     */
+    // Without a profile resolver there is no way to know which curve this brand charts, so it keeps
+    // today's economy exactly: `wave` resolves to DEFAULT_CONFIG, which is the unchanged behaviour.
+    const profile = curveProfileFor ? await curveProfileFor(siteId) : "wave";
+    const fallback: VersionedGameConfig = { ...defaultConfigForProfile(profile), version: 0 };
+    const store = new SiteGameConfigStore(siteId, q, { currency, fallback }); // poll-only; push comes from the shared listener
     await store.init();
     // Instant hot-reload without a per-brand connection: the shared listener nudges THIS brand's
     // refresh when site_game_config_changed fires with its site_id (payload).
