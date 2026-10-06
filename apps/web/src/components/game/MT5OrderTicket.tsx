@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useDisplayMoney } from '@/lib/money';
-import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useOrderEntry, DURATION_OPTIONS, durationLabel } from '@/lib/game/useOrderEntry';
 import { useOrderResult } from '@/lib/game/useOrderResult';
 import { MT5OrderResult } from '@/components/game/mobile/MT5OrderResult';
@@ -10,6 +9,7 @@ import { MT5LivePosition } from '@/components/game/MT5LivePosition';
 import { useRestoreLevels } from '@/lib/game/levelsStore';
 import { MT5LevelRows } from '@/components/game/MT5LevelRows';
 import { MT5Price } from '@/components/game/MT5Price';
+import { volClampReason } from '@/lib/game/volumeSteps';
 import { cn } from '@/lib/cn';
 
 /**
@@ -60,22 +60,37 @@ export function MT5OrderTicket() {
   const order = useOrderEntry();
   const {
     ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, volStep, setLots, bump, stakeCents, overBalance, signedIn,
-    durationS, setDurationS, durations, place, activePosition, earlyCloseEnabled,
+    lots, minLots, maxLots, volDigits, volStep, setLots, bump, volNote, stakeCents, overBalance, signedIn,
+    durationS, setDurationS, durations, place, activePosition, continuous,
     tick, priceOfRate, market,
   } = order;
   const money = useDisplayMoney();
-  const limits = useStakeLimits();
   const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
   const steps = volumeStepsOf(volStep);
   const [typingVol, setTypingVol] = useState<string | null>(null);
+  /**
+   * What happened to the last figure that was typed in, when it was not taken as written.
+   *
+   * MetaTrader's Volume is a numeric spinner that accepts keystrokes and validates them, never an
+   * inert control (docs/mt5/01-order-and-close-dialogs.md 1.3 lists `Volume:` as a "numeric
+   * spinner"; its advanced mobile dialog "highlights the field in red" on an invalid value rather
+   * than refusing the keystroke). Snapping a typed figure in silence is what made the field look
+   * broken: type 1, get 0.058 back, with no reason given.
+   */
+  const [volClamp, setVolClamp] = useState<string | null>(null);
   const commitVol = () => {
     if (typingVol === null) return;
     const n = Number(typingVol);
-    // `setLots` snaps to the symbol's grid and clamps to the brand's range, so a typed figure
-    // cannot land off-grid or outside what the engine will accept.
-    if (Number.isFinite(n) && n > 0) setLots(n);
     setTypingVol(null);
+    if (!Number.isFinite(n) || n <= 0) {
+      setVolClamp(`"${typingVol}" is not a volume, so ${lots.toFixed(volDigits)} lots is kept.`);
+      return;
+    }
+    // `setLots` snaps to the symbol's grid and clamps to the range, so a typed figure cannot land
+    // off-grid or outside what the engine will accept. It returns what it used, which is what lets
+    // the difference be reported instead of looking like the typing was ignored.
+    const applied = setLots(n);
+    setVolClamp(volClampReason(n, applied, { minLots, maxLots, volStep, volDigits }));
   };
   const send = (dir: 'buy' | 'sell') => report(dir, place(dir));
 
@@ -108,6 +123,12 @@ export function MT5OrderTicket() {
     );
   }
 
+  /** What the bound IS, for the stepper that cannot move past it, and why where there is a why. */
+  const atMin = `Minimum volume ${minLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`;
+  const atMax = `Maximum volume ${maxLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`;
+  // A clamp report is about the last keystrokes and outranks the standing note.
+  const volMessage = volClamp ?? volNote;
+
   const rowLabel = 'w-20 shrink-0 text-[12px] text-[#8fa2b8] lg:w-auto lg:basis-full';
   const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-1 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
 
@@ -133,8 +154,11 @@ export function MT5OrderTicket() {
           scaling with magnitude). Ours had a label and an asymmetric -1/+2 arrangement that no
           MetaTrader build has, and at phone width it wrapped onto two lines. */}
       <div className="grid grid-cols-5 gap-1">
+        {/* Disabled only ON the bound, and never without saying which bound it is: MetaTrader
+            carries min/max/step on the symbol and its dialogs name the constraint rather than
+            leaving a dead control to be guessed at. */}
         {steps.slice().reverse().map((st) => (
-          <button key={`-${st}`} type="button" onClick={() => bump(-st)} disabled={lots <= minLots} className={stepBtn} aria-label={`Decrease volume by ${st}`}>
+          <button key={`-${st}`} type="button" onClick={() => { setVolClamp(null); bump(-st); }} disabled={lots <= minLots} title={lots <= minLots ? atMin : undefined} className={stepBtn} aria-label={`Decrease volume by ${st}`}>
             −{st.toFixed(volDigits)}
           </button>
         ))}
@@ -143,11 +167,17 @@ export function MT5OrderTicket() {
           * value to type on the keyboard") and the thing this ticket had no version of: it was a
           * `<span>`. With a 0.025 minimum and two fixed steps, a trader who wanted 5 lots had no
           * way to get there but to hold down a button.
+          *
+          * It is NEVER disabled, whatever the steppers are doing. MetaTrader's `Volume:` is a
+          * numeric spinner you can always type into, and a brand whose minimum equals its maximum
+          * puts both steppers on their bound at once: if the field went with them the ticket would
+          * have no working volume control at all, which is what the bug report describes.
           */}
         {typingVol === null ? (
           <button
             type="button"
             onClick={() => setTypingVol(lots.toFixed(volDigits))}
+            title={`Volume in lots. Type a value between ${minLots.toFixed(volDigits)} and ${maxLots.toFixed(volDigits)}.`}
             aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
             className="flex h-8 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-bold text-white tabular-nums transition hover:border-[#3183ff]"
           >
@@ -166,15 +196,21 @@ export function MT5OrderTicket() {
           />
         )}
         {steps.map((st) => (
-          <button key={`+${st}`} type="button" onClick={() => bump(st)} disabled={lots >= maxLots} className={stepBtn} aria-label={`Increase volume by ${st}`}>
+          <button key={`+${st}`} type="button" onClick={() => { setVolClamp(null); bump(st); }} disabled={lots >= maxLots} title={lots >= maxLots ? atMax : undefined} className={stepBtn} aria-label={`Increase volume by ${st}`}>
             +{st.toFixed(volDigits)}
           </button>
         ))}
       </div>
+      {/* Both bounds, always. They are the symbol's own min and max intersected with the brand's,
+          which is the pair MetaTrader's contract specification states, so hiding the ceiling when
+          the brand set none left the ticket quoting a limit it had no second half for. */}
       <div className="flex items-baseline gap-2 text-[11px] text-[#8fa2b8]">
         <span>= {money.fmt(stakeCents)}</span>
-        <span className="ml-auto">min {minLots.toFixed(volDigits)}{limits.maxCents === undefined ? '' : ` / max ${maxLots.toFixed(volDigits)}`}</span>
+        <span className="ml-auto">min {minLots.toFixed(volDigits)} / max {maxLots.toFixed(volDigits)}</span>
       </div>
+      {volMessage === null ? null : (
+        <p data-volume-note="" className="text-[11px] leading-snug text-[#f0b90b]">{volMessage}</p>
+      )}
 
       {/**
         * MetaTrader's Stop Loss and Take Profit, on the SAME model the phone uses.
@@ -189,7 +225,7 @@ export function MT5OrderTicket() {
         price={price}
         digits={digits}
         stakeCents={stakeCents}
-        earlyCloseEnabled={earlyCloseEnabled}
+        continuous={continuous}
         durationLabel={durationLabel(durationS)}
       />
 

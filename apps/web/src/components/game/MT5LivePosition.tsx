@@ -128,9 +128,10 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           ? 'Market execution. Left alone, it closes itself at expiry.'
           : 'Closes automatically at expiry: market execution.'}
       </p>
-      {/* MetaTrader's S/L, stated rather than offered. The engine settles a losing contract at
-          expiry and will not close one early, so the stop is fixed at the stake: that is the most
-          this position can lose, whatever happens to the price. */}
+      {/* MetaTrader's S/L, stated rather than offered: this compact surface carries no level
+          controls, and the ticket, the Toolbox and Modify position all do. The stake is the figure
+          that holds either way, because the continuous payout floors at zero, so it is the most
+          this position can lose whatever the price does and whatever closes it. */}
       <p className="text-[10px] text-[#8fa2b8]">
         Max loss {money.fmt(pos.stakeCents)} (the stake). This contract cannot lose more.
       </p>

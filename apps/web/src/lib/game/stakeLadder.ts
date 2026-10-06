@@ -14,7 +14,17 @@ export const ceil5 = ceilUnit;
 export const floor5 = floorUnit;
 export const isMultipleOf5 = (v: number) => Number.isFinite(v) && v > 0 && Math.abs(v / 5 - Math.round(v / 5)) < 1e-9;
 
-export interface StakeUnits { min: number; max: number | null; ladder: number[] }
+export interface StakeUnits {
+  min: number;
+  max: number | null;
+  ladder: number[];
+  /**
+   * True when the resolved maximum came out BELOW the resolved minimum, which is a brand
+   * MISCONFIGURATION or a conversion artefact, never a range. Reported rather than swallowed so a
+   * caller can say so and so the condition is greppable from one place.
+   */
+  inverted: boolean;
+}
 
 /**
  * Resolve the brand's stake range in display units.
@@ -33,9 +43,22 @@ export function resolveStakeUnits(a: { nativeMin?: number | null; nativeMax?: nu
   const min = Math.max(a.nativeMin && a.nativeMin > 0 ? a.nativeMin : 0, enforcedMin);
   const enforcedMax = a.maxDisplay != null && Number.isFinite(a.maxDisplay) ? floorUnit(a.maxDisplay) : null;
   const nativeMax = a.nativeMax && a.nativeMax > 0 ? a.nativeMax : null;
-  let max = nativeMax != null && enforcedMax != null ? Math.min(nativeMax, enforcedMax) : nativeMax ?? enforcedMax;
-  if (max != null && max < min) max = min;
-  return { min, max, ladder: stakeLadder(min, max) };
+  const ceiling = nativeMax != null && enforcedMax != null ? Math.min(nativeMax, enforcedMax) : nativeMax ?? enforcedMax;
+  /**
+   * A ceiling below the floor is NO ceiling, not a one-value range.
+   *
+   * This used to read `if (max < min) max = min`, which turned a misconfigured or FX-converted
+   * inversion into a single tradable amount. Downstream that single amount became
+   * `effectiveVolume({min: x, max: x})`, both volume steppers sat on their bound at once, and the
+   * ticket printed "min 0.058 / max 0.058" with nothing the trader could move: the reported bug.
+   * MetaTrader's Volume control is never dead (`docs/mt5/01-order-and-close-dialogs.md` 1.3: a
+   * "numeric spinner"; 2.4: "enter the volume to close in the "Volume" field"), and it takes its
+   * limits from the SYMBOL's contract specification, so dropping an impossible brand ceiling lets
+   * that specification's own ceiling stand, which is what `effectiveVolume` does with a null max.
+   */
+  const inverted = ceiling != null && ceiling < min;
+  const max = inverted ? null : ceiling;
+  return { min, max, ladder: stakeLadder(min, max), inverted };
 }
 
 export function stakeLadder(min: number, max: number | null): number[] {

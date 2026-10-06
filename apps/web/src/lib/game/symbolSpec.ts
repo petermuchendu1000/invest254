@@ -23,10 +23,11 @@
  *   Exchange / Sector / CFI / Industry / Country / ISIN   this is not an exchange-listed security.
  *   Calculation       none of MetaTrader's seven modes (Forex, Futures, Collateral and so on)
  *       describes a fixed-stake contract, and picking the nearest would misstate how it settles.
- *   Stops level       the minimum distance a stop may sit from the price. The stop here is the
- *       stake itself rather than a price level, so there is no distance to state.
- *   Tick value        the money one tick is worth. A payout here follows elapsed time rather than
- *       distance moved, so no tick has a fixed value.
+ *   Stops level       the minimum distance a stop may sit from the price. The engine imposes none:
+ *       it takes a stop anywhere and checks it on every tick, so there is no distance to state.
+ *   Tick value        the money one tick is worth. It follows from the payout's gain and its
+ *       break-even cost, neither of which the engine publishes to the client, so stating a figure
+ *       would be inventing one.
  *   Option type / Underlying / Strike price / Face value / Accrued interest   not a derivative of
  *       a listed instrument.
  */

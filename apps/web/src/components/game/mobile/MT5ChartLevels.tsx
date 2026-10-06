@@ -7,6 +7,9 @@ import {
   pointsOfPrice, priceOfPoints, applyRatioLock, type Levels,
 } from '@/lib/game/levels';
 import { useLevelsStore } from '@/lib/game/levelsStore';
+import { isContinuousBrand } from '@/lib/game/levelWatch';
+import { useGameSocket } from '@/lib/game/GameSocketProvider';
+import { useBrand } from '@/lib/brand/BrandProvider';
 import { cn } from '@/lib/cn';
 
 /**
@@ -30,10 +33,14 @@ import { cn } from '@/lib/cn';
  *
  * ── What the money figure says ───────────────────────────────────────────────────────────────────
  * MetaTrader shows the potential P/L of the level being dragged. The distance in POINTS is real and
- * is shown. The money is not derivable the way MetaTrader's is: this contract's payout is a
- * multiplier assigned at open that rises with elapsed time, and no level determines it. So the stop
- * shows the stake, which is exactly what it risks, and the target says so rather than printing an
- * invented figure. The dialog's own notes carry the same two sentences.
+ * is shown; the money depends on how the brand is priced.
+ *
+ * On a CONTINUOUS brand the engine closes the position at the level, for what it is worth there, so
+ * the figure does follow from the distance — but it follows through a gain and a break-even cost the
+ * engine does not publish to the client, so no figure is printed rather than an invented one. On a
+ * committed contract the payout is a multiplier assigned at open that no level determines, so the
+ * stop shows the stake, which is exactly what it risks, and the target says it varies. The dialog's
+ * own notes carry the same distinction.
  */
 export const LEVEL_COLOUR = { sl: '#DD5B4E', tp: '#0EB52E' } as const;
 
@@ -48,6 +55,10 @@ export function MT5ChartLevels({ project, width, height, digits, price, stakeCen
   stakeCents: number;
 }) {
   const money = useDisplayMoney();
+  const brand = useBrand();
+  const { earlyCloseEnabled } = useGameSocket();
+  /** Whether the engine will act on these levels at all. See lib/game/levelWatch.ts. */
+  const continuous = isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled });
   const levels = useLevelsStore((s) => s.levels);
   const setLevels = useLevelsStore((s) => s.set);
   const levelRef = useLevelsStore((s) => s.ref);
@@ -213,8 +224,8 @@ export function MT5ChartLevels({ project, width, height, digits, price, stakeCen
             className="pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-[#0f1720]/90 px-1.5 py-0.5 font-mono text-[10px] leading-none text-white tabular-nums"
             style={{ outline: `1px solid ${colour}`, top: nudge[field] }}
           >
-            {points > 0 ? '+' : ''}{points} pts ·{' '}
-            {field === 'sl' ? money.fmt(stakeCents) : 'varies'}
+            {points > 0 ? '+' : ''}{points} pts
+            {continuous ? null : <> · {field === 'sl' ? money.fmt(stakeCents) : 'varies'}</>}
           </span>
         ) : null}
       </div>

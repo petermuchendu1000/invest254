@@ -7,12 +7,13 @@ import { accountSummary, accountStripFields, mtAmount, lotsOfStake } from '@inve
 import { useGameSocket, useGameSocketApi, type NewsItemDto, type DayAnchor } from '@/lib/game/GameSocketProvider';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
+import { useBrand } from '@/lib/brand/BrandProvider';
 import { useSession } from '@/lib/auth/session';
 import { useMyNotifications } from '@/lib/notifications/hooks';
 import { useJournal, logJournal } from '@/lib/game/journal';
 import { useAlertsStore, usePriceAlertWatch, type PriceAlert } from '@/lib/game/alerts';
 import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
-import { levelPrice } from '@/lib/game/levelWatch';
+import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { api } from '@/lib/api/endpoints';
 import type { PositionDto } from '@/lib/api/types';
@@ -53,6 +54,12 @@ type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
   const { activePosition, status, earlyCloseEnabled, setLevels: pushLevels } = useGameSocket();
+  const brand = useBrand();
+  /**
+   * Whether the engine acts on the S/L and T/P levels at all: a brand with a price axis, pool mode
+   * off. `earlyCloseEnabled` alone is not it. See `isContinuousBrand` in lib/game/levelWatch.ts.
+   */
+  const continuous = isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled });
   const { getLastTick, getMarket, sell } = useGameSocketApi();
   const { data: wallet } = useWallet();
   const money = useDisplayMoney();
@@ -372,7 +379,7 @@ export function MT5Toolbox() {
                     to={px(getLastTick()?.rate ?? null)}
                     profit={money.fmt(live.livePnlCents)}
                     profitCents={live.livePnlCents}
-                    note={earlyCloseEnabled && tpPrice !== null ? `T/P ${tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(live.stakeCents)}`}
+                    note={continuous && tpPrice !== null ? `T/P ${tpPrice.toFixed(digits)}` : `Max loss ${money.fmt(live.stakeCents)}`}
                   />
                   <div className="hidden sm:block">
                     <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'S / L', 'T / P', 'Price', 'Profit']}>
@@ -391,11 +398,13 @@ export function MT5Toolbox() {
                           {/* MetaTrader's S/L column: the LEVEL, as a price, the same one the ticket
                               sets and the chart draws. It used to print the stake instead, because
                               there was no stop to show: the whole column was a sentence about the
-                              engine. The stop still cannot fire, which the ticket says in full;
-                              this is the level the trader set, which is what the column is for. */}
+                              engine. On a continuous brand the engine checks this level every tick
+                              and closes the position there, which is what the column is for. */}
                           <span
                             className="text-[#8fa2b8]"
-                            title="This contract settles a loss at expiry, so the stop cannot fire. The level is the trader's."
+                            title={continuous
+                              ? 'The stop closes this position at its price, for what it is worth there. Stops processing is performed on the server side.'
+                              : 'This contract settles a loss at expiry, so the stop cannot fire. The level is the trader\u2019s.'}
                           >
                             {slPrice === null ? '-' : slPrice.toFixed(digits)}
                           </span>
@@ -404,7 +413,7 @@ export function MT5Toolbox() {
                           {/* MetaTrader's T/P column: the level as a price, stepped in the
                               instrument's own points. It held a money TARGET before, which is a
                               different concept the chart could not draw and the phone never fired. */}
-                          {earlyCloseEnabled ? (
+                          {continuous ? (
                             <span className="flex items-center gap-1">
                               <button type="button" onClick={() => stepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
                               <span className="min-w-16 text-center">{tpPrice === null ? 'none' : tpPrice.toFixed(digits)}</span>

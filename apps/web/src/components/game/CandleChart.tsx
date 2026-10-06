@@ -1156,11 +1156,11 @@ export function CandleChart({
    * pending orders. Only the first of those can exist here, and the reasons are worth stating
    * because they are not laziness:
    *   - there are no pending orders: every contract is market execution;
-   *   - the Stop Loss has no price level at all. A losing contract cannot be closed early, so the
-   *     whole downside is the stake and no price would ever trigger a stop;
-   *   - the Take Profit is an amount rather than a price, because the payout rises with elapsed
-   *     time rather than with price, so it has no line to sit on either.
-   * Drawing a stop line at a made-up price would be the exact invention this rebuild is undoing.
+   *   - the Stop Loss and the Take Profit ARE prices, and they are drawn, but by `MT5ChartLevels`
+   *     over this canvas rather than by the series: they are draggable, they carry MetaTrader's own
+   *     chips, and they come from the shared levels store the ticket writes.
+   * What is left here is the open-position level alone. Drawing a second, undraggable pair through
+   * the series would put two lines on one level and let them disagree.
    *
    * Colour: MetaTrader draws position levels in the `Volumes` colour (CHART_COLOR_VOLUME is
    * documented as "Color of volumes and position opening levels"), which is Green in the one

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { Direction } from '@invest254/shared';
+import { chartStyleOf, curveProfileForChartStyle } from '@invest254/shared/chart';
 // Relative, not aliased: `@/` does not resolve under the repo's node:test runner, and this
 // module's pure half is unit-tested.
 import { logJournal } from './journal.js';
@@ -9,38 +10,50 @@ import { priceOfPoints, type Levels } from './levels.js';
 import type { ActivePosition } from './betting.js';
 
 /**
- * MetaTrader's Take Profit, firing at the PRICE the trader set it at.
+ * Where a Stop Loss and a Take Profit are a PRICE this engine will actually close a position at.
  *
- * ── Why this replaces a money target ─────────────────────────────────────────────────────────────
+ * ── The one flag the copy turns on ───────────────────────────────────────────────────────────────
  *
- * There were two different "take profit" concepts in this app and they disagreed. The phone's
- * advanced dialog held MetaTrader's real thing: a signed distance in points from an anchor price,
- * drawn and dragged on the chart. The desktop ticket, the Toolbox row and the Modify dialog held
- * something else entirely, a target floating PROFIT in cents, and a watcher that closed the
- * contract when the P/L reached it. Neither knew about the other, so a level set on the chart was
- * invisible to the ticket and the ticket's target was invisible to the chart.
+ * The engine opens a position as CONTINUOUS when the brand has a price axis, and only then. See
+ * `apps/engine/src/game.ts`: `const continuous = this.priceAxis !== undefined`, with the axis handed
+ * to the GameServer in `siteregistry.ts` only when the brand's curve profile is `market`, and with
+ * `continuous: false` forced on every pool-controlled position. On a continuous position the engine
+ * checks both levels on every tick, stop first, and closes at
+ * `settlement.valueAt(...)` — what the position is worth at that price. On a non-continuous one the
+ * outcome is committed at open, `set_levels` is refused outright ("LEVELS_UNSUPPORTED") and the
+ * contract runs to its horizon.
  *
- * The money target's own argument for existing was that "closing at a price level would pay an
- * amount unrelated to that level", and that is true of the PAYOUT: this contract's payout rises
- * with elapsed time rather than with the distance to a level. But it is not what MetaTrader's T/P
- * promises. MetaTrader's T/P promises to CLOSE THERE; what the close is worth is a separate
- * question, and the dialog already says so in as many words. So a price trigger is both honest and
- * MetaTrader's actual semantics, and it is what this does.
+ * So the browser's proxy for the engine's `continuous` is exactly two facts, both of which it
+ * already has:
  *
- * ── What it is allowed to do ─────────────────────────────────────────────────────────────────────
+ *   1. the brand's curve profile is `market`, which is the same shared helper the engine's wiring
+ *      uses (`curveProfileForChartStyle`), and
+ *   2. pool mode is off, which the engine reports in its hello as `earlyCloseEnabled`.
  *
- * Nothing but the ordinary manual close, through the same `sell` the Close button calls, under the
- * same two conditions the engine already imposes: the brand allows a manual close at all, and this
- * contract was decided a win (`sellable`). It prices nothing and settles nothing.
+ * It is not `earlyCloseEnabled` alone: a line brand with pool mode OFF reports early close enabled
+ * and still has no axis, so neither of its levels can fire. The MT5 surfaces this gates are rendered
+ * for non-marketers only (`TradeSurface`: `terminal = isTerminalBrand && !isMarketer`), which is the
+ * one case where pool mode and a committed contract coincide exactly.
  *
- * ── And why there is no stop-loss trigger here ───────────────────────────────────────────────────
+ * ── Why this module no longer watches anything ───────────────────────────────────────────────────
  *
- * A stop can never fire in this engine, and that is a fact about the engine rather than an omission
- * here: `sell` refuses a losing position outright ("NOT_SELLABLE: losing positions settle at
- * expiry"). A contract whose price has crossed its stop is a losing one by definition, so a trigger
- * would do nothing but produce a refusal the trader never asked for. The dialog states that instead,
- * which is the honest version.
+ * `useTakeProfitLevelWatch` fired a manual sell from a React effect when the price reached the
+ * level. It is no longer armed anywhere: the ENGINE holds the levels and fires them on its own tick,
+ * so a target survives a closed laptop. See docs/mt5/20-real-sl-tp.md.
  */
+
+/**
+ * Does this brand's engine price a position continuously, so a stop and a target close it at their
+ * price?
+ *
+ * Pure, so the copy that depends on it can be unit-tested. `chartStyle` is the brand's raw value;
+ * `chartStyleOf` normalises it the same way every other caller does.
+ */
+export function isContinuousBrand(
+  { chartStyle, earlyCloseEnabled }: { chartStyle: unknown; earlyCloseEnabled: boolean },
+): boolean {
+  return earlyCloseEnabled && curveProfileForChartStyle(chartStyleOf(chartStyle)) === 'market';
+}
 
 /** The price a level sits at, or null when it is not set. */
 export function levelPrice(
@@ -67,6 +80,10 @@ export function targetReached(
 
 /**
  * Close the open contract when the price reaches its Take Profit level.
+ *
+ * NOT ARMED. The engine holds both levels and fires them on its own tick, so this would be a second,
+ * weaker copy of the same rule: one that only runs while the tab is open and receiving ticks. It is
+ * kept, with its tests, as the shape of a client-side trigger should one ever be wanted again.
  *
  * Fires at most once per position: `sell` is not instantaneous, and a second call against a position
  * already closing is an error the trader would see.

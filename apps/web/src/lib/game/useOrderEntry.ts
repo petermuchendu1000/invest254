@@ -20,7 +20,7 @@ import type { ActivePosition } from '@/lib/game/betting';
 import type { Tick } from '@/lib/game/types';
 import type { LocalRefusal } from '@/lib/game/orderResult';
 import { useLevelsStore } from '@/lib/game/levelsStore';
-import { levelPrice } from '@/lib/game/levelWatch';
+import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 
 /**
  * Everything an order-entry surface needs, in one place.
@@ -56,9 +56,23 @@ export interface OrderEntry {
   volDigits: number;
   /** This symbol's own volume step, which the stepper and the slider move by. */
   volStep: number;
-  setLots: (lots: number) => void;
+  /**
+   * Set the volume, snapped to the symbol's grid and clamped to the range, and RETURN what was
+   * applied. The return is what lets a typed figure be reported: MetaTrader's Volume field takes
+   * any keystrokes and validates on commit, so a surface has to be able to say that 12 was read
+   * and 0.5 was used rather than appear to ignore the typing.
+   */
+  setLots: (lots: number) => number;
   /** Add to the volume and clamp it to the brand's limits. */
   bump: (delta: number) => void;
+  /**
+   * Why the volume cannot move, in the trader's words, or null while the range is open.
+   *
+   * MetaTrader states a symbol's volume limits (its contract specification carries min, max and
+   * step) and its dialogs explain a bound rather than just greying a control out. A ticket whose
+   * steppers are both disabled and says nothing is the reported bug.
+   */
+  volNote: string | null;
   stakeCents: number;
   /** Signed in, and the stake is more than the wallet holds. */
   overBalance: boolean;
@@ -81,6 +95,11 @@ export interface OrderEntry {
 
   activePosition: ActivePosition | null;
   earlyCloseEnabled: boolean;
+  /**
+   * Whether this brand's engine prices a position CONTINUOUSLY, so a Stop Loss and a Take Profit
+   * really close one at their price. See `isContinuousBrand` in lib/game/levelWatch.ts.
+   */
+  continuous: boolean;
   tick: Tick | null;
   /** The display price of a raw engine rate, on the CURRENT day's anchor. */
   priceOfRate: (rate: number | null | undefined) => number | null;
@@ -157,7 +176,8 @@ export function useOrderEntry(): OrderEntry {
   const brandMinLots = limits.minCents / LOT_STAKE_CENTS;
   // A brand may set no ceiling; the symbol's own then stands.
   const brandMaxLots = limits.maxCents === undefined ? null : limits.maxCents / LOT_STAKE_CENTS;
-  const vol = effectiveVolume(volumeSpecOf(symbol), brandMinLots, brandMaxLots);
+  const spec = volumeSpecOf(symbol);
+  const vol = effectiveVolume(spec, brandMinLots, brandMaxLots);
   const minLots = vol.min;
   const maxLots = vol.max;
   const volStep = vol.step;
@@ -215,7 +235,24 @@ export function useOrderEntry(): OrderEntry {
   // Stepped ON the symbol's grid: a +0.01 on an index that steps in tenths is not a step at all,
   // and MetaTrader's own stepper moves by the symbol's step.
   const bump = (delta: number) => setStored(snapToStep(lots + delta));
-  const setLots = (v: number) => setStored(snapToStep(v));
+  const setLots = (v: number): number => {
+    const applied = snapToStep(v);
+    setStored(applied);
+    return applied;
+  };
+
+  /**
+   * The reason a bound is a bound, which MetaTrader always has: volume limits come from the
+   * symbol's contract specification and the brand's own stake range, and both are knowable
+   * numbers. Null while there is room to move, so a surface prints nothing in the normal case.
+   */
+  const volNote = !limits.ready
+    ? null
+    : limits.inverted
+      ? `This brand's maximum stake is below its minimum, so ${symbol}'s own ceiling of ${spec.max} lots applies.`
+      : maxLots - minLots < volStep / 2
+        ? `This brand's minimum and maximum stake are the same, so ${minLots.toFixed(volDigits)} lots is the only volume it accepts.`
+        : null;
 
   const stakeCents = Math.round(lots * LOT_STAKE_CENTS);
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
@@ -263,10 +300,12 @@ export function useOrderEntry(): OrderEntry {
   return {
     ready: hydrated,
     symbol, settledSymbol, digits, price, tradeDisabled, connecting,
-    lots, minLots, maxLots, volDigits, volStep, setLots, bump, stakeCents, overBalance, signedIn: !!token,
+    lots, minLots, maxLots, volDigits, volStep, setLots, bump, volNote, stakeCents, overBalance, signedIn: !!token,
     durationS, setDurationS, durations,
     place,
-    activePosition, earlyCloseEnabled, tick, priceOfRate, market,
+    activePosition, earlyCloseEnabled,
+    continuous: isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled }),
+    tick, priceOfRate, market,
     chartSettled: () => setCharted(null),
   };
 }

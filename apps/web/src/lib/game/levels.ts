@@ -19,16 +19,19 @@
  * ── What these levels do on THIS contract ────────────────────────────────────────────────────────
  *
  * They are inputs, and this module is only about the inputs. What the engine will act on is a
- * separate question with a blunt answer, recorded here because it is the first thing anyone reading
- * this file will want to know:
+ * separate question, recorded here because it is the first thing anyone reading this file will want
+ * to know, and it has two answers:
  *
- *   `sell()` refuses a losing position outright ("NOT_SELLABLE: losing positions settle at expiry"),
- *   and refuses every manual close on a pool brand ("SELL_DISABLED"). A position is `sellable` only
- *   when its outcome was decided a WIN at open. So a stop loss can never fire, and a take profit
- *   fires only on a trade already decided a winner, on a non-pool brand.
+ *   On a CONTINUOUS position — a brand with a price axis, pool mode off — the engine checks both
+ *   levels on every tick, stop first, and closes the position at what it is worth at that price. So
+ *   a stop is a real stop and can return part of the stake, and a target is a real target.
  *
- * The dialog therefore renders MetaTrader's controls exactly and states what each one does here,
- * rather than drawing a working stop over an engine that will not honour it.
+ *   On a non-continuous one the outcome is committed at open, `set_levels` is refused
+ *   ("LEVELS_UNSUPPORTED") and the contract runs to its horizon, so neither level fires.
+ *
+ * `isContinuousBrand` in lib/game/levelWatch.ts is the one place that tells the two apart, and the
+ * surfaces say which they are on rather than drawing a working stop over an engine that will not
+ * honour it. See docs/mt5/20-real-sl-tp.md.
  */
 
 /** MetaTrader's three ways of expressing a level. Its segmented control shows Price and Pips; the
