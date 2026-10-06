@@ -1022,6 +1022,43 @@ export class GameServer {
       // how a position is decided or settled is touched; it is the same boolean `sell` already
       // tests, said out loud so the interface can be honest.
       earlyCloseEnabled: !(this.pool?.enabled() ?? false),
+      /**
+       * The SPREAD this brand charges, per side, in curve-value units.
+       *
+       * Not a new cost and not a display invention. `cost` is what the continuous payout is built
+       * on: `clamp(1 + gain * (move - cost), maxMultiplier)`, so a position is worth exactly its
+       * stake when `move == cost` and the trader keeps only what they make beyond it. settle.ts
+       * says it in those words: "`cost` is economically the SPREAD: the move a trader must make to
+       * break even, and the whole edge lives there."
+       *
+       * So the brand has always quoted a spread; it simply never showed one, and the order ticket
+       * printed a single price with the note that there was no spread for two to sit either side
+       * of. That note was true under the step economy and stopped being true when the terminal's
+       * edge moved into the spread. Published per DIRECTION because the calibration solves one
+       * cost per side, and they need not be equal.
+       *
+       * In value units, so the client converts with the same `scale` it already uses to turn a
+       * curve value into a price. Null on a brand with no price axis: there the committed step
+       * contract is in force, nothing is priced continuously, and there is no spread to state.
+       */
+      spread: this.hasPriceAxis ? this.spreadSnapshot() : null,
     };
+  }
+
+  /**
+   * The break-even cost per side, read off the ACTIVE day's settlement.
+   *
+   * Read rather than stored: the calibration is per day and per config version, so a brand that
+   * reseeds at midnight or has its economics changed by an operator quotes the new spread straight
+   * away, exactly as it settles on it.
+   */
+  private spreadSnapshot(): { buy: number; sell: number } | null {
+    try {
+      const s = this.getActiveContext().settlement;
+      return { buy: s.continuousParams("buy").cost, sell: s.continuousParams("sell").cost };
+    } catch {
+      // A brand whose day context is not built yet quotes no spread rather than a guessed one.
+      return null;
+    }
   }
 }
