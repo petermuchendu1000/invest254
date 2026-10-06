@@ -407,7 +407,34 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
               // Full snapshot (real + bonus) so a freshly granted welcome bonus (0094) shows in the
               // client wallet immediately on connect, not only after the next REST /wallet refetch.
               const snap = await opts.repo.getWalletSnapshot(userId);
-              return send(ws, "balance", { real: snap.real, bonus: snap.bonus, currency: snap.currency });
+              send(ws, "balance", { real: snap.real, bonus: snap.bonus, currency: snap.currency });
+              /**
+               * Whatever this user already has running, so a refreshed client can pick it up.
+               *
+               * A reload destroyed the client's only record of an open contract, and the engine had
+               * no way to be asked about it: the Trade screen said "No open positions" while the
+               * contract was still running, its tick updates were arriving at this very socket and
+               * being dropped for want of a position to attach them to, and it would settle into a
+               * balance change the trader could not account for.
+               *
+               * On the AUTH reply rather than in `hello`, because `hello` is sent before auth and
+               * cannot carry a user's data. Nothing is decided here: it reports what the engine
+               * already holds, and the live multiplier, the countdown and `sellable` all arrive on
+               * the next tick as they already did.
+               */
+              const running = rt.game.openPositionsOf(userId);
+              return send(ws, "open_positions", {
+                positions: running.map((p) => ({
+                  positionId: p.id,
+                  direction: p.direction,
+                  stakeCents: p.stakeCents,
+                  durationS: p.durationS,
+                  openedAtMs: p.openedAtMs,
+                  expiresAtMs: p.expiresAtMs,
+                  entryRate: p.outcome.entryRate,
+                  sellable: p.sellable,
+                })),
+              });
             }
             case "open_position": {
               const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
