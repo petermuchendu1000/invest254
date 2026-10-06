@@ -417,7 +417,7 @@ export function MT5Toolbox() {
                         onClick={() => setSheet('menu')}
                         title="Open the position menu"
                       >
-                        <Td>{symbol}</Td>
+                        <Td first>{symbol}</Td>
                         <Td>{live.positionId ? live.positionId.slice(0, 8) : '…'}</Td>
                         {/* MetaTrader's Time column: `YYYY.MM.DD HH:MM` plus the seconds its own
                             rendered values carry, in the broker's server time (09-toolbox.md
@@ -518,7 +518,7 @@ export function MT5Toolbox() {
                 <Table head={['Symbol', 'Ticket', 'Time', 'Type', 'Volume', 'Price', 'Close', 'Profit']}>
                   {rows.map((p: PositionDto) => (
                     <tr key={p.id} className="border-t border-[#2b3543]/60">
-                      <Td>{symbol}</Td>
+                      <Td first>{symbol}</Td>
                       <Td>{p.id.slice(0, 8)}</Td>
                       <Td>{stamp(p.openedAt)}</Td>
                       <Td className={p.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{p.direction}</Td>
@@ -913,13 +913,24 @@ function Figure({ label, value, tone, className }: { label: string; value: strin
   );
 }
 
+/**
+ * MetaTrader's grid alignment: `Symbol` left, everything else right, HEADER INCLUDED.
+ *
+ * docs/mt5/09-toolbox.md 266-268 reads it off the screenshots: "`Symbol` is left-aligned … every
+ * column from `Ticket` rightwards is right-aligned, including its header", and :269 puts `Profit`
+ * rightmost. It is not decoration. These columns are tickets, volumes, prices and money, and a
+ * column of right-aligned figures lines its decimal points up so the eye can compare rows; left
+ * aligning them is most of why this read as a web table rather than a terminal grid.
+ *
+ * The first column is the one exception because it holds a NAME, and names read from the left.
+ */
 function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
   return (
-    <table className="w-full border-collapse text-left font-mono text-[11px] tabular-nums">
+    <table className="w-full border-collapse text-right font-mono text-[11px] tabular-nums">
       <thead>
         <tr className="text-[#8fa2b8]">
           {head.map((h, i) => (
-            <th key={`${h}:${i}`} className="whitespace-nowrap px-2 py-1 font-normal">{h}</th>
+            <th key={`${h}:${i}`} className={cn('whitespace-nowrap px-2 py-1 font-normal', i === 0 && 'text-left')}>{h}</th>
           ))}
         </tr>
       </thead>
@@ -928,8 +939,9 @@ function Table({ head, children }: { head: string[]; children: React.ReactNode }
   );
 }
 
-function Td({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn('whitespace-nowrap px-2 py-1', className)}>{children}</td>;
+/** A cell. `first` carries the symbol, so it keeps the left alignment names need. */
+function Td({ children, className, first }: { children: React.ReactNode; className?: string; first?: boolean }) {
+  return <td className={cn('whitespace-nowrap px-2 py-1', first && 'text-left', className)}>{children}</td>;
 }
 
 function Empty({ children }: { children: React.ReactNode }) {

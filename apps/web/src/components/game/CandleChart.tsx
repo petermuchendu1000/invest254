@@ -87,6 +87,23 @@ const CHART_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
   { id: 'line', label: 'Line chart' },
   { id: 'heikin', label: 'Heikin Ashi' },
 ];
+/**
+ * The chart types a surface may offer, which is not the same list on both.
+ *
+ * `docs/mt5/03-chart-ui.md` 18-19 and 47-50: "Heikin Ashi is a native chart type on MOBILE but not
+ * on desktop. The single biggest desktop/mobile divergence in the chart." On desktop MetaTrader has
+ * exactly three (`ENUM_CHART_MODE` has three members and no API surface for a fourth) and ships
+ * Heikin Ashi only as a bundled custom indicator, so offering it as a fourth type on the desktop
+ * menu is one step past the fact. Dropping Area and Baseline from this list was right for the same
+ * reason; this is the one that was missed.
+ *
+ * A chart already SET to Heikin Ashi still lists it, on either surface, because hiding the option
+ * that is currently in force would leave a trader looking at bars they cannot name or change back
+ * from. That is the same rule `ADDON_TYPES` already uses for a brand's own extra type.
+ */
+function chartTypesFor(phone: boolean, current: MainType): ReadonlyArray<{ id: MainType; label: string }> {
+  return phone ? CHART_TYPES : CHART_TYPES.filter((c) => c.id !== 'heikin' || current === 'heikin');
+}
 /** The add-on systems that are not MetaTrader types; shown only to the brand that owns one. */
 const ADDON_TYPES: ReadonlyArray<{ id: MainType; label: string }> = [
   { id: 'area', label: 'Area' }, { id: 'baseline', label: 'Baseline' },
@@ -1258,7 +1275,7 @@ export function CandleChart({
                           Common tab (docs/mt5/03-chart-ui.md:67), and it is how the Scale and
                           Chart sections just below already read. */}
                       <div className="grid gap-1">
-                        {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === initialType)].map((c) => (
+                        {[...chartTypesFor(false, chartType), ...ADDON_TYPES.filter((a) => a.id === initialType)].map((c) => (
                           <button key={c.id} type="button" onClick={() => setChartType(c.id)} className={cn(pill, 'w-full', chartType === c.id ? active : idle)}>{c.label}</button>
                         ))}
                       </div>
@@ -2020,7 +2037,7 @@ function MobileChartBar({
         <MobileSheet title="Indicators" onClose={() => setOpen(null)}>
           <Section title="Chart type">
             <div className="grid grid-cols-3 gap-1">
-              {[...CHART_TYPES, ...ADDON_TYPES.filter((a) => a.id === chartType)].map((c) => (
+              {[...chartTypesFor(true, chartType), ...ADDON_TYPES.filter((a) => a.id === chartType)].map((c) => (
                 <button
                   key={c.id}
                   type="button"
