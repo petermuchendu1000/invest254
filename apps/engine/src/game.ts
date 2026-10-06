@@ -430,6 +430,9 @@ export class GameServer {
       tpPrice: continuous && Number.isFinite(input.tpPrice as number) ? input.tpPrice ?? null : null,
     };
     this.positions.set(positionId, p);
+    // Levels sent WITH the order are persisted too, or a restart in the first seconds of a trade
+    // would lose exactly the stop the trader opened with.
+    if (p.slPrice !== null || p.tpPrice !== null) this.persistLevels(p);
     return { position: p, balance: newBalance };
   }
 
@@ -886,7 +889,38 @@ export class GameServer {
     if (!p.continuous) throw new Error("LEVELS_UNSUPPORTED: this contract settles at expiry");
     p.slPrice = Number.isFinite(slPrice as number) ? slPrice : null;
     p.tpPrice = Number.isFinite(tpPrice as number) ? tpPrice : null;
+    this.persistLevels(p);
     return p;
+  }
+
+  /**
+   * Write the levels to the position's row, so a restart does not lose them (migration 0183).
+   *
+   * FIRE-AND-FORGET, on the same terms as the display-price stamp in pricestamp.ts: it is issued
+   * after the in-memory levels are already set, never awaited, and a failure is logged rather than
+   * thrown. A level the trader can see is worth more than a level that refuses to be set because
+   * the database hiccuped, and a missed write leaves exactly the behaviour this replaced.
+   *
+   * The repository method is optional, so the in-memory dev repository and every existing fake keep
+   * working without it.
+   */
+  private persistLevels(p: Position): void {
+    const write = this.repo.setPositionLevels?.bind(this.repo);
+    if (!write) return;
+    void write(p.id, p.slPrice, p.tpPrice).catch((err: unknown) => {
+      // Not fatal: see the note above. Logged so a persistently failing write is visible.
+      console.warn(`[levels] persisting ${p.id} failed:`, (err as Error)?.message ?? err);
+    });
+  }
+
+  /**
+   * Does this brand price positions continuously, so a protective level can fire?
+   *
+   * The same test `openPosition` makes. Crash recovery needs it to re-arm a position the way it was
+   * opened rather than guessing, which is why it is exposed rather than inferred from the row.
+   */
+  get hasPriceAxis(): boolean {
+    return this.priceAxis !== undefined;
   }
 
   async sell(positionId: string, userId: string): Promise<SettledEvent> {

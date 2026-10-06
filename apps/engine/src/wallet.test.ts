@@ -78,7 +78,16 @@ test("InMemory repo: listOpenPositions returns recovery metadata; excludes settl
   const o = await r.openPosition({ userId: "u", stakeCents: 20000, direction: "sell", entryRate: 0.21, durationS: 10, gameDayId: 5, nonce: 3, openedAtMs: 1781778933000 , configVersion: 1});
   let open = await r.listOpenPositions();
   assert.equal(open.length, 1);
-  assert.deepEqual(open[0], { id: o.positionId, userId: "u", stakeCents: 20000, direction: "sell", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 5, nonce: 3, configVersion: 1, siteId: null, kind: "rise_fall", contract: null });
+  // `slPrice`/`tpPrice` (migration 0183) are on the work list because recovery re-arms a continuous
+  // position WITH its levels; a position opened without them reads null, not absent.
+  assert.deepEqual(open[0], { id: o.positionId, userId: "u", stakeCents: 20000, direction: "sell", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 5, nonce: 3, configVersion: 1, siteId: null, kind: "rise_fall", contract: null, slPrice: null, tpPrice: null });
+  // And a level written through the repository comes back on it.
+  await r.setPositionLevels(o.positionId, 3065.5, 3080.25);
+  assert.deepEqual(
+    await r.listOpenPositions().then((rows) => [rows[0]!.slPrice, rows[0]!.tpPrice]),
+    [3065.5, 3080.25],
+    "a stamped level is on the recovery work list",
+  );
   await r.settlePosition({ positionId: o.positionId, exitRate: 0.1, result: "loss", multiplier: 0, payoutCents: 0 });
   open = await r.listOpenPositions();
   assert.equal(open.length, 0); // settled positions are not in the recovery work list
@@ -91,7 +100,7 @@ test("Pg repo: ensureGameDay/revealSeed/listOpenPositions/getFairness map to RPC
       calls.push({ text, params });
       if (text.includes("fn_ensure_game_day")) return { rows: [{ id: "42" }] };
       if (text.includes("fn_reveal_game_day")) return { rows: [{ ok: true }] };
-      if (text.includes("from positions")) return { rows: [{ id: "p-9", user_id: "u", stake: "20000", direction: "buy", duration_s: 10, opened_at: new Date(1781778933000), entry_rate: "0.21", game_day_id: "42", nonce: "3", config_version: "7" }] };
+      if (text.includes("from positions")) return { rows: [{ id: "p-9", user_id: "u", stake: "20000", direction: "buy", duration_s: 10, opened_at: new Date(1781778933000), entry_rate: "0.21", game_day_id: "42", nonce: "3", config_version: "7", sl_price: "3065.50000", tp_price: null }] };
       if (text.includes("v_fairness")) return { rows: [{ id: "42", trade_date: "2026-06-17", server_seed_hash: "h", server_seed: null, revealed_at: null }] };
       return { rows: [] };
     },
@@ -102,7 +111,14 @@ test("Pg repo: ensureGameDay/revealSeed/listOpenPositions/getFairness map to RPC
   assert.equal(await r.revealSeed("2026-06-17", "seed"), true);
   assert.deepEqual(calls.at(-1)!.params, ["2026-06-17", "seed", null]); // 3rd arg = site_id (0048)
   const open = await r.listOpenPositions();
-  assert.deepEqual(open[0], { id: "p-9", userId: "u", stakeCents: 20000, direction: "buy", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 42, nonce: 3, configVersion: 7, siteId: null, kind: "rise_fall", contract: null });
+  // `sl_price` arrives from pg as a NUMERIC string and has to come back a number; `tp_price` null
+  // means "not set" rather than zero (migration 0183).
+  assert.deepEqual(open[0], { id: "p-9", userId: "u", stakeCents: 20000, direction: "buy", durationS: 10, openedAtMs: 1781778933000, entryRate: 0.21, gameDayId: 42, nonce: 3, configVersion: 7, siteId: null, kind: "rise_fall", contract: null, slPrice: 3065.5, tpPrice: null });
+  // The writer is a plain assignment scoped to an open position: moving and CLEARING a level are
+  // what Modify position is, so a `coalesce` here would make a cleared stop un-clearable.
+  await r.setPositionLevels("p-9", null, 3080.25);
+  assert.match(calls.at(-1)!.text, /update positions set sl_price = \$2, tp_price = \$3 .* status = 'open'/);
+  assert.deepEqual(calls.at(-1)!.params, ["p-9", null, 3080.25]);
   const f = await r.getFairness("2026-06-17");
   assert.ok(f && f.serverSeedHash === "h" && f.serverSeed === null && f.revealedAt === null);
 });

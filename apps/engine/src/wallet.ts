@@ -44,6 +44,15 @@ export interface OpenPositionRow {
   kind?: string | null;
   /** Phase 2: per-kind contract params (jsonb). For digits: { kind, target, instrumentId, settleIndex }. */
   contract?: unknown;
+  /**
+   * The protective levels this position was carrying, as prices (migration 0183).
+   *
+   * Crash recovery re-arms a continuous position WITH its stop and target, which is the only reason
+   * these are on the work list. Absent (not just null) on a repository that predates the columns,
+   * so an older fake keeps compiling and recovery treats it as "no levels", which is what it was.
+   */
+  slPrice?: number | null;
+  tpPrice?: number | null;
 }
 
 /** Public fairness record for a day (commitment always; seed only after reveal). */
@@ -149,6 +158,16 @@ export interface GameRepository {
    * simply stores no display prices.
    */
   setExecutionPrices?(positionId: string, axis: PriceAxis, symbol?: string): Promise<void>;
+  /**
+   * Record the Stop Loss and Take Profit a trader set (migration 0183), so a restart does not lose
+   * them and recovery can re-arm the position the way it was opened.
+   *
+   * Outside the money path, exactly like `setExecutionPrices`: its own UPDATE, after the atomic RPC,
+   * never awaited by the caller. Unlike the display prices this is a plain overwrite rather than a
+   * `coalesce` first-write-wins, because MOVING a level and CLEARING one are the whole feature.
+   * Optional so the in-memory repository and existing fakes keep compiling.
+   */
+  setPositionLevels?(positionId: string, slPrice: number | null, tpPrice: number | null): Promise<void>;
 }
 
 /** Minimal query surface compatible with `pg`'s Pool/Client. */
@@ -163,6 +182,9 @@ interface MemPos {
   result: string | null; settledAtMs: number | null;
   /** DEMO-1: the bucket debited at open (settlement routes by this, like positions.demo). */
   demo?: boolean;
+  /** Migration 0183's columns, so recovery can be exercised without a database. */
+  slPrice?: number | null;
+  tpPrice?: number | null;
 }
 interface MemLedger {
   id: number; userId: string; type: string; amount: Cents; balanceKind: string;
@@ -322,9 +344,17 @@ export class InMemoryGameRepository implements GameRepository {
     for (const p of this.positions.values()) {
       if (p.status !== "open") continue;
       const meta = this.contractMeta.get(p.id);
-      out.push({ id: p.id, userId: p.userId, stakeCents: p.stake, direction: p.direction, durationS: p.durationS, openedAtMs: p.openedAtMs, entryRate: p.entryRate, gameDayId: p.gameDayId, nonce: p.nonce, configVersion: p.configVersion, siteId: p.siteId, kind: meta?.kind ?? "rise_fall", contract: meta?.contract ?? null });
+      out.push({ id: p.id, userId: p.userId, stakeCents: p.stake, direction: p.direction, durationS: p.durationS, openedAtMs: p.openedAtMs, entryRate: p.entryRate, gameDayId: p.gameDayId, nonce: p.nonce, configVersion: p.configVersion, siteId: p.siteId, kind: meta?.kind ?? "rise_fall", contract: meta?.contract ?? null, slPrice: p.slPrice ?? null, tpPrice: p.tpPrice ?? null });
     }
     return out;
+  }
+
+  /** Mirrors PgGameRepository.setPositionLevels: open positions only, last write wins. */
+  async setPositionLevels(positionId: string, slPrice: number | null, tpPrice: number | null): Promise<void> {
+    const p = this.positions.get(positionId);
+    if (!p || p.status !== "open") return;
+    p.slPrice = slPrice;
+    p.tpPrice = tpPrice;
   }
 
   async getFairness(tradeDate: string): Promise<FairnessRecord | null> {
@@ -502,7 +532,7 @@ export class PgGameRepository implements GameRepository {
   }
   async listOpenPositions(): Promise<OpenPositionRow[]> {
     const r = await this.q.query(
-      "select id, user_id, stake, direction, duration_s, opened_at, entry_rate, game_day_id, nonce, config_version, site_id, kind, contract from positions where status = 'open' order by opened_at", []);
+      "select id, user_id, stake, direction, duration_s, opened_at, entry_rate, game_day_id, nonce, config_version, site_id, kind, contract, sl_price, tp_price from positions where status = 'open' order by opened_at", []);
     return r.rows.map((x) => ({
       id: String(x.id), userId: String(x.user_id), stakeCents: toCents(x.stake), direction: x.direction as Direction,
       durationS: Number(x.duration_s), openedAtMs: toMs(x.opened_at), entryRate: Number(x.entry_rate),
@@ -511,6 +541,8 @@ export class PgGameRepository implements GameRepository {
       siteId: x.site_id === null || x.site_id === undefined ? null : String(x.site_id),
       kind: (x.kind ?? "rise_fall") as string,
       contract: x.contract ?? null,
+      slPrice: x.sl_price === null || x.sl_price === undefined ? null : Number(x.sl_price),
+      tpPrice: x.tp_price === null || x.tp_price === undefined ? null : Number(x.tp_price),
     }));
   }
   async getFairness(tradeDate: string): Promise<FairnessRecord | null> {
@@ -645,6 +677,19 @@ export class PgGameRepository implements GameRepository {
     await this.q.query(
       "update positions set entry_price = coalesce(entry_price, $2), exit_price = coalesce(exit_price, $3), symbol = coalesce(symbol, $4) where id = $1::uuid",
       [positionId, entry, exit, sym]);
+  }
+
+  /**
+   * The trader's protective levels, written straight (migration 0183).
+   *
+   * A plain assignment rather than the `coalesce` the display prices use: moving a stop and clearing
+   * one are what Modify position IS, so the last write has to win and null has to mean "not set".
+   * Scoped to an OPEN position so a late write cannot annotate a settled receipt.
+   */
+  async setPositionLevels(positionId: string, slPrice: number | null, tpPrice: number | null): Promise<void> {
+    await this.q.query(
+      "update positions set sl_price = $2, tp_price = $3 where id = $1::uuid and status = 'open'",
+      [positionId, slPrice, tpPrice]);
   }
 }
 

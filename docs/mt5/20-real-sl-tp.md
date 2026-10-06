@@ -238,12 +238,34 @@ catches a leak is not a weaker test, it is not a test:
 The gates sit at 0.02, which leaves the honest curve three times the room it needs and fails every
 control by three to seven times over.
 
-### Known gap
+### A restart used to disarm the stop (closed by migration 0183)
 
-A **re-armed** position keeps the committed contract. The levels are not persisted, so a restart
-cannot know what stop the trader had set, and settling it on a model whose inputs were lost is worse
-than settling it the way it opened. Closing this needs the same kind of forward-only column the
-execution prices got in migration 0180.
+A **re-armed** position used to come back with `continuous: false` and no levels. That was recorded
+here as a known gap, and it was worse than the word "gap" suggests, because the engine restarts on
+every merge to main: it happened to real trades routinely, and it did three things at once.
+
+* The trader's stop and target **silently vanished**. Nothing told them.
+* The position **changed how it was priced**, from the continuous payout it was opened under to the
+  committed step contract. The same trade settled one way before the restart and another way after.
+* A losing position that could be **closed by hand** a second earlier could not be closed at all,
+  because `sellable` was re-derived as `outcome.result === "win"` instead of the
+  `continuous || won` rule `openPosition` uses.
+
+Migration 0183 adds `positions.sl_price` and `positions.tp_price`, on exactly the terms migration
+0180 set for the execution prices: their own UPDATE after the atomic money RPC, never inside it, so
+`fn_open_position` keeps the ten-argument signature every caller uses and a failed stamp can never
+fail or alter a trade. The write is fire-and-forget for the same reason the price stamp is, and it
+is a plain assignment rather than a `coalesce`, because moving a level and clearing one are what
+Modify position IS.
+
+Recovery then re-arms from `GameServer.hasPriceAxis`, the same test `openPosition` makes, rather
+than from a guess: a brand that charts a line still has nothing to put a level on and still keeps
+the committed contract.
+
+Verified against a real PostgreSQL 16 rather than by typecheck: the migration is idempotent, the
+unchanged ten-argument `fn_open_position` still opens, a separate UPDATE stamps the levels, the
+recovery query reads them back, clearing one gives NULL rather than 0, and the unchanged
+`fn_settle_position` pays out the same 42,500 it always did.
 
 ### Proof
 
@@ -257,4 +279,6 @@ execution prices got in migration 0180.
 * `scratchpad/sltp.mjs` — 9/9 in a real browser against the real engine. Reads the websocket frames:
   the order carries the levels as prices, the engine acknowledges what it took, and after a RELOAD
   the engine hands the stop back because it never lost it.
-* Full suites: engine 574 pass / 0 fail, shared 379 pass / 0 fail.
+* `apps/engine/src/recovery.test.ts` — crashes a brand that has a price axis and proves the
+  recovered position is continuous again, still carries the stop, is still closeable by hand, and
+  that the stop then FIRES on a tick with `closedBy: "sl"`.

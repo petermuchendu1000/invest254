@@ -175,3 +175,76 @@ test("a brand with NO price axis keeps the committed contract untouched", async 
   assert.equal(p.slPrice, null, "and a level cannot be armed on it");
   assert.throws(() => gs.setLevels(p.id, "u1", 1, null), /LEVELS_UNSUPPORTED/);
 });
+
+/**
+ * A RESTART must not disarm a trader's stop, and must not re-price their position.
+ *
+ * The engine deploys on every merge to main, and a deploy restarts it, so this is routine rather
+ * than exotic. Recovery used to re-arm every open position with `continuous: false` and no levels,
+ * which did three things to a trade already in flight: the stop silently vanished, the position
+ * switched from the continuous payout it was opened under to the committed step contract, and a
+ * loser that could be closed by hand a second earlier could not be closed at all.
+ *
+ * Migration 0183 persists the levels, so this walks the whole path: open with a stop, read the
+ * position back off the repository the way `RecoveryService` does, and check the row carries what
+ * the trader set.
+ */
+test("a restart keeps the stop: the levels are persisted and come back on the recovery work list", async () => {
+  const r = makeRig();
+  r.repo.seed("u1", 100_000);
+  const { position } = await r.gs.openPosition({ userId: "u1", stakeCents: 25_000, direction: "buy" });
+  assert.equal(position.continuous, true, "the rig's brand has an axis, so the position is continuous");
+
+  // Set levels the way Modify position does.
+  const sl = r.priceAt(position.entryT) - 5;
+  const tp = r.priceAt(position.entryT) + 5;
+  r.gs.setLevels(position.id, "u1", sl, tp);
+  // The write is fire-and-forget, so let the microtask queue drain before reading it back.
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const rows = await r.repo.listOpenPositions();
+  const row = rows.find((x) => x.id === position.id);
+  assert.ok(row, "the position is on the recovery work list");
+  assert.equal(row.slPrice, sl, "the stop survives into the row recovery reads");
+  assert.equal(row.tpPrice, tp, "and so does the target");
+
+  // Clearing a level has to persist too, or a cleared stop would come back from the dead.
+  r.gs.setLevels(position.id, "u1", null, tp);
+  await Promise.resolve();
+  await Promise.resolve();
+  const after = (await r.repo.listOpenPositions()).find((x) => x.id === position.id)!;
+  assert.equal(after.slPrice, null, "a CLEARED stop stays cleared across a restart");
+  assert.equal(after.tpPrice, tp, "and clearing one level leaves the other alone");
+});
+
+test("levels sent WITH the order are persisted, not just ones set afterwards", async () => {
+  const r = makeRig();
+  r.repo.seed("u1", 100_000);
+  // A restart in the first seconds of a trade must not lose the stop it was opened with.
+  const { position } = await r.gs.openPosition({
+    userId: "u1", stakeCents: 25_000, direction: "buy", slPrice: 2990, tpPrice: 3010,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  const row = (await r.repo.listOpenPositions()).find((x) => x.id === position.id)!;
+  assert.equal(row.slPrice, 2990, "the stop the order carried is on the row");
+  assert.equal(row.tpPrice, 3010, "and so is the target");
+});
+
+test("a brand with NO axis persists nothing, because it has no levels to lose", async () => {
+  const cfg = DEFAULT_CONFIG;
+  const curve = new CurveGenerator("levels-day", cfg);
+  const eng = new SettlementEngine(curve, cfg);
+  const repo = new InMemoryGameRepository();
+  const clock = { ms: 0 };
+  const ctx = { curve, settlement: eng, dayStartMs: 0, gameDayId: null, configVersion: 1 };
+  const gs = new GameServer(() => ctx, repo, () => cfg, () => clock.ms); // no axis
+  assert.equal(gs.hasPriceAxis, false, "no axis means recovery keeps the committed contract");
+  repo.seed("u1", 100_000);
+  const { position } = await gs.openPosition({ userId: "u1", stakeCents: 25_000, direction: "buy", slPrice: 2990 });
+  await Promise.resolve();
+  await Promise.resolve();
+  const row = (await repo.listOpenPositions()).find((x) => x.id === position.id)!;
+  assert.equal(row.slPrice, null, "a line brand drops a level it cannot honour, rather than storing a lie");
+});
