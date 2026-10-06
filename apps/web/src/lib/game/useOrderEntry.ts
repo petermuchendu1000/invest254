@@ -45,6 +45,13 @@ export interface OrderEntry {
   digits: number;
   /** The live price of `symbol`, or null before the first quote. */
   price: number | null;
+  /**
+   * MetaTrader's two sides, around `price`, by the spread the engine charges.
+   *
+   * Null where the brand quotes one price. A ticket that has this shows Bid and Ask the way
+   * MetaTrader's does; one that does not shows the single number it always did.
+   */
+  bidAsk: { bid: number; ask: number } | null;
   /** True when the chart is on a symbol this brand will not accept an order on. */
   tradeDisabled: boolean;
   connecting: boolean;
@@ -121,7 +128,7 @@ export function useOrderEntry(): OrderEntry {
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const limits = useStakeLimits();
   const { data: wallet } = useWallet();
-  const { status, activePosition, openPosition, earlyCloseEnabled } = useGameSocket();
+  const { status, activePosition, openPosition, earlyCloseEnabled, spread } = useGameSocket();
   const { getLastTick, getMarket, getSymbolQuote } = useGameSocketApi();
   const charted = useChartSymbolStore((st) => st.symbol);
   const setCharted = useChartSymbolStore((st) => st.set);
@@ -168,6 +175,29 @@ export function useOrderEntry(): OrderEntry {
       ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue)
       : null;
   const price = charted === null ? (tick ? priceOfRate(tick.rate) : null) : quote?.price ?? null;
+
+  /**
+   * MetaTrader's BID and ASK, which this brand has always had and never showed.
+   *
+   * `price` above is the brand's quoted number, the one the chart draws and a position's entry is
+   * stamped at: MetaTrader calls a chart drawn on it `Last` mode, and its Specification dialog
+   * carries exactly that setting (`Chart mode`: `Last` or `Bid`). The two sides sit either side of
+   * it by the spread the engine already charges.
+   *
+   * The arithmetic is the engine's own, not a presentation choice. A continuous position is worth
+   * `clamp(1 + gain * (move - cost), 0, max)`, so a BUY breaks even once the price has risen by
+   * `cost` and a SELL once it has fallen by `cost` — which is what paying the ask and being filled
+   * at the bid means. `cost` is in curve-value units and a price is `base + scale * value`, so the
+   * offset in price terms is `cost * scale`, the same conversion `priceOfRate` makes one line up.
+   *
+   * Null when the brand publishes no spread: a line brand settles a committed contract where
+   * nothing is priced continuously, and an engine older than the field says nothing. Both mean one
+   * price, which is what this ticket showed before and still shows.
+   */
+  const scale = market?.instrument.scale ?? null;
+  const bidAsk = price !== null && spread !== null && scale !== null
+    ? { bid: price - spread.sell * scale, ask: price + spread.buy * scale }
+    : null;
 
   // ── Volume ─────────────────────────────────────────────────────────────────────────────────────
   /**
@@ -304,7 +334,7 @@ export function useOrderEntry(): OrderEntry {
 
   return {
     ready: hydrated,
-    symbol, settledSymbol, digits, price, tradeDisabled, connecting,
+    symbol, settledSymbol, digits, price, bidAsk, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, volStep, setLots, bump, volNote, stakeCents, overBalance, signedIn: !!token,
     durationS, setDurationS, durations,
     place,

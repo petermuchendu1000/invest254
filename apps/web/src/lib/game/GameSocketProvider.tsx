@@ -115,6 +115,14 @@ interface GameSocketValue {
    * only honest where this is true. False until the engine has said otherwise.
    */
   earlyCloseEnabled: boolean;
+  /**
+   * The brand's spread per side in curve-value units, or null where the brand quotes one price.
+   *
+   * What makes MetaTrader's Bid and Ask real here rather than drawn: the engine already charges
+   * this on every continuous position (settle.ts, "`cost` is economically the SPREAD"), so a buy
+   * priced at the ask and a sell at the bid is the truth about the trade, stated.
+   */
+  spread: { buy: number; sell: number } | null;
 
   // ── Phase 2: Deriv-style digits/instrument stream (isolated from the rise/fall path above) ──────
   /** Authoritative per-instrument tick buffer (quote as `rate`), for the digits chart. */
@@ -236,8 +244,8 @@ export interface CandlesReply {
 }
 
 /** Stable functions (never change identity) — consumers that only trade/read buffers never re-render. */
-type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'lastTradeError' | 'instrumentResetKey'>;
-type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'lastTradeError'>;
+type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'spread' | 'lastTradeError' | 'instrumentResetKey'>;
+type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'spread' | 'lastTradeError'>;
 const ApiCtx = createContext<GameSocketApi | null>(null);
 const StateCtx = createContext<GameSocketState | null>(null);
 const InstKeyCtx = createContext<string>('');
@@ -340,6 +348,14 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   // Set from the engine's hello. False until then: the close affordances stay away rather than
   // appearing and then failing.
   const [earlyCloseEnabled, setEarlyCloseEnabled] = useState(false);
+  /**
+   * The brand's spread per side, in curve-value units, straight off the engine's hello.
+   *
+   * Null means this brand quotes ONE price, which is every line brand and every engine written
+   * before the field. It is never guessed: a terminal that invents a spread is quoting a price the
+   * server never sent, which is the thing this client just stopped doing.
+   */
+  const [spread, setSpread] = useState<{ buy: number; sell: number } | null>(null);
   /**
    * EVERY position this account currently has running, oldest first.
    *
@@ -920,6 +936,12 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           const d = data as HelloData;
           if (d?.serverSeedHash) setFairness({ serverSeedHash: d.serverSeedHash, tradeDate: d.tradeDate });
           setEarlyCloseEnabled(d?.gameConfig?.earlyCloseEnabled === true);
+          {
+            const sp = d?.gameConfig?.spread;
+            setSpread(sp && Number.isFinite(sp.buy) && Number.isFinite(sp.sell)
+              ? { buy: sp.buy, sell: sp.sell }
+              : null);
+          }
           // Re-arm the instrument subscription after a (re)connect so the digits chart keeps streaming.
           if (subscribedInstrumentRef.current) send('subscribe_instrument', { instrumentId: subscribedInstrumentRef.current });
           // Same for the watch list: without this a reconnect left Market Watch frozen on the last
@@ -1563,7 +1585,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
     requestSymbols, subscribeSymbols, getSymbolQuote]);
-  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, positions, earlyCloseEnabled, lastTradeError }), [status, online, fairness, activePosition, positions, earlyCloseEnabled, lastTradeError]);
+  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, lastTradeError }), [status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, lastTradeError]);
 
   return (
     <ApiCtx.Provider value={apiValue}>

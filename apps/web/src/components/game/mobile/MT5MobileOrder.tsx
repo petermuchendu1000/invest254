@@ -7,7 +7,7 @@ import { useOrderEntry, durationLabel } from '@/lib/game/useOrderEntry';
 import { useOrderResult } from '@/lib/game/useOrderResult';
 import { MT5OrderResult } from '@/components/game/mobile/MT5OrderResult';
 import { useGameSocketApi } from '@/lib/game/GameSocketProvider';
-import { CurveCanvas } from '@/components/game/CurveCanvas';
+import { MT5TickBand } from '@/components/game/mobile/MT5TickBand';
 import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
 import { levelPrice } from '@/lib/game/levelWatch';
 import { volumeSteps, volClampReason } from '@/lib/game/volumeSteps';
@@ -24,13 +24,13 @@ import { cn } from '@/lib/cn';
  *    1  back  |  SYMBOL bold + description subtitle
  *    2  the order type, full width, centred, with a triangle at the right edge
  *    3  a SEVEN-cell volume stepper: -0.5 -0.1 -0.01 [value] +0.01 +0.1 +0.5, tap the value to type
- *    4  Bid and Ask, large, side by side
- *    5  `- SL +` under an ORANGE underline, `- TP +` under a GREEN one
- *    6  `Fill policy` ..... `Fill or Kill`
+ *    4  `- SL +` under a RED underline and `- TP +` under a GREEN one, SIDE BY SIDE on one row
+ *    5  `Fill policy:` ..... `Fill or Kill`
+ *    6  Bid and Ask, large, side by side, in MetaTrader's big-figure typography
  *    7  a tick chart
  *    8  a warning line
- *    9  the buttons, at the very bottom: TEXT ONLY, two lines each, `SELL` / `BY MARKET` in red and
- *       `BUY` / `BY MARKET` in blue, with a thin divider between them
+ *    9  the buttons, at the very bottom: TEXT ONLY, two lines each, `SELL` / `by market` in red
+ *       and `BUY` / `by market` in blue, with a thin divider between them
  *
  * Nine is the one most easily got wrong, and this screen had it wrong: two filled rectangles with
  * "Sell by Market" on them is iOS's treatment of this screen, not Android's, and Android is the
@@ -38,16 +38,22 @@ import { cn } from '@/lib/cn';
  *
  * ── Where this instrument differs, and why ───────────────────────────────────────────────────────
  *
- *   ONE price, not Bid and Ask. A contract opens and settles on the same seeded number; there is no
- *   spread for two prices to sit either side of. Printing two would say the player buys at one and
- *   sells at the other.
+ *   BID AND ASK are real here, and this screen shows both. They were not always: a contract used to
+ *   open and settle on the same seeded number with no spread for two prices to sit either side of,
+ *   and this screen printed one and said so. The terminal's edge then moved INTO the spread, and
+ *   `cost` in the continuous payout is now exactly that: the move a trader has to make before the
+ *   position is worth its stake. The engine publishes it per side and the two quotes follow from it,
+ *   so a buy at the ask and a sell at the bid is the truth about the trade rather than decoration.
+ *   A line brand publishes none and still shows its single price.
  *
  *   The order type cannot be changed. MetaTrader's row is a selector over Market Execution and four
  *   pending types; every contract here is market execution, so the row is present, shows what it
  *   is, and says why it will not open.
  *
- *   No tick chart. This feed is served as bars from M1 up, so there is no tick series to draw. The
- *   Specification dialog says the same thing about its Ticks tab.
+ *   The tick chart is drawn, and on a price scale with both sides tagged on it, which is what the
+ *   reference shows. The Specification dialog's Ticks tab says there is no tick HISTORY to chart and
+ *   that is still true: history is served as bars from M1 up. The live buffer is a different thing,
+ *   the engine streams it, and it is what MetaTrader draws here.
  *
  *   An EXPIRY row, which MetaTrader has no equivalent of: its positions run until closed, these
  *   settle on a timer the trader picks. It is the single most important fact about the trade, so it
@@ -61,7 +67,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   const money = useDisplayMoney();
   const { getTicks, getLastTick } = useGameSocketApi();
   const {
-    ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
+    ready, symbol, settledSymbol, digits, price, bidAsk, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, volStep, bump, setLots, volNote, stakeCents, overBalance, signedIn,
     durationS, setDurationS, durations, place, continuous, chartSettled,
     priceOfRate,
@@ -189,10 +195,21 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           type="button"
           disabled
           title="Every contract on this platform is market execution. MetaTrader's other four order types are pending orders, and this engine has none."
-          className="flex w-full items-center border-b border-[#2b3543] px-3 py-3 text-[14px] text-white disabled:cursor-not-allowed"
+          className="relative flex w-full items-center border-b border-[#2b3543] px-3 py-3 text-[14px] text-white disabled:cursor-not-allowed"
         >
           <span className="flex-1 text-center">Market Execution</span>
-          <span aria-hidden className="text-[9px] text-[#8fa2b8]">▼</span>
+          {/* MetaTrader's affordance on this row is a small triangle tucked into the BOTTOM-RIGHT
+              CORNER of the cell, not a dropdown caret on the baseline. Drawn as a corner wedge so it
+              reads the same way at phone density. */}
+          <span
+            aria-hidden
+            className="absolute bottom-0 right-0"
+            style={{
+              width: 0, height: 0,
+              borderLeft: '7px solid transparent',
+              borderBottom: '7px solid #5b6b7d',
+            }}
+          />
         </button>
 
         {/* 3. The seven-cell stepper. The three sizes scale with the volume, as MetaTrader's do; the
@@ -241,55 +258,99 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           <p data-volume-note="" className="px-3 pb-1.5 text-[11px] leading-snug text-[#f0b90b]">{volMessage}</p>
         )}
 
-        {/* 4. MetaTrader's Bid and Ask, large and side by side. One price here, so it is centred
-               across the width both of them would have taken. */}
-        <div className="flex items-end justify-center border-y border-[#2b3543] py-3">
-          <MT5Price value={price} digits={digits} className="text-[24px] font-semibold" />
+        {/*
+          SL and TP, side by side on ONE row, each under its own underline: red for the stop and
+          green for the target, the way `android/en/open_market.png` draws them. They sit ABOVE the
+          prices here, which is the order of the reference screen; this file's own notes had them
+          below, from the field list in docs/mt5/04-mobile-app.md section 5a, and the screenshot is
+          the newer evidence.
+
+          Unset, the cell shows the greyed label `SL` / `TP` rather than a value, exactly as the
+          reference does.
+        */}
+        <div className="flex items-stretch border-b border-[#2b3543]">
+          <LevelHalf
+            label="SL"
+            underline="#f23645"
+            value={anchor === null ? 'waiting' : slPrice === null ? null : slPrice.toFixed(digits)}
+            onDown={() => bumpSl(-1)}
+            onUp={() => bumpSl(1)}
+            disabled={anchor === null}
+          />
+          <span aria-hidden className="w-px shrink-0 bg-[#2b3543]" />
+          <LevelHalf
+            label="TP"
+            underline="#0EB52E"
+            value={!continuous ? 'n/a' : anchor === null ? 'waiting' : tpPrice === null ? null : tpPrice.toFixed(digits)}
+            onDown={() => bumpTp(-1)}
+            onUp={() => bumpTp(1)}
+            disabled={!continuous || anchor === null}
+            title={continuous ? undefined : 'This brand settles every contract at expiry, so a target cannot close one early.'}
+          />
         </div>
 
-        {/* 5. SL and TP, each under MetaTrader's own underline: orange for the stop, green for the
-               target. Both colours are measured from MetaQuotes' own close-position screens. */}
-        <LevelRow
-          label="SL"
-          underline="#FF9300"
-          value={anchor === null ? 'waiting' : slPrice === null ? 'not set' : slPrice.toFixed(digits)}
-          onDown={() => bumpSl(-1)}
-          onUp={() => bumpSl(1)}
-          downDisabled={anchor === null}
-        />
-        <LevelRow
-          label="TP"
-          underline="#0EB52E"
-          value={!continuous ? 'not available' : anchor === null ? 'waiting' : tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
-          {...(continuous
-            ? { onDown: () => bumpTp(-1), onUp: () => bumpTp(1), downDisabled: anchor === null }
-            : { note: 'This brand settles every contract at expiry, so a target cannot close one early.' })}
-        />
-        <p className="px-3 pb-2 text-[10px] leading-snug text-[#8fa2b8]">
-          {continuous
-            ? `SL and TP close the position at their price, for what it is worth there, so a stop can return part of the stake. Max loss ${money.fmt(stakeCents)}.`
-            : `The stop is the stake, and neither level fires: this contract settles at ${durationLabel(durationS)} whatever the price does.`}
-        </p>
+        {/*
+          Fill policy, which MetaTrader writes with a colon and right-aligns the value of.
 
-        {/* 6. Fill policy, with the dotted leader the Trade screen uses. */}
-        <Leader label="Fill policy" value="Fill or Kill" />
+          `Fill or Kill` and not the `Return` the reference screenshot shows, because this row states
+          a SYMBOL property, not a piece of MetaTrader's chrome: its Specification dialog lists
+          `Filling` as one of `Fill or Kill`, `Immediate or Cancel`, `Book or Cancel`, `Return`, and
+          what a screenshot shows is whatever that broker configured for that symbol. This engine
+          fills an order whole at the next tick or rejects it, and never leaves a remainder working,
+          so Fill or Kill is what it does. `Return` would promise partial fills that cannot happen.
+          docs/mt5/01-order-and-close-dialogs.md 60 records the same value for EURUSD market
+          execution.
+        */}
+        <Leader label="Fill policy:" value="Fill or Kill" />
 
-        {/* 7. MetaTrader's tick chart, and this one really is ticks: the engine streams them and
-               `getTicks` is that buffer, so the band draws the same live edge the chart's last
-               candle is forming from. (The Specification's Ticks tab says there is no tick SERIES
-               to chart; that is about history, which is served as bars from M1 up. The live buffer
-               is a different thing and it is what MetaTrader draws here.)
+        {/*
+          MetaTrader's BID and ASK, large and side by side, in its own typography: the lead digits
+          small, the pip figure big, the fractional pip raised.
 
-               Only while the ticket is on the symbol this brand settles. The tick buffer carries
-               that symbol alone, so on any other one this band would draw a second instrument's
-               price under the first one's name.
+          Two prices at last, and they are real. `cost` in the continuous payout IS the spread, the
+          move a trader has to make before the position is worth its stake, and the engine now
+          publishes it per side; `bidAsk` turns it into the two prices a broker quotes. This screen
+          used to print one number with a note that there was no spread for two to sit either side
+          of, which was true under the step economy and stopped being true when the terminal's edge
+          moved into the spread.
 
-               `numbers={false}`: the canvas's own axis is the curve's unitless value, and a scale
-               running 0.8 to -0.8 directly under a quote of 3081.42 reads as a second price that
-               disagrees with the first. The shape, the red/green split and the zero line stay. */}
+          A brand that publishes none still shows the single centred price it always did.
+        */}
+        {bidAsk === null ? (
+          <div className="flex items-end justify-center border-b border-[#2b3543] py-3">
+            <MT5Price value={price} digits={digits} className="text-[24px] font-semibold text-[#3183ff]" />
+          </div>
+        ) : (
+          <div className="flex items-end justify-around border-b border-[#2b3543] py-3">
+            {/* Bid on the left under SELL, ask on the right under BUY: a sell is filled at the bid
+                and a buy at the ask, so each side sits over the button that takes it. */}
+            <MT5Price value={bidAsk.bid} digits={digits} className="text-[24px] font-semibold text-[#3183ff]" />
+            <MT5Price value={bidAsk.ask} digits={digits} className="text-[24px] font-semibold text-[#3183ff]" />
+          </div>
+        )}
+
+        {/*
+          MetaTrader's tick chart, which on this screen is a PRICE band with the two sides tagged on
+          it: the ask line above, the last between as a dashed rule, the bid below, and the tick
+          trace running through them. That is what `android/en/open_market.png` draws, and it is why
+          this is `MT5TickBand` rather than the classic shell's `CurveCanvas`: that canvas plots the
+          curve's own unitless value, so a line at the bid could only be placed by inventing a
+          mapping between the two scales.
+
+          Only while the ticket is on the symbol this brand settles. The tick buffer carries that
+          symbol alone, so on any other one this band would draw a second instrument's price under
+          the first one's name.
+        */}
         {tradeDisabled ? null : (
-          <div className="min-h-28 flex-1 border-y border-[#2b3543]">
-            <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={60_000} numbers={false} />
+          <div className="relative min-h-28 flex-1 border-b border-[#2b3543]">
+            <MT5TickBand
+              getTicks={getTicks}
+              priceOfRate={priceOfRate}
+              digits={digits}
+              bid={bidAsk?.bid ?? null}
+              ask={bidAsk?.ask ?? null}
+              last={price}
+            />
           </div>
         )}
 
@@ -326,12 +387,19 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
         </div>
         )}
 
-        {/* 8. MetaTrader's warning line. Its own words are about market conditions and slippage;
-               this engine fills at the next tick, so the line says the thing that is actually true
-               of this contract rather than copying a sentence that is not. */}
-        <p className="px-3 pb-3 pt-1 text-[10px] leading-snug text-[#8fa2b8]">
-          Attention! The order fills at the next engine tick, which may differ from the price shown.
-          The contract then settles {durationLabel(durationS)} later, at whatever the price is then.
+        {/*
+          MetaTrader's Market Execution hint, verbatim as far as it is true here.
+
+          The reference reads: "With Market Execution the price depends on the market situation. The
+          order price will be quoted by a dealer." The first sentence is exactly this contract: the
+          order goes at whatever the market is when it fills, and no price is promised. The second is
+          not, because there is no dealer in the loop; this engine fills at its next tick. Copying it
+          would be the same class of error as quoting a price the server never sent, so the mechanism
+          is named instead of a counterparty that does not exist.
+        */}
+        <p className="px-3 pb-3 pt-2 text-[10px] leading-snug text-[#8fa2b8]">
+          With Market Execution the price depends on the market situation. The order fills at the
+          engine&apos;s next tick, which may differ from the price shown.
         </p>
 
         {tradeDisabled ? (
@@ -397,38 +465,36 @@ function StepCell({ step, onPick, bound }: { step: { label: string; delta: numbe
 }
 
 /**
- * MetaTrader's `− SL +` and `− TP +` rows.
+ * One HALF of MetaTrader's `−  SL  +` / `−  TP  +` row.
  *
- * The underline is the whole visual identity of these two: an orange rule under the stop and a
- * green one under the target, which is how a trader tells them apart at a glance without reading
- * the two-letter label. Where a side has no steppers the row keeps its underline and states what
- * the level actually is, rather than drawing dead `−` and `+` buttons.
+ * The reference screen puts both on one line, split down the middle, each sitting on its own
+ * coloured rule: red under the stop, green under the target. That underline is the whole visual
+ * identity of the pair, and it is how a trader tells them apart without reading the two letters.
+ *
+ * Unset, the cell shows the greyed LABEL and no number, which is what the reference draws: `SL` and
+ * `TP` in placeholder grey between the two steppers. A value replaces it once one is set.
  */
-function LevelRow({ label, underline, value, note, onDown, onUp, downDisabled }: {
+function LevelHalf({ label, underline, value, onDown, onUp, disabled, title }: {
   label: string;
   underline: string;
-  value: string;
-  note?: string | undefined;
-  onDown?: (() => void) | undefined;
-  onUp?: (() => void) | undefined;
-  downDisabled?: boolean | undefined;
+  /** The level as a price, or null when there is none to show and the label stands in. */
+  value: string | null;
+  onDown: () => void;
+  onUp: () => void;
+  disabled: boolean;
+  title?: string | undefined;
 }) {
-  const step = 'grid h-9 w-10 shrink-0 place-items-center text-[18px] font-semibold leading-none text-[#3183ff] disabled:opacity-30';
+  const step = 'grid h-10 w-9 shrink-0 place-items-center text-[18px] font-semibold leading-none text-[#3183ff] disabled:opacity-30';
   return (
-    <div className="px-3 pt-2">
-      <div className="flex items-center" title={note}>
-        {onDown ? (
-          <button type="button" onClick={onDown} disabled={downDisabled} aria-label={`Lower ${label}`} className={step}>−</button>
-        ) : <span className="w-10 shrink-0" />}
-        <span className="flex min-w-0 flex-1 items-baseline justify-center gap-2">
-          <span className="text-[12px] font-semibold text-[#8fa2b8]">{label}</span>
-          <span className={cn('truncate font-mono text-[14px] font-semibold tabular-nums', onUp || onDown ? 'text-white' : 'text-[#8fa2b8]')}>
-            {value}
-          </span>
+    <div className="min-w-0 flex-1 px-2 pt-1.5" title={title}>
+      <div className="flex items-center">
+        <button type="button" onClick={onDown} disabled={disabled} aria-label={`Lower ${label}`} className={step}>−</button>
+        <span className="min-w-0 flex-1 truncate text-center font-mono text-[13px] font-semibold tabular-nums">
+          {value === null
+            ? <span className="text-[#5b6b7d]">{label}</span>
+            : <span className="text-white">{value}</span>}
         </span>
-        {onUp ? (
-          <button type="button" onClick={onUp} aria-label={`Raise ${label}`} className={step}>+</button>
-        ) : <span className="w-10 shrink-0" />}
+        <button type="button" onClick={onUp} disabled={disabled} aria-label={`Raise ${label}`} className={step}>+</button>
       </div>
       <span aria-hidden data-level-underline={label} className="mt-0.5 block h-0.5 w-full rounded" style={{ background: underline }} />
     </div>
@@ -456,7 +522,7 @@ function Leader({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * One of MetaTrader's two trade buttons: `SELL` over `BY MARKET`, in colour, on no fill at all.
+ * One of MetaTrader's two trade buttons: `SELL` over `by market`, in colour, on no fill at all.
  *
  * The second line is the execution mode, and MetaTrader changes it with the symbol's: "Market
  * Execution → Buy by market / Sell by market", where Instant and Exchange execution read just
@@ -480,7 +546,9 @@ function SideButton({ top, colour, disabled, onPick, title }: {
       style={{ color: colour }}
     >
       <span className="text-[17px] font-bold leading-none tracking-wide">{top}</span>
-      <span className="text-[10px] font-semibold leading-none tracking-wider opacity-90">BY MARKET</span>
+      {/* `by market` in lower case, as the reference screen sets it: the top line is the shout and
+          the second line is a quiet qualifier under it. */}
+      <span className="text-[10px] font-semibold leading-none opacity-90">by market</span>
     </button>
   );
 }
