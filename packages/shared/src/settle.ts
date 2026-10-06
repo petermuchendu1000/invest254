@@ -46,10 +46,10 @@ export class SettlementEngine {
   constructor(
     private readonly curve: CurveGenerator,
     private readonly cfg: GameConfig,
-    calibrationSeed = "calibration",
+    private readonly calibrationSeed = "calibration",
     private readonly durationS = cfg.defaultDurationS,
-    sampleWindowS = CALIBRATION_WINDOW_S,
-    nSamples = 200_000,
+    private readonly sampleWindowS = CALIBRATION_WINDOW_S,
+    private readonly nSamples = 200_000,
   ) {
     assertFeasible(cfg);
     this.params = {
@@ -146,6 +146,101 @@ export class SettlementEngine {
     const multiplier = winMultiplier(rng, meanMult, this.cfg.maxMultiplier);
     const payoutCents = mulCents(stakeCents, multiplier);
     return { ...base, multiplier, payoutCents, pnlCents: payoutCents - stakeCents };
+  }
+
+  /**
+   * The CONTINUOUS payout's two parameters, per direction.
+   *
+   * See docs/mt5/20-real-sl-tp.md for the measurements behind this. In short: the step payout above
+   * (nothing until `tau`, then a jump straight to 1 + gain*tau = 1.70x) is what makes a real stop
+   * impossible. A take profit set below `tau` closes the contract on the zero side of the step and
+   * pays the trader NOTHING for being right but modest (measured RTP 0.00%); a target at or above
+   * `tau` leaks a third of the house edge (25% RTP becoming 33%). A step payout and a continuous
+   * target cannot both be sane.
+   *
+   * The continuous form is a line through a cost:
+   *
+   *     payout = clamp(1 + gain * (move - cost), 0, maxMultiplier)
+   *
+   * `cost` is economically the SPREAD: the move a trader must make to break even, and the whole
+   * house edge. `gain` is inherited from the step calibration unchanged, so the payout keeps the
+   * spread the operator already tuned, and only the threshold becomes a cost.
+   *
+   * Measured over 40,000 trades per rule on three seeds: RTP holds at 24.4-25.4% against a 25%
+   * target for every sane stopping rule (held to horizon, tight stops, wide stops, target only,
+   * stop only), where the step payout leaked to 33%. No stopping rule beats the house.
+   */
+  private continuous: Record<Direction, { cost: number; gain: number }> | null = null;
+
+  /**
+   * Solve `cost` so a contract held to the horizon returns exactly the configured RTP.
+   *
+   * Monotone decreasing in cost (a bigger cost can only lower every payout), so a bisection is
+   * exact to the bit. Sampled from the same process and window the step calibration uses, so the
+   * two are comparable and a brand that switches between them keeps its economics.
+   */
+  private calibrateContinuous(dir: Direction, seed: string, windowS: number, n: number): { cost: number; gain: number } {
+    const rng = new SeededRng(seed, `cont:${dir}`);
+    const moves: number[] = new Array(n);
+    for (let i = 0; i < n; i++) moves[i] = this.signedMove(dir, rng.range(0, windowS));
+    const gain = this.params[dir].gain;
+    const target = rtp(this.cfg);
+    const meanPayout = (cost: number): number => {
+      let s = 0;
+      for (const m of moves) s += Math.max(0, Math.min(1 + gain * (m - cost), this.cfg.maxMultiplier));
+      return s / moves.length;
+    };
+    // The payout is 0 everywhere once cost exceeds the largest move, so the bracket is finite.
+    let lo = 0, hi = 1 / gain + Math.max(...moves) + 1e-9;
+    for (let i = 0; i < 80; i++) {
+      const mid = (lo + hi) / 2;
+      if (meanPayout(mid) > target) lo = mid; else hi = mid;
+    }
+    return { cost: (lo + hi) / 2, gain };
+  }
+
+  /** The continuous parameters, calibrated on first use and cached. */
+  continuousParams(dir: Direction): { cost: number; gain: number } {
+    if (!this.continuous) {
+      this.continuous = {
+        buy: this.calibrateContinuous("buy", this.calibrationSeed, this.sampleWindowS, this.nSamples),
+        sell: this.calibrateContinuous("sell", this.calibrationSeed, this.sampleWindowS, this.nSamples),
+      };
+    }
+    return this.continuous[dir];
+  }
+
+  /**
+   * What a contract is worth after `elapsedS` seconds, on the continuous payout.
+   *
+   * This is BOTH the live value and the settlement: closing at any moment pays what this says,
+   * which is the property that makes a stop and a target mean something. There is no committed
+   * endpoint to converge to and no cap that depends on a decision already taken, because under this
+   * model nothing is decided at open except the cost the trader has to overcome.
+   */
+  valueAt(dir: Direction, entryT: number, elapsedS: number): number {
+    const { cost, gain } = this.continuousParams(dir);
+    const move = this.moveAt(dir, entryT, elapsedS);
+    return Math.max(0, Math.min(1 + gain * (move - cost), this.cfg.maxMultiplier));
+  }
+
+  /**
+   * Settle on the continuous payout at an arbitrary holding time.
+   *
+   * `result` is DERIVED from the payout rather than decided in advance: a contract that returns
+   * more than its stake is a win, anything else a loss. That is what lets a stop loss close a
+   * position at a partial loss, which the step model had no way to express.
+   */
+  settleContinuous(stakeCents: number, dir: Direction, entryT: number, elapsedS: number): Outcome {
+    const multiplier = this.valueAt(dir, entryT, elapsedS);
+    const entryRate = this.curve.rate(entryT);
+    const exitRate = this.curve.rate(entryT + elapsedS);
+    const payoutCents = mulCents(stakeCents, multiplier);
+    return {
+      result: payoutCents > stakeCents ? "win" : "loss",
+      multiplier, payoutCents, pnlCents: payoutCents - stakeCents,
+      entryRate, exitRate, signedMove: this.moveAt(dir, entryT, elapsedS),
+    };
   }
 
   /**
