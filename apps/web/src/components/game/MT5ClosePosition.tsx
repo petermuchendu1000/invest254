@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useDisplayMoney } from '@/lib/money';
 import { useLevelsStore } from '@/lib/game/levelsStore';
 import { levelPrice } from '@/lib/game/levelWatch';
@@ -67,7 +68,10 @@ export function MT5ClosePosition({
   const tpPrice = pos.tpPrice ?? levelPrice(levels, levelRef ?? openPrice, 'tp', digits);
   /** The ENGINE's stop, falling back to the local store the way the T/P row does. */
   const slPrice = pos.slPrice ?? levelPrice(levels, levelRef ?? openPrice, 'sl', digits);
-  const lots = lotsOfStake(pos.stakeCents);
+  // Volume to the SYMBOL's own volume digits, so every surface states one lot size for one
+  // position (docs/mt5/09-toolbox.md 300, rows at 313-318).
+  const volumeDigits = useVolumeDigits(symbol);
+  const lots = lotsOfStake(pos.stakeCents, volumeDigits);
   /**
    * What this close actually does to the trader's money. A position exactly flat closes at neither,
    * so it gets MetaTrader's bare verb rather than a sign it does not have.
@@ -140,16 +144,16 @@ export function MT5ClosePosition({
             was claiming a stop was set on a position that might have none, while the Toolbox grid
             said "-" and the live panel said "not set" for the same position: three surfaces, three
             answers. `09-toolbox.md` 336-338 settles it, and MetaTrader's own answer for an unset
-            level is blank.
+            level is blank — which this row still was not printing, so all three now are.
           */}
           <Row label="S / L" accent={SL_ORANGE}>
             <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
-              {slPrice === null ? 'not set' : slPrice.toFixed(digits)}
+              {slPrice === null ? '' : slPrice.toFixed(digits)}
             </span>
           </Row>
           <Row label="T / P" accent={TP_GREEN}>
             <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
-              {tpPrice === null ? 'not set' : tpPrice.toFixed(digits)}
+              {tpPrice === null ? '' : tpPrice.toFixed(digits)}
             </span>
           </Row>
           <Row label="Fill policy">

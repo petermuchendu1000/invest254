@@ -19,6 +19,27 @@
  * What is left is real, and is given in MetaTrader's own order and under its own labels. `Last High`
  * and `Last Low` rather than `Bid High`/`Bid Low` because MetaTrader uses the Last pair when a
  * symbol's chart is built on Last prices, which is what this one's Chart mode says.
+ *
+ * ── `Tick Value` and `Face Value`, the two rows a one-price platform does NOT lose ───────────────
+ *
+ * Neither is two-sided, so the argument that deletes `Bid`, `Ask` and `Spread` here
+ * (docs/mt5/10-market-watch.md 404-417) does not touch them, and both sit at the head of
+ * MetaTrader's own list (603-638). They were both missing, for one stated reason that has since
+ * stopped being true.
+ *
+ * `Face Value` is now stated. It is the contract's nominal value, which on this platform is set by
+ * the brand rather than by an exchange: one lot stakes a fixed sum (`LOT_STAKE_CENTS`), and that sum
+ * is the whole of what a lot is. It is a real figure, not a derived one, which is why MetaTrader
+ * renders it as a static row rather than a ticking one.
+ *
+ * `Tick Value` is still absent, and the reason it carried — that the payout follows elapsed time
+ * rather than the price — is obsolete: the live result has followed the PRICE since
+ * packages/shared/src/livepnl.ts was rewritten. The honest reason now is narrower and still holds.
+ * The money a tick is worth is `stake * gain` per unit of favourable move, and `gain` is calibrated
+ * by the settlement engine PER DIRECTION, server-side, and never sent to the client: a tick is
+ * worth different money on a buy than on a sell of the same symbol, and the client is told neither
+ * number. A single figure in this row would therefore be invented, and it would be invented twice
+ * over. MetaTrader omits a row that has no meaning for an instrument, and that is what this is.
  */
 
 export interface DetailRow {
@@ -36,6 +57,11 @@ export interface DetailRow {
 
 export interface DetailInput {
   digits: number;
+  /**
+   * What one lot stakes, already formatted BARE — no currency code, as every figure in this list is
+   * (docs/mt5/09-toolbox.md 429). This is MetaTrader's `Face Value`: see the header note.
+   */
+  faceValue: string;
   /** The live price, or null before a quote has landed. */
   last: number | null;
   /** The session's own bar: its open, high and low. Null when the day's bar has not arrived. */
@@ -57,6 +83,9 @@ export function detailRows(i: DetailInput): DetailRow[] {
   return [
     // The tick: 10^-digits. MetaTrader leads its list with this.
     { label: 'Tick Size', value: (10 ** -i.digits).toFixed(i.digits), live: false },
+    // MetaTrader's order puts Tick Value between these two. It is absent, and the header note says
+    // why: the gain it follows from is per-direction and server-side, so no single figure is true.
+    { label: 'Face Value', value: i.faceValue, live: false },
     { label: 'Last', value: fixed(i.last, i.digits), live: true },
     { label: 'Last High', value: fixed(i.session?.high ?? null, i.digits), live: false },
     { label: 'Last Low', value: fixed(i.session?.low ?? null, i.digits), live: false },

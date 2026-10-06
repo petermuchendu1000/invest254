@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useDisplayMoney } from '@/lib/money';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { dealResultLabel } from '@/lib/game/dealWording';
@@ -40,6 +41,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function MT5PositionDetail({ id, onClose }: { id: string | null; onClose: () => void }) {
   const { data, isLoading, isError } = usePositionDetail(id);
   const money = useDisplayMoney();
+  // Volume to the SYMBOL's own volume digits, so every surface states one lot size for one position
+  // (docs/mt5/09-toolbox.md 300, rows at 313-318).
+  const volumeDigits = useVolumeDigits(data?.symbol ?? XAUUSD.symbol);
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -93,7 +97,7 @@ function MT5PositionDetail({ id, onClose }: { id: string | null; onClose: () => 
                 brand's own symbol, which is what every row meant before it existed. */}
             <MT5SummaryLine label="Symbol" value={data.symbol ?? XAUUSD.symbol} />
             <MT5SummaryLine label="Type" value={data.direction} />
-            <MT5SummaryLine label="Volume" value={lotsOfStake(data.stakeCents)} />
+            <MT5SummaryLine label="Volume" value={lotsOfStake(data.stakeCents, volumeDigits)} />
             <MT5SummaryLine label="Price" value={px(data.entryPrice)} />
             {data.settledAt === null ? null : <MT5SummaryLine label="Close price" value={px(data.exitPrice)} />}
             <MT5SummaryLine label="Status" value={dealResultLabel(data, true)} />

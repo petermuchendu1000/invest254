@@ -373,7 +373,28 @@ export function MT5Toolbox() {
           >
             {/* MetaTrader shows a position as a two-line entry on a phone and as a wide table on a
                 desktop, because ten columns cannot be read on a 430px screen. Both are rendered from
-                the same values and swapped at `sm`, rather than the table being squeezed. */}
+                the same values, rather than the table being squeezed.
+
+                The swap used to happen at `sm`, as if the viewport were the constraint. It is not:
+                this pane is only the CHART column, with Market Watch docked to its left and the
+                ticket to its right, so a 1024px laptop gives it 446px, which is the 430px phone
+                case under another name. The ten columns measured 720px there and the `Profit`
+                header, the one column a trader is actually watching and the one carrying the
+                × close control, sat 274px past the right edge of the pane (at 1152 165px, at 1280
+                126px, at 1366 36px; 1440 is the first width at which it lands inside). The pane
+                scrolls, so none of it was clipped, but a column you have to go and find is not on
+                screen. Nothing can be done to the table itself here: ten columns of prices cannot
+                be truncated into 446px and still be read, and MetaTrader truncates a column rather
+                than dropping one (`Currency` drawn as `Curr…`, docs/mt5/09-toolbox.md:841), so the
+                order below stays exactly its order (docs/mt5/09-toolbox.md:258).
+
+                That 446px was the real defect and it is fixed where it was caused, in
+                `TradeSurface`: this panel is now docked across the whole window as MetaTrader's is
+                ("at the bottom of the main window", docs/mt5/09-toolbox.md:119) rather than nested
+                inside the chart column, so the pane is the window's width and the grid's own
+                720-733px of content fits from 1024 up. The `sm` swap below is therefore back to
+                being about the PHONE, which is what MetaTrader's two-line entry is for, instead of
+                hiding the grid from every laptop. */}
             {tab === 'trade' ? (
               live ? (
                 <>
@@ -431,7 +452,8 @@ export function MT5Toolbox() {
                         <Td>
                           {/* MetaTrader's T/P column: the level as a price, stepped in the
                               instrument's own points. It held a money TARGET before, which is a
-                              different concept the chart could not draw and the phone never fired. */}
+                              different concept the chart could not draw and the phone never fired.
+                              Unset, it is blank for the same reason the S/L cell is. */}
                           {continuous ? (
                             <span className="flex items-center gap-1">
                               <button type="button" onClick={() => stepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
@@ -579,8 +601,21 @@ export function MT5Toolbox() {
               eleven of them drawn (Company is hidden, as MetaTrader hides it). Eleven cannot share
               a 390px phone evenly — "Code Base" alone would not fit in a thirty-pixel slot — so the
               strip SCROLLS rather than crushing the labels, which is what the period row above the
-              chart already does with twenty-one periods. On a wide screen they still fill the bar.
-              A count rides as a superscript, as MetaTrader's red subscript count does. */}
+              chart already does with twenty-one periods.
+              A count rides as a superscript, as MetaTrader's red subscript count does.
+
+              A LAPTOP is the same problem, which is why nothing here stretches the tabs any more.
+              `sm:flex-1` used to hand all eleven an equal share of the bar, and because the chart
+              column is only part of the window the share was too small to hold the label: measured
+              at 1024, eight of the eleven were cut (Code Base 23px, Exposure 16px, Calendar 14px,
+              Mailbox 7px, Articles 6px, Experts 6px, History 4px, Journal 3px, the strip reading
+              "MailboxCalendaAlerts Article Code BExpertJourna"), and again at exactly 1280, where
+              the `xl:` step widens Market Watch and the ticket and takes 80px back off this column.
+              Equal shares also killed the scroll: a flex item that has already been shrunk to fit
+              leaves the scroller nothing to scroll. MetaTrader never stretches them: its Toolbox
+              tabs are "flat labels separated by thin vertical rules" (docs/mt5/09-toolbox.md:140),
+              each its own width, and a panel tab strip with no room for them all grows
+              `◀ ▶` scroll arrows at its right end (docs/mt5/10-market-watch.md:96). */}
           <div className="flex items-stretch overflow-x-auto border-t border-[#2b3543] bg-[#202933] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {VISIBLE_TOOLBOX_TABS.map((t) => {
               const count = t.id === 'mailbox'
@@ -594,7 +629,7 @@ export function MT5Toolbox() {
                   aria-pressed={tab === t.id}
                   title={t.unavailable}
                   className={cn(
-                    'shrink-0 whitespace-nowrap px-2 py-1.5 text-[10.5px] font-semibold leading-tight transition sm:min-w-0 sm:flex-1 sm:px-0.5',
+                    'shrink-0 whitespace-nowrap px-2 py-1.5 text-[10.5px] font-semibold leading-tight transition',
                     tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
                     t.unavailable ? 'opacity-55' : '',
                   )}
@@ -763,6 +798,10 @@ function AlertsTab({
               <Td>{a.symbol}</Td>
               <Td>{a.above ? 'Bid ≥' : 'Bid ≤'}</Td>
               <Td>{a.price.toFixed(digits)}</Td>
+              {/* `stamp` is server time, like every other record stamp in this panel. Note that
+                  MetaTrader's `Time =` alert CONDITION is the one field it specifies in local
+                  computer time ("Specify the local computer time", 09-toolbox.md 937) — a different
+                  field, and not one this panel offers: the only conditions here are on price. */}
               <Td className={a.triggeredAtMs ? 'text-[#f0b90b]' : 'text-[#41be56]'}>
                 {a.triggeredAtMs ? `fired ${stamp(a.triggeredAtMs)}` : 'armed'}
               </Td>

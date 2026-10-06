@@ -130,7 +130,18 @@ export function MT5OrderTicket() {
   const volMessage = volClamp ?? volNote;
 
   const rowLabel = 'w-20 shrink-0 text-[12px] text-[#8fa2b8] lg:w-auto lg:basis-full';
-  const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-1 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
+  /**
+   * No horizontal padding on a stepper, and a 2px gutter rather than 4px.
+   *
+   * The five cells split the ticket's own width, and on the desktop dock that width is `lg:w-72`
+   * until `xl:w-80` (TradeSurface.tsx:157): 264px inside the padding, so with `gap-1` a cell was
+   * 49.6px. `−0.100` measures 50px of mono glyphs, so all four steppers cut 5px off their own
+   * label at every width from 1024 to 1279 (clean at 1280, where `xl:w-80` arrives). Dropping the
+   * 8px of padding recovers most of it and the narrower gutter the last 1.6px, which measures as
+   * zero clipping with room to spare. The five cells stay EQUAL, because that is the shape
+   * MetaTrader's own stepper row has; what goes is the padding the label could not afford.
+   */
+  const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-0 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
 
   return (
     <div className="relative flex flex-col gap-2 rounded-sm border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
@@ -153,7 +164,7 @@ export function MT5OrderTicket() {
           inline label: the centre cell IS the volume (iOS five cells, Android seven, the increments
           scaling with magnitude). Ours had a label and an asymmetric -1/+2 arrangement that no
           MetaTrader build has, and at phone width it wrapped onto two lines. */}
-      <div className="grid grid-cols-5 gap-1">
+      <div className="grid grid-cols-5 gap-0.5">
         {/* Disabled only ON the bound, and never without saying which bound it is: MetaTrader
             carries min/max/step on the symbol and its dialogs name the constraint rather than
             leaving a dead control to be guessed at. */}

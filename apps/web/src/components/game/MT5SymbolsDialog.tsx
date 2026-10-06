@@ -66,7 +66,11 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-[78vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
         <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
-          <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[2px] bg-[#3183ff] text-[10px] font-black text-white">S</span>
+          {/* MetaTrader's own icon for this window: "Title: `Symbols`, with the yellow `$` badge
+              icon" (docs/mt5/10-market-watch.md 999), the same badge its context-menu entry carries
+              (442) and the same one the tree's group nodes wear. It was a blue `S`, which is a
+              letter from the window's title rather than MetaTrader's mark. */}
+          <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[2px] bg-[#f0b90b] text-[11px] font-black leading-none text-[#1a1a1a]">$</span>
           <span className="flex-1 truncate text-[15px] font-semibold leading-tight">Symbols</span>
           <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white">×</button>
         </div>
@@ -85,6 +89,24 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
           </p>
         </div>
 
+        {/*
+          MetaTrader's three columns, verbatim and in order: `Symbol | Description | Expiration`
+          (docs/mt5/10-market-watch.md 1028). Two were drawn here and the list carried no headings at
+          all, so there was nothing to say which cell was which.
+
+          Every cell under `Expiration` is EMPTY, and that is MetaTrader's own rendering rather than a
+          gap: its screenshot shows blank Expiration cells for EURUSD, GBPUSD and USDCHF, because a
+          spot instrument has no expiry date. Nothing in this catalogue is a dated contract, so the
+          column is present and empty throughout — which is also why there is no "Show expired
+          contracts" checkbox beside the search box.
+        */}
+        <div className="flex shrink-0 items-center gap-2 border-b border-[#2b3543] bg-[#202933] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#8fa2b8]">
+          <span aria-hidden className="w-3 shrink-0" />
+          <span className="w-20 shrink-0">Symbol</span>
+          <span className="min-w-0 flex-1">Description</span>
+          <span className="w-16 shrink-0 text-right">Expiration</span>
+        </div>
+
         <div className="min-h-0 flex-1 overflow-y-auto">
           {groups.length === 0 ? (
             <p className="px-3 py-4 text-center text-[11px] text-[#8fa2b8]">No symbol matches that.</p>
@@ -101,7 +123,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
                   <span aria-hidden className="w-3 text-[#8fa2b8]">{expanded ? '−' : '+'}</span>
                   {/* MetaTrader prints the tree path with a backslash; the leaf is what reads as a heading. */}
                   <span className="flex-1 truncate">{group.replace('\\', ' › ')}</span>
-                  <span className="shrink-0 font-mono text-[10px] text-[#8fa2b8]">{rows.length}</span>
+                  <span className="w-16 shrink-0 text-right font-mono text-[10px] text-[#8fa2b8]">{rows.length}</span>
                 </button>
                 {expanded ? rows.map((r) => {
                   const on = picked.includes(r.symbol);
@@ -122,6 +144,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
                       />
                       <span className="w-20 shrink-0 font-semibold text-white">{r.symbol}</span>
                       <span className="min-w-0 flex-1 truncate text-[#8fa2b8]">{r.description}</span>
+                      <span className="w-16 shrink-0 text-right text-[#8fa2b8]" />
                     </label>
                   );
                 }) : null}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
 import { useDisplayMoney } from '@/lib/money';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
 import { isContinuousBrand } from '@/lib/game/levelWatch';
@@ -31,6 +32,10 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
   openPrice: number | null;
 }) {
   const money = useDisplayMoney();
+  // Volume to the SYMBOL's own volume digits, so this card and the ticket that opened the position
+  // state one lot size (docs/mt5/09-toolbox.md 300).
+  const volumeDigits = useVolumeDigits(symbol);
+  const lots = lotsOfStake(pos.stakeCents, volumeDigits);
   const { sell, earlyCloseEnabled } = useGameSocket();
   const brand = useBrand();
   /**
@@ -80,7 +85,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-[13px] font-bold text-white">{symbol}</span>
         <span className="shrink-0 font-mono text-[12px] font-semibold uppercase" style={{ color: side }}>
-          {pos.direction} {lotsOfStake(pos.stakeCents)}
+          {pos.direction} {lots}
         </span>
       </div>
 
@@ -88,7 +93,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
       <div className="flex items-end justify-between gap-2">
         <span className="text-[10px] uppercase tracking-wide text-[#8fa2b8]">Profit</span>
         <span className={cn('font-mono text-[22px] font-semibold leading-none tabular-nums', pnlTone)}>
-          {pnl > 0 ? '+' : ''}{money.fmt(pnl)}
+          {pnl > 0 ? '+' : ''}{money.mt(pnl)}
         </span>
       </div>
 
@@ -101,18 +106,22 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
         * moment the horizon became an hour-long backstop rather than the trade's whole character.
         *
         * S/L and T/P are the ENGINE's, read off the position rather than the ticket's working copy,
-        * because those are the ones that will actually fire. "not set" rather than a blank, which is
-        * MetaTrader's own wording for an empty level.
+        * because those are the ones that will actually fire. An unset one is BLANK: docs/mt5/09-toolbox.md
+        * 336-338, "the cell is blank and no × is drawn". This card said "not set" while the Trade
+        * grid said "-" and the close form said "not set" again, so one position had three answers.
         */}
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums">
-        <Row label="Volume" value={lotsOfStake(pos.stakeCents)} />
+        <Row label="Volume" value={lots} />
         {/* MetaTrader's row carries BOTH prices: the one it opened at and the one it is at now.
             Without the open price the S/L and T/P rows are numbers with nothing to read them
             against, which is the state this card was in. */}
         <Row label="Price" value={openPrice === null ? '-' : openPrice.toFixed(digits)} />
-        <Row label="S / L" value={pos.slPrice === null ? 'not set' : pos.slPrice.toFixed(digits)} />
-        <Row label="T / P" value={pos.tpPrice === null ? 'not set' : pos.tpPrice.toFixed(digits)} />
+        <Row label="S / L" value={pos.slPrice === null ? '' : pos.slPrice.toFixed(digits)} />
+        <Row label="T / P" value={pos.tpPrice === null ? '' : pos.tpPrice.toFixed(digits)} />
         <Row label="Price" value={price === null ? '-' : price.toFixed(digits)} />
+        {/* The one figure on this card that names its currency, and the only row here that is not
+            one of MetaTrader's: the strip names the code once after Balance and leaves every other
+            figure bare (09-toolbox.md 429), and this card has no strip to name it. */}
         <Row label="Stake" value={money.fmt(pos.stakeCents)} />
         {pos.phase === 'open' ? null : <Row label="State" value={state} />}
       </dl>

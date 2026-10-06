@@ -7,6 +7,7 @@ const base = {
   last: 1.08920,
   session: { open: 1.10415, high: 1.10477, low: 1.08996 },
   previousClose: 1.10415,
+  faceValue: '10 000.00',
 };
 
 /**
@@ -17,8 +18,27 @@ const base = {
 
 test("the rows are MetaTrader's, in MetaTrader's order", () => {
   assert.deepEqual(detailRows(base).map((r) => r.label), [
-    'Tick Size', 'Last', 'Last High', 'Last Low', 'Daily Change', 'Open Price', 'Close Price',
+    'Tick Size', 'Face Value', 'Last', 'Last High', 'Last Low', 'Daily Change', 'Open Price', 'Close Price',
   ]);
+});
+
+/**
+ * `Tick Value` and `Face Value` are the two rows a one-price platform keeps: neither is two-sided,
+ * so the argument that deletes Bid/Ask/Spread (docs/mt5/10-market-watch.md 404-417) leaves both, and
+ * both head MetaTrader's own list (603-638). Face Value is statable here and Tick Value is not —
+ * see the reasoning in symbolDetails.ts.
+ */
+test('Face Value is the nominal sum one lot stakes, bare', () => {
+  const face = detailRows(base).find((r) => r.label === 'Face Value');
+  assert.equal(face?.value, '10 000.00');
+  assert.equal(face?.live, false, 'the brand sets it, so it does not tick');
+  assert.ok(!/[A-Z]/.test(String(face?.value)), 'no currency code: 09-toolbox.md 429');
+});
+
+test('Tick Value is absent rather than invented', () => {
+  // The money a tick is worth is stake * gain, and `gain` is calibrated per DIRECTION inside the
+  // settlement engine and never sent to the client. One figure cannot be true for both sides.
+  assert.ok(!detailRows(base).some((r) => r.label === 'Tick Value'));
 });
 
 test('it says Last High and Last Low, not Bid High and Bid Low', () => {
@@ -32,13 +52,13 @@ test('it says Last High and Last Low, not Bid High and Bid Low', () => {
 test('every value prints to the symbol’s own digit count', () => {
   const rows = detailRows(base);
   assert.equal(rows[0]!.value, '0.00001');
-  assert.equal(rows[1]!.value, '1.08920');
-  assert.equal(rows[2]!.value, '1.10477');
-  assert.equal(rows[3]!.value, '1.08996');
+  assert.equal(rows[2]!.value, '1.08920');
+  assert.equal(rows[3]!.value, '1.10477');
+  assert.equal(rows[4]!.value, '1.08996');
   // Gold, at two.
-  const gold = detailRows({ digits: 2, last: 3079.43, session: { open: 3080, high: 3081, low: 3077 }, previousClose: 3080 });
+  const gold = detailRows({ digits: 2, last: 3079.43, session: { open: 3080, high: 3081, low: 3077 }, previousClose: 3080, faceValue: '10 000.00' });
   assert.equal(gold[0]!.value, '0.01');
-  assert.equal(gold[1]!.value, '3079.43');
+  assert.equal(gold[2]!.value, '3079.43');
 });
 
 test('Daily Change is measured against the previous session close, as MetaTrader defines it', () => {
@@ -59,8 +79,8 @@ test('only the rows that actually tick are marked live', () => {
 });
 
 test('a row with nothing behind it prints a dash rather than a number', () => {
-  const cold = detailRows({ digits: 5, last: null, session: null, previousClose: null });
-  assert.deepEqual(cold.map((r) => r.value), ['0.00001', '-', '-', '-', '-', '-', '-']);
+  const cold = detailRows({ digits: 5, last: null, session: null, previousClose: null, faceValue: '10 000.00' });
+  assert.deepEqual(cold.map((r) => r.value), ['0.00001', '10 000.00', '-', '-', '-', '-', '-', '-']);
 });
 
 /**

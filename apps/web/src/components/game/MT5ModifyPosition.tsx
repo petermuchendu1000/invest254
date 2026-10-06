@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { lotsOfStake } from '@invest254/shared/account';
+import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useLevelsStore } from '@/lib/game/levelsStore';
 import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
 import { useBrand } from '@/lib/brand/BrandProvider';
@@ -44,6 +45,9 @@ export function MT5ModifyPosition({
   onDismiss: () => void;
 }) {
   const brand = useBrand();
+  // Volume to the SYMBOL's own volume digits, so every surface states one lot size for one position
+  // (docs/mt5/09-toolbox.md 300, rows at 313-318).
+  const volumeDigits = useVolumeDigits(symbol);
   /**
    * Whether the engine will act on these levels at all. `canTakeProfit` is the brand's early-close
    * flag, which is one of the two facts; the other is whether the brand has a price axis.
@@ -121,7 +125,7 @@ export function MT5ModifyPosition({
               Modify position #{pos.positionId ? pos.positionId.slice(0, 8) : '…'}
             </span>
             <span className="block truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">
-              {pos.direction} {lotsOfStake(pos.stakeCents)} {symbol} at {openPrice === null ? '-' : openPrice.toFixed(digits)}
+              {pos.direction} {lotsOfStake(pos.stakeCents, volumeDigits)} {symbol} at {openPrice === null ? '-' : openPrice.toFixed(digits)}
             </span>
           </span>
         </div>
