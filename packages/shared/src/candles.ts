@@ -178,10 +178,15 @@ export function aggregate(src: readonly Candle[], tf: Timeframe): Candle[] {
       const start = bucketStartS(b.time, tf);
       curEnd = nextBucketS(start, tf);
       cur = { time: start, open: b.open, high: b.high, low: b.low, close: b.close };
+      // Tick volume SUMS: a bar's price changes are the price changes of the bars it is folded
+      // from, which is how MetaTrader's higher periods carry it. Left undefined where the source
+      // carries none, so "not counted" stays distinguishable from "counted and zero".
+      if (b.tickVolume !== undefined) cur.tickVolume = b.tickVolume;
     } else {
       if (b.high > cur.high) cur.high = b.high;
       if (b.low < cur.low) cur.low = b.low;
       cur.close = b.close;
+      if (b.tickVolume !== undefined) cur.tickVolume = (cur.tickVolume ?? 0) + b.tickVolume;
     }
   }
   if (cur) out.push(cur);
@@ -250,13 +255,24 @@ export function minuteBars(
     const s = m * 60;
     const open = px(s);
     let high = open, low = open, close = open;
+    /**
+     * MetaTrader's tick volume: how many times the price CHANGED inside the minute.
+     *
+     * Counted off the same 1 Hz samples the high and low are read from, and counted as CHANGES
+     * rather than samples: `px` quantises to the instrument's tick size, so a quiet minute returns
+     * the same figure several seconds running and a busy one returns a new figure almost every
+     * second. That is what makes this a real histogram with real variation rather than a flat bar
+     * of 60, and it is the figure MetaTrader's `Tick Volumes` row draws.
+     */
+    let changes = 0;
     for (let k = 1; k <= 60; k++) {
       const v = px(s + k);
       if (v > high) high = v;
       if (v < low) low = v;
+      if (v !== close) changes++;
       close = v;
     }
-    out[m] = { time: dayStartS + s, open, high, low, close };
+    out[m] = { time: dayStartS + s, open, high, low, close, tickVolume: changes };
   }
   return out;
 }

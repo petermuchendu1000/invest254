@@ -1,4 +1,5 @@
 import type { Direction } from '@invest254/shared';
+import type { PendingKind } from '@invest254/shared/pending';
 
 /**
  * WebSocket betting contract — mirrors the engine source of truth
@@ -24,6 +25,17 @@ export interface PositionOpenedData {
   /** The protective levels the engine actually took, which may differ from what was asked. */
   slPrice?: number | null;
   tpPrice?: number | null;
+  /**
+   * True when the ENGINE opened this by itself, because a pending order reached its level.
+   *
+   * It is the one case where nobody sent an order to match the acknowledgement to, so the client
+   * must adopt the position rather than fall back to "the oldest order still awaiting its ack":
+   * that fallback would pair this position's ticket and entry price with a market order the trader
+   * happened to have in flight at the same moment.
+   */
+  fromPending?: boolean;
+  /** The pending order that became this position, for the Journal line. */
+  orderId?: string;
 }
 
 /** S→C: per-tick live P&L for the open position. */
@@ -91,6 +103,44 @@ export interface OpenPositionInput {
    */
   slPrice?: number | null;
   tpPrice?: number | null;
+}
+
+/**
+ * MetaTrader's pending order, as the terminal asks for one.
+ *
+ * The level is a chart PRICE, like the protective levels: the engine holds it, converts the live
+ * rate to a price on every tick and compares. Nothing is debited while the order waits; the stake
+ * is taken when it fills, by the same path a market order takes.
+ */
+export interface PlacePendingInput {
+  kind: PendingKind;
+  symbol: string;
+  stakeCents: number;
+  /** The price the order is armed at, which is the one the trader clicked on the chart. */
+  triggerPrice: number;
+  /** Armed WITH the position, so an order placed with a stop opens a protected position. */
+  slPrice?: number | null;
+  tpPrice?: number | null;
+  durationS: number;
+}
+
+/**
+ * An order waiting for its level, as the engine reports one.
+ *
+ * MetaTrader's Trade tab lists these above the open positions, under the same columns; its History
+ * ORDERS grid shows them once they have filled or been cancelled.
+ */
+export interface PendingOrderDto {
+  id: string;
+  userId: string;
+  kind: PendingKind;
+  symbol: string;
+  stakeCents: number;
+  triggerPrice: number;
+  slPrice: number | null;
+  tpPrice: number | null;
+  durationS: number;
+  createdAtMs: number;
 }
 
 /**

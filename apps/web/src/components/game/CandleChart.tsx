@@ -9,6 +9,21 @@ import {
   INDICATOR_BY_ID, INDICATOR_GROUPS, VOLUME_GROUP_NOTE, type Plot,
 } from '@/lib/chart/indicatorCatalog';
 import { toggleIndicator, useEnabledIndicators } from '@/lib/chart/indicatorsStore';
+import { removeIndicators, setIndicators } from '@/lib/chart/indicatorsStore';
+import {
+  deleteTemplate, listTemplates, removableTemplates, saveTemplate,
+  type ChartTemplate, type TemplateKind,
+} from '@/lib/chart/templates';
+import { MT5SaveTemplate } from '@/components/game/MT5SaveTemplate';
+import {
+  tradeHistoryLines, tradeHistoryMarks, type ClosedDeal,
+} from '@/lib/chart/tradeHistory';
+import { usePositions } from '@/lib/positions/hooks';
+import { positionTicket } from '@/lib/history/mt5history';
+import { lotsOfStake } from '@invest254/shared/account';
+import {
+  pendingKindsAt, pendingRowLabel, type PendingKind,
+} from '@invest254/shared/pending';
 import { ChartDrawings, DrawingsBackdrop, type Projection } from '@/components/game/ChartDrawings';
 import {
   TOOLS, parseDrawings, serializeDrawings, storageKey, type Drawing, type DrawingKind, type ToolId,
@@ -19,7 +34,7 @@ import {
 } from '@/lib/chart/follow';
 import type { Colours } from '@/lib/chart/chartProperties';
 import {
-  DEFAULT_PROPERTIES, parseProperties, serializeProperties, storageKey as propsKey,
+  DEFAULT_PROPERTIES, parseProperties, serializeProperties, storageKey as propsKey, tickVolumesBlocked,
   type ChartKind, type ChartProperties,
 } from '@/lib/chart/chartProperties';
 import { MT5ChartProperties } from '@/components/game/MT5ChartProperties';
@@ -225,9 +240,17 @@ type Enabled = ReadonlySet<string>;
 interface Legend { o: number; h: number; l: number; c: number; changePct: number }
 type Anchor = CandlesReply['anchor'];
 
+/**
+ * The default for `pendingLevels`, as a module constant rather than a fresh `[]` per render: the
+ * effect that draws the lines depends on the array's identity, and a new empty array each render
+ * would tear every line down and rebuild it on each incoming tick.
+ */
+const NO_PENDING: ReadonlyArray<{ id: string; price: number; label: string }> = [];
+
 export function CandleChart({
   getLastTick, requestCandles, status, initialType = 'candles', openPosition = null, symbol,
   phone = false, levelStakeCents = 0, fullScreen, onFullScreen,
+  onPlacePending, onTakeProfit, onNewOrder, pendingLevels = NO_PENDING,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
@@ -266,6 +289,23 @@ export function CandleChart({
    */
   levelStakeCents?: number | undefined;
   /**
+   * MetaTrader's pending orders, the protective level and the order window, handed in rather than
+   * reached for.
+   *
+   * This chart takes its world as props on purpose: it draws, and the surface around it owns the
+   * socket. A row whose handler is absent is drawn DISABLED with the reason, which is what
+   * MetaTrader does with a command it cannot run.
+   */
+  onPlacePending?: ((input: { kind: PendingKind; triggerPrice: number; stakeCents: number; symbol: string }) => void) | undefined;
+  onTakeProfit?: ((price: number) => void) | undefined;
+  onNewOrder?: (() => void) | undefined;
+  /**
+   * The orders waiting on a level, so `Trade Levels` can draw them: MetaTrader draws a pending
+   * order as a line at its price labelled with its type and volume, and that line is how a trader
+   * sees the order the menu above just armed.
+   */
+  pendingLevels?: ReadonlyArray<{ id: string; price: number; label: string }> | undefined;
+  /**
    * Phone, landscape only: MetaTrader's full-screen, with the app's tab bar hidden.
    *
    * Undefined in portrait, where MetaTrader has no such mode, so the bar does not offer a control
@@ -287,6 +327,15 @@ export function CandleChart({
   const plotsRef = useRef(new Map<string, ISeriesApi<SeriesType>>());
   const markersRef = useRef(new Map<string, { setMarkers: (m: unknown[]) => void }>());
   const lcRef = useRef<typeof import('lightweight-charts') | null>(null);
+  /**
+   * MetaTrader's `Tick Volumes` histogram and the sub-pane it is drawn in.
+   *
+   * Kept apart from `plotsRef` on purpose: a volume histogram is not an indicator. It is a CHART
+   * PROPERTY (`CHART_SHOW_VOLUMES`, the F8 dialog's Show tab, Ctrl+L), it is not in the catalogue,
+   * and it must not be touched by the indicator refresh that adds and removes the ones that are.
+   */
+  const volRef = useRef<ISeriesApi<SeriesType> | null>(null);
+  const volPaneRef = useRef<number | null>(null);
   /**
    * Heikin Ashi's live state: the bar currently drawn for the newest bucket, and the one before it.
    * A Heikin Ashi bar is defined by its predecessor, so the forming bar cannot be computed from the
@@ -357,6 +406,8 @@ export function CandleChart({
    */
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [props, setProps] = useState<ChartProperties>(DEFAULT_PROPERTIES);
+  /** The settings as they are NOW, for the callbacks that are installed once and never re-created. */
+  const propsRef = useRef<ChartProperties>(props); propsRef.current = props;
   const [plotSize, setPlotSize] = useState({ w: 0, h: 0 });
   const [revision, setRevision] = useState(0);
   const plotRef = useRef<HTMLDivElement>(null);
@@ -397,7 +448,11 @@ export function CandleChart({
    * (docs/mt5/08-chart-properties.md:490, 527). Without the price the menu is just a list of
    * commands; with it, the menu is about the point on the chart that was clicked.
    */
-  const [chartMenu, setChartMenu] = useState<{ x: number; y: number; price: number | null } | null>(null);
+  const [chartMenu, setChartMenu] = useState<
+    { x: number; y: number; price: number | null; pane: number } | null
+  >(null);
+  /** MetaTrader's `Save Template...`, which asks for a name before it saves anything. */
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   /**
    * MetaTrader's `One Click Trading` (Alt+T), which is a terminal setting rather than a chart one:
    * the same flag the phone's one-click panel fires from, so switching it here switches it there.
@@ -625,6 +680,77 @@ export function CandleChart({
   }, []);
 
   /**
+   * MetaTrader's `Step by Step` (F12), which moves the chart ONE BAR.
+   *
+   * `F12 / Shift+F12 move one bar` (docs/mt5/03-chart-ui.md:102) — F12 back through the history,
+   * Shift+F12 forward again. It shifts the visible range rather than changing its width, so the
+   * zoom a trader set is exactly the zoom they keep; and it switches FOLLOWING off, because a
+   * chart that snapped back to the live edge on the next tick could not be stepped at all.
+   */
+  const stepBars = useCallback((delta: number) => {
+    const chart = chartRef.current; if (!chart) return;
+    const r = chart.timeScale().getVisibleLogicalRange();
+    if (!r) return;
+    setFollow(false);
+    chart.timeScale().setVisibleLogicalRange({ from: r.from + delta, to: r.to + delta });
+  }, []);
+
+  /**
+   * Which pane the pointer is over, from the top of the plot host.
+   *
+   * MetaTrader greys `Delete Indicator Window` unless the menu was opened INSIDE an indicator
+   * subwindow, so the menu has to know which one it is in. Asked of the chart's own pane sizes
+   * rather than remembered: panes are created and removed as indicators come and go, and a
+   * remembered index would start pointing at someone else's pane the moment one is removed, which
+   * is the same trap `refreshIndicators` documents.
+   */
+  const paneAtY = useCallback((clientY: number): number => {
+    const chart = chartRef.current;
+    const host = hostRef.current?.getBoundingClientRect() ?? null;
+    if (!chart || !host) return 0;
+    let y = clientY - host.top;
+    const panes = chart.panes();
+    for (let i = 0; i < panes.length; i++) {
+      let h = 0;
+      try { h = chart.paneSize(i).height; } catch { h = 0; }
+      if (y < h) return i;
+      y -= h;
+    }
+    return Math.max(0, panes.length - 1);
+  }, []);
+
+  /**
+   * MetaTrader's `Delete Indicator Window`: take away the sub-pane under the cursor.
+   *
+   * A sub-pane IS its indicators, so removing it is removing them; the pane then disappears on its
+   * own, because `refreshIndicators` drops any pane left with no series in it. Pane 0 is the price
+   * itself and is never deletable, which is exactly where MetaTrader greys the row.
+   */
+  const deleteIndicatorWindow = useCallback((paneIndex: number) => {
+    if (paneIndex <= 0) return;
+    /**
+     * The volume subwindow is a pane too, and deleting it means switching the property off.
+     *
+     * Without this the row would be enabled over that pane and do nothing, because the histogram
+     * is not an indicator and `plotsRef` has nothing in it to remove. MetaTrader reaches the same
+     * end from the same place: the subwindow goes and `Tick Volumes` unticks.
+     */
+    if (volPaneRef.current === paneIndex) {
+      changeProps({ ...propsRef.current, volumes: 'hide' });
+      return;
+    }
+    const doomed: string[] = [];
+    for (const [key, series] of plotsRef.current) {
+      let idx = -1;
+      try { idx = series.getPane().paneIndex(); } catch { idx = -1; }
+      if (idx !== paneIndex) continue;
+      const id = key.slice(0, key.indexOf(':'));
+      if (id && !doomed.includes(id)) doomed.push(id);
+    }
+    removeIndicators(doomed);
+  }, [changeProps]);
+
+  /**
    * MetaTrader's `Save as Picture`, through the chart's own `takeScreenshot`.
    *
    * It is composited onto the background colour first. This chart's series canvas is deliberately
@@ -682,11 +808,37 @@ export function CandleChart({
         const typed = e.code.startsWith('Digit') ? MENU_CHART_TYPES[Number(e.code.slice(5)) - 1] : undefined;
         if (typed) { e.preventDefault(); setChartType(typed.id); return; }
         if (e.code === 'KeyT') { e.preventDefault(); setOneClick(!oneClick); return; }
+        // Alt+D, `Docked`. Only where there is a window to undock into, which is the same
+        // condition the menu row is greyed on.
+        if (e.code === 'KeyD' && onFullScreen) { e.preventDefault(); onFullScreen(!fullScreen); return; }
         return;
       }
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         if (e.code === 'KeyG') { e.preventDefault(); changeProps({ ...props, showGrid: !props.showGrid }); }
         else if (e.code === 'KeyI') { e.preventDefault(); setMenuOpen(true); }
+        // Ctrl+L, `Tick Volumes`. Ctrl+K is deliberately NOT bound: traded volume does not exist
+        // on this feed, so the row it belongs to is greyed and a key for it would do nothing.
+        else if (e.code === 'KeyL') {
+          e.preventDefault();
+          changeProps({ ...props, volumes: props.volumes === 'tick' ? 'hide' : 'tick' });
+        }
+        return;
+      }
+      /**
+       * F12 and Shift+F12, MetaTrader's `Step by Step`: "F12 / Shift+F12 move one bar"
+       * (docs/mt5/03-chart-ui.md:102). F12 steps BACK through the history, Shift+F12 forward
+       * again, which is the one case here where Shift is part of the shortcut rather than
+       * something to bail out on — so it is tested before the modifier guard below.
+       */
+      if (e.key === 'F12' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        stepBars(e.shiftKey ? 1 : -1);
+        return;
+      }
+      // F9, which the Trading submenu's own `New Order` row prints.
+      if (e.key === 'F9' && onNewOrder && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        onNewOrder();
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -697,7 +849,7 @@ export function CandleChart({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [props, changeProps, zoom, oneClick, setOneClick]);
+  }, [props, changeProps, zoom, oneClick, setOneClick, stepBars, fullScreen, onFullScreen, onNewOrder]);
 
   /**
    * Draw whatever is switched on, and remove whatever is not.
@@ -817,6 +969,71 @@ export function CandleChart({
     }
   }, []);
   useEffect(() => { refreshIndicators(); }, [ind, refreshIndicators]);
+
+  /**
+   * MetaTrader's `Tick Volumes`: a histogram of the number of PRICE CHANGES per bar, in its own
+   * sub-pane under the price.
+   *
+   * It is drawn here rather than through the indicator catalogue because it is not an indicator: it
+   * is the chart property `CHART_SHOW_VOLUMES`, reached from the F8 dialog's Show tab, from the
+   * context menu, and from Ctrl+L. One colour for the whole series, which is MetaTrader's own
+   * `Volumes:` field on the Colors tab (there is no up/down pair for it).
+   *
+   * The figure itself comes from the server with the bars, counted off the same curve the bars are
+   * sampled from, and the FORMING bar's count is maintained by the tick loop above. That is what
+   * makes this a live histogram rather than a static one: the newest column grows through its
+   * minute.
+   *
+   * `props.volumes === 'real'` deliberately draws nothing. Traded volume does not exist on this
+   * feed, which is why the menu's `Volumes` row is greyed with that reason; it cannot become a
+   * histogram here by being switched on somewhere else.
+   */
+  useEffect(() => {
+    const chart = chartRef.current, lc = lcRef.current;
+    if (!chart || !lc) return;
+    const bars = candlesRef.current;
+    const want = props.volumes === 'tick' && !tickVolumesBlocked(props);
+
+    if (!want) {
+      const series = volRef.current;
+      volRef.current = null;
+      volPaneRef.current = null;
+      if (series) {
+        try { chart.removeSeries(series); } catch { /* chart already gone */ }
+      }
+      const off = plotRef.current;
+      if (off) delete off.dataset.chartTickVolumes;
+      return;
+    }
+
+    let series = volRef.current;
+    if (!series) {
+      const pane = chart.addPane();
+      volPaneRef.current = pane.paneIndex();
+      // A fifth of the price pane, which is about what MetaTrader gives its volume subwindow.
+      try { pane.setHeight(Math.max(48, Math.round(chart.paneSize(0).height * 0.18))); } catch { /* no price pane yet */ }
+      series = chart.addSeries(lc.HistogramSeries, {
+        color: props.colours.volumes,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        // A count, so no decimals: `55`, never `55.00`.
+        priceFormat: { type: 'volume' },
+      }, volPaneRef.current);
+      volRef.current = series;
+    } else {
+      series.applyOptions({ color: props.colours.volumes } as never);
+    }
+    series.setData(
+      bars.flatMap((b) => (b.tickVolume === undefined ? [] : [{ time: b.time as UTCTimestamp, value: b.tickVolume }])),
+    );
+    /**
+     * A test seam, on the same terms as `chartBars` and `chartTradeHistory`: a histogram inside the
+     * chart's own canvas leaves nothing in the DOM, so from outside there is no way to tell a drawn
+     * series from a menu row that did nothing. The count is the number of bars that carry a figure.
+     */
+    const host = plotRef.current;
+    if (host) host.dataset.chartTickVolumes = String(bars.filter((b) => b.tickVolume !== undefined).length);
+  }, [props, revision]);
 
   /**
    * The crosshair tool is not a drawing tool — it switches the chart's own crosshair to MAGNET,
@@ -1151,14 +1368,20 @@ export function CandleChart({
          * The view, published on the plot.
          *
          * A test seam, and the honest one: there is no way to ask the chart its visible range from
-         * outside, and asserting on a React ref asserts on nothing a trader can see. These two say
-         * how wide the window is and whether it is following, which is exactly what broke. Written
-         * to the DOM rather than to state so this handler does not re-render on every pan.
+         * outside, and asserting on a React ref asserts on nothing a trader can see. These three
+         * say how wide the window is, WHERE it starts, and whether it is following, which is
+         * exactly what broke. Written to the DOM rather than to state so this handler does not
+         * re-render on every pan.
+         *
+         * `chartFrom` is what makes `Step by Step` checkable: one bar out of several hundred
+         * visible is still "at the live edge", so `chartFollowing` does not change and only the
+         * range's own start says the chart moved at all.
          */
         const host = plotRef.current;
         if (host) {
           host.dataset.chartBars = String(Math.round(visibleBarsRef.current));
           host.dataset.chartFollowing = followingRef.current ? '1' : '0';
+          host.dataset.chartFrom = range === null ? '' : range.from.toFixed(2);
         }
         // Objects live in time/price, so every view change has to re-project them onto their bars.
         setRevision((r) => r + 1);
@@ -1209,13 +1432,21 @@ export function CandleChart({
           let closedOne = false;
           let bar: Candle;
           if (!cur || bucket > cur.time) {
-            bar = { time: bucket, open: price, high: price, low: price, close: price };
+            // The forming bar's own tick volume starts at one: the price that opened it is the
+            // first print in it. The history bars arrive with theirs already counted, server-side,
+            // from the same curve (`minuteBars` in the shared package).
+            bar = { time: bucket, open: price, high: price, low: price, close: price, tickVolume: 1 };
             buf.push(bar);
             if (buf.length > MAX_HELD_BARS) buf.splice(0, buf.length - MAX_HELD_BARS);
             closedOne = true;
           } else if (bucket < cur.time) {
             bar = cur; // a late tick inside an already-closed bucket: ignore it
           } else {
+            // A tick volume counts price CHANGES, so a tick that repeats the last price does not
+            // raise it. That is the whole definition of the figure, and the reason it is a figure
+            // this feed genuinely has: the quote is quantised to the instrument's tick size, so a
+            // quiet minute really does print the same price several seconds running.
+            if (price !== cur.close) cur.tickVolume = (cur.tickVolume ?? 0) + 1;
             cur.high = Math.max(cur.high, price);
             cur.low = Math.min(cur.low, price);
             cur.close = price;
@@ -1241,6 +1472,11 @@ export function CandleChart({
           // One path for both cases. Appending only the newest value cannot work once displaced
           // indicators are in play, and recomputing costs a pass per switched-on indicator.
           if (indRef.current.size > 0) refreshIndicators();
+          // The volume bar grows within the minute, so it is updated on the tick rather than only
+          // when the bar closes. One `update` call, which is what the histogram costs.
+          if (volRef.current && bar.tickVolume !== undefined) {
+            volRef.current.update({ time: tm, value: bar.tickVolume } as never);
+          }
           if (!hoverRef.current) setLegend(legendOf(bar));
           /**
            * MetaTrader's "Chart auto scroll", and its whole rule: a NEW BAR scrolls to the latest
@@ -1283,14 +1519,15 @@ export function CandleChart({
    * MetaTrader's trade levels.
    *
    * `CHART_SHOW_TRADE_LEVELS` draws the levels of open positions, Stop Loss, Take Profit and
-   * pending orders. Only the first of those can exist here, and the reasons are worth stating
-   * because they are not laziness:
-   *   - there are no pending orders: every contract is market execution;
-   *   - the Stop Loss and the Take Profit ARE prices, and they are drawn, but by `MT5ChartLevels`
-   *     over this canvas rather than by the series: they are draggable, they carry MetaTrader's own
-   *     chips, and they come from the shared levels store the ticket writes.
-   * What is left here is the open-position level alone. Drawing a second, undraggable pair through
-   * the series would put two lines on one level and let them disagree.
+   * pending orders. Three of those four are drawn, each where it belongs:
+   *   - the open position's level, here, through the series;
+   *   - the pending orders' levels, in the effect below this one, which the chart's own menu now
+   *     places (it used to say "there are no pending orders: every contract is market execution",
+   *     and that stopped being true the moment the menu could arm one);
+   *   - the Stop Loss and the Take Profit, by `MT5ChartLevels` over this canvas rather than by the
+   *     series: they are draggable, they carry MetaTrader's own chips, and they come from the
+   *     shared levels store the ticket writes. Drawing a second, undraggable pair through the
+   *     series would put two lines on one level and let them disagree.
    *
    * Colour: MetaTrader draws position levels in the `Volumes` colour (CHART_COLOR_VOLUME is
    * documented as "Color of volumes and position opening levels"), which is Green in the one
@@ -1334,6 +1571,313 @@ export function CandleChart({
       try { series.removePriceLine(line); } catch { /* series already gone */ }
     };
   }, [openPosition?.entryRate, openPosition?.direction, openPosition?.lots, revision, props.showTradeLevels, props.colours]);
+
+  /**
+   * The pending orders' own levels, which is the other half of `CHART_SHOW_TRADE_LEVELS`.
+   *
+   * MetaTrader draws a waiting order as a line at its level, labelled with its type and volume,
+   * and that line is how a trader sees the order they just placed from this very menu. Dashed,
+   * because the level has NOT happened yet: the solid line above is a price the market traded at,
+   * and these are prices it has not reached.
+   *
+   * A trigger is an absolute price already, so there is no anchor arithmetic here: it was rounded
+   * to the symbol's digits when the row was clicked and the engine stored exactly that.
+   */
+  useEffect(() => {
+    const series = mainRef.current;
+    const lc = lcRef.current;
+    const mark = (n: number) => { const host = plotRef.current; if (host) host.dataset.chartPendingLevels = String(n); };
+    if (!series || !lc || !props.showTradeLevels || pendingLevels.length === 0) { mark(0); return; }
+    const colour = themeOf(props.colours).volumes;
+    const lines = pendingLevels
+      .filter((o) => Number.isFinite(o.price))
+      .map((o) => series.createPriceLine({
+        price: o.price,
+        color: colour,
+        lineWidth: 1,
+        lineStyle: lc.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: o.label,
+      }));
+    mark(lines.length);
+    return () => {
+      mark(0);
+      for (const line of lines) {
+        try { series.removePriceLine(line); } catch { /* series already gone */ }
+      }
+    };
+  }, [pendingLevels, revision, props.showTradeLevels, props.colours]);
+
+  /**
+   * MetaTrader's `Trade History` on the chart: the deals that are already closed, where they
+   * happened.
+   *
+   * The prices are the ones the ENGINE stamped at execution (`entryPrice`/`exitPrice`, migrations
+   * 0180 and 0182), not rates re-priced through today's anchor, so a deal from last week lands on
+   * the price it actually traded at. A row without them is skipped rather than placed at a price
+   * it never traded at; `tradeHistoryMarks` owns that rule and is tested on it.
+   *
+   * The query is the one the History tab already runs, so a terminal with the Toolbox open pays
+   * nothing for this, and a signed-out chart fetches nothing at all.
+   */
+  const closed = usePositions('settled');
+  const deals: ClosedDeal[] = useMemo(() => {
+    if (!props.showTradeHistory) return [];
+    const sym = instrument.symbol;
+    const rows = closed.data?.pages.flatMap((pg) => pg.items) ?? [];
+    return rows
+      // This chart's symbol only. A gold deal drawn on a EURUSD chart would be at a price that
+      // means nothing there, which is the same mistake as pricing through the wrong anchor.
+      .filter((p) => (p.symbol ?? sym) === sym)
+      .map((p) => ({
+        id: p.id,
+        direction: p.direction,
+        openedAtMs: p.openedAt,
+        settledAtMs: p.settledAt,
+        entryPrice: p.entryPrice ?? null,
+        exitPrice: p.exitPrice ?? null,
+        pnlCents: p.pnlCents ?? 0,
+        ticket: positionTicket(p),
+      }));
+  }, [closed.data, props.showTradeHistory, instrument.symbol]);
+
+  useEffect(() => {
+    const series = mainRef.current;
+    const lc = lcRef.current;
+    const host = plotRef.current;
+    if (!series || !lc) return;
+    /**
+     * The same kind of seam `showTradeLevels` carries, and for the same reason: these are drawn
+     * INTO a canvas, so from outside there is no way to ask whether they are there. This says how
+     * many deals are on the chart.
+     */
+    const mark = (n: number) => { if (host) host.dataset.chartTradeHistory = String(n); };
+    const marks = tradeHistoryMarks(deals);
+    if (marks.length === 0) { mark(0); return; }
+
+    const plugin = lc.createSeriesMarkers(series, marks.map((m) => ({
+      time: m.time as UTCTimestamp,
+      position: m.position,
+      shape: m.shape,
+      color: m.color,
+      text: m.text,
+    })));
+    // Each deal's entry joined to its exit, which is the other half of what MetaTrader draws.
+    // Drawn as a line series per deal rather than one with gaps: a single series would connect the
+    // exit of one deal to the entry of the next, inventing a trade that never happened.
+    const joins = tradeHistoryLines(deals).map((l) => {
+      const line = series ? chartRef.current?.addSeries(lc.LineSeries, {
+        color: l.color,
+        lineWidth: 1,
+        lineStyle: lc.LineStyle.Dotted,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      }, 0) : null;
+      line?.setData([
+        { time: l.from.time as UTCTimestamp, value: l.from.price },
+        { time: l.to.time as UTCTimestamp, value: l.to.price },
+      ]);
+      return line ?? null;
+    });
+    mark(deals.length);
+
+    return () => {
+      mark(0);
+      try { plugin.setMarkers([]); } catch { /* series already gone */ }
+      for (const l of joins) {
+        if (!l) continue;
+        try { chartRef.current?.removeSeries(l); } catch { /* chart already gone */ }
+      }
+    };
+  }, [deals, revision]);
+
+  /**
+   * Apply a template: the chart type, the period, every property and the indicators, in one act.
+   *
+   * `timeframe: null` leaves the period alone, which is MetaTrader's own behaviour for a template
+   * that does not name one, and which is why applying "Oscillator" to an H4 chart gives the
+   * oscillators rather than M1.
+   */
+  const applyTemplate = useCallback((t: ChartTemplate) => {
+    changeProps(t.properties);
+    setChartType(t.kind as MainType);
+    if (t.timeframe && (TIMEFRAME_KEYS as readonly string[]).includes(t.timeframe)) {
+      chooseTf(t.timeframe as Timeframe);
+    }
+    setIndicators(t.indicators);
+  }, [changeProps, chooseTf]);
+
+  /** Bumped when a template is saved or removed, so the submenu redraws its list. */
+  const [templateRev, setTemplateRev] = useState(0);
+
+  /**
+   * Save this chart as a template, under the name the dialog collected.
+   *
+   * Everything MetaTrader's `.tpl` carries and nothing it does not: the chart type, the period, the
+   * whole properties record, and the applied indicators. `tf` is written rather than null, because
+   * a chart saved by hand WAS on a period and MetaTrader's saved template carries it; the four
+   * seeded ones leave it null for the reason lib/chart/templates states.
+   */
+  const saveCurrentTemplate = useCallback((name: string) => {
+    const result = saveTemplate({
+      name,
+      kind: chartType as TemplateKind,
+      timeframe: tfRef.current,
+      properties: props,
+      indicators: [...ind],
+    });
+    if (result === 'saved') setTemplateRev((n) => n + 1);
+    return result;
+  }, [chartType, props, ind]);
+
+  /**
+   * The Templates submenu's rows, rebuilt when the saved set changes.
+   *
+   * Read through `templateRev` rather than inline, so saving or removing one redraws the list: the
+   * templates live in this device's storage, which React cannot see changing.
+   */
+  const templateItems = useMemo(() => {
+    void templateRev;
+    return [
+      { label: 'Save Template...', run: () => setSaveTemplateOpen(true) },
+      ...removableTemplates().map((t) => ({
+        label: `Remove: ${t.name}`,
+        run: () => { deleteTemplate(t.name); setTemplateRev((n) => n + 1); },
+      })),
+      ...listTemplates().map((t) => ({ label: t.name, run: () => applyTemplate(t) })),
+    ];
+  }, [templateRev, applyTemplate]);
+
+  /**
+   * MetaTrader's pending-order rows, built from the price that was clicked.
+   *
+   * The pair a click offers, the label it prints and the test that fills it are all in
+   * `@invest254/shared/pending`, which the ENGINE calls too. That is the point of putting them
+   * there: a row drawn here cannot promise a fill the server would not make.
+   *
+   * The volume is the one the ticket is set to, as MetaTrader takes its from the quick trading
+   * panel, and the level is the price under the cursor rounded to the symbol's digits — the number
+   * the row PRINTS, never the raw coordinate behind it, for the same reason the Alert row states.
+   */
+  const placeOrder = useCallback((kind: PendingKind, price: number) => {
+    const level = Number(price.toFixed(instRef.current.digits));
+    if (!Number.isFinite(level) || levelStakeCents <= 0) return;
+    onPlacePending?.({
+      kind,
+      symbol: instRef.current.symbol,
+      stakeCents: levelStakeCents,
+      triggerPrice: level,
+    });
+  }, [onPlacePending, levelStakeCents]);
+
+  /**
+   * The two types this click allows, or none when there is no price to compare against.
+   *
+   * `lastClose` is the market as this chart shows it. The ENGINE re-checks the level against its
+   * own price before arming anything, which is the one that decides; this only keeps the menu from
+   * offering a row that would be refused.
+   */
+  const pendingPair = useCallback((price: number | null): readonly [PendingKind, PendingKind] | null => {
+    const last = candlesRef.current[candlesRef.current.length - 1]?.close ?? null;
+    if (price === null || last === null || !Number.isFinite(price)) return null;
+    return pendingKindsAt(price, last);
+  }, []);
+
+  /**
+   * Why an order cannot be placed from this menu right now, in the trader's words, or undefined
+   * while it can.
+   *
+   * One value for both the dynamic top row and the Trading submenu's two, so the menu cannot offer
+   * a row in one place and refuse it in the other. `symbol !== undefined` means the chart is on an
+   * instrument this brand quotes but does not accept orders on, which is MetaTrader's `Disabled`
+   * trade mode and the same refusal the ticket prints for it.
+   */
+  const orderRefusal = useMemo((): string | undefined => {
+    if (onPlacePending === undefined) return 'This surface cannot place an order.';
+    if (symbol !== undefined) return `Trade disabled for ${symbol}. Orders are placed on the symbol this account settles.`;
+    if (levelStakeCents <= 0) return 'Set a volume on the order ticket first.';
+    return undefined;
+  }, [onPlacePending, symbol, levelStakeCents]);
+
+  /** Row 1: MetaTrader's dynamic top item, which is the FIRST of the pair the cursor allows. */
+  const pendingRow = useCallback((price: number | null, _where: 'top'): ChartMenuItem[] => {
+    const pair = pendingPair(price);
+    if (pair === null || price === null) return [];
+    const kind = pair[0];
+    return [{
+      kind: 'command',
+      label: pendingRowLabel(kind, lotsOfStake(levelStakeCents), price, instRef.current.digits),
+      run: () => placeOrder(kind, price),
+      ...(orderRefusal === undefined ? {} : { disabled: orderRefusal }),
+    }];
+  }, [pendingPair, placeOrder, levelStakeCents, orderRefusal]);
+
+  /**
+   * Row 2: MetaTrader's `Trading ▸`, its five rows in its order — the two pending orders the cursor
+   * allows, `Take Profit`, `Alert`, a separator (drawn as a disabled rule), and `New Order F9`.
+   */
+  const tradingSubmenu = useCallback((price: number | null) => {
+    const pair = pendingPair(price);
+    const dp = instRef.current.digits;
+    const rows: SubMenuItem[] = [];
+    const cannotOrder = orderRefusal;
+    if (pair !== null && price !== null) {
+      for (const kind of pair) {
+        rows.push({
+          label: pendingRowLabel(kind, lotsOfStake(levelStakeCents), price, dp),
+          run: () => placeOrder(kind, price),
+          ...(cannotOrder === undefined ? {} : { disabled: cannotOrder }),
+        });
+      }
+      /**
+       * `Take Profit  <price>`: MetaTrader arms the OPEN position's take profit at the clicked
+       * level. The engine holds it, exactly as the ticket's own T/P field does, so this is a
+       * shorter route to the same instruction rather than a second one.
+       */
+      rows.push({
+        label: `Take Profit  ${price.toFixed(dp)}`,
+        run: () => onTakeProfit?.(Number(price.toFixed(dp))),
+        ...(onTakeProfit === undefined
+          ? { disabled: 'This surface cannot set a level.' }
+          : openPosition === null
+            ? { disabled: 'A Take Profit belongs to an open position, and there is none open.' }
+            : {}),
+      });
+      // `Alert  <price>`, armed at the number the row PRINTS rather than the raw coordinate.
+      rows.push({
+        label: `Alert  ${price.toFixed(dp)}`,
+        run: () => {
+          const level = Number(price.toFixed(dp));
+          if (!Number.isFinite(level)) return;
+          const lastClose = candlesRef.current[candlesRef.current.length - 1]?.close ?? level;
+          useAlertsStore.getState().add({
+            enabled: true,
+            symbol: instRef.current.symbol,
+            condition: level >= lastClose ? 'last>' : 'last<',
+            price: level,
+            timeHHMM: '',
+            limit: ALERT_DEFAULTS.limit,
+            timeoutS: ALERT_DEFAULTS.timeoutS,
+            expiresAtMs: null,
+          });
+        },
+      });
+    }
+    /**
+     * `New Order  F9`. MetaTrader opens its order dialog; this terminal's ticket is docked beside
+     * the chart and never closed, so the row brings the eye to it rather than opening a second one.
+     */
+    rows.push({
+      label: 'New Order  F9',
+      // MetaTrader draws a dividing line above this row, which is why it is the one row here that
+      // carries a separator.
+      separator: rows.length > 0,
+      run: () => onNewOrder?.(),
+      ...(onNewOrder === undefined ? { disabled: 'The order ticket is already on screen.' } : {}),
+    });
+    return rows;
+  }, [pendingPair, placeOrder, levelStakeCents, orderRefusal, onTakeProfit, onNewOrder, openPosition]);
 
   const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" aria-hidden />;
   const dp = instrument.digits;
@@ -1499,6 +2043,16 @@ export function CandleChart({
         />}
         <div
           ref={plotRef}
+          /**
+           * The plot surface, named so a probe can point at it.
+           *
+           * Everything this chart reports about itself is written onto this element as a data
+           * attribute (`chartBars`, `chartFollowing`, `chartTradeLevel`, `chartTradeHistory`,
+           * `chartTickVolumes`, `chartPicture`), and those only appear once the thing they report
+           * has happened. This one is always here, which is what a test needs to right-click the
+           * chart at a chosen price in the first place.
+           */
+          data-chart-plot=""
           className="relative min-h-0 flex-1"
           style={{ background: TV.bg }}
           /**
@@ -1523,7 +2077,14 @@ export function CandleChart({
              */
             const host = hostRef.current?.getBoundingClientRect() ?? null;
             const price = host ? projection.priceOf(e.clientY - host.top) : null;
-            setChartMenu({ x: e.clientX, y: e.clientY, price: Number.isFinite(price as number) ? price : null });
+            setChartMenu({
+              x: e.clientX,
+              y: e.clientY,
+              price: Number.isFinite(price as number) ? price : null,
+              // Which pane was clicked, because `Delete Indicator Window` acts on THAT one and
+              // MetaTrader greys the row on the price pane. See `paneAtY`.
+              pane: paneAtY(e.clientY),
+            });
           }}
         >
           {/* Behind the candles: objects the trader set to draw as background. */}
@@ -1666,98 +2227,62 @@ export function CandleChart({
 
       {chartMenu ? (
         /**
-         * MetaTrader's 27-item chart background menu, minus the items this platform has no
-         * equivalent of. The groups below are its groups, in its order, under its labels and with
-         * its printed accelerators; the numbers are its rows in docs/mt5/08-chart-properties.md.
+         * MetaTrader's chart background menu: all 27 of its rows, in its order, in its eight
+         * groups, under its labels and with the accelerators it prints beside them. The numbers in
+         * the comments are its rows in the table at docs/mt5/08-chart-properties.md:490-524, read
+         * off MetaQuotes' own `chart_trading_menu.png`.
          *
          * Nothing here is a second implementation of anything. Every item calls the handler the
          * ⚙ Tools menu, the left rail or the Properties dialog already calls, which is the whole
          * point of a second surface: the menu is a shorter route to the same chart, not a copy of
          * it that can disagree with it.
          *
-         * WHAT IS NOT DRAWN, and why. Each of these has no handler to call because the thing itself
-         * does not exist here, and drawing a row that cannot act is the one failure this menu
-         * cannot afford:
-         *   1  `Sell Limit 1 219.306`   every contract is market execution, so there is no pending
-         *                    order to place at the clicked price, and the three order rows of the
-         *                    `Trading` submenu go with it for the same reason. Its fourth row,
-         *                    `Alert  219.306`, IS drawn: see below.
-         *   3  `Depth Of Market  Alt+B`  there is no order book; one price is quoted.
-         *   7  `Expert List  Alt+X`      there are no Expert Advisors and no MQL5 programs.
-         *   12 `Templates ▸`             templates are MetaTrader's saved chart settings files;
-         *                                this chart persists its settings per symbol instead and
-         *                                has no file to save or load.
-         *   14 `Docked  Alt+D`           the chart is a pane in one page, not a detachable window.
-         *   18 `Volumes  Ctrl+K` and
-         *   19 `Tick Volumes  Ctrl+L`    the feed carries no traded volume, which is the same
-         *                                reason the Show tab disables both rows (NO_VOLUME) and the
-         *                                seven volume-fed indicators are disabled in the catalogue.
-         *   21 `Trade History`           nothing draws closed deals on this chart, so the command
-         *                                would toggle a setting with no picture behind it. The
-         *                                Show tab keeps its checkbox because that dialog is a
-         *                                faithful copy of MetaTrader's thirteen rows; a menu is a
-         *                                list of commands, and a command must do something.
-         *   24 `Delete Indicators Window`  MetaTrader greys this outside an indicator subwindow,
-         *                                and this menu opens on the chart background, which is
-         *                                exactly where it greys it.
-         *   25 `Step by Step  F12`       that steps the Strategy Tester; there is no tester.
+         * THREE ROWS ARE GREYED, and MetaTrader greying a row it cannot act on is why they are
+         * drawn at all rather than removed: the menu keeps its shape, and the tooltip says why.
+         * Each is a thing this platform does not have the DATA for, not a thing left unbuilt:
+         *
+         *   3  `Depth Of Market  Alt+B`  contracts are struck against the brand rather than matched
+         *                                against other orders, so there is no book to show. The
+         *                                Market Watch context menu greys it for the same reason.
+         *   7  `Expert List  Alt+X`      there are no Expert Advisors. The Toolbox's Experts tab
+         *                                carries what this terminal's programs DO log, which is
+         *                                the indicators; a list of running EAs would be a list of
+         *                                nothing.
+         *   18 `Volumes  Ctrl+K`         TRADED volume, which this feed does not carry at all. Its
+         *                                neighbour `Tick Volumes` is a different figure and is
+         *                                live: see below.
          */
         <MT5ChartMenu
           at={chartMenu}
           onDismiss={() => setChartMenu(null)}
           groups={[
-            /**
-             * 2. `Trading ▸`, holding the one row of MetaTrader's submenu this platform can honour:
-             * `Alert  <price>` (docs/mt5/08-chart-properties.md:527 lists the submenu as
-             * `Sell Limit`, `Buy Stop`, `Take Profit`, `Alert`, ———, `New Order F9`).
-             *
-             * It is here now because the Toolbox grew an Alerts tab and an Alert Editor. Until it
-             * did, this row had nowhere to go and was correctly left out; the rule has not changed,
-             * only what the platform can do. The three order rows stay out (market execution only)
-             * and `New Order F9` stays out because the order ticket is docked beside the chart and
-             * never closed, so there is no window for it to open.
-             *
-             * The CONDITION follows the cursor, which is MetaTrader's own rule for this submenu,
-             * stated verbatim at :528-531 for the order types: what the menu offers depends on
-             * whether it was opened above or below the current price. An alert placed above the
-             * market is one that fires when the price rises to it, and below, when it falls to it.
-             * Anything else would arm an alert that was already true the moment it was created.
-             *
-             * The whole row is omitted rather than shown dead when there is no price yet (before
-             * the first paint), which is the same rule every other row here follows.
-             */
-            ...(chartMenu.price === null ? [] : [[{
-              kind: 'submenu' as const,
-              label: 'Trading',
-              items: [{
-                label: `Alert  ${chartMenu.price.toFixed(instrument.digits)}`,
-                run: () => {
-                  /**
-                   * The price the ROW SAYS, not the raw coordinate behind it.
-                   *
-                   * `coordinateToPrice` returns the full float for the pixel that was clicked
-                   * (3078.165777074284), and the row prints it at the symbol's digits (3078.17).
-                   * Arming the alert at the float would mean a trader read one number off the menu
-                   * and got another, on the one figure the alert is entirely about. The label is the
-                   * promise; this makes it the fact.
-                   */
-                  const price = Number(chartMenu.price?.toFixed(instrument.digits));
-                  if (!Number.isFinite(price)) return;
-                  const lastClose = candlesRef.current[candlesRef.current.length - 1]?.close ?? price;
-                  useAlertsStore.getState().add({
-                    enabled: true,
-                    symbol: instrument.symbol,
-                    condition: price >= lastClose ? 'last>' : 'last<',
-                    price,
-                    timeHHMM: '',
-                    limit: ALERT_DEFAULTS.limit,
-                    timeoutS: ALERT_DEFAULTS.timeoutS,
-                    expiresAtMs: null,
-                  });
-                },
-              }],
-            }]]),
             [
+              /**
+               * 1. MetaTrader's dynamic top row: a PENDING ORDER at the price that was clicked.
+               *
+               * Verbatim on why the type changes with the cursor: "If the menu is activated above
+               * the current price, a user can place Sell Limit and Buy Stop orders. If the menu is
+               * activated below the current price, Buy Limit and Sell Stop orders can be placed."
+               * The row names the volume and the level, exactly as its screenshot does
+               * (`Sell Limit 1  219.306`), and the volume is the ticket's own.
+               */
+              ...pendingRow(chartMenu.price, 'top'),
+              /**
+               * 2. `Trading ▸`, MetaTrader's own five rows: the two pending orders the cursor
+               * allows, `Take Profit`, `Alert`, a separator, and `New Order F9`
+               * (docs/mt5/08-chart-properties.md:527).
+               */
+              {
+                kind: 'submenu', label: 'Trading',
+                items: tradingSubmenu(chartMenu.price),
+              },
+            ],
+            [
+              // 3. No order book: contracts are struck against the brand, not matched.
+              {
+                kind: 'command', label: 'Depth Of Market', accel: 'Alt+B', run: () => {},
+                disabled: 'Depth of Market needs an order book. Contracts here are struck against the brand, not matched against other orders, so there is no book to show.',
+              },
               // 4. Not a chart setting but a terminal one, and the phone's one-click panel fires
               // from this same flag.
               { kind: 'toggle', label: 'One Click Trading', accel: 'Alt+T', on: oneClick, run: () => setOneClick(!oneClick) },
@@ -1771,6 +2296,12 @@ export function CandleChart({
               { kind: 'command', label: 'Indicator List', accel: 'Ctrl+I', run: () => setMenuOpen(true) },
               // 6. The same dialog Ctrl+B and the rail's list button open.
               { kind: 'command', label: 'Object List', accel: 'Ctrl+B', run: () => setObjectsListOpen(true) },
+              // 7. No Expert Advisors, so no list of them. The Experts tab logs what this
+              // terminal's programs genuinely do, which is the indicators.
+              {
+                kind: 'command', label: 'Expert List', accel: 'Alt+X', run: () => {},
+                disabled: 'This platform runs no Expert Advisors. What its programs do log is in the Toolbox Experts tab.',
+              },
             ],
             // 8-10. `shownKind` is which of MetaTrader's three is being drawn, so a Heikin Ashi
             // chart marks Candlesticks, exactly as the Properties dialog's radio does.
@@ -1785,22 +2316,87 @@ export function CandleChart({
                 kind: 'submenu', label: 'Timeframes',
                 items: TIMEFRAME_KEYS.map((k) => ({ label: k, on: tf === k, run: () => chooseTf(k) })),
               },
+              /**
+               * 12. `Templates ▸`: MetaTrader's `Save Template...`, `Remove Template ▸`, then the
+               * templates themselves. A template here is a record in this device's storage rather
+               * than a `.tpl` file, for the reason lib/chart/templates gives, and it carries what
+               * MetaTrader's carries: the chart type, the period, every property, and the
+               * indicators. Four ship with the terminal.
+               */
+              {
+                kind: 'submenu', label: 'Templates',
+                items: templateItems,
+              },
               // 13. The history refetch that a reconnect and the midnight reseed already trigger.
               { kind: 'command', label: 'Refresh', run: () => setReloadKey((k) => k + 1) },
             ],
             [
+              /**
+               * 14. `Docked`: MetaTrader's charts live inside the terminal window and can be
+               * undocked into a window of their own. This chart's equivalent is the full-window
+               * mode the phone bar's own button already switches to, so the row toggles that: a
+               * docked chart is the pane beside Market Watch and the ticket, an undocked one fills
+               * the window. Greyed where the surface has no full-window mode to go to.
+               */
+              {
+                kind: 'toggle', label: 'Docked', accel: 'Alt+D', on: !fullScreen,
+                run: () => onFullScreen?.(!fullScreen),
+                ...(onFullScreen === undefined
+                  ? { disabled: 'This chart has no window of its own to undock into.' }
+                  : {}),
+              },
               // 15-17. Three chart properties, written through the same `changeProps` the
               // Properties dialog writes through, so the menu and the dialog cannot drift apart.
               { kind: 'toggle', label: 'Grid', accel: 'Ctrl+G', on: props.showGrid, run: () => changeProps({ ...props, showGrid: !props.showGrid }) },
               { kind: 'toggle', label: 'Auto Scroll', on: props.autoScroll, run: () => changeProps({ ...props, autoScroll: !props.autoScroll }) },
               { kind: 'toggle', label: 'Chart Shift', on: props.chartShift, run: () => changeProps({ ...props, chartShift: !props.chartShift }) },
             ],
-            // 20. The open position's level, which is the one trade level that can exist here.
-            [{ kind: 'toggle', label: 'Trade Levels', on: props.showTradeLevels, run: () => changeProps({ ...props, showTradeLevels: !props.showTradeLevels }) }],
+            [
+              /**
+               * 18-19. MetaTrader's two volume rows are one tri-state (`CHART_SHOW_VOLUMES`), which
+               * is why `ChartProperties.volumes` is one field and why ticking one unticks the other.
+               *
+               * They are NOT the same figure. `Volumes` is traded volume, which this feed does not
+               * carry at all and never will: nothing is matched against anyone. `Tick Volumes` is
+               * the number of PRICE CHANGES inside the bar, which this curve genuinely has and
+               * which varies bar to bar, so it is a real histogram and it is live.
+               */
+              {
+                kind: 'toggle', label: 'Volumes', accel: 'Ctrl+K', on: props.volumes === 'real', run: () => {},
+                disabled: 'Traded volume needs trades matched between parties. Contracts here are struck against the brand, so there is none to show. Tick Volumes, below, is the figure this feed does have.',
+              },
+              {
+                kind: 'toggle', label: 'Tick Volumes', accel: 'Ctrl+L', on: props.volumes === 'tick',
+                run: () => changeProps({ ...props, volumes: props.volumes === 'tick' ? 'hide' : 'tick' }),
+                // MetaTrader's own rule, which the F8 dialog applies too (`tickVolumesBlocked`):
+                // a fixed scale leaves no room for the volume subwindow.
+                ...(tickVolumesBlocked(props)
+                  ? { disabled: 'The price scale is fixed, which leaves no volume subwindow to draw in. Turn Scale fix off on the Properties dialog.' }
+                  : {}),
+              },
+              // 20. The open position's level.
+              { kind: 'toggle', label: 'Trade Levels', on: props.showTradeLevels, run: () => changeProps({ ...props, showTradeLevels: !props.showTradeLevels }) },
+              // 21. The closed deals, drawn where they happened. See `tradeHistoryMarks`.
+              { kind: 'toggle', label: 'Trade History', on: props.showTradeHistory, run: () => changeProps({ ...props, showTradeHistory: !props.showTradeHistory }) },
+            ],
             [
               // 22-23. The toolbar's own −/+ , which hold the right edge still.
               { kind: 'command', label: 'Zoom In', accel: '+', run: () => zoom('in') },
               { kind: 'command', label: 'Zoom Out', accel: '-', run: () => zoom('out') },
+              /**
+               * 24. `Delete Indicators Window`, on the pane that was right-clicked. MetaTrader
+               * greys it outside an indicator subwindow, which is exactly what pane 0 is: the
+               * price itself, which cannot be deleted.
+               */
+              {
+                kind: 'command', label: 'Delete Indicators Window',
+                run: () => deleteIndicatorWindow(chartMenu.pane),
+                ...(chartMenu.pane > 0
+                  ? {}
+                  : { disabled: 'This is the price window. Right-click inside an indicator window to delete it.' }),
+              },
+              // 25. `F12 / Shift+F12 move one bar` (docs/mt5/03-chart-ui.md:102).
+              { kind: 'command', label: 'Step by Step', accel: 'F12', run: () => stepBars(-1) },
             ],
             // 26. MetaQuotes states this is one of only two commands the context menu has that the
             // main Charts menu does not (:554-556), which is why it is worth having here.
@@ -1808,6 +2404,16 @@ export function CandleChart({
             // 27. The F8 dialog.
             [{ kind: 'command', label: 'Properties', accel: 'F8', run: () => setPropertiesOpen(true) }],
           ]}
+        />
+      ) : null}
+
+      {/* `Save Template...`. MetaTrader's Save As box offers the chart's own name first, which is
+          its title: `SYMBOL,PERIOD`. */}
+      {saveTemplateOpen ? (
+        <MT5SaveTemplate
+          suggested={`${instrument.symbol},${tf}`}
+          onSave={saveCurrentTemplate}
+          onDismiss={() => setSaveTemplateOpen(false)}
         />
       ) : null}
 
@@ -2486,9 +3092,16 @@ const BarIcon = {
  * chart types, docs/mt5/08-chart-properties.md:500), and a row that opens a submenu.
  */
 type ChartMenuItem =
-  | { kind: 'command'; label: string; accel?: string; run: () => void }
-  | { kind: 'toggle'; label: string; accel?: string; on: boolean; run: () => void }
-  | { kind: 'radio'; label: string; accel?: string; on: boolean; run: () => void }
+  /**
+   * `disabled` is the REASON, not a boolean.
+   *
+   * MetaTrader greys a row it cannot act on rather than removing it, so the menu keeps its shape
+   * and a trader learns where things are. A greyed row with no explanation is the worst of both,
+   * so every one here carries the sentence that says why, on its tooltip.
+   */
+  | { kind: 'command'; label: string; accel?: string; run: () => void; disabled?: string }
+  | { kind: 'toggle'; label: string; accel?: string; on: boolean; run: () => void; disabled?: string }
+  | { kind: 'radio'; label: string; accel?: string; on: boolean; run: () => void; disabled?: string }
   /**
    * A row that opens a submenu.
    *
@@ -2498,7 +3111,24 @@ type ChartMenuItem =
    * announced as a plain `menuitem` rather than a `menuitemradio` that is permanently unchecked,
    * which is what a screen reader would otherwise read out.
    */
-  | { kind: 'submenu'; label: string; items: ReadonlyArray<{ label: string; on?: boolean; run: () => void }> };
+  | { kind: 'submenu'; label: string; items: ReadonlyArray<SubMenuItem> };
+
+/**
+ * A row inside a submenu.
+ *
+ * `disabled` carries the REASON rather than a flag, exactly as the top-level rows do: MetaTrader
+ * greys a row it cannot act on instead of removing it, and a greyed row with nothing to say reads
+ * as a bug. `separator` is MetaTrader's own rule in its Trading submenu, where `New Order` sits
+ * below a dividing line.
+ */
+export interface SubMenuItem {
+  label: string;
+  on?: boolean;
+  disabled?: string;
+  /** Drawn as a dividing line ABOVE this row. */
+  separator?: boolean;
+  run: () => void;
+}
 
 /**
  * MetaTrader's chart background context menu.
@@ -2596,8 +3226,15 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
       // A right click on the menu itself must not raise the browser's menu over it; the plot's own
       // suppression does not reach here, because the menu is not inside the plot.
       onContextMenu={(e) => e.preventDefault()}
-      className="fixed z-[90] min-w-56 rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[11px] shadow-xl"
-      style={{ left: pos.x, top: pos.y }}
+      className="fixed z-[90] min-w-56 overflow-y-auto overscroll-contain rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[11px] shadow-xl"
+      /**
+       * Twenty-seven rows is about 700px, which is taller than a landscape phone.
+       *
+       * Clamping the POSITION is not enough on such a screen: the menu still ran off the bottom, so
+       * everything from `Docked` down could be seen and not reached. It scrolls instead, which is
+       * what the Timeframes submenu beside it already does for its 21 periods.
+       */
+      style={{ left: pos.x, top: pos.y, maxHeight: 'calc(100vh - 12px)' }}
     >
       {groups.map((group, g) => (
         <div key={g} className="contents">
@@ -2616,6 +3253,7 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
                     role="menuitem"
                     aria-haspopup="menu"
                     aria-expanded={sub?.label === item.label}
+                    data-menu-item={item.label}
                     onClick={(e) => (sub?.label === item.label ? setSub(null) : openSub(item.label, e.currentTarget, item.items))}
                     className="flex w-full items-center gap-4 px-3 py-1.5 text-left text-white transition hover:bg-[#3183ff]"
                   >
@@ -2629,20 +3267,27 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
                       style={{ left: sub.x, top: sub.y, minWidth: sub.w, maxHeight: sub.h, width: 'max-content' }}
                       className="fixed z-[91] overflow-y-auto rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl"
                     >
-                      {item.items.map((sub) => (
-                        <button
-                          key={sub.label}
-                          type="button"
-                          role={sub.on === undefined ? 'menuitem' : 'menuitemradio'}
-                          {...(sub.on === undefined ? {} : { 'aria-checked': sub.on })}
-                          onClick={run(sub.run)}
-                          className={cn(
-                            'block w-full px-3 py-1 text-left transition hover:bg-[#3183ff]',
-                            sub.on ? 'bg-[#2b3543] text-white' : 'text-white',
-                          )}
-                        >
-                          {sub.label}
-                        </button>
+                      {item.items.map((row) => (
+                        <div key={row.label} className="contents">
+                          {row.separator ? <div role="separator" className="my-1 h-px bg-[#2b3543]" /> : null}
+                          <button
+                            type="button"
+                            role={row.on === undefined ? 'menuitem' : 'menuitemradio'}
+                            {...(row.on === undefined ? {} : { 'aria-checked': row.on })}
+                            data-menu-item={row.label}
+                            disabled={row.disabled !== undefined}
+                            title={row.disabled}
+                            onClick={run(row.run)}
+                            className={cn(
+                              'block w-full px-3 py-1 text-left transition',
+                              row.disabled !== undefined
+                                ? 'cursor-not-allowed text-[#55637a]'
+                                : cn('hover:bg-[#3183ff]', row.on ? 'bg-[#2b3543] text-white' : 'text-white'),
+                            )}
+                          >
+                            {row.label}
+                          </button>
+                        </div>
                       ))}
                     </div>
                   ) : null}
@@ -2654,9 +3299,17 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
                   type="button"
                   role={item.kind === 'command' ? 'menuitem' : item.kind === 'radio' ? 'menuitemradio' : 'menuitemcheckbox'}
                   {...(item.kind === 'command' ? {} : { 'aria-checked': item.on })}
+                  data-menu-item={item.label}
+                  disabled={item.disabled !== undefined}
+                  title={item.disabled}
                   onClick={run(item.run)}
                   onMouseEnter={() => setSub(null)}
-                  className="flex w-full items-center gap-4 px-3 py-1.5 text-left text-white transition hover:bg-[#3183ff]"
+                  className={cn(
+                    'flex w-full items-center gap-4 px-3 py-1.5 text-left transition',
+                    item.disabled === undefined
+                      ? 'text-white hover:bg-[#3183ff]'
+                      : 'cursor-not-allowed text-[#55637a]',
+                  )}
                 >
                   {/* The tick column, always reserved: without it the labels of the toggled rows
                       would sit a glyph further right than the rest and the menu would look ragged,

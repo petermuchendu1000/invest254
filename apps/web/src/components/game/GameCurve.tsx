@@ -5,6 +5,7 @@ import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { CurveCanvas, type MarketerBeat } from '@/components/game/CurveCanvas';
 import { CandleChart } from '@/components/game/CandleChart';
 import { lotsOfStake } from '@invest254/shared/account';
+import { PENDING_LABELS } from '@invest254/shared/pending';
 import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
@@ -14,6 +15,7 @@ import type { ActivePosition } from '@/lib/game/betting';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { cn } from '@/lib/cn';
 import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
+import { useChartOrders } from '@/lib/game/chartOrders';
 import type { Timeframe } from '@invest254/shared/candles';
 import type { Tick } from '@/lib/game/types';
 
@@ -92,8 +94,33 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
     const q = getSymbolQuote(symbol);
     return q === null ? null : { t: q.t, rate: q.rate, delta: 0 };
   }, [symbol, getLastTick, getSymbolQuote]);
-  const { activePosition, status } = useGameSocket();
+  const { activePosition, status, pendingOrders } = useGameSocket();
   const brand = useBrand();
+  /**
+   * The three order handlers the chart's context menu needs.
+   *
+   * Passed in rather than reached for inside `CandleChart`, because that component is deliberately
+   * prop-driven: it takes a tick source and a candle source and knows nothing about the socket, so
+   * the one place that holds both is here.
+   */
+  const chartOrders = useChartOrders({ brandSlug: brand.slug });
+  /**
+   * The waiting orders as levels for the chart to draw, this chart's symbol only.
+   *
+   * MetaTrader labels the line with the order's type and volume, which is the same text its Trade
+   * grid prints in those two columns; `pendingRowLabel` would add the price a second time, and the
+   * axis label already carries it.
+   */
+  const pendingLevels = useMemo(() => {
+    const on = charted ?? defaultSymbol;
+    return pendingOrders
+      .filter((o) => on === null || o.symbol === on)
+      .map((o) => ({
+        id: o.id,
+        price: o.triggerPrice,
+        label: `${PENDING_LABELS[o.kind].toLowerCase()} ${lotsOfStake(o.stakeCents, volumeDigits)}`,
+      }));
+  }, [pendingOrders, charted, defaultSymbol, volumeDigits]);
   // The wave follows the effective "basic" skin: a real marketer OR a player who chose Basic.
   const { isMarketer } = useMarketerSkin();
   const tvType = tradingViewTypeOf(chartStyleOf(brand.chartStyle));
@@ -163,6 +190,11 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
           openPosition={activePosition && activePosition.entryRate !== null
             ? { entryRate: activePosition.entryRate, direction: activePosition.direction, lots: lotsOfStake(activePosition.stakeCents, volumeDigits) }
             : null}
+          /* MetaTrader's chart menu places orders. See lib/game/chartOrders. */
+          onPlacePending={chartOrders.onPlacePending}
+          onTakeProfit={chartOrders.onTakeProfit}
+          onNewOrder={chartOrders.onNewOrder}
+          pendingLevels={pendingLevels}
         />
       ) : (
         <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} />

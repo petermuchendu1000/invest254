@@ -30,7 +30,8 @@ import {
   priceChangePct, priceText, stamp,
   type DealRow, type OrderRow, type PeriodKey, type PositionRow as ClosedRow, type Range,
 } from '@/lib/history/mt5history';
-import { ticketLabel, type ActivePosition } from '@/lib/game/betting';
+import { ticketLabel, type ActivePosition, type PendingOrderDto } from '@/lib/game/betting';
+import { PENDING_LABELS } from '@invest254/shared/pending';
 import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
@@ -71,14 +72,14 @@ import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
 type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
-  const { positions, status, earlyCloseEnabled, spread, setLevels: pushLevels } = useGameSocket();
+  const { positions, pendingOrders, status, earlyCloseEnabled, spread, setLevels: pushLevels } = useGameSocket();
   const brand = useBrand();
   /**
    * Whether the engine acts on the S/L and T/P levels at all: a brand with a price axis, pool mode
    * off. `earlyCloseEnabled` alone is not it. See `isContinuousBrand` in lib/game/levelWatch.ts.
    */
   const continuous = isContinuousBrand({ chartStyle: brand.chartStyle, earlyCloseEnabled });
-  const { getLastTick, getMarket, sell } = useGameSocketApi();
+  const { getLastTick, getMarket, sell, cancelPending } = useGameSocketApi();
   const { data: wallet } = useWallet();
   const money = useDisplayMoney();
   const token = useSession((s) => s.token);
@@ -423,7 +424,7 @@ export function MT5Toolbox() {
                 being about the PHONE, which is what MetaTrader's two-line entry is for, instead of
                 hiding the grid from every laptop. */}
             {tab === 'trade' ? (
-              openPositions.length ? (
+              openPositions.length || pendingOrders.length ? (
                 <>
                   {/* MetaTrader's phone entry: one two-line row per position. */}
                   {openPositions.map((pos) => (
@@ -464,8 +465,42 @@ export function MT5Toolbox() {
                           onStepTp={(dir) => stepTpOf(pos, dir)}
                         />
                       ))}
+                      {/**
+                       * The pending orders, BELOW the positions, in the same grid.
+                       *
+                       * MetaTrader's own shape: "open positions above the account summary strip,
+                       * pending orders below it, in a single shared column grid"
+                       * (docs/mt5/09-toolbox.md 249). There is no second table and no second
+                       * header, and what tells the two kinds apart is the `Type` cell, which reads
+                       * `buy limit` rather than `buy` — which is exactly how MetaTrader tells them
+                       * apart too (09-toolbox.md 296: the UI renders `buy`, `sell`, `buy limit`,
+                       * `sell limit`).
+                       */}
+                      {pendingOrders.map((order) => (
+                        <PendingGridRow
+                          key={order.id}
+                          order={order}
+                          digits={digits}
+                          nowRate={getLastTick()?.rate ?? null}
+                          px={px}
+                          lots={lots}
+                          onCancel={() => cancelPending(order.id)}
+                        />
+                      ))}
                     </Table>
                   </div>
+                  {/* The phone's own entry for an order waiting on its level. The two-line
+                      position row above it has no column for a trigger, so this states what the
+                      order is in its own words rather than borrowing that shape. */}
+                  {pendingOrders.map((order) => (
+                    <PendingPhoneRow
+                      key={order.id}
+                      order={order}
+                      digits={digits}
+                      lots={lots}
+                      onCancel={() => cancelPending(order.id)}
+                    />
+                  ))}
                 </>
               ) : (
                 <Empty>No open positions.</Empty>
@@ -1111,6 +1146,101 @@ function PositionRow({
         {note ? <div className="font-mono text-[10px] text-[#8fa2b8]">{note}</div> : null}
       </div>
     </Tag>
+  );
+}
+
+/**
+ * A pending order in the Trade grid, in MetaTrader's shared ten columns.
+ *
+ * What goes where, and why each cell reads as it does (docs/mt5/09-toolbox.md 280-300):
+ *
+ *   Ticket    MetaTrader's `Order` number for a pending order rather than a position ticket. These
+ *             orders have an id and no ticket number, so the id's first characters stand in, which
+ *             is the same stand-in `ticketLabel` makes for a position awaiting its number.
+ *   Time      when the order was ARMED. MetaTrader's `YYYY.MM.DD HH:MM:SS`, server time.
+ *   Type      `buy limit`, `sell stop` and so on, lowercase, which is how MetaTrader renders it and
+ *             the only thing in the grid that tells a pending row from a position row.
+ *   Volume    `requested / filled`, verbatim: *"volume requested in the pending order, and volume
+ *             covered by the deal"*, e.g. `0.01 / 0`. Nothing is filled while it waits, so `/ 0`.
+ *   Price     the TRIGGER, which is this order's own price, then the market's in the ninth column.
+ *   Profit    MetaTrader puts the order's `State` in the last column for a pending row, because a
+ *             waiting order has no profit. `placed` is MetaTrader's own word for one that is armed.
+ */
+function PendingGridRow({
+  order, digits, nowRate, px, lots, onCancel,
+}: {
+  order: PendingOrderDto;
+  digits: number;
+  nowRate: number | null;
+  px: (rate: number | null) => string;
+  lots: (stakeCents: number) => string;
+  onCancel: () => void;
+}) {
+  const buy = order.kind === 'buyLimit' || order.kind === 'buyStop';
+  return (
+    <tr data-pending-order={order.id} className="border-t border-[#2b3543]/60 hover:bg-[#202933]">
+      <Td first>{order.symbol}</Td>
+      <Td>{order.id.slice(0, 8)}</Td>
+      <Td>{stamp(order.createdAtMs)}</Td>
+      <Td className={buy ? 'text-[#3183ff]' : 'text-[#f23645]'}>{PENDING_LABELS[order.kind].toLowerCase()}</Td>
+      <Td>{lots(order.stakeCents)} / 0</Td>
+      <Td>{order.triggerPrice.toFixed(digits)}</Td>
+      <Td><span className="text-[#8fa2b8]">{order.slPrice === null ? '' : order.slPrice.toFixed(digits)}</span></Td>
+      <Td><span className="text-[#8fa2b8]">{order.tpPrice === null ? '' : order.tpPrice.toFixed(digits)}</span></Td>
+      <Td>{px(nowRate)}</Td>
+      <Td>
+        <span className="flex items-center justify-end gap-2">
+          <span className="text-[#8fa2b8]">placed</span>
+          {/* MetaTrader deletes a pending order from its own row. Nothing is debited while an order
+              waits, so there is nothing to settle: it simply stops existing. */}
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Delete order"
+            title="Delete this order. Nothing has been staked, so there is nothing to settle."
+            className="rounded-sm border border-[#2b3543] px-1.5 text-[11px] font-normal text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645]"
+          >
+            ×
+          </button>
+        </span>
+      </Td>
+    </tr>
+  );
+}
+
+/** The same order on a phone, where there is no grid: what it is, at what level, and a delete. */
+function PendingPhoneRow({
+  order, digits, lots, onCancel,
+}: {
+  order: PendingOrderDto;
+  digits: number;
+  lots: (stakeCents: number) => string;
+  onCancel: () => void;
+}) {
+  const buy = order.kind === 'buyLimit' || order.kind === 'buyStop';
+  return (
+    <div
+      data-pending-order={order.id}
+      className="flex w-full items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2 sm:hidden"
+    >
+      <div className="min-w-0">
+        <div className="text-[12px] font-semibold text-white">
+          {order.symbol},{' '}
+          <span className={buy ? 'text-[#3183ff]' : 'text-[#f23645]'}>
+            {PENDING_LABELS[order.kind].toLowerCase()} {lots(order.stakeCents)}
+          </span>
+        </div>
+        <div className="font-mono text-[11px] text-[#8fa2b8]">at {order.triggerPrice.toFixed(digits)}</div>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        aria-label="Delete order"
+        className="shrink-0 rounded-sm border border-[#2b3543] px-2 py-1 text-[11px] text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645]"
+      >
+        Delete
+      </button>
+    </div>
   );
 }
 

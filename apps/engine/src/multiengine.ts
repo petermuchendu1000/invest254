@@ -4,6 +4,7 @@ import {
   type Direction, instrumentById, isKnownInstrument, isTimeframe, symbolDef,
   type DigitKind, type MultDir,
 } from "@invest254/shared";
+import { isPendingKind } from "@invest254/shared/pending";
 import type { SiteRegistry } from "./siteregistry.js";
 import { MAX_ANCHORS } from "./markethistory.js";
 import type { SymbolHistories } from "./symbolhistories.js";
@@ -359,6 +360,52 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
           const p = rt.game.getPosition(u.positionId);
           if (p) toSiteUser(siteId, p.userId, "position_update", u);
         },
+        /**
+         * A pending order reached its level. The trader armed it earlier and is very likely not
+         * watching, so this is pushed rather than waited for: MetaTrader moves the row from Orders
+         * to Trade and writes a Journal line, and a terminal cannot do either without being told.
+         */
+        onPendingFilled: (e) => {
+          toSiteUser(siteId, e.order.userId, "pending_filled", {
+            orderId: e.order.id,
+            kind: e.order.kind,
+            symbol: e.order.symbol,
+            triggerPrice: e.order.triggerPrice,
+            stakeCents: e.order.stakeCents,
+            positionId: e.positionId,
+            error: e.error,
+          });
+          /**
+           * And the position itself, in the SAME frame shape the `open_position` reply uses.
+           *
+           * Without this a filled order left the Orders list and nothing appeared in Trade: that
+           * reply is the only other place `position_opened` is sent, and it is sent to the client
+           * that asked. Nobody asked for this one, so it has to be pushed, and it has to look
+           * exactly like the other so the client needs no second code path for it.
+           */
+          const p = e.position;
+          if (p) {
+            toSiteUser(siteId, p.userId, "position_opened", {
+              /**
+               * Nobody's request, so there is no `clientId` to echo and the client must not guess
+               * one: its fallback is "the oldest order still awaiting its ack", which would pair
+               * THIS position's ticket and entry price with a market order the trader happened to
+               * have in flight. This flag is what tells it to adopt the position instead.
+               */
+              fromPending: true,
+              orderId: e.order.id,
+              positionId: p.id,
+              ticket: p.ticket,
+              entryRate: p.outcome.entryRate,
+              direction: p.direction,
+              stakeCents: p.stakeCents,
+              durationS: p.durationS,
+              expiresAtMs: p.expiresAtMs,
+              slPrice: p.slPrice,
+              tpPrice: p.tpPrice,
+            });
+          }
+        },
         onSettled: (e) => {
           toSiteUser(siteId, e.position.userId, "position_settled", {
             positionId: e.position.id,
@@ -534,6 +581,91 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
             case "sell": {
               const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
               await rt.game.sell(String(msg.data.positionId), userId); return;
+            }
+            /**
+             * MetaTrader's pending orders: arm an order at a price, and wait.
+             *
+             * The three frames below are deliberately the same shape as `open_position`'s: the
+             * caller's own id is echoed on every answer, because a trader can arm a second order
+             * while the first is still being written and binding by arrival order would be a guess
+             * that is wrong exactly when it costs money.
+             *
+             * The LEVEL is validated against the market by the engine, not by the browser. The
+             * client calls the same `pendingLevelValid` so it never offers an impossible row, but
+             * the price it holds is a tick or two old and the engine's is not — and an order that
+             * would fill the instant it was placed is a market order wearing the wrong name.
+             */
+            case "place_pending": {
+              const orderId = msg.data?.clientId === undefined ? undefined : String(msg.data.clientId);
+              const cid = orderId === undefined ? {} : { clientId: orderId };
+              const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED", ...cid });
+              if (opts.playAllowed && !(await opts.playAllowed()))
+                return send(ws, "error", { code: "SYSTEM_DISABLED", message: "Play is temporarily disabled by the platform.", ...cid });
+              const lvl = (v: unknown): number | null => {
+                const n = Number(v);
+                return Number.isFinite(n) && n > 0 ? n : null;
+              };
+              const market = rt.game.priceRightNow();
+              if (market === null) {
+                return send(ws, "error", {
+                  code: "NO_PRICE",
+                  message: "The trade server has no price for this symbol yet.",
+                  ...cid,
+                });
+              }
+              /**
+               * Only the symbol this brand ticks. The sweep offers `pending.step` that one symbol
+               * and no other, so an order armed on anything else would be armed forever: listed,
+               * never filled, and never refused. MetaTrader's own `Disabled` trade mode is what the
+               * client already shows for those symbols; this is the server saying the same thing.
+               */
+              if (!isPendingKind(msg.data.kind)) {
+                return send(ws, "error", {
+                  code: "ORDER_REJECTED",
+                  message: "That is not one of the four pending order types.",
+                  ...cid,
+                });
+              }
+              const traded = rt.game.tradedSymbol();
+              const asked = String(msg.data.symbol ?? "");
+              if (traded === null || asked !== traded) {
+                return send(ws, "error", {
+                  code: "WRONG_SYMBOL",
+                  message: traded === null
+                    ? "This account has no tradable instrument right now."
+                    : `Orders on this account are placed on ${traded}.`,
+                  ...cid,
+                });
+              }
+              try {
+                const order = await rt.game.pending.place({
+                  userId,
+                  kind: msg.data.kind,
+                  symbol: traded,
+                  stakeCents: Number(msg.data.stakeCents),
+                  triggerPrice: Number(msg.data.triggerPrice),
+                  slPrice: lvl(msg.data.slPrice),
+                  tpPrice: lvl(msg.data.tpPrice),
+                  durationS: Number(msg.data.durationS ?? 60),
+                  marketPrice: market,
+                });
+                return send(ws, "pending_placed", { ...cid, order });
+              } catch (err: any) {
+                return send(ws, "error", { code: "ORDER_REJECTED", message: String(err?.message ?? err), ...cid });
+              }
+            }
+            case "cancel_pending": {
+              const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
+              try {
+                const order = await rt.game.pending.cancel(String(msg.data.orderId), userId);
+                return send(ws, "pending_canceled", { orderId: order.id });
+              } catch (err: any) {
+                return send(ws, "error", { code: "ORDER_REJECTED", message: String(err?.message ?? err) });
+              }
+            }
+            case "pending_orders": {
+              const userId = userOf.get(ws); if (!userId) return send(ws, "error", { code: "AUTH_REQUIRED" });
+              return send(ws, "pending_orders", { orders: rt.game.pending.list(userId) });
             }
             /**
              * MetaTrader's Modify position: move or clear the protective levels on an open trade.

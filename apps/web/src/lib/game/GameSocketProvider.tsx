@@ -40,6 +40,8 @@ import type {
   ActivePosition,
   BalanceData,
   OpenPositionInput,
+  PlacePendingInput,
+  PendingOrderDto,
   PositionOpenedData,
   PositionSettledData,
   PositionUpdateData,
@@ -96,6 +98,15 @@ interface GameSocketValue {
    */
   setLevels: (slPrice: number | null, tpPrice: number | null, positionId?: string) => boolean;
   /**
+   * MetaTrader's pending orders: arm one at a price, cancel one, and read what is waiting.
+   *
+   * `placePending` only ASKS. The engine validates the level against its own price, which is the
+   * one that matters: the browser's is a tick or two old, and an order placed against a stale
+   * price is one that fills the instant it is made. Returns false when the socket is down.
+   */
+  placePending: (input: PlacePendingInput) => boolean;
+  cancelPending: (orderId: string) => boolean;
+  /**
    * The last trade error the engine sent, for the order window to show as MetaTrader's rejection.
    *
    * Carries the same title and detail the toast uses, from `lib/game/orderResult`, so the two
@@ -123,6 +134,14 @@ interface GameSocketValue {
    * priced at the ask and a sell at the bid is the truth about the trade, stated.
    */
   spread: { buy: number; sell: number } | null;
+  /**
+   * The orders armed at a price, waiting for the market, as the ENGINE holds them.
+   *
+   * Never guessed at from what this tab sent: the engine is the side that fills them, and it is
+   * also the side a second device's order arrives at. The list is asked for on connect and
+   * refreshed whenever one is placed, cancelled or filled.
+   */
+  pendingOrders: readonly PendingOrderDto[];
 
   // ── Phase 2: Deriv-style digits/instrument stream (isolated from the rise/fall path above) ──────
   /** Authoritative per-instrument tick buffer (quote as `rate`), for the digits chart. */
@@ -252,8 +271,8 @@ export interface CandlesReply {
 }
 
 /** Stable functions (never change identity) — consumers that only trade/read buffers never re-render. */
-type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'spread' | 'lastTradeError' | 'instrumentResetKey'>;
-type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'spread' | 'lastTradeError'>;
+type GameSocketApi = Omit<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'spread' | 'pendingOrders' | 'lastTradeError' | 'instrumentResetKey'>;
+type GameSocketState = Pick<GameSocketValue, 'status' | 'online' | 'fairness' | 'activePosition' | 'positions' | 'earlyCloseEnabled' | 'spread' | 'pendingOrders' | 'lastTradeError'>;
 const ApiCtx = createContext<GameSocketApi | null>(null);
 const StateCtx = createContext<GameSocketState | null>(null);
 const InstKeyCtx = createContext<string>('');
@@ -364,6 +383,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
    * server never sent, which is the thing this client just stopped doing.
    */
   const [spread, setSpread] = useState<{ buy: number; sell: number } | null>(null);
+  const [pendingOrders, setPendingOrders] = useState<readonly PendingOrderDto[]>([]);
   /**
    * EVERY position this account currently has running, oldest first.
    *
@@ -814,6 +834,29 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     return true;
   }, [pick, send, toast]);
 
+  /**
+   * Arm a pending order at a price.
+   *
+   * The engine answers with `pending_placed` or an `ORDER_REJECTED` error, and the list is refreshed
+   * from the engine rather than guessed at here: the authority on what is armed is the side that
+   * will fill it.
+   */
+  const placePending = useCallback((input: PlacePendingInput): boolean => {
+    if (!send('place_pending', { ...input, clientId: `po-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })) {
+      toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: your order was not placed.' });
+      return false;
+    }
+    return true;
+  }, [send, toast]);
+
+  const cancelPending = useCallback((orderId: string): boolean => {
+    if (!send('cancel_pending', { orderId })) {
+      toast.push({ tone: 'error', title: 'Not connected', description: 'Reconnecting: your order was not cancelled.' });
+      return false;
+    }
+    return true;
+  }, [send, toast]);
+
   const sell = useCallback((positionId?: string) => {
     const a = pick(positionId);
     if (!a || !a.positionId || a.phase !== 'open' || !a.sellable) return;
@@ -1157,7 +1200,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
            */
           const ackKey = d.clientId !== undefined && d.clientId !== null
             ? { clientId: String(d.clientId) }
-            : { clientId: positionsRef.current.find((p) => !p.positionId)?.clientId };
+            // A pending order's fill is nobody's request, so there is nothing to bind it to and the
+            // fallback below must not be used: see `fromPending` in lib/game/betting.
+            : d.fromPending === true
+              ? { clientId: undefined }
+              : { clientId: positionsRef.current.find((p) => !p.positionId)?.clientId };
           clearOpenAck(ackKey.clientId); // acknowledged: that order's watchdog has nothing to guard
           const fill = (cur: ActivePosition | null): ActivePosition => ({
             positionId: d.positionId,
@@ -1322,6 +1369,46 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           if (d.rejected && d.rejected.length > 0) {
             logJournal('warn', 'Quotes', `not quoted (${d.rejected.length} of ${(d.symbols?.length ?? 0) + d.rejected.length}, cap ${d.max ?? '?'}): ${d.rejected.slice(0, 6).join(', ')}`);
           }
+          break;
+        }
+        /**
+         * MetaTrader's pending orders. The engine is the authority on what is armed, so every one
+         * of these refreshes the list from it rather than patching a local copy: a second device,
+         * a reconnect and a fill all change the book, and only one side sees all three.
+         */
+        case 'pending_orders': {
+          const d = data as { orders?: PendingOrderDto[] };
+          setPendingOrders(Array.isArray(d.orders) ? d.orders : []);
+          break;
+        }
+        case 'pending_placed': {
+          const d = data as { order?: PendingOrderDto };
+          if (d.order) {
+            logJournal('ok', 'Trade', `${d.order.kind} ${d.order.symbol} armed at ${d.order.triggerPrice}`);
+          }
+          send('pending_orders', {});
+          break;
+        }
+        case 'pending_canceled': {
+          logJournal('info', 'Trade', 'pending order cancelled');
+          send('pending_orders', {});
+          break;
+        }
+        /**
+         * One reached its level. The trader armed it earlier and is very likely not watching, so it
+         * is announced rather than left to be noticed: MetaTrader writes a Journal line and moves
+         * the row from Orders to Trade.
+         */
+        case 'pending_filled': {
+          const d = data as { kind?: string; symbol?: string; triggerPrice?: number; positionId?: string | null; error?: string | null };
+          if (d.error) {
+            logJournal('error', 'Trade', `${d.kind ?? 'pending order'} at ${d.triggerPrice ?? '?'} could not fill: ${d.error}`);
+            toast.push({ tone: 'error', title: 'Order not filled', description: d.error });
+          } else {
+            logJournal('ok', 'Trade', `${d.kind ?? 'pending order'} ${d.symbol ?? ''} filled at ${d.triggerPrice ?? '?'}`);
+            toast.push({ tone: 'info', title: 'Pending order filled', description: `${d.symbol ?? ''} at ${d.triggerPrice ?? ''}` });
+          }
+          send('pending_orders', {});
           break;
         }
         case 'symbol_quote': {
@@ -1622,11 +1709,13 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
     requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks,
+    placePending, cancelPending,
   }), [getTicks, getLastTick, openPosition, setLevels, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
-    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks]);
-  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, lastTradeError }), [status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, lastTradeError]);
+    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks,
+    placePending, cancelPending]);
+  const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, pendingOrders, lastTradeError }), [status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, pendingOrders, lastTradeError]);
 
   return (
     <ApiCtx.Provider value={apiValue}>
