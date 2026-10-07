@@ -94,7 +94,7 @@ export function MT5ClosePosition({
       role="dialog"
       aria-modal="true"
       aria-label={`Close position ${ticketOf(pos)}`}
-      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)] sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         {/* Title block: MetaTrader names the ticket on the first line and the deal on the second. */}

@@ -214,7 +214,7 @@ export function MT5OrderTicket() {
             onClick={() => setTypingVol(lots.toFixed(volDigits))}
             title={`Volume in lots. Type a value between ${minLots.toFixed(volDigits)} and ${maxLots.toFixed(volDigits)}.`}
             aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
-            className="flex h-8 items-center justify-center rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] font-mono text-[14px] font-bold text-white tabular-nums transition hover:border-[var(--mt5-blue)]"
+            className="flex h-8 items-center justify-center rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] font-mono text-[14px] font-bold text-[var(--mt5-text)] tabular-nums transition hover:border-[var(--mt5-blue)]"
           >
             {lots.toFixed(volDigits)}
           </button>
@@ -227,7 +227,7 @@ export function MT5OrderTicket() {
             onChange={(e) => setTypingVol(e.target.value)}
             onBlur={commitVol}
             onKeyDown={(e) => { if (e.key === 'Enter') commitVol(); if (e.key === 'Escape') setTypingVol(null); }}
-            className="flex h-8 w-full items-center justify-center rounded border border-[var(--mt5-blue)] bg-[var(--mt5-surface)] text-center font-mono text-[14px] font-bold text-white tabular-nums outline-none"
+            className="flex h-8 w-full items-center justify-center rounded border border-[var(--mt5-blue)] bg-[var(--mt5-surface)] text-center font-mono text-[14px] font-bold text-[var(--mt5-text)] tabular-nums outline-none"
           />
         )}
         {steps.map((st) => (

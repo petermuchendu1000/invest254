@@ -957,7 +957,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
       role="dialog"
       aria-modal="true"
       aria-label="Alert Editor"
-      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)] sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <form
         onSubmit={(e) => { e.preventDefault(); onOk(draft); }}
@@ -977,7 +977,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
             <select
               value="notification"
               onChange={() => { /* the three others are disabled options; nothing to select */ }}
-              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
+              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
             >
               <option value="notification">Notification</option>
               <option value="sound" disabled>Sound (no sound files on this platform)</option>
@@ -992,7 +992,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
               aria-label="Expiration"
               value={dtLocal(draft.expiresAtMs)}
               onChange={(e) => onChange({ ...draft, expiresAtMs: e.target.value ? new Date(e.target.value).getTime() : null })}
-              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
+              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
             />
           </Field>
 
@@ -1013,7 +1013,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
               value={draft.condition}
               aria-label="Condition"
               onChange={(e) => onChange({ ...draft, condition: e.target.value as AlertCondition })}
-              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
+              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
             >
               {ALERT_CONDITIONS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
@@ -1030,7 +1030,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
                 aria-label="Value"
                 placeholder="15:00"
                 onChange={(e) => onChange({ ...draft, timeHHMM: e.target.value })}
-                className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
+                className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
               />
             ) : (
               <input
@@ -1038,7 +1038,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
                 aria-label="Value"
                 inputMode="decimal"
                 onChange={(e) => onChange({ ...draft, price: Number(e.target.value) })}
-                className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
+                className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
               />
             )}
           </Field>
@@ -1072,7 +1072,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
                 aria-label="Timeout"
                 value={draft.timeoutS}
                 onChange={(e) => onChange({ ...draft, timeoutS: Math.max(1, Number(e.target.value) || 1) })}
-                className="w-24 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
+                className="w-24 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
               />
               <span className="text-[var(--mt5-muted)]">sec</span>
             </span>
@@ -1085,7 +1085,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
               aria-label="Maximum iterations"
               value={draft.limit}
               onChange={(e) => onChange({ ...draft, limit: Math.max(1, Number(e.target.value) || 1) })}
-              className="w-24 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
+              className="w-24 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
             />
           </Field>
         </div>
@@ -1688,7 +1688,7 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
                     aria-label="Custom period from"
                     value={custom.from}
                     onChange={(e) => setCustom({ ...custom, from: e.target.value })}
-                    className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
+                    className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[11px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
                   />
                 </label>
                 <label className="flex items-center gap-2 text-[11px] text-[var(--mt5-muted)]">
@@ -1698,7 +1698,7 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
                     aria-label="Custom period to"
                     value={custom.to}
                     onChange={(e) => setCustom({ ...custom, to: e.target.value })}
-                    className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
+                    className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[11px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
                   />
                 </label>
                 <button type="button" onClick={() => setMenu(null)} className="self-end rounded bg-[var(--mt5-blue)] px-2 py-0.5 text-[11px] font-semibold text-white">Apply</button>

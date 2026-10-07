@@ -53,7 +53,7 @@ export function MT5Settings() {
   const [accountOpen, setAccountOpen] = useState(false);
 
   return (
-    <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
+    <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)]">
       {/* MetaTrader's Settings title bar is a single line — there is no second instrument-filter
           line the way the History screen has one. */}
       <MT5TitleBar title="Settings" back />
@@ -111,13 +111,15 @@ export function MT5Settings() {
         {aboutRows(isMarketer, register).map((r) => (
           <Row key={r.id} label={r.label} sub={r.sub} href={r.href} chevron />
         ))}
-        {/* The problem-gambling helpline is a gambling disclosure, so it follows the same rule as
-            the rows above and is absent from a marketer screen. It is also absent from a BROKER's
-            settings: a helpline for a service that does not cover what this reader is doing is
-            worse than none. Same number the footer carries, under the same rule. */}
-        {isMarketer || register === 'trading'
-          ? null
-          : <Row label="Helpline" sub="Free, confidential support" href="tel:1190" value="1190" />}
+        {/* No problem-gambling helpline here, and the row is GONE rather than conditional.
+            It was written as `isMarketer || register === 'trading' ? null : <Row …>`, and on this
+            screen both halves of that test are constants: `MT5Settings` renders only when
+            `isTerminalScreen(terminal, isMarketer)` holds, which already means `terminal && not a
+            marketer`, and `register` is `registerOf(terminal)`, which is `'trading'` for exactly
+            that case. So the row could never draw, and a condition that cannot be false reads like
+            a feature that is sometimes there. The reason it should not draw is unchanged and is
+            worth keeping: a helpline for a service that does not cover what this reader is doing is
+            worse than none. A gambling shell has its own settings screen and the footer's own row. */}
         {/* No "Operated under licence." fallback: a brand that publishes no licence line has not
             told us it is licensed, and saying so for it would be the platform inventing a claim
             about its own operator. */}
@@ -168,7 +170,7 @@ function AccountCard({ open, onToggle }: { open: boolean; onToggle: () => void }
     >
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-[15px] font-semibold leading-tight text-white">{user.username}</span>
+          <span className="min-w-0 truncate text-[15px] font-semibold leading-tight text-[var(--mt5-text)]">{user.username}</span>
           <span className="shrink-0 rounded-sm bg-[var(--mt5-border)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--mt5-muted)]">
             {demo ? 'Demo' : 'Real'}
           </span>

@@ -94,7 +94,7 @@ export function MT5SaveTemplate({
             onChange={(e) => { setName(e.target.value); setError(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
             data-template-name
-            className="h-8 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 text-[12px] text-white outline-none focus:border-[var(--mt5-blue)]"
+            className="h-8 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 text-[12px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
           />
           {/* What a template carries, stated where it is saved: MetaTrader's rule is settings and
               indicators, never the objects drawn on the chart. */}
@@ -123,7 +123,7 @@ export function MT5SaveTemplate({
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-[var(--mt5-text)] transition hover:bg-[var(--mt5-border)]"
           >
             Cancel
           </button>

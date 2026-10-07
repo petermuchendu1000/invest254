@@ -70,7 +70,7 @@ function MT5PositionDetail({ id, onClose }: { id: string | null; onClose: () => 
         role="dialog"
         aria-modal="true"
         aria-label="Position detail"
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto overscroll-contain border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] pb-[env(safe-area-inset-bottom)] text-white shadow-2xl sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-sm sm:border"
+        className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto overscroll-contain border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] pb-[env(safe-area-inset-bottom)] text-[var(--mt5-text)] shadow-2xl sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-sm sm:border"
       >
         <MT5TitleBar
           embedded

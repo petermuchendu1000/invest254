@@ -65,7 +65,7 @@ export function MT5PositionMenu({
                 type="button"
                 onClick={it.onPick}
                 disabled={it.disabled}
-                className="flex w-full flex-col items-start border-b border-[var(--mt5-border)]/60 px-3 py-3 text-left text-[14px] text-white transition last:border-b-0 hover:bg-[var(--mt5-raised)] disabled:cursor-not-allowed disabled:text-[var(--mt5-muted)]"
+                className="flex w-full flex-col items-start border-b border-[var(--mt5-border)]/60 px-3 py-3 text-left text-[14px] text-[var(--mt5-text)] transition last:border-b-0 hover:bg-[var(--mt5-raised)] disabled:cursor-not-allowed disabled:text-[var(--mt5-muted)]"
               >
                 {it.label}
                 {it.note ? <span className="mt-0.5 text-[11px] leading-snug text-[var(--mt5-muted)]">{it.note}</span> : null}

@@ -11,7 +11,6 @@ import { DigitsBottomNav } from '@/components/layout/DigitsBottomNav';
 import { PositionsSheet } from '@/components/game/digits/PositionsSheet';
 import { TransactionHistoryModal } from '@/components/game/digits/TransactionHistoryModal';
 import { HowToTradeModal } from '@/components/game/digits/HowToTradeModal';
-import { SoundBootstrap } from '@/components/layout/SoundToggle';
 import { LiveChatPanel, LiveChatLauncher } from '@/components/chat/LiveChatPanel';
 import { AccountDialogs } from '@/components/account/AccountDialogs';
 import { Footer } from '@/components/layout/Footer';
@@ -66,7 +65,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <PositionsSheet />
         <TransactionHistoryModal />
         <HowToTradeModal />
-        <SoundBootstrap />
         <LiveChatPanel />
         <AccountDialogs />
         <SessionBootstrap />

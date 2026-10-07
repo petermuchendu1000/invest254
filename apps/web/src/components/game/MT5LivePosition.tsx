@@ -140,7 +140,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           onClick={() => setClosing(true)}
           disabled={!closable}
           title={pos.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
-          className="h-9 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[12px] font-semibold text-white transition hover:border-[var(--mt5-blue)] disabled:cursor-not-allowed disabled:opacity-40"
+          className="h-9 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[12px] font-semibold text-[var(--mt5-text)] transition hover:border-[var(--mt5-blue)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {closeWhy}
         </button>

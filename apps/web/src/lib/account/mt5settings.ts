@@ -45,8 +45,20 @@ export function aboutRows(isMarketer: boolean, register: Register = 'gaming'): A
   return rows.filter((r) => !(isMarketer && r.gambling));
 }
 
-/** The sub-label under Identity verification, from the KYC status the API reports. */
+/**
+ * The sub-label under Identity verification, from the KYC status the API reports.
+ *
+ * `undefined` is NOT "not verified", and collapsing the two was the same defect the verification
+ * dialog was fixed for: a status that has not arrived yet -- the request is in flight, the token has
+ * not rehydrated, the call failed -- is a question this row cannot answer, and answering it anyway
+ * told a trader who HAD submitted their documents that they had not. The dialog behind this row
+ * already distinguishes them (`AccountDialogs` keeps an explicit `'unknown'` and never shows the
+ * form on it); the row that opens it now does too.
+ *
+ * `null` still means "asked, and the account has no KYC record", which genuinely is not verified.
+ */
 export function kycSub(status: string | null | undefined): string {
+  if (status === undefined) return 'Checking…';
   switch (status) {
     case 'approved': return 'Verified';
     case 'pending': return 'In review';

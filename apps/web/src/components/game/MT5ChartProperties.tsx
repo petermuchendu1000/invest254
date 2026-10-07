@@ -65,7 +65,7 @@ export function MT5ChartProperties({
       role="dialog"
       aria-modal="true"
       aria-label={`Properties of ${symbol},${timeframe}`}
-      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)] sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[76vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
@@ -111,7 +111,7 @@ export function MT5ChartProperties({
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-[var(--mt5-text)] transition hover:bg-[var(--mt5-border)]"
           >
             Cancel
           </button>
@@ -160,7 +160,7 @@ function Group({ children }: { children: React.ReactNode }) {
   return <div className="mb-3 rounded-sm border border-[var(--mt5-border)] p-2.5 last:mb-0">{children}</div>;
 }
 
-const num = 'h-8 w-28 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 font-mono text-[11px] text-white outline-none focus:border-[var(--mt5-blue)] disabled:opacity-40';
+const num = 'h-8 w-28 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 font-mono text-[11px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)] disabled:opacity-40';
 
 function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
   return (
@@ -334,7 +334,7 @@ function ColorsTab({ draft, set }: { draft: ChartProperties; set: Set }) {
       <label className="mb-3 flex items-center gap-2 text-[11px]">
         <span className="w-24 shrink-0 text-right text-[var(--mt5-muted)]">Scheme:</span>
         <select
-          className="h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
+          className="h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
           value={draft.scheme ?? ''}
           onChange={(e) => {
             const name = e.target.value as SchemeName;
@@ -358,7 +358,7 @@ function ColorsTab({ draft, set }: { draft: ChartProperties; set: Set }) {
           />
           <select
             aria-label={f.label.replace(':', '')}
-            className="h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
+            className="h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
             value={draft.colours[f.id]}
             onChange={(e) => pick(f.id, e.target.value)}
           >

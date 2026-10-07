@@ -79,7 +79,11 @@ export function MT5TitleBar({
     >
       <div
         className={cn(
-          'flex items-center gap-3 pr-3',
+          // White, stated here and not inherited: this bar's fill is `--mt5-blue` in BOTH themes,
+          // so it is the one strip on a MetaTrader screen whose foreground does not follow the
+          // theme. The screen around it now paints from `--mt5-text`, and without this the title
+          // went dark the moment a trader chose the light theme -- dark text on a blue bar.
+          'flex items-center gap-3 pr-3 text-white',
           ownsBar ? 'pl-1 lg:pl-3' : 'pl-3',
           subtitle ? 'pb-1 pt-2' : 'py-2.5',
           // The hamburger is a 44px tap target and supplies the bar's height on a phone; the
@@ -142,7 +146,15 @@ export function MT5Screen({ title, children, back = true }: {
     // The tokens, because what these states hold is the app's own components — a Skeleton, an
     // EmptyState with a Log in button — and on a MetaTrader screen that button is blue and square,
     // not the app's green pill.
-    <div style={MT5_TOKENS} className="mt5-square flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
+    //
+    // The foreground is `--mt5-text`, not the literal white it used to be.
+    //
+    // This screen's background is `--mt5-surface`: #0f1720 in dark and #ffffff in light. The
+    // foreground was `text-white`, so asking for the light theme painted white text on a white
+    // screen -- not a dim screen, an unreadable one -- and every label below inherits from here.
+    // `--mt5-text` is the same pair the other way round (#ffffff / #0f1720), so the two move
+    // together by construction and cannot come apart again.
+    <div style={MT5_TOKENS} className="mt5-square flex flex-1 flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)]">
       <MT5TitleBar title={title} back={back} />
       {children}
     </div>
@@ -176,7 +188,7 @@ export function MT5Summary({ children }: { children: React.ReactNode }) {
 export function MT5Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h2 className="border-t border-[var(--mt5-border)] px-3 pb-1.5 pt-4 text-[12px] font-bold uppercase tracking-wide text-white">
+      <h2 className="border-t border-[var(--mt5-border)] px-3 pb-1.5 pt-4 text-[12px] font-bold uppercase tracking-wide text-[var(--mt5-text)]">
         {title}
       </h2>
       <div className="border-t border-[var(--mt5-border)]">{children}</div>
@@ -209,7 +221,7 @@ export function MT5Row({
   const body = (
     <>
       <span className="min-w-0 flex-1">
-        <span className={cn('block truncate text-[15px] leading-tight', tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-white')}>
+        <span className={cn('block truncate text-[15px] leading-tight', tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-[var(--mt5-text)]')}>
           {label}
         </span>
         {sub ? (

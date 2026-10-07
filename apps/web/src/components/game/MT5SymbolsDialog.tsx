@@ -62,7 +62,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
       role="dialog"
       aria-modal="true"
       aria-label="Symbols"
-      className="fixed inset-0 z-[86] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[86] flex flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)] sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[78vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
@@ -81,7 +81,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Find symbol"
             aria-label="Find symbol"
-            className="h-7 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-2 text-[11px] text-white outline-none placeholder:text-[#4a5666] focus:border-[var(--mt5-blue)]"
+            className="h-7 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-2 text-[11px] text-[var(--mt5-text)] outline-none placeholder:text-[#4a5666] focus:border-[var(--mt5-blue)]"
           />
           <p className={cn('mt-1.5 text-[10px] leading-snug', full ? 'text-[#f0b90b]' : 'text-[var(--mt5-muted)]')}>
             {picked.length} of {MAX_WATCHED} shown.
@@ -118,7 +118,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
                   type="button"
                   onClick={() => setOpen((p) => (p.includes(group) ? p.filter((g) => g !== group) : [...p, group]))}
                   aria-expanded={expanded}
-                  className="flex w-full items-center gap-2 border-b border-[var(--mt5-border)]/60 bg-[var(--mt5-raised)] px-3 py-1.5 text-left text-[11px] font-semibold text-white"
+                  className="flex w-full items-center gap-2 border-b border-[var(--mt5-border)]/60 bg-[var(--mt5-raised)] px-3 py-1.5 text-left text-[11px] font-semibold text-[var(--mt5-text)]"
                 >
                   <span aria-hidden className="w-3 text-[var(--mt5-muted)]">{expanded ? '−' : '+'}</span>
                   {/* MetaTrader prints the tree path with a backslash; the leaf is what reads as a heading. */}

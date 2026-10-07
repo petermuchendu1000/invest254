@@ -33,7 +33,7 @@ export function MT5Specification({ spec, onDismiss }: { spec: SpecInput; onDismi
       role="dialog"
       aria-modal="true"
       aria-label="Specification"
-      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)] sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[72vh] sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">

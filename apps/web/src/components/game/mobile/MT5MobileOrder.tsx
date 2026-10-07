@@ -148,7 +148,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   if (!ready) return <div className="h-full animate-pulse bg-[var(--mt5-surface)]" />;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-white">
+    <div className="relative flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)]">
       {/* 1. Header: back, then the symbol in bold over its description. */}
       <div className="flex shrink-0 items-center gap-1 border-b border-[var(--mt5-border)] px-1 py-2">
         <button

@@ -136,7 +136,7 @@ export function MT5History({ embedded = false }: {
   const shown = tab === 'orders' ? sortedOrders.length : tab === 'deals' ? sortedDeals.length : sortedClosed.length;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-[var(--mt5-surface)] text-white">
+    <div className="flex min-h-full flex-1 flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)]">
       {/* MetaTrader keeps the screen name, the symbol filter and the tabs all inside the one blue
           band. One instrument is quoted, so "All symbols" is a statement of fact rather than a picker
           that would open on a list of one. */}
@@ -469,7 +469,7 @@ function PeriodMenu({
             {p.key === 'custom' ? <path d="M9 15h6" /> : null}
           </svg>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] text-white">{p.label}</span>
+            <span className="block truncate text-[13px] text-[var(--mt5-text)]">{p.label}</span>
             {p.key !== 'custom' ? (
               <span className="block truncate font-mono text-[11px] text-[var(--mt5-muted)]">
                 {periodSubtitle(periodRange(p.key, Date.now()))}
@@ -487,7 +487,7 @@ function PeriodMenu({
               type="date"
               value={custom.from}
               onChange={(e) => onCustom({ ...custom, from: e.target.value })}
-              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[var(--mt5-blue)]"
+              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[12px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
             />
           </label>
           <label className="flex items-center gap-2 text-[11px] text-[var(--mt5-muted)]">
@@ -496,7 +496,7 @@ function PeriodMenu({
               type="date"
               value={custom.to}
               onChange={(e) => onCustom({ ...custom, to: e.target.value })}
-              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[var(--mt5-blue)]"
+              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[12px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]"
             />
           </label>
         </div>
@@ -515,7 +515,7 @@ function SortMenu({
           key={s.key}
           type="button"
           onClick={() => onPick(s.key)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-white hover:bg-[var(--mt5-border)]"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[var(--mt5-text)] hover:bg-[var(--mt5-border)]"
         >
           <span className="flex-1">{s.label}</span>
           {sort === s.key ? (
