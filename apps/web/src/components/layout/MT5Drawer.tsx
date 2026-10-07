@@ -55,6 +55,22 @@ const SettingsIcon = () => (
     <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l1.7-1.3-1.8-3.1-2 .8a7.6 7.6 0 0 0-2.6-1.5L14.2 3H10.6l-.4 2.1a7.6 7.6 0 0 0-2.6 1.5l-2-.8L3.8 8.9l1.7 1.3a7.8 7.8 0 0 0 0 3l-1.7 1.3 1.8 3.1 2-.8a7.6 7.6 0 0 0 2.6 1.5l.4 2.1h3.6l.4-2.1a7.6 7.6 0 0 0 2.6-1.5l2 .8 1.8-3.1-1.7-1.3Z" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+/** An outward share: MetaTrader has no such screen, so this is the app's own, drawn to match. */
+const InviteIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M16 11a4 4 0 100-8 4 4 0 000 8zM3 21v-1a6 6 0 016-6h2" />
+    <path d="M19 14v6M16 17h6" />
+  </svg>
+);
+
+/** A document with a folded corner: the licence, the terms and the risk statement live behind it. */
+const LegalIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" />
+    <path d="M14 3v5h5M9 13h6M9 17h4" />
+  </svg>
+);
+
 const ChatIcon = () => (
   <svg viewBox="0 0 24 24" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
     <path d="M20 15a2 2 0 0 1-2 2H8l-4 3V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z" strokeLinecap="round" strokeLinejoin="round" />

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useNavDrawer } from '@/lib/ui/drawer';
+import { MT5Back } from '@/components/mt5/MT5Back';
 import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 import { cn } from '@/lib/cn';
 
@@ -31,11 +32,20 @@ import { cn } from '@/lib/cn';
  * Above `lg` the app's own title bar is on screen with its own hamburger, so this one draws none.
  */
 export function MT5TitleBar({
-  title, subtitle, actions, children, embedded = false,
+  title, subtitle, actions, children, embedded = false, back,
 }: {
   title: string;
   subtitle?: string | undefined;
   actions?: React.ReactNode;
+  /**
+   * A way back, drawn where MetaTrader draws one: left of the title, in place of the hamburger.
+   *
+   * Every screen this bar titles is PUSHED from the chart, and none of them had one — the only
+   * exit was to re-open the drawer and tap Trade, which is two taps to undo one and is not what
+   * the back gesture on the phone does either. `true` uses the browser's own history; an object
+   * overrides the handler or the fallback for a screen that was opened from a link.
+   */
+  back?: boolean | { onBack?: (() => void) | undefined; fallback?: string } | undefined;
   /** Tabs, which MetaTrader draws inside the bar rather than under it. */
   children?: React.ReactNode;
   /**
@@ -77,7 +87,17 @@ export function MT5TitleBar({
           ownsBar && !subtitle && 'max-lg:py-1',
         )}
       >
-        {ownsBar ? (
+        {/* The back control replaces the hamburger rather than sitting beside it: this screen was
+            pushed from somewhere, so going back is what the left of the bar is for, and the drawer
+            is still one swipe or one tap on the chart away. Drawn at every width, because a desktop
+            window has no system back gesture at all. */}
+        {back ? (
+          <MT5Back
+            {...(typeof back === 'object' && back.onBack ? { onBack: back.onBack } : {})}
+            {...(typeof back === 'object' && back.fallback ? { fallback: back.fallback } : {})}
+            className={ownsBar ? '' : '-ml-1'}
+          />
+        ) : ownsBar ? (
           <button
             type="button"
             onClick={toggleDrawer}
@@ -109,13 +129,21 @@ export function MT5TitleBar({
  * the hamburger and is the ONLY bar on the screen, so a route that drops it while it loads — or
  * because nobody is signed in — drops the app's navigation with it and strands the screen.
  */
-export function MT5Screen({ title, children }: { title: string; children: React.ReactNode }) {
+export function MT5Screen({ title, children, back = true }: {
+  title: string;
+  children: React.ReactNode;
+  /**
+   * A way back to where this screen was pushed from. ON by default, because every screen this
+   * wraps is reached from the chart and none of them had one.
+   */
+  back?: boolean | { onBack?: (() => void) | undefined; fallback?: string };
+}) {
   return (
     // The tokens, because what these states hold is the app's own components — a Skeleton, an
     // EmptyState with a Log in button — and on a MetaTrader screen that button is blue and square,
     // not the app's green pill.
     <div style={MT5_TOKENS} className="mt5-square flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
-      <MT5TitleBar title={title} />
+      <MT5TitleBar title={title} back={back} />
       {children}
     </div>
   );

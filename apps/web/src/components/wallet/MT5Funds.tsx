@@ -46,7 +46,7 @@ export function MT5Funds() {
 
   return (
     <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
-      <MT5TitleBar title="Funds" subtitle={figures.demo ? 'Demo account' : 'Real account'} />
+      <MT5TitleBar title="Funds" back subtitle={figures.demo ? 'Demo account' : 'Real account'} />
 
       <div className="mx-auto w-full lg:max-w-3xl">
         <MT5Summary>

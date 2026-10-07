@@ -142,6 +142,7 @@ export function MT5History({ embedded = false }: {
           that would open on a list of one. */}
       <MT5TitleBar
         embedded={embedded}
+        {...(embedded ? {} : { back: true as const })}
         title="History"
         subtitle="All symbols"
         actions={<>

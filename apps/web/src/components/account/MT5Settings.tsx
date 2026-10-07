@@ -56,7 +56,7 @@ export function MT5Settings() {
     <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
       {/* MetaTrader's Settings title bar is a single line — there is no second instrument-filter
           line the way the History screen has one. */}
-      <MT5TitleBar title="Settings" />
+      <MT5TitleBar title="Settings" back />
 
       {/* The title bar is full-bleed, as the terminal's chrome is; the settings themselves are a
           reading column — MetaTrader's own settings on a wide window are a panel, not an edge-to-edge

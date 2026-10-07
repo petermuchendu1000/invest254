@@ -52,7 +52,7 @@ export default function DashboardPage() {
     <div style={MT5_TOKENS} className="mt5-square flex min-h-0 flex-1 flex-col bg-[var(--mt5-surface)] text-white">
       {/* Named as MetaTrader names a screen, in the band it names it in — so arriving here reads as
           another screen of the terminal rather than a different site. */}
-      <MT5TitleBar title="Dashboard" />
+      <MT5TitleBar title="Dashboard" back />
       <div className="flex-1 p-3">
         <MarketerDashboardView />
       </div>
