@@ -30,7 +30,9 @@
 create table if not exists public.pending_orders (
   id               uuid primary key default gen_random_uuid(),
   site_id          uuid not null references public.sites (id) on delete cascade,
-  user_id          uuid not null references public.users (id) on delete cascade,
+  -- `profiles`, not `users`: this schema's account row is `public.profiles` (0004), which is what
+  -- `positions.user_id` references and therefore the only table this can agree with.
+  user_id          uuid not null references public.profiles (id) on delete cascade,
   -- MetaTrader's four: 'buyLimit' | 'sellLimit' | 'buyStop' | 'sellStop'. Text rather than an enum
   -- for the reason every other status column here is text: an enum needs its own migration to grow.
   kind             text not null,
