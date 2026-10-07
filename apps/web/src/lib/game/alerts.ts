@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { logJournal } from '@/lib/game/journal';
+import { logJournal } from './journal.js';
 
 /**
  * Alerts — the real mechanism behind MetaTrader's Alerts tab and its Alert Editor.
@@ -13,18 +13,15 @@ import { logJournal } from '@/lib/game/journal';
  * them against the same live price the chart draws and fires genuinely: the counter advances, a
  * Journal line is written and the caller is handed the alert so it can raise a toast.
  *
- * THE CONDITION LIST IS SHORTER THAN METATRADER'S, AND THAT IS THE DOCUMENTED ANSWER.
+ * THE CONDITION LIST IS MetaTrader's, LESS THE TWO IT HAS NO DATA FOR.
  * 09-toolbox.md 933-935 lists nine: `Bid < Bid > Ask < Ask > Last < Last > Volume < Volume > Time =`.
- * This platform quotes ONE price per symbol, and docs/mt5/10-market-watch.md 417-419 settles what a
- * one-price platform does with that: it "keeps `Symbol`, `Time`, `Daily Change`, `Last`-family and
- * the volume family unchanged, and must delete `Bid`, `Ask` and `Spread` outright rather than fold
- * them. There is no MetaTrader precedent for a merged price column." So the Bid and Ask families
- * are deleted, not renamed and not drawn four times over one number, and the surviving price
- * family is `Last`, which is also what Market Watch heads its one quote column here.
- * `Volume <` / `Volume >` go too, for a different reason: the feed carries no volume at all (a tick
- * is `{ t, rate, delta }`), so there is nothing to compare. `Time =` stays, because it never needed
- * a second price — "an alert triggers at the specified time ... the local computer time in the
- * format HH:MM" (09-toolbox.md 937-938).
+ * Seven of them are here. The Bid and Ask families used to be cut on the grounds that this platform
+ * quotes one price per symbol; the engine publishes the spread it has always charged, so both sides
+ * are real figures and a trader can arm a level on the side they actually trade, which is the point
+ * of those four conditions. `Volume <` / `Volume >` are still absent, for a reason that has not
+ * changed: the feed carries no volume at all (a tick is `{ t, rate, delta }`), so there is nothing
+ * to compare. `Time =` never needed a price at all — "an alert triggers at the specified time ...
+ * the local computer time in the format HH:MM" (09-toolbox.md 937-938).
  *
  * ONE HONEST LIMIT. MetaTrader runs alerts on the broker's server, so they fire with the app shut.
  * These are stored in the browser and checked by the open tab, so an alert only fires while the
@@ -34,14 +31,27 @@ import { logJournal } from '@/lib/game/journal';
  * a position.
  */
 
-export type AlertCondition = 'last<' | 'last>' | 'time=';
+export type AlertCondition =
+  | 'bid<' | 'bid>' | 'ask<' | 'ask>' | 'last<' | 'last>' | 'time=';
 
 /** The conditions this platform can genuinely evaluate, in MetaTrader's own order and wording. */
 export const ALERT_CONDITIONS: ReadonlyArray<{ key: AlertCondition; label: string }> = [
+  { key: 'bid<', label: 'Bid <' },
+  { key: 'bid>', label: 'Bid >' },
+  { key: 'ask<', label: 'Ask <' },
+  { key: 'ask>', label: 'Ask >' },
   { key: 'last<', label: 'Last <' },
   { key: 'last>', label: 'Last >' },
   { key: 'time=', label: 'Time =' },
 ];
+
+/** The live quote an alert is checked against: MetaTrader's three price families. */
+export interface AlertQuote {
+  last: number | null;
+  /** Null on a brand that publishes no spread; a Bid or Ask alert then never fires. */
+  bid: number | null;
+  ask: number | null;
+}
 
 export const conditionLabel = (c: AlertCondition): string =>
   ALERT_CONDITIONS.find((x) => x.key === c)?.label ?? c;
@@ -176,7 +186,7 @@ const localHHMM = (ms: number): string => {
  * and a `Time =` alert may fire only once inside the minute it names — otherwise a ten-second
  * timeout would fire it six times over that minute.
  */
-export function alertDue(a: PriceAlert, price: number | null, nowMs: number): boolean {
+export function alertDue(a: PriceAlert, quote: AlertQuote, nowMs: number): boolean {
   if (!a.enabled || a.counter >= a.limit) return false;
   if (a.expiresAtMs !== null && nowMs > a.expiresAtMs) return false;
   if (a.triggeredAtMs !== null && nowMs - a.triggeredAtMs < a.timeoutS * 1000) return false;
@@ -184,9 +194,14 @@ export function alertDue(a: PriceAlert, price: number | null, nowMs: number): bo
     if (a.timeHHMM !== localHHMM(nowMs)) return false;
     return a.triggeredAtMs === null || localHHMM(a.triggeredAtMs) !== a.timeHHMM;
   }
-  if (price === null || !Number.isFinite(price)) return false;
+  // Each condition reads its OWN side. A Bid alert on a brand that publishes no spread has no bid
+  // to read and simply never fires, which is the same thing as not being armed.
+  const side = a.condition.startsWith('bid') ? quote.bid
+    : a.condition.startsWith('ask') ? quote.ask
+    : quote.last;
+  if (side === null || !Number.isFinite(side)) return false;
   // Strict, because the row says `Last < 3071.82` and not `Last ≤ 3071.82`.
-  return a.condition === 'last<' ? price < a.price : price > a.price;
+  return a.condition.endsWith('<') ? side < a.price : side > a.price;
 }
 
 /**
@@ -197,7 +212,7 @@ export function alertDue(a: PriceAlert, price: number | null, nowMs: number): bo
  * person perceives, and keeps this off the render path.
  */
 export function useAlertWatch(
-  getPrice: () => number | null,
+  getQuote: () => AlertQuote,
   symbol: string,
   onFire?: (alert: PriceAlert, price: number | null) => void,
 ): void {
@@ -206,11 +221,12 @@ export function useAlertWatch(
 
   useEffect(() => {
     const id = setInterval(() => {
-      const price = getPrice();
+      const quote = getQuote();
+      const price = quote.last;
       const now = Date.now();
       const { alerts, markTriggered } = useAlertsStore.getState();
       for (const a of alerts) {
-        if (a.symbol !== symbol || !alertDue(a, price, now)) continue;
+        if (a.symbol !== symbol || !alertDue(a, quote, now)) continue;
         markTriggered(a.id, now);
         logJournal(
           'warn',
@@ -223,5 +239,5 @@ export function useAlertWatch(
       }
     }, 500);
     return () => clearInterval(id);
-  }, [getPrice, symbol]);
+  }, [getQuote, symbol]);
 }

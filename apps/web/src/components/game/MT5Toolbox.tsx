@@ -18,7 +18,7 @@ import { GROUP_LABELS, INDICATOR_GROUPS, MT5_INDICATOR_COUNT, VOLUME_GROUP_NOTE,
 import { toggleIndicator, useEnabledIndicators } from '@/lib/chart/indicatorsStore';
 import {
   ALERT_CONDITIONS, ALERT_DEFAULTS, conditionLabel, useAlertsStore, useAlertWatch,
-  type AlertCondition, type AlertDraft, type PriceAlert,
+  type AlertCondition, type AlertDraft, type AlertQuote, type PriceAlert,
 } from '@/lib/game/alerts';
 import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
 import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
@@ -71,7 +71,7 @@ import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
 type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
-  const { positions, status, earlyCloseEnabled, setLevels: pushLevels } = useGameSocket();
+  const { positions, status, earlyCloseEnabled, spread, setLevels: pushLevels } = useGameSocket();
   const brand = useBrand();
   /**
    * Whether the engine acts on the S/L and T/P levels at all: a brand with a price axis, pool mode
@@ -165,8 +165,19 @@ export function MT5Toolbox() {
     const p = priceOfRate(rate);
     return p === null ? '-' : p.toFixed(digits);
   };
-  // Alerts fire against the same price the chart draws, and against the clock for `Time =`.
-  useAlertWatch(livePrice, symbol, (a, price) => {
+  /**
+   * The quote an alert is checked against: the same price the chart draws, and the two sides around
+   * it by the spread the engine charges, so a `Bid >` alert fires at the bid a sell would fill at.
+   * The arithmetic is the order ticket's own (`useOrderEntry.bidAsk`).
+   */
+  const liveQuote = useCallback((): AlertQuote => {
+    const last = livePrice();
+    const scale = getMarket()?.instrument.scale ?? null;
+    if (last === null || spread === null || scale === null) return { last, bid: null, ask: null };
+    return { last, bid: last - spread.sell * scale, ask: last + spread.buy * scale };
+  }, [livePrice, getMarket, spread]);
+  // Alerts fire against that quote, and against the clock for `Time =`.
+  useAlertWatch(liveQuote, symbol, (a, price) => {
     toast.push({
       tone: 'info',
       title: `${a.symbol} alert`,

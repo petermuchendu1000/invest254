@@ -24,12 +24,15 @@ test("the rows are MetaTrader's, in the order its own dialog renders them", () =
   ]);
 });
 
-test('the spread is zero, which is a fact about this instrument and not a placeholder', () => {
-  // One price per symbol: a trade opens and closes on the same number. MetaTrader prints
-  // "floating" where a spread moves; there is nothing here for it to move between.
-  const spread = specRows(base).find((r) => r.label === 'Spread');
-  assert.equal(spread?.value, '0');
+test("the spread row is the brand's own figure, in the symbol's points", () => {
+  // MetaTrader prints "floating" where a spread moves and the figure where it is fixed. This
+  // brand's is fixed: the settlement engine charges the same cost on every tick.
+  const spread = specRows({ ...base, spreadPoints: 58 }).find((r) => r.label === 'Spread');
+  assert.equal(spread?.value, '58');
   assert.equal(spread?.kind, 'integer');
+  // A brand that publishes none reads 0, which is then true rather than a placeholder.
+  assert.equal(specRows(base).find((r) => r.label === 'Spread')?.value, '0');
+  assert.equal(specRows({ ...base, spreadPoints: null }).find((r) => r.label === 'Spread')?.value, '0');
 });
 
 test('the rows that have no meaning here are absent, not blank', () => {

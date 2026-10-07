@@ -72,6 +72,14 @@ export interface SpecInput {
   volumeStep: number;
   /** The expiries the ticket offers, in the order it offers them. */
   expiries: readonly string[];
+  /**
+   * The spread in the symbol's own POINTS, or null on a brand that publishes none.
+   *
+   * MetaTrader's `Spread` row is `floating` where the spread moves and the figure where it is
+   * fixed. This brand's is fixed, charged by the settlement engine and the same on every tick, so
+   * the figure is what belongs here.
+   */
+  spreadPoints?: number | null;
   volumeDigits: number;
   /**
    * MetaTrader's `Trade` mode for this instrument. Defaults to full access.
@@ -91,11 +99,15 @@ export function specRows(i: SpecInput): SpecRow[] {
     { label: 'Digits', value: String(i.digits), kind: 'integer' },
     { label: 'Contract size', value: `${i.contractSize} / lot`, kind: 'fraction' },
     /**
-     * Zero, and that is a fact rather than a placeholder: this instrument quotes ONE price, so a
-     * trade opens and closes on the same number. MetaTrader prints "floating" where a spread moves;
-     * there is nothing here for it to move between.
+     * The brand's own fixed spread, in points.
+     *
+     * This row read `0` under a comment saying the instrument quotes one price so a trade opens
+     * and closes on the same number. It does not: the settlement engine charges a cost on every
+     * position and the terminal now quotes both sides around it. MetaTrader prints `floating`
+     * where a spread moves and the figure where it is fixed; this one is fixed, so the figure is
+     * what belongs here. A brand that publishes none still reads `0`, which is then true.
      */
-    { label: 'Spread', value: '0', kind: 'integer' },
+    { label: 'Spread', value: String(i.spreadPoints ?? 0), kind: 'integer' },
     { label: 'Margin currency', value: i.currency, kind: 'string' },
     { label: 'Profit currency', value: i.currency, kind: 'string' },
     // MetaTrader's two modes are "By bid price" and "By last price". With one price, it is the last.

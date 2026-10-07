@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { INDICATOR_BY_ID } from './indicatorCatalog.js';
-import { logExperts } from '@/lib/game/journal';
+import { logExperts } from '../game/journal.js';
 
 /**
  * Which of MetaTrader's indicators are applied to the chart.

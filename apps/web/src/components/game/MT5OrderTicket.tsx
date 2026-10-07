@@ -22,9 +22,6 @@ import { cn } from '@/lib/cn';
  *
  * WHAT IS NOT MetaTrader, and why:
  *
- *  - ONE price, on both buttons. MetaTrader puts the bid on SELL and the ask on BUY. There is no
- *    spread here — a contract settles on one seeded price — so printing two different numbers would
- *    tell the player they buy at one and sell at the other, which is false.
  *  - An EXPIRY row. MetaTrader positions run until closed; these contracts settle at a fixed
  *    duration, so the control exists and is labelled for what it is.
  *
@@ -59,7 +56,7 @@ export function MT5OrderTicket() {
    */
   const order = useOrderEntry();
   const {
-    ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
+    ready, symbol, settledSymbol, digits, price, bidAsk, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, volStep, setLots, bump, volNote, stakeCents, overBalance, signedIn,
     durationS, setDurationS, durations, place, activePosition, continuous,
     tick, priceOfRate, market,
@@ -255,15 +252,31 @@ export function MT5OrderTicket() {
         */}
 
       {/* The quote, then the buttons.
-          MetaTrader's modern order dialog puts NO price on the buttons. The price is shown
-          separately, large and centred above them, and the buttons read "Sell by Market" and
-          "Buy by Market" under Market Execution. Ours used to print the SAME price on both sides,
-          which read as a bid and an ask that were somehow equal. This feed quotes ONE rate and has
-          no spread, so one price is the truth; inventing a second would be the exact habit this
-          rebuild exists to break. */}
-      <div className="flex items-end justify-center pt-0.5">
-        <MT5Price value={price} digits={digits} className="text-[26px] font-semibold" />
-      </div>
+          MetaTrader's order dialog puts NO price ON the buttons: the two sides are shown above
+          them, large, and the buttons read "Sell by Market" and "Buy by Market" under Market
+          Execution. The BID sits over SELL and the ASK over BUY, because those are the prices
+          those two buttons fill at.
+
+          This panel used to print one centred number, under a comment saying this feed quotes one
+          rate with no spread so a second would be invented. The engine publishes the spread it has
+          always charged, so both sides are real and derived from one quote by the arithmetic in
+          `useOrderEntry.bidAsk`; the phone ticket and the Market Watch grid already show them. A
+          brand that publishes no spread still gets the single centred price, which is what it
+          genuinely has. */}
+      {bidAsk === null ? (
+        <div className="flex items-end justify-center pt-0.5">
+          <MT5Price value={price} digits={digits} className="text-[26px] font-semibold" />
+        </div>
+      ) : (
+        <div data-ticket-sides="" className="grid grid-cols-2 gap-2 pt-0.5">
+          <span className="flex items-end justify-center">
+            <MT5Price value={bidAsk.bid} digits={digits} className="text-[22px] font-semibold text-[#f23645]" />
+          </span>
+          <span className="flex items-end justify-center">
+            <MT5Price value={bidAsk.ask} digits={digits} className="text-[22px] font-semibold text-[#3183ff]" />
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <button

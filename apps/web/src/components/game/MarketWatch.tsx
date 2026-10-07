@@ -243,23 +243,25 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
    * including which rows are absent and why, is argued in lib/game/symbolDetails.
    */
   const activeQuote = quoteOf(active);
+  /**
+   * The selected symbol's two sides, by the brand's published spread. The same arithmetic the rows
+   * above, the One Click panels and the order ticket use, so the Details tab and the Specification
+   * dialog cannot quote a Bid the grid disagrees with.
+   */
+  const activeSides = activeQuote && activeQuote.price !== null && spread
+    ? {
+        bid: activeQuote.price - spread.sell * activeQuote.instrument.scale,
+        ask: activeQuote.price + spread.buy * activeQuote.instrument.scale,
+      }
+    : null;
+
   const details = detailRows({
     digits: activeDigits,
     // MetaTrader's `Face Value`: the contract's nominal value, which here is the fixed sum one lot
     // stakes. Bare, like every other figure in the list (docs/mt5/09-toolbox.md 429).
     faceValue: money.mt(LOT_STAKE_CENTS),
     last: activeQuote?.price ?? null,
-    /**
-     * The two sides of the selected symbol, by the brand's published spread. The same arithmetic
-     * the rows above, the One Click panels and the order ticket use, so the Details tab cannot
-     * quote a Bid the grid disagrees with.
-     */
-    sides: activeQuote && activeQuote.price !== null && spread
-      ? {
-          bid: activeQuote.price - spread.sell * activeQuote.instrument.scale,
-          ask: activeQuote.price + spread.buy * activeQuote.instrument.scale,
-        }
-      : null,
+    sides: activeSides,
     session: activeHours && activeQuote
       ? sessionSoFar(activeHours, activeQuote.anchor.tradeDate, activeQuote.price)
       : null,
@@ -843,6 +845,11 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
             maxVolume: activeVolume.max,
             volumeStep: activeVolume.step,
             expiries: DURATION_OPTIONS.map(durationLabel),
+            /* The brand's own fixed spread, in this symbol's points: the same figure the Symbols
+               grid prints in its Spread column, derived from the same two sides. */
+            spreadPoints: activeSides === null
+              ? null
+              : spreadPoints(activeSides.bid, activeSides.ask, activeDigits),
             /* The step decides the decimals, so an index reads 0.1 and a major 0.01; one more
                place where the brand's minimum sits off the symbol's grid. */
             volumeDigits: volumeDigitsOf(activeVolume)
