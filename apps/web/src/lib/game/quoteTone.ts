@@ -100,3 +100,46 @@ export function gutterGlyph(input: QuoteToneInput): GutterGlyph {
   const tone = quoteTone(input);
   return tone === 'up' ? 'up' : tone === 'down' ? 'down' : 'flat';
 }
+
+/**
+ * The PHONE's corner triangle, which is a different marker on a different screen.
+ *
+ * The gutter glyph above belongs to the DESKTOP Market Watch grid, where it was sampled
+ * (docs/mt5/10-market-watch.md section 2.4: a green arrow, a red arrow or a grey dot, left of the
+ * Symbol column in a six-column table). MetaTrader's phone Quotes row is not that row narrowed; it
+ * is a two-column, three-line row (docs/mt5/04-mobile-app.md section 2) and it carries **no
+ * tick-direction glyph at all**. What sits in its top-left corner is this:
+ *
+ *   "a small filled triangle in the row's top-LEFT corner — blue (#1C5FE9 measured) = net floating
+ *    profit, red = loss" (04-mobile-app.md 81)
+ *
+ * So the two are not alternatives and neither replaces the other. The phone shows the triangle; the
+ * desktop shows the arrow. That the phone's marker is blue-and-red while the desktop's is
+ * green-and-red is consistent on MetaTrader's own terms: its mobile palette rule (section 8) is
+ * "Profit = blue, Loss = red" and reserves green for Take Profit, and the desktop grid's green arrow
+ * is about the PRICE moving rather than about money.
+ *
+ * It states a different fact from either: not where the price went, but that this symbol is one the
+ * trader is currently exposed on, and whether that exposure is up or down.
+ */
+export type PositionMark = 'profit' | 'loss';
+
+export const POSITION_MARK_COLOUR: Record<PositionMark, string> = {
+  // Measured off Android's Quotes screen (04-mobile-app.md 585).
+  profit: '#1C5FE9',
+  /**
+   * NOT measured, and worth saying so: every published screenshot of the marker happens to show a
+   * profitable position, so no loss triangle exists to sample. MetaQuotes' prose says only "red".
+   * This is Android's own measured loss red from the Trade screen (04-mobile-app.md 581), which is
+   * the nearest thing the reference actually contains — the same figure this marker summarises.
+   */
+  loss: '#BA0000',
+};
+
+/**
+ * Which way the exposure is, from the net floating P/L of the positions on the symbol.
+ *
+ * Breaking even is not a loss, so zero is blue: MetaTrader has two states here and no third.
+ */
+export const positionMark = (floatingCents: number): PositionMark =>
+  floatingCents < 0 ? 'loss' : 'profit';

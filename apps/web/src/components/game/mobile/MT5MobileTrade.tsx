@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { accountSummary, mobileAccountRows, mtAmount, lotsOfStake } from '@invest254/shared/account';
+import { PENDING_LABELS } from '@invest254/shared/pending';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
@@ -13,7 +14,8 @@ import {
   MT5SwipeRow, SwipeCloseIcon, SwipeEditIcon, SwipePlusIcon, SwipeChartIcon, SwipeDepthIcon,
   type SwipeCommand,
 } from '@/components/game/mobile/MT5SwipeRow';
-import { ticketLabel } from '@/lib/game/betting';
+import { ticketLabel, type ActivePosition, type PendingOrderDto } from '@/lib/game/betting';
+import { useNavDrawer } from '@/lib/ui/drawer';
 import { cn } from '@/lib/cn';
 
 /**
@@ -39,16 +41,23 @@ import { cn } from '@/lib/cn';
  * follows, so the leader is here, drawn as a repeating gradient rather than a row of full stops: a
  * literal run of dots cannot be made to end exactly where the value begins at every width.
  *
- * ── What is not here ─────────────────────────────────────────────────────────────────────────────
- * No `Orders` section. MetaTrader's Trade screen has one under Positions, and this engine has no
- * pending orders at all — every contract is market execution — so an empty section headed "Orders"
- * would be a promise of a feature rather than a view of one.
+ * ── Every position, and the orders waiting to become one ─────────────────────────────────────────
+ * This screen used to show ONE position and no Orders section, under comments saying "this engine
+ * holds one contract at a time" and "this engine has no pending orders at all". Neither is true any
+ * more: the socket publishes `positions` (a list, oldest first) and `pendingOrders`, and the desktop
+ * Toolbox has rendered both for some time. A trader holding three contracts was shown one, and the
+ * account block beneath summed only that one, so Equity and Free margin on the phone disagreed with
+ * the same figures on the desktop. Both sections are now the whole list.
+ *
+ * `Orders` sits under `Positions`, which is MetaTrader's order, and each section is drawn only when
+ * it has rows — an empty band headed "Orders" would still be a promise rather than a view.
  */
 export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void; onChart: () => void }) {
   const money = useDisplayMoney();
   const { data: wallet } = useWallet();
-  const { activePosition, status, sell, earlyCloseEnabled } = useGameSocket();
+  const { positions, pendingOrders, status, sell, cancelPending, earlyCloseEnabled } = useGameSocket();
   const { getLastTick } = useGameSocketApi();
+  const openDrawer = useNavDrawer((s) => s.setOpen);
   // `volDigits` is the ORDER TICKET's own volume digits, so the row states the same lot size the
   // ticket that opened it showed (docs/mt5/09-toolbox.md 300, rows at 313-318). The row printed two
   // places whatever the symbol's step was, so a 0.025-lot position read 0.03 here.
@@ -58,16 +67,53 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   // `useOrderEntry` already drives that re-render on its own 250ms timer, and a second one here
   // only doubled the renders without showing a newer number.
 
-  // MetaTrader reaches Close position and Modify position from the row's context menu, which is
-  // what a press on the row opens. Same three sheets the desktop Toolbox uses.
-  const [sheet, setSheet] = useState<null | 'menu' | 'close' | 'modify'>(null);
+  /**
+   * Which row's sheet is open, and WHICH ROW.
+   *
+   * It was a bare `'menu' | 'close' | 'modify'`, which is all a one-position screen needs. With a
+   * list it has to name the position too, or a close form opened from the third row would act on
+   * whichever position the screen happened to call "the live one". Keyed on `clientId` because that
+   * is the one id every position has from the instant it is optimistically opened; `positionId` is
+   * null until the engine answers.
+   */
+  const [sheet, setSheet] = useState<{ kind: 'menu' | 'close' | 'modify'; clientId: string } | null>(null);
+  /**
+   * Which rows are expanded. Android: "a single tap expands the row inline; a long press (~1 s)
+   * opens the context menu" (04-mobile-app.md 253). A Set, not one id, because MetaTrader's rows
+   * expand independently and collapsing one to open another is a rule it does not have.
+   */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const toggleExpanded = (clientId: string) => setExpanded((cur) => {
+    const next = new Set(cur);
+    if (!next.delete(clientId)) next.add(clientId);
+    return next;
+  });
+  /**
+   * MetaTrader's sort button (↑↓) in the Trade top bar (04-mobile-app.md 210).
+   *
+   * It toggles the direction of the list's own order and nothing else. MetaQuotes publishes no sort
+   * KEYS for this screen — the Market Watch's "Sort ▸" submenu is undocumented too (10-market-watch
+   * 2.5, "Could not verify" #2) — so a menu of keys here would be invented. The engine sends
+   * `positions` oldest first, so the two states are "oldest first" and "newest first", which are
+   * real orderings of a real list rather than a guess at MetaTrader's menu.
+   */
+  const [newestFirst, setNewestFirst] = useState(false);
 
-  // An optimistic open has no engine id yet; its stake is already committed, so it counts.
-  const live = activePosition && activePosition.phase !== 'settling' ? activePosition : null;
-  const floatingCents = live ? live.livePnlCents : 0;
+  /**
+   * Every open contract, and the account figures that follow from ALL of them.
+   *
+   * A settling position still counts: its stake left the balance when it opened and has not come
+   * back yet, so dropping it from `openStakeCents` would show the trader margin they cannot spend as
+   * free. The screen keeps drawing it, dimmed by its own row, until the engine's settle removes it
+   * from the list.
+   */
+  const openStakeCents = positions.reduce((sum, p) => sum + p.stakeCents, 0);
+  const floatingCents = positions.reduce((sum, p) => sum + p.livePnlCents, 0);
+  const shown = newestFirst ? [...positions].reverse() : positions;
+  const forSheet = sheet === null ? null : positions.find((p) => p.clientId === sheet.clientId) ?? null;
   const summary = accountSummary({
     walletCents: (wallet?.real ?? 0) + (wallet?.bonus ?? 0),
-    openStakeCents: live ? live.stakeCents : 0,
+    openStakeCents,
     floatingPnlCents: floatingCents,
   });
   const rows = mobileAccountRows({
@@ -101,22 +147,34 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
    * further to the left" fires on its own. That is the right one to land on: it navigates and
    * changes nothing, so a drag that goes further than intended cannot cost money.
    */
-  const closeNote = !earlyCloseEnabled
+  const closeNoteOf = (pos: ActivePosition): string | undefined => (!earlyCloseEnabled
     ? 'This brand settles every contract at expiry.'
-    : live === null
-      ? undefined
-      : !live.sellable
-        ? 'This contract settles at expiry and cannot be closed at a loss.'
-        : live.phase !== 'open'
-          ? 'This contract is already settling.'
-          : undefined;
-  const swipeCommands: readonly SwipeCommand[] = [
-    { label: 'Close position', icon: SwipeCloseIcon, onPick: () => setSheet('close'), unavailable: closeNote },
-    { label: 'Edit position', icon: SwipeEditIcon, onPick: () => setSheet('modify') },
+    : !pos.sellable
+      ? 'This contract settles at expiry and cannot be closed at a loss.'
+      : pos.phase !== 'open'
+        ? 'This contract is already settling.'
+        : undefined);
+
+  /** The six icons, bound to ONE position: with a list, a swipe has to act on the row it opened. */
+  const swipeCommandsOf = (pos: ActivePosition): readonly SwipeCommand[] => [
     {
+      label: 'Close position',
+      icon: SwipeCloseIcon,
+      onPick: () => setSheet({ kind: 'close', clientId: pos.clientId }),
+      unavailable: closeNoteOf(pos),
+    },
+    { label: 'Edit position', icon: SwipeEditIcon, onPick: () => setSheet({ kind: 'modify', clientId: pos.clientId }) },
+    {
+      /**
+       * MetaTrader pre-fills a new order from the position it was opened on, and this engine can
+       * hold several contracts at once now, so the command WORKS: it opens the ticket, which is
+       * already primed with this symbol and the trader's last volume. It used to be dimmed with
+       * "this engine holds one contract at a time", which stopped being true when the engine began
+       * publishing a list of positions.
+       */
       label: 'Increase position',
       icon: SwipePlusIcon,
-      unavailable: 'This engine holds one contract at a time, so there is no position to add to.',
+      onPick: onNewOrder,
     },
     { label: 'Open Chart', icon: SwipeChartIcon, onPick: onChart },
     {
@@ -128,10 +186,29 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-white">
-      {/* Android's top bar: the title small, with the total floating profit beneath it in blue, and
-          the new-order button at the right. The hamburger is on the chart screen's own bar, so it
-          is not repeated here. */}
+      {/* Android's top bar, all four of its controls (04-mobile-app.md 210):
+          `☰` | "Trade" small with the total floating profit beneath it in blue | sort (↑↓) | new
+          order. */}
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2">
+        {/**
+          * The hamburger, which was missing and was not a cosmetic absence.
+          *
+          * It was left out because "the hamburger is on the chart screen's own bar, so it is not
+          * repeated here" — but the five-tab bar reaches this screen directly, so a trader who
+          * opened the app on Trade had NO route to the drawer at all, and the drawer is where
+          * Funds, Settings, Legal and the session action live. MetaTrader draws it on this bar;
+          * so does this now.
+          */}
+        <button
+          type="button"
+          onClick={() => openDrawer(true)}
+          aria-label="Open menu"
+          className="-ml-1 grid h-9 w-9 shrink-0 place-items-center rounded text-white"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-5 w-5" aria-hidden>
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
         <div className="min-w-0">
           <div className="text-[11px] leading-none text-[var(--mt5-muted)]">Trade</div>
           <div
@@ -150,6 +227,23 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
           className={cn('ml-auto h-1.5 w-1.5 shrink-0 rounded-full', status === 'open' ? 'bg-[var(--mt5-green)]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[var(--mt5-red)]')}
           title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
         />
+        {/* MetaTrader's sort button. Drawn only where there is an order to change: one row has no
+            ordering, and a control that cannot do anything is worse than one that is not there. */}
+        {positions.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => setNewestFirst((v) => !v)}
+            aria-pressed={newestFirst}
+            aria-label={newestFirst ? 'Sorted newest first. Sort oldest first.' : 'Sorted oldest first. Sort newest first.'}
+            title={newestFirst ? 'Newest first' : 'Oldest first'}
+            className="grid h-9 w-9 shrink-0 place-items-center rounded text-[var(--mt5-blue)]"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
+              <path d="M7 4v16M7 4L4 7M7 4l3 3" />
+              <path d="M17 20V4M17 20l-3-3M17 20l3-3" />
+            </svg>
+          </button>
+        ) : null}
         {/* MetaTrader's new-order button: a document with a plus. */}
         <button
           type="button"
@@ -193,72 +287,109 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
           Positions
         </div>
 
-        {live ? (
-          /* MetaTrader Android's swipe-left quick commands, over the row's right side. The order is
-             its documented one; what each icon does and does not do is argued below. */
-          <MT5SwipeRow label={`${settledSymbol} ${live.direction}`} commands={swipeCommands}>
-            <MobilePositionRow
-              symbol={settledSymbol}
-              direction={live.direction}
-              lots={lotsOfStake(live.stakeCents, volDigits)}
-              from={px(live.entryRate)}
-              to={px(getLastTick()?.rate ?? null)}
-              profit={money.mt(live.livePnlCents)}
-              profitCents={live.livePnlCents}
-              onOpenMenu={() => setSheet('menu')}
-            />
-          </MT5SwipeRow>
-        ) : (
+        {positions.length === 0 ? (
           <p className="px-3 py-6 text-center text-[11px] text-[var(--mt5-muted)]">No open positions.</p>
+        ) : (
+          shown.map((pos) => (
+            /* MetaTrader Android's swipe-left quick commands, over the row's right side. The order
+               is its documented one; what each icon does and does not do is argued above. */
+            <MT5SwipeRow
+              key={pos.clientId}
+              label={`${settledSymbol} ${pos.direction}`}
+              commands={swipeCommandsOf(pos)}
+            >
+              <MobilePositionRow
+                symbol={settledSymbol}
+                direction={pos.direction}
+                lots={lotsOfStake(pos.stakeCents, volDigits)}
+                from={px(pos.entryRate)}
+                to={px(getLastTick()?.rate ?? null)}
+                profit={money.mt(pos.livePnlCents)}
+                profitCents={pos.livePnlCents}
+                ticket={ticketLabel(pos)}
+                sl={pos.slPrice === null ? null : pos.slPrice.toFixed(digits)}
+                tp={pos.tpPrice === null ? null : pos.tpPrice.toFixed(digits)}
+                settling={pos.phase === 'settling'}
+                expanded={expanded.has(pos.clientId)}
+                onToggle={() => toggleExpanded(pos.clientId)}
+                onOpenMenu={() => setSheet({ kind: 'menu', clientId: pos.clientId })}
+              />
+            </MT5SwipeRow>
+          ))
         )}
+
+        {/* MetaTrader's second band, under Positions: the orders that have not become positions yet
+            (04-mobile-app.md 249-253). Drawn only when there are some, because this engine's
+            contracts are market execution by default and a trader who has armed nothing should not
+            be shown a heading for it. */}
+        {pendingOrders.length > 0 ? (
+          <>
+            <div className="border-y border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--mt5-muted)]">
+              Orders
+            </div>
+            {pendingOrders.map((order) => (
+              <MobileOrderRow
+                key={order.id}
+                order={order}
+                digits={digits}
+                lots={lotsOfStake(order.stakeCents, volDigits)}
+                onCancel={() => cancelPending(order.id)}
+              />
+            ))}
+          </>
+        ) : null}
       </div>
 
       {/* MetaTrader's position menu and the two forms it leads to, the same three this terminal's
-          desktop Toolbox opens from its own row. Its documented Android items are Close position,
-          New order, Modify position and Chart; `New order` is absent because this engine holds one
-          position at a time, so there is nothing to pre-fill a second one from. */}
-      {live && sheet === 'menu' ? (
+          desktop Toolbox opens from its own row, and ALL FOUR of its documented Android items:
+          Close position, New order, Modify position, Chart. `New order` was absent because the
+          engine held one contract at a time; it holds several now, so the item does what MetaTrader
+          says it does and opens the ticket, which is already primed with this symbol.
+
+          Every sheet is bound to `forSheet`, the position the row belongs to, looked up afresh from
+          the list on each render: the row's live P/L and phase have to keep arriving while its close
+          form is open, and a captured copy would freeze at the moment the sheet was opened. */}
+      {forSheet && sheet?.kind === 'menu' ? (
         <MT5PositionMenu
-          title={`${settledSymbol}, ${live.direction} ${lotsOfStake(live.stakeCents, volDigits)}`}
-          subtitle={`#${ticketLabel(live)} at ${px(live.entryRate)}`}
+          title={`${settledSymbol}, ${forSheet.direction} ${lotsOfStake(forSheet.stakeCents, volDigits)}`}
+          subtitle={`#${ticketLabel(forSheet)} at ${px(forSheet.entryRate)}`}
           onDismiss={() => setSheet(null)}
           items={[
             {
               id: 'close',
               label: 'Close position',
-              onPick: () => setSheet('close'),
-              disabled: !earlyCloseEnabled || !live.sellable || live.phase !== 'open',
-              note: !earlyCloseEnabled
-                ? 'This brand settles every contract at expiry.'
-                : !live.sellable
-                  ? 'This contract settles at expiry and cannot be closed at a loss.'
-                  : undefined,
+              onPick: () => setSheet({ kind: 'close', clientId: forSheet.clientId }),
+              disabled: !earlyCloseEnabled || !forSheet.sellable || forSheet.phase !== 'open',
+              note: closeNoteOf(forSheet),
             },
-            { id: 'modify', label: 'Modify position', onPick: () => setSheet('modify') },
+            { id: 'neworder', label: 'New order', onPick: () => { setSheet(null); onNewOrder(); } },
+            { id: 'modify', label: 'Modify position', onPick: () => setSheet({ kind: 'modify', clientId: forSheet.clientId }) },
             { id: 'chart', label: 'Chart', onPick: () => { setSheet(null); onChart(); } },
           ]}
         />
       ) : null}
 
-      {live && sheet === 'close' ? (
+      {forSheet && sheet?.kind === 'close' ? (
         <MT5ClosePosition
-          pos={live}
+          pos={forSheet}
           symbol={settledSymbol}
           digits={digits}
           price={priceOfRate(getLastTick()?.rate ?? null)}
-          openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
-          busy={live.phase === 'settling'}
+          openPrice={forSheet.entryRate === null ? null : priceOfRate(forSheet.entryRate)}
+          busy={forSheet.phase === 'settling'}
           onDismiss={() => setSheet(null)}
-          onConfirm={() => { sell(); setSheet(null); }}
+          /* The position's OWN id. `sell()` with no argument closes whichever one the provider
+             considers active, which with a list is the newest rather than the one on screen. */
+          onConfirm={() => { sell(forSheet.positionId ?? undefined); setSheet(null); }}
         />
       ) : null}
 
-      {live && sheet === 'modify' ? (
+      {forSheet && sheet?.kind === 'modify' ? (
         <MT5ModifyPosition
-          pos={live}
+          pos={forSheet}
           symbol={settledSymbol}
           digits={digits}
-          openPrice={live.entryRate === null ? null : priceOfRate(live.entryRate)}
+          openPrice={forSheet.entryRate === null ? null : priceOfRate(forSheet.entryRate)}
           canTakeProfit={earlyCloseEnabled}
           onDismiss={() => setSheet(null)}
         />
@@ -278,12 +409,28 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
  * not green. MT5 mobile uses blue for gains throughout, which is the single most recognisable thing
  * about its colour scheme and the easiest to get wrong.
  *
- * A press opens the context menu, which is Android's documented gesture for this row (its single
- * tap expands the row inline; there is nothing more to expand here, because this contract has no
- * swap, no comment and no stop level, so the press is the one that does something).
+ * ── The two gestures, which are not the same gesture ─────────────────────────────────────────────
+ * Android, verbatim: "a single tap expands the row inline; a long press (~1 s) opens the context
+ * menu" (04-mobile-app.md 253). This row had the tap opening the menu and no expansion at all,
+ * under a comment saying there was nothing to expand "because this contract has no swap, no comment
+ * and no stop level". It has a ticket and it has both stop levels now, which is most of what
+ * MetaTrader's own expanded card prints:
+ *
+ *     EURUSD  buy 1.00                            13.00
+ *     1.12762 → 1.12775
+ *     S / L:   1.12562        Swap:        0.00
+ *     T / P:   1.12962                #52763705
+ *
+ * So the tap expands, and the long press opens the menu. The menu is still reachable without the
+ * timing: a swipe-left on the row carries the same commands as icons, which is MetaTrader's other
+ * documented route to them, and the expanded card ends in a button to it — a gesture a trader has
+ * to hold for a second should never be the ONLY way to reach a close form.
+ *
+ * `Swap` is not printed. MetaTrader's figure is an overnight financing charge, and this engine has
+ * none: a row of `0.00` would be a real-looking number for a cost that does not exist.
  */
 function MobilePositionRow({
-  symbol, direction, lots, from, to, profit, profitCents, onOpenMenu,
+  symbol, direction, lots, from, to, profit, profitCents, ticket, sl, tp, settling, expanded, onToggle, onOpenMenu,
 }: {
   symbol: string;
   direction: string;
@@ -292,31 +439,140 @@ function MobilePositionRow({
   to: string;
   profit: string;
   profitCents: number;
+  ticket: string;
+  sl: string | null;
+  tp: string | null;
+  /** Already closing: the row stays, dimmed, until the engine's settle takes it off the list. */
+  settling: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onOpenMenu: () => void;
 }) {
   const buy = direction === 'buy';
+  /**
+   * The long press, measured by a timer rather than by a library.
+   *
+   * Cancelled by a move as well as by the release: this row sits inside a swipe container and in a
+   * scrolling list, so a drag that begins on the row is a swipe or a scroll and must not also count
+   * as a press. `fired` is what stops the release from then being treated as the tap.
+   */
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  const cancel = () => { if (timer.current !== null) { clearTimeout(timer.current); timer.current = null; } };
+  const start = () => {
+    fired.current = false;
+    cancel();
+    timer.current = setTimeout(() => { fired.current = true; timer.current = null; onOpenMenu(); }, 1000);
+  };
+  useEffect(() => cancel, []);
+
   return (
-    <button
-      type="button"
-      onClick={onOpenMenu}
-      aria-label={`Position menu for ${symbol} ${direction} ${lots}`}
-      className="flex w-full items-start justify-between gap-3 border-b border-[var(--mt5-border)] px-3 py-2.5 text-left transition active:bg-[var(--mt5-raised)]"
-    >
+    <div className={cn('border-b border-[var(--mt5-border)]', settling ? 'opacity-60' : '')}>
+      <button
+        type="button"
+        onClick={() => { if (!fired.current) onToggle(); }}
+        onPointerDown={start}
+        onPointerUp={cancel}
+        onPointerLeave={cancel}
+        onPointerCancel={cancel}
+        onPointerMove={cancel}
+        onContextMenu={(e) => { e.preventDefault(); cancel(); onOpenMenu(); }}
+        aria-expanded={expanded}
+        aria-label={`${symbol} ${direction} ${lots}, ${expanded ? 'collapse' : 'expand'} details`}
+        className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left transition active:bg-[var(--mt5-raised)]"
+      >
+        <div className="min-w-0">
+          <div className="text-[13px] font-bold text-white">
+            {symbol},{' '}
+            <span className={cn('font-semibold', buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]')}>{direction} {lots}</span>
+          </div>
+          <div className="pt-0.5 font-mono text-[12px] text-[var(--mt5-muted)] tabular-nums">{from} → {to}</div>
+        </div>
+        <div
+          className={cn(
+            'shrink-0 font-mono text-[13px] font-bold tabular-nums',
+            profitCents > 0 ? 'text-[var(--mt5-blue)]' : profitCents < 0 ? 'text-[var(--mt5-red)]' : 'text-white',
+          )}
+        >
+          {profit}
+        </div>
+      </button>
+
+      {expanded ? (
+        /* MetaTrader's expanded card: the two levels on the left, the ticket bottom-right (Android
+           puts it there; iOS puts it at the top). A level that is not set reads "not set" rather
+           than being omitted, so the card says the same thing whichever levels this position has. */
+        <div className="px-3 pb-2.5 font-mono text-[11px] tabular-nums">
+          <div className="flex items-baseline gap-2">
+            <span className="w-12 shrink-0 text-[var(--mt5-muted)]">S / L:</span>
+            <span className={sl === null ? 'text-[var(--mt5-muted)]' : 'text-white'}>{sl ?? 'not set'}</span>
+          </div>
+          <div className="flex items-baseline gap-2 pt-0.5">
+            <span className="w-12 shrink-0 text-[var(--mt5-muted)]">T / P:</span>
+            <span className={tp === null ? 'text-[var(--mt5-muted)]' : 'text-white'}>{tp ?? 'not set'}</span>
+            <span className="ml-auto text-[var(--mt5-muted)]">#{ticket}</span>
+          </div>
+          {/* The commands, without the one-second hold. A long press is MetaTrader's gesture and it
+              is implemented above; it is not an acceptable only route to a close form. */}
+          <button
+            type="button"
+            onClick={onOpenMenu}
+            className="mt-2 text-[11px] font-semibold text-[var(--mt5-blue-link)]"
+          >
+            Commands
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * An order waiting on its level, in the phone's own two-line shape.
+ *
+ * MetaTrader Android: `GBPUSD, buy limit` / `1.00 / 0.00 at 1.26235` · right: `placed` in grey
+ * (04-mobile-app.md 251). The `x / y` is requested volume over filled volume, which is always
+ * `0.00` while the order is still waiting, and the trigger price follows "at".
+ *
+ * The delete control is this app's, and it has to be: MetaTrader reaches `Delete order` through the
+ * order's context menu, and a phone row whose only gesture led to a menu with one live item would be
+ * a menu for the sake of the shape. Nothing has been staked while an order waits, so deleting one
+ * settles nothing.
+ */
+function MobileOrderRow({
+  order, digits, lots, onCancel,
+}: {
+  order: PendingOrderDto;
+  digits: number;
+  lots: string;
+  onCancel: () => void;
+}) {
+  const buy = order.kind === 'buyLimit' || order.kind === 'buyStop';
+  return (
+    <div data-pending-order={order.id} className="flex items-start justify-between gap-3 border-b border-[var(--mt5-border)] px-3 py-2.5">
       <div className="min-w-0">
         <div className="text-[13px] font-bold text-white">
-          {symbol},{' '}
-          <span className={cn('font-semibold', buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]')}>{direction} {lots}</span>
+          {order.symbol},{' '}
+          <span className={cn('font-semibold', buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]')}>
+            {PENDING_LABELS[order.kind].toLowerCase()}
+          </span>
         </div>
-        <div className="pt-0.5 font-mono text-[12px] text-[var(--mt5-muted)] tabular-nums">{from} → {to}</div>
+        <div className="pt-0.5 font-mono text-[12px] text-[var(--mt5-muted)] tabular-nums">
+          {lots} / 0 at {order.triggerPrice.toFixed(digits)}
+        </div>
       </div>
-      <div
-        className={cn(
-          'shrink-0 font-mono text-[13px] font-bold tabular-nums',
-          profitCents > 0 ? 'text-[var(--mt5-blue)]' : profitCents < 0 ? 'text-[var(--mt5-red)]' : 'text-white',
-        )}
-      >
-        {profit}
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="text-[11px] text-[var(--mt5-muted)]">placed</span>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label={`Delete ${PENDING_LABELS[order.kind].toLowerCase()} order`}
+          title="Delete this order. Nothing has been staked, so there is nothing to settle."
+          className="rounded-sm border border-[var(--mt5-border)] px-1.5 text-[13px] leading-5 text-[var(--mt5-muted)] transition active:border-[var(--mt5-red)] active:text-[var(--mt5-red)]"
+        >
+          ×
+        </button>
       </div>
-    </button>
+    </div>
   );
 }

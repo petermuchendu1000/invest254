@@ -10,7 +10,10 @@ import {
 import { useDisplayMoney } from '@/lib/money';
 import { MT5Price } from '@/components/game/MT5Price';
 import { logJournal } from '@/lib/game/journal';
-import { quoteTone, QUOTE_TONE_COLOUR, gutterGlyph, GUTTER_GLYPH, GUTTER_COLOUR } from '@/lib/game/quoteTone';
+import {
+  quoteTone, QUOTE_TONE_COLOUR, gutterGlyph, GUTTER_GLYPH, GUTTER_COLOUR,
+  positionMark, POSITION_MARK_COLOUR, type PositionMark,
+} from '@/lib/game/quoteTone';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import {
   MT5Specification, MT5MarketWatchMenu, marketWatchMenu,
@@ -75,7 +78,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
   onNewOrder?: (() => void) | undefined;
 }) {
   const { getMarket, requestCandles, requestSymbols, getSymbolQuote, getSymbolTicks, getSettledSymbol } = useGameSocketApi();
-  const { status, spread } = useGameSocket();
+  const { status, spread, positions } = useGameSocket();
   const money = useDisplayMoney();
   const [tab, setTab] = useState<Tab>('symbols');
   /** MetaTrader reaches the Specification dialog from the Market Watch context menu. */
@@ -123,6 +126,32 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
     () => (catalogue.length === 0 ? [...watched] : watched.filter((s) => bySymbol.has(s))),
     [watched, bySymbol, catalogue.length],
   );
+
+  /**
+   * The phone's open-position marker: which row wears MetaTrader's corner triangle, and its colour.
+   *
+   * ONE row can wear it, and that is the model rather than a shortcut. A position on this platform
+   * is opened against the brand's price axis — the engine's `Position` (apps/engine/src/game.ts 26)
+   * records no symbol at all, and the socket refuses an order placed while the chart is on any other
+   * instrument (`priceAxisSymbol`, game.ts 287; `tradeDisabled` in lib/game/useOrderEntry). So every
+   * open position is on the settled symbol, necessarily, and marking any other row would be stating
+   * something the engine cannot mean.
+   *
+   * `defaultSymbol` rather than `getSettledSymbol()`: both are the same value from the same reply,
+   * but this one is React state, so the marker appears when the catalogue lands instead of waiting
+   * for an unrelated re-render. Null until then, which draws no triangle — the honest rendering of
+   * "not known yet", since the alternative is marking a row that may not be the right one.
+   *
+   * A settling position still counts as exposure, which is the rule MT5MobileTrade's own floating
+   * total uses (line 66), so the marker and the Trade screen can never disagree about whether the
+   * trader has something open.
+   */
+  const marked = useMemo(() => {
+    const live = positions.filter((p) => p.phase !== 'settling');
+    if (live.length === 0 || defaultSymbol === null) return null;
+    const floatingCents = live.reduce((sum, p) => sum + p.livePnlCents, 0);
+    return { symbol: defaultSymbol, mark: positionMark(floatingCents) };
+  }, [positions, defaultSymbol]);
 
   // Which symbols the engine quotes is decided in one place for the whole screen (see
   // lib/game/chartSymbol's useQuoteSubscription), because the subscription is a set per socket and
@@ -508,8 +537,10 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                     onContextMenu={(e) => { e.preventDefault(); setSelected(symbol); setMenu({ x: e.clientX, y: e.clientY, symbol }); }}
                     className={cn(
                       'w-full text-left transition hover:bg-[var(--mt5-raised)]',
+                      // `relative` is the phone's open-position triangle: it hangs in the row's own
+                      // top-left corner, outside the flex flow, so it cannot shift the text.
                       phone
-                        ? (view === 'simple' ? 'flex items-center gap-2 px-3 py-3' : 'flex items-start gap-2 px-3 py-2')
+                        ? (view === 'simple' ? 'relative flex items-center gap-2 px-3 py-3' : 'relative flex items-start gap-2 px-3 py-2')
                         // Tighter than the phone row's: six columns share a docked panel that is
                         // 286px wide at 1440, and the two price columns are the ones that must not
                         // be squeezed. MetaTrader drops columns off the right edge at this width;
@@ -523,9 +554,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                       /* MetaTrader Android's reduced row, verbatim: "In the simple view mode only
                          the Bid and Ask prices are shown." Which is now literally what it shows. */
                       <>
-                        <span aria-hidden className="w-3 shrink-0 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
-                          {GUTTER_GLYPH[glyph]}
-                        </span>
+                        <PositionCorner mark={marked?.symbol === symbol ? marked.mark : null} />
                         <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-white">{symbol}</span>
                         <span className="flex shrink-0 items-baseline gap-2 text-right">
                           {sides === null ? (
@@ -544,9 +573,17 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                        * grid rather than the same one narrowed (docs/mt5/04-mobile-app.md section 2,
                        * read off `android/en/quotes.png`). Two columns, three lines on the left:
                        *
+                       *     ◢(corner triangle)
                        *     +151  0.14%                      1.08 07⁶
                        *     EURUSD
                        *     15:09:42  ⌶ 0
+                       *
+                       * There is NO tick-direction glyph in a gutter here, and that is a difference
+                       * from the desktop grid rather than an omission: the phone row's top-left
+                       * corner carries the open-position triangle instead (see `PositionCorner`),
+                       * and the symbol starts at the row's own padding edge. The green-and-red arrow
+                       * this row used to print was the DESKTOP Market Watch's, sampled from the
+                       * desktop screenshot, reused on a screen MetaTrader never puts it on.
                        *
                        * Line 1 is the daily change: the POINTS figure grey and never colour-coded,
                        * the percent blue when positive and red when negative. That split is
@@ -565,9 +602,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                        * of bars per watched symbol to print two numbers each.
                        */
                       <>
-                        <span aria-hidden className="w-3 shrink-0 pt-1 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
-                          {GUTTER_GLYPH[glyph]}
-                        </span>
+                        <PositionCorner mark={marked?.symbol === symbol ? marked.mark : null} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-baseline gap-1.5 font-mono text-[10px] tabular-nums">
                             <span className="text-[#969696]">
@@ -904,6 +939,42 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
       </div>
       )}
     </aside>
+  );
+}
+
+/**
+ * MetaTrader mobile's open-position marker on a Quotes row.
+ *
+ * "a small filled triangle in the row's top-LEFT corner — blue (#1C5FE9 measured) = net floating
+ * profit, red = loss" (docs/mt5/04-mobile-app.md 81). It is a CORNER triangle, a dog-ear filling the
+ * angle of the row rather than a centred ▲ in a gutter, which is why it is drawn as a polygon
+ * against the row's own two edges and sits outside the flex flow entirely.
+ *
+ * MetaQuotes' own help text places it "on the right" and every screenshot puts it top-left; the
+ * reference notes the contradiction and resolves it the way this repo always does: the screenshot
+ * wins.
+ *
+ * Its size is not a measured figure. The reference says "small" and publishes no dimension, so this
+ * is 7px, scaled to the 15px symbol beside it — named here as a choice rather than passed off as a
+ * sample.
+ *
+ * `mark` of null draws nothing, which is the common case: no exposure on this symbol, or the
+ * catalogue has not landed yet so which symbol carries the positions is not yet known.
+ */
+function PositionCorner({ mark }: { mark: PositionMark | null }) {
+  if (mark === null) return null;
+  return (
+    <svg
+      viewBox="0 0 7 7"
+      className="pointer-events-none absolute left-0 top-0 h-[7px] w-[7px]"
+      // "You have an open position on this symbol" is not decoration, and a trader using a screen
+      // reader is the one who most needs telling. The colour says which way it is going; so does
+      // this, because a label naming only the triangle would carry none of the meaning.
+      role="img"
+      aria-label={mark === 'profit' ? 'Open position, in profit' : 'Open position, at a loss'}
+    >
+      <polygon points="0,0 7,0 0,7" fill={POSITION_MARK_COLOUR[mark]} />
+    </svg>
   );
 }
 

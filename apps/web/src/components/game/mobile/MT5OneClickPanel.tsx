@@ -27,16 +27,25 @@ import { cn } from '@/lib/cn';
  * panel wants to be where the thumb is. Both placements are MetaTrader's; this is a choice between
  * two of its own settings, not a departure from them.
  *
- * ── One price, not a bid and an ask ──────────────────────────────────────────────────────────────
- * MetaTrader prints the bid on SELL and the ask on BUY. There is no spread here: a contract opens
- * and settles on one seeded price. Both blocks therefore carry the same number, which is the same
- * decision the order ticket documents, for the same reason — printing two different prices would
- * tell the player they buy at one and sell at the other, and that is false.
+ * ── The bid on SELL and the ask on BUY ───────────────────────────────────────────────────────────
+ * MetaQuotes' layout is literally `[ SELL \n <bid price> ] [ stepper ] [ BUY \n <ask price> ]`
+ * (04-mobile-app.md 165), and this panel now prints those two numbers.
+ *
+ * It used to print one, in both blocks, under a comment saying a bid and an ask would "tell the
+ * player they buy at one and sell at the other, and that is false". That was true when it was
+ * written and has not been true since the engine began publishing the spread it charges: `cost` in
+ * the continuous payout IS the spread, a trader does buy at the ask and sell at the bid, and the
+ * single number was the misleading rendering. Both sides come from `bidAsk`, which is the same
+ * arithmetic over the same quote that the order ticket and the Quotes rows use, so no surface on
+ * this phone can quote a different price from another.
+ *
+ * `bidAsk` is null on a brand that publishes no spread, and there the panel falls back to the one
+ * price it always showed — because on that brand one price is the truth.
  */
 export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void }) {
   const money = useDisplayMoney();
   const {
-    ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
+    ready, symbol, settledSymbol, digits, price, bidAsk, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, bump, setLots, volNote, stakeCents, durationS, place,
     chartSettled, continuous,
   } = useOrderEntry();
@@ -122,8 +131,14 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
       <span className="text-[10px] font-bold uppercase leading-none tracking-wider text-white/90">
         {dir}
       </span>
-      {/* "the price is large beneath it with enlarged last digits" — MT5Price is that typography. */}
-      <MT5Price value={price} digits={digits} className="text-[13px] font-semibold text-white" />
+      {/* "the price is large beneath it with enlarged last digits" — MT5Price is that typography.
+          The SELL block carries the bid and the BUY block the ask: the price each side would
+          actually execute at, which is the number a trader is being asked to accept. */}
+      <MT5Price
+        value={bidAsk === null ? price : dir === 'sell' ? bidAsk.bid : bidAsk.ask}
+        digits={digits}
+        className="text-[13px] font-semibold text-white"
+      />
     </button>
   );
 

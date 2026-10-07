@@ -89,7 +89,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
     return (
       <div className="flex h-dvh flex-col overflow-hidden">
-        <TopBar />
+        {/**
+          * MetaTrader's phone draws ONE top bar, and below `lg` this shell is MetaTrader's phone.
+          *
+          * The app bar sat above MT5MobileShell's own chrome, so every phone screen carried two
+          * stacked bars: the brand's blue lockup and then MetaTrader's. That is 56px of a phone
+          * screen spent on a second bar MetaTrader does not have, and it is the most visible way
+          * the terminal stopped looking like the terminal.
+          *
+          * Hidden rather than unmounted, so nothing it carries is lost at a width where it IS
+          * MetaTrader's bar: from `lg` up this is the desktop terminal, whose title bar is the app
+          * bar. What the phone would otherwise lose is reached through the drawer, which is
+          * MetaTrader's own answer to the same question -- the account, the balance, Funds,
+          * Settings, Chat and the session action are all rows in it, and the covert marketer entry
+          * moved onto its account card (MT5Drawer).
+          */}
+        {/* A wrapper rather than `display: contents` on the header itself: `contents` and the
+            `hidden` that has to override it are the same property, and which one wins would come
+            down to stylesheet order. A box that is simply not displayed cannot be ambiguous. */}
+        <div className={cn('shrink-0', terminal ? 'hidden lg:block' : '')}>
+          <TopBar />
+        </div>
         <NotificationBanners />
         <main className={cn(
           'relative flex w-full min-h-0 flex-1 flex-col',

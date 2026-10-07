@@ -62,7 +62,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
   const money = useDisplayMoney();
   const { data: wallet } = useWallet();
   const {
-    ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
+    ready, symbol, settledSymbol, digits, price, bidAsk, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, volStep, bump, setLots, volNote, stakeCents, overBalance, signedIn,
     durationS, place, continuous, chartSettled,
     priceOfRate,
@@ -183,15 +183,35 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
             the symbol, the SL chip and the money lines all clipped at the left edge. The strip
             keeps its own horizontal scrolling; this box must not have any. */}
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-3">
-          {/* 2. Symbol and description, with the price on the right where MetaTrader puts Bid and
-                 Ask. One price here, for the reason the order ticket documents. */}
+          {/* 2. "SYMBOL with its description, Bid and Ask on the right" (04-mobile-app.md 25), and
+                 both of them, labelled, because a sheet that offers a SELL and a BUY button has to
+                 say which price each of them is. This printed one unlabelled number under a comment
+                 deferring to the order ticket; the ticket itself has quoted two sides since the
+                 engine began publishing its spread, so the deferral pointed at a reason that had
+                 stopped applying. `bidAsk` is the ticket's own value, not a second derivation.
+
+                 Null only on a brand that publishes no spread, where the single price is the whole
+                 truth and is printed on its own. */}
           <div className="flex items-start gap-3">
             <div className="min-w-0">
               <div className="truncate text-[15px] font-bold leading-tight">{symbol}</div>
               {description === '' ? null : <div className="truncate text-[11px] text-[var(--mt5-muted)]">{description}</div>}
             </div>
             <div className="ml-auto shrink-0 text-right">
-              <MT5Price value={price} digits={digits} className="text-[15px] font-semibold" />
+              {bidAsk === null ? (
+                <MT5Price value={price} digits={digits} className="text-[15px] font-semibold" />
+              ) : (
+                <div className="flex items-baseline justify-end gap-3">
+                  <div>
+                    <div className="text-[9px] font-semibold uppercase leading-none tracking-wide text-[var(--mt5-muted)]">Bid</div>
+                    <MT5Price value={bidAsk.bid} digits={digits} className="text-[15px] font-semibold" />
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-semibold uppercase leading-none tracking-wide text-[var(--mt5-muted)]">Ask</div>
+                    <MT5Price value={bidAsk.ask} digits={digits} className="text-[15px] font-semibold" />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -317,8 +337,12 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
               onStartTyping={() => setTyping({ field: 'sl', text: levelText('sl', levels.slPoints) === 'not set' ? '' : levelText('sl', levels.slPoints) })}
               onType={(text) => setTyping({ field: 'sl', text })}
               onCommit={(text) => commitLevel('sl', text)}
-              /* 9. Where MetaTrader prints the level's money value. */
+              /* 9. Where MetaTrader prints the level's money value, "loss in red on the SL side"
+                    (04-mobile-app.md 369). Red in the SL chip's OWN measured colour, which the
+                    reference names two lines earlier for the chip this sits beside: one control,
+                    one red, and both halves of it sampled from the same screenshot. */
               note={`Max loss ${money.fmt(stakeCents)}`}
+              noteColour="#DD5B4E"
               detail={continuous
                 ? 'The stop closes the position at this price, for what it is worth there, so part of the stake can come back. Stops processing is performed on the server side.'
                 : 'The stop cannot fire: this engine settles a losing contract at expiry and refuses an early close on one. The stake is the most it can lose, whatever the price does.'}
@@ -490,10 +514,20 @@ function Stepper({
  * at any phone size, with the chip and its money note sharing the line above.
  */
 function LevelChip({
-  label, colour, value, set, settable, onDown, onUp, onClear, note, detail, typing, onType, onStartTyping, onCommit,
+  label, colour, value, set, settable, onDown, onUp, onClear, note, noteColour, detail, typing, onType, onStartTyping, onCommit,
 }: {
   label: string;
   colour: string;
+  /**
+   * What colour row 9 is in, where row 9 is a money figure.
+   *
+   * MetaTrader: "Beneath them, the money value of each level — loss in red on the SL side, profit in
+   * green on the TP side" (04-mobile-app.md 369). Omitted where this app's note is NOT a money
+   * value, which is the TP side here: see the component header on why a continuous contract's target
+   * figure cannot be computed from what the engine publishes. Prose painted green would claim to be
+   * a profit figure, and that is the one thing it must not do.
+   */
+  noteColour?: string | undefined;
   value: string;
   set: boolean;
   /** False before the first quote: a level is a price, and there is no price to measure from. */
@@ -520,7 +554,11 @@ function LevelChip({
         </span>
         {/* MetaTrader's row 9: the money value of this level. What it says here is argued in the
             component's own header; the title carries the full reason. */}
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[var(--mt5-muted)] tabular-nums" title={detail}>
+        <span
+          className="min-w-0 flex-1 truncate font-mono text-[10px] tabular-nums"
+          style={{ color: noteColour ?? 'var(--mt5-muted)' }}
+          title={detail}
+        >
           {note}
         </span>
         {set ? (

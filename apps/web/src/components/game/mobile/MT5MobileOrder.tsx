@@ -276,7 +276,11 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
         <div className="flex items-stretch border-b border-[var(--mt5-border)]">
           <LevelHalf
             label="SL"
-            underline="#f23645"
+            // MetaTrader's measured Android value for this underline, #EF853A (04-mobile-app.md
+            // 571). It is ORANGE, not the terminal's sell red: on mobile MetaTrader reserves
+            // orange for the stop and for closing a position, and uses red for a loss. The red
+            // here read as "this is the sell side", which is a different claim.
+            underline="#EF853A"
             value={anchor === null ? 'waiting' : slPrice === null ? null : slPrice.toFixed(digits)}
             onDown={() => bumpSl(-1)}
             onUp={() => bumpSl(1)}
@@ -285,7 +289,10 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           <span aria-hidden className="w-px shrink-0 bg-[var(--mt5-border)]" />
           <LevelHalf
             label="TP"
-            underline="#0EB52E"
+            // #54BE66 (04-mobile-app.md 572), the classic ticket's own green. #0EB52E, which was
+            // here, is the ADVANCED dialog's TP chip (570) — a different control on a different
+            // screen.
+            underline="#54BE66"
             value={!continuous ? 'n/a' : anchor === null ? 'waiting' : tpPrice === null ? null : tpPrice.toFixed(digits)}
             onDown={() => bumpTp(-1)}
             onUp={() => bumpTp(1)}

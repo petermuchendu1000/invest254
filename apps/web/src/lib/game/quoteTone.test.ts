@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { quoteTone, QUOTE_TONE_COLOUR, STALE_AFTER_MS, gutterGlyph, GUTTER_GLYPH, GUTTER_COLOUR } from './quoteTone.js';
+import {
+  quoteTone, QUOTE_TONE_COLOUR, STALE_AFTER_MS, gutterGlyph, GUTTER_GLYPH, GUTTER_COLOUR,
+  positionMark, POSITION_MARK_COLOUR,
+} from './quoteTone.js';
 
 /**
  * MetaQuotes' rule, verbatim: "Blue — the current price is higher than the previous one; Red — the
@@ -73,4 +76,25 @@ test('the grey dot covers both a stale price and one that has never arrived', ()
   // both stale by their Time column and both carry the dot.
   assert.equal(gutterGlyph({ up: true, changedAt: 0, now: 60_000 }), 'flat');
   assert.equal(gutterGlyph({ up: null, changedAt: null, now: 1 }), 'flat');
+});
+
+test("the phone's corner triangle is about MONEY, and the gutter arrow about the price", () => {
+  /**
+   * These two markers were conflated: the phone Quotes row was drawing the DESKTOP grid's
+   * tick-direction arrow, which MetaTrader does not put on a phone at all. They state different
+   * facts and they are deliberately different colours, so the test holds both at once — a later
+   * reading of one document alone cannot quietly make them the same marker again.
+   */
+  assert.equal(POSITION_MARK_COLOUR.profit, '#1C5FE9', '04-mobile-app.md 81, measured');
+  assert.notEqual(POSITION_MARK_COLOUR.profit, GUTTER_COLOUR.up);
+  // Green is the one colour this marker can never be: MT5 mobile reserves green for Take Profit
+  // (04-mobile-app.md 594-596), and the desktop gutter's green arrow is about the price moving.
+  assert.notEqual(POSITION_MARK_COLOUR.profit, '#00A91C');
+  assert.notEqual(POSITION_MARK_COLOUR.loss, '#00A91C');
+});
+
+test('breaking even is blue, because MetaTrader has two states here and not three', () => {
+  assert.equal(positionMark(1), 'profit');
+  assert.equal(positionMark(0), 'profit', 'zero is not a loss');
+  assert.equal(positionMark(-1), 'loss');
 });

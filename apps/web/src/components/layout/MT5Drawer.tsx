@@ -14,6 +14,7 @@ import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { useDisplayMoney } from '@/lib/money';
 import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
+import { MarketerLogoHotspot } from '@/components/marketer/MarketerHUD';
 import { cn } from '@/lib/cn';
 
 /**
@@ -147,7 +148,20 @@ export function MT5Drawer() {
                 {demo ? 'Demo' : 'Real'}
               </span>
             </div>
-            <div className="truncate text-[11px] leading-tight text-white/75">{server}</div>
+            {/* The covert marketer entry, on the one line of this card that is not a destination.
+                It lives here because MetaTrader's phone shell has no brand logo to overlay: the
+                app bar that used to carry it is hidden below `lg` on a terminal brand (see
+                AppShell), since MetaTrader draws exactly one top bar and a second one above its
+                chrome is not its screen. A corner-anchored hotspot was not an option either, as
+                MarketerHUD's own note explains: it lands on the chart's hamburger.
+
+                The server name is text, so nothing is taken from anyone: a player sees and reaches
+                exactly what they did before, and a marketer's tap here opens the dashboard instead
+                of the account. The username above it still opens the account for both. */}
+            <div className="relative truncate text-[11px] leading-tight text-white/75">
+              {server}
+              <MarketerLogoHotspot />
+            </div>
             <div className="mt-2 font-mono text-[20px] font-semibold leading-none tabular-nums">
               {money.fmt(balanceCents)}
             </div>

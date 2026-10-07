@@ -63,8 +63,19 @@ export function MT5ModifyPosition({
   const setLevels = useLevelsStore((s) => s.set);
   const levelRef = useLevelsStore((s) => s.ref);
   const anchor = levelRef ?? openPrice;
-  // The engine's own setter: what it accepts is what will fire.
-  const pushLevels = useGameSocket().setLevels;
+  /**
+   * The engine's own setter, aimed at THIS position: what it accepts is what will fire.
+   *
+   * The id is not optional in practice, and leaving it off was a defect rather than a shorthand.
+   * `setLevels` with no id falls back to "the newest open position" (`pick` in GameSocketProvider),
+   * which was the only position there could be when this form was written. The engine holds several
+   * now and both the desktop Trade grid and the phone Trade screen list them, so a trader opening
+   * Modify on the first of three rows was moving the stop on the third. It is still a fallback and
+   * not a silent one: `positionId` is null only while an open is optimistic, and the engine refuses
+   * a level on a position it has not acknowledged either way.
+   */
+  const push = useGameSocket().setLevels;
+  const pushLevels = (sl: number | null, tp: number | null) => push(sl, tp, pos.positionId ?? undefined);
   const slPrice = levelPrice(levels, anchor, 'sl', digits);
   const tpPrice = levelPrice(levels, anchor, 'tp', digits);
 

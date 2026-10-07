@@ -174,7 +174,10 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           openPrice={openPrice}
           busy={pos.phase === 'settling'}
           onDismiss={() => setClosing(false)}
-          onConfirm={() => { sell(); setClosing(false); }}
+          // This card's OWN position. A bare `sell()` closes whichever one the provider holds as
+          // newest, which was this one when only one could exist; several can now, and a card drawn
+          // for a position has to close the position it was drawn for.
+          onConfirm={() => { sell(pos.positionId ?? undefined); setClosing(false); }}
         />
       ) : null}
     </div>
