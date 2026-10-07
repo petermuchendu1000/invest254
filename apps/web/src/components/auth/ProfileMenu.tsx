@@ -84,7 +84,7 @@ export function ProfileMenu({ user }: { user: MeDto }) {
     mt5 ? 'rounded-none' : 'rounded-lg',
   );
   // MetaTrader's accent is blue; the app's is green. The money icons follow whichever is in play.
-  const iconTone = mt5 ? 'text-[#4597ff]' : 'text-accent';
+  const iconTone = mt5 ? 'text-[var(--mt5-blue-link)]' : 'text-accent';
 
   return (
     <div className="relative" ref={rootRef}>
@@ -119,7 +119,7 @@ export function ProfileMenu({ user }: { user: MeDto }) {
           <div className="flex items-center gap-3 px-3 py-2.5">
             <span className={cn(
               'flex h-9 w-9 items-center justify-center text-sm font-bold',
-              mt5 ? 'rounded-sm bg-[#3183ff] text-white' : 'rounded-full bg-accent text-accent-fg',
+              mt5 ? 'rounded-sm bg-[var(--mt5-blue)] text-white' : 'rounded-full bg-accent text-accent-fg',
             )}>
               {initial}
             </span>

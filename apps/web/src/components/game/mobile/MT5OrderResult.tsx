@@ -51,8 +51,8 @@ export function MT5OrderResult({ result, onDismiss, placement = 'overlay' }: {
       data-order-result-placement={placement}
       className={
         placement === 'overlay'
-          ? 'absolute inset-x-0 bottom-0 z-10 border-t bg-[#0f1720] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3'
-          : 'rounded-sm border bg-[#0f1720] px-3 pb-3 pt-2.5'
+          ? 'absolute inset-x-0 bottom-0 z-10 border-t bg-[var(--mt5-surface)] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3'
+          : 'rounded-sm border bg-[var(--mt5-surface)] px-3 pb-3 pt-2.5'
       }
       style={placement === 'overlay'
         ? { borderTopColor: rejected ? '#f23645' : '#2b3543' }
@@ -62,48 +62,48 @@ export function MT5OrderResult({ result, onDismiss, placement = 'overlay' }: {
         <>
           <div className="flex items-center gap-2">
             {/* MetaTrader waits here too: the order is with the server and nothing is known yet. */}
-            <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#3183ff]" />
+            <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[var(--mt5-blue)]" />
             <span className="text-[14px] font-semibold text-white">
               Sending {result.direction === 'buy' ? 'buy' : 'sell'} order
             </span>
           </div>
-          <p className="pt-1 text-[11px] text-[#8fa2b8]">
+          <p className="pt-1 text-[11px] text-[var(--mt5-muted)]">
             The order fills at the next engine tick.
           </p>
         </>
       ) : result.kind === 'done' ? (
         <>
           <div className="flex items-baseline gap-2">
-            <span className="text-[14px] font-bold text-[#41be56]">Done</span>
+            <span className="text-[14px] font-bold text-[var(--mt5-green)]">Done</span>
             <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-white tabular-nums">
               {result.line}
             </span>
           </div>
           {result.ticket === null ? null : (
-            <p className="pt-1 font-mono text-[11px] text-[#8fa2b8] tabular-nums">
+            <p className="pt-1 font-mono text-[11px] text-[var(--mt5-muted)] tabular-nums">
               #{result.ticket.slice(0, 8)}
             </p>
           )}
           <button
             type="button"
             onClick={onDismiss}
-            className="mt-2 h-9 w-full rounded bg-[#202933] text-[13px] font-semibold text-[#3183ff]"
+            className="mt-2 h-9 w-full rounded bg-[var(--mt5-raised)] text-[13px] font-semibold text-[var(--mt5-blue)]"
           >
             OK
           </button>
         </>
       ) : (
         <>
-          <div className="text-[14px] font-bold text-[#f23645]">{result.title}</div>
+          <div className="text-[14px] font-bold text-[var(--mt5-red)]">{result.title}</div>
           {result.detail === undefined ? null : (
-            <p className="pt-1 text-[11px] leading-snug text-[#8fa2b8]">{result.detail}</p>
+            <p className="pt-1 text-[11px] leading-snug text-[var(--mt5-muted)]">{result.detail}</p>
           )}
           {/* MetaTrader's requote flow ends on an `OK` that "returns you to the order screen", and a
               plain rejection is acknowledged the same way. */}
           <button
             type="button"
             onClick={onDismiss}
-            className="mt-2 h-9 w-full rounded bg-[#202933] text-[13px] font-semibold text-[#3183ff]"
+            className="mt-2 h-9 w-full rounded bg-[var(--mt5-raised)] text-[13px] font-semibold text-[var(--mt5-blue)]"
           >
             OK
           </button>

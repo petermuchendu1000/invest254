@@ -63,7 +63,7 @@ export function MT5ObjectMenu({
       ref={box}
       role="menu"
       aria-label={drawing ? objectNameOf(drawing) : 'Object'}
-      className="fixed z-[90] min-w-44 rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[11px] shadow-xl"
+      className="fixed z-[90] min-w-44 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[11px] shadow-xl"
       style={{ left: at.x, top: at.y }}
     >
       <Item label="Properties" disabled={!has} onClick={run(onProperties)} />
@@ -87,7 +87,7 @@ function Item({ label, onClick, disabled }: { label: string; onClick: () => void
       disabled={disabled}
       className={cn(
         'block w-full px-3 py-1.5 text-left transition',
-        disabled ? 'cursor-not-allowed text-[#4a5666]' : 'text-white hover:bg-[#3183ff]',
+        disabled ? 'cursor-not-allowed text-[#4a5666]' : 'text-white hover:bg-[var(--mt5-blue)]',
       )}
     >
       {label}

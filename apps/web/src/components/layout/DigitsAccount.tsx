@@ -16,7 +16,7 @@ import { useAmountText } from '@/lib/game/useAmountText';
 import { useDigitSession } from '@/lib/game/digitSession';
 import { useMultSession } from '@/lib/game/multSession';
 import { useLiveChat } from '@/lib/chat/liveChat';
-import { useAccountUi, useMyKyc, PLAYER_TWO_FACTOR } from '@/lib/account/accountUi';
+import { useAccountUi, useMyKyc, kycLabelSuffix, PLAYER_TWO_FACTOR } from '@/lib/account/accountUi';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { passwordError } from '@/lib/auth/validation';
 import { DIcon, type IconName } from '@/components/game/digits/icons';
@@ -185,7 +185,7 @@ export function AccountMenu() {
             <Item icon="user" label="Profile" href="/account" />
             <Item icon="lock" label="Change Password" onClick={() => setPw(true)} />
             {PLAYER_TWO_FACTOR ? <Item icon="shield" label="Two-Factor Auth" onClick={() => openDialog('twofactor')} /> : null}
-            <Item icon="idcard" label={`Verify Identity${kyc.data?.status === 'approved' ? ' · verified' : kyc.data?.status === 'pending' ? ' · in review' : ''}`} onClick={() => openDialog('verify')} />
+            <Item icon="idcard" label={`Verify Identity${kycLabelSuffix(kyc.data?.status)}`} onClick={() => openDialog('verify')} />
             <Item icon="gift" label="Referrals" href="/account" />
           </div>
           <div className="border-t border-border py-1">

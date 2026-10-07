@@ -27,16 +27,25 @@ import { cn } from '@/lib/cn';
  * panel wants to be where the thumb is. Both placements are MetaTrader's; this is a choice between
  * two of its own settings, not a departure from them.
  *
- * ── One price, not a bid and an ask ──────────────────────────────────────────────────────────────
- * MetaTrader prints the bid on SELL and the ask on BUY. There is no spread here: a contract opens
- * and settles on one seeded price. Both blocks therefore carry the same number, which is the same
- * decision the order ticket documents, for the same reason — printing two different prices would
- * tell the player they buy at one and sell at the other, and that is false.
+ * ── The bid on SELL and the ask on BUY ───────────────────────────────────────────────────────────
+ * MetaQuotes' layout is literally `[ SELL \n <bid price> ] [ stepper ] [ BUY \n <ask price> ]`
+ * (04-mobile-app.md 165), and this panel now prints those two numbers.
+ *
+ * It used to print one, in both blocks, under a comment saying a bid and an ask would "tell the
+ * player they buy at one and sell at the other, and that is false". That was true when it was
+ * written and has not been true since the engine began publishing the spread it charges: `cost` in
+ * the continuous payout IS the spread, a trader does buy at the ask and sell at the bid, and the
+ * single number was the misleading rendering. Both sides come from `bidAsk`, which is the same
+ * arithmetic over the same quote that the order ticket and the Quotes rows use, so no surface on
+ * this phone can quote a different price from another.
+ *
+ * `bidAsk` is null on a brand that publishes no spread, and there the panel falls back to the one
+ * price it always showed — because on that brand one price is the truth.
  */
 export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void }) {
   const money = useDisplayMoney();
   const {
-    ready, symbol, settledSymbol, digits, price, tradeDisabled, connecting,
+    ready, symbol, settledSymbol, digits, price, bidAsk, tradeDisabled, connecting,
     lots, minLots, maxLots, volDigits, bump, setLots, volNote, stakeCents, durationS, place,
     chartSettled, continuous,
   } = useOrderEntry();
@@ -85,7 +94,7 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
   const tint = oneClickTint({ up: seen.current.up, changedAt: seen.current.changedAt, now: Date.now() });
   const fill = ONE_CLICK_FILL[tint];
 
-  if (!ready) return <div className="h-[72px] shrink-0 animate-pulse border-t border-[#2b3543] bg-[#0f1720]" />;
+  if (!ready) return <div className="h-[72px] shrink-0 animate-pulse border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)]" />;
 
   /**
    * A tap fires, or opens the ticket.
@@ -122,15 +131,21 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
       <span className="text-[10px] font-bold uppercase leading-none tracking-wider text-white/90">
         {dir}
       </span>
-      {/* "the price is large beneath it with enlarged last digits" — MT5Price is that typography. */}
-      <MT5Price value={price} digits={digits} className="text-[13px] font-semibold text-white" />
+      {/* "the price is large beneath it with enlarged last digits" — MT5Price is that typography.
+          The SELL block carries the bid and the BUY block the ask: the price each side would
+          actually execute at, which is the number a trader is being asked to accept. */}
+      <MT5Price
+        value={bidAsk === null ? price : dir === 'sell' ? bidAsk.bid : bidAsk.ask}
+        digits={digits}
+        className="text-[13px] font-semibold text-white"
+      />
     </button>
   );
 
-  const chev = 'grid h-7 w-6 shrink-0 place-items-center rounded text-[#0f1720] transition active:bg-black/10 disabled:opacity-30';
+  const chev = 'grid h-7 w-6 shrink-0 place-items-center rounded text-[var(--mt5-surface)] transition active:bg-black/10 disabled:opacity-30';
 
   return (
-    <div className="shrink-0 border-t border-[#2b3543] bg-[#0f1720] px-2 py-1.5">
+    <div className="shrink-0 border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 py-1.5">
       <div className="flex items-stretch gap-1.5">
         {side('sell')}
         {/* "a white volume stepper with chevron-down (decrease) and chevron-up (increase) around the
@@ -158,7 +173,7 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
                 onClick={() => setTypingVol(lots.toFixed(volDigits))}
                 title={`Volume in lots. Type a value between ${minLots.toFixed(volDigits)} and ${maxLots.toFixed(volDigits)}.`}
                 aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
-                className="min-w-0 flex-1 text-center font-mono text-[13px] font-bold text-[#0f1720] tabular-nums"
+                className="min-w-0 flex-1 text-center font-mono text-[13px] font-bold text-[var(--mt5-surface)] tabular-nums"
               >
                 {lots.toFixed(volDigits)}
               </button>
@@ -171,7 +186,7 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
                 onChange={(e) => setTypingVol(e.target.value)}
                 onBlur={commitVol}
                 onKeyDown={(e) => { if (e.key === 'Enter') commitVol(); if (e.key === 'Escape') setTypingVol(null); }}
-                className="w-0 min-w-0 flex-1 bg-transparent text-center font-mono text-[13px] font-bold text-[#0f1720] outline-none tabular-nums"
+                className="w-0 min-w-0 flex-1 bg-transparent text-center font-mono text-[13px] font-bold text-[var(--mt5-surface)] outline-none tabular-nums"
               />
             )}
             <button
@@ -191,7 +206,7 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
           {/* The amount, and a term ONLY where there still is one: a continuous brand ignores the
               client's duration entirely (see MT5MobileOrder's Expiry note), so printing one here
               would advertise a term this trade does not have. */}
-          <span className="-mt-0.5 font-mono text-[9px] leading-none text-[#0f1720]/70 tabular-nums">
+          <span className="-mt-0.5 font-mono text-[9px] leading-none text-[var(--mt5-surface)]/70 tabular-nums">
             {money.fmt(stakeCents)}{continuous ? '' : ` · ${durationLabel(durationS)}`}
           </span>
         </div>
@@ -208,9 +223,9 @@ export function MT5OneClickPanel({ onOpenTicket }: { onOpenTicket: () => void })
           to place an order.
         </p>
       ) : connecting ? (
-        <p className="pt-1 text-center text-[10px] text-[#8fa2b8]">Connecting…</p>
+        <p className="pt-1 text-center text-[10px] text-[var(--mt5-muted)]">Connecting…</p>
       ) : (
-        <p className={cn('pt-1 text-center text-[10px] leading-none text-[#8fa2b8]')}>
+        <p className={cn('pt-1 text-center text-[10px] leading-none text-[var(--mt5-muted)]')}>
           {instant ? 'One-click trading is on: a tap places this order.' : 'Tap a side to open the order ticket.'}
         </p>
       )}

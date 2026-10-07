@@ -22,8 +22,63 @@ export const isTerminalScreen = (terminalBrand: boolean, isMarketer: boolean): b
  * `/dashboard` is the marketer's own page, and it belongs here for the same reason the rest do: it
  * is reached from inside the terminal, so arriving at a centred reading column with a marketing
  * footer under it would be the moment the illusion of one app breaks.
+ *
+ * It is a PREFIX list, and that is the fix for most of what was wrong. As an exact-match set it
+ * covered five paths: `/history` was a terminal screen and `/history/digits` was not, and every
+ * other page a trader can reach — the affiliate screen, the legal pages, a referral landing, the
+ * offline and not-found screens — rendered in the generic house style whatever brand they belonged
+ * to. The worst of them put the terminal's blue bar on top of an invest254 reading column with the
+ * gaming footer underneath, which is three different products in one scroll.
  */
-export const TERMINAL_ROUTES: ReadonlySet<string> = new Set(['/history', '/account', '/wallet', '/dashboard']);
+export const TERMINAL_ROUTES: readonly string[] = [
+  '/history', '/account', '/wallet', '/dashboard', '/affiliate', '/legal', '/r', '/offline',
+];
 
-export const isTerminalRoute = (pathname: string | null | undefined): boolean =>
-  pathname !== null && pathname !== undefined && TERMINAL_ROUTES.has(pathname);
+/**
+ * The operator consoles are NOT terminal screens and never should be.
+ *
+ * They are staff tools with their own sidebar shells, they are not reached from inside the
+ * terminal, and a prefix list that swept them in would restyle seventeen admin pages as a trading
+ * platform. Listed explicitly so the prefix rule above can stay simple.
+ */
+const NEVER_TERMINAL: readonly string[] = ['/admin', '/platform', '/console'];
+
+const underPrefix = (pathname: string, prefix: string): boolean =>
+  pathname === prefix || pathname.startsWith(`${prefix}/`);
+
+export const isTerminalRoute = (pathname: string | null | undefined): boolean => {
+  if (pathname === null || pathname === undefined) return false;
+  if (NEVER_TERMINAL.some((p) => underPrefix(pathname, p))) return false;
+  return TERMINAL_ROUTES.some((p) => underPrefix(pathname, p));
+};
+
+/**
+ * The title the SHELL must draw for a terminal route, or null when the page draws its own.
+ *
+ * Four screens build their own `MT5TitleBar` because they put things in it — History has its tabs
+ * and its symbol filter, Funds has the account mode in its subtitle. Everything else was a bare
+ * page with no bar at all: no title, no way back, and its heading flush against the window edge,
+ * because the terminal shell deliberately has no gutters (the chart lives in it). Naming them here
+ * gives each one MetaTrader's bar without touching the page.
+ */
+const OWN_TITLE_BAR: readonly string[] = ['/history', '/account', '/wallet', '/dashboard'];
+
+const SHELL_TITLES: ReadonlyArray<readonly [prefix: string, title: string]> = [
+  ['/affiliate', 'Invite friends'],
+  ['/legal', 'Legal'],
+  ['/r', 'Invitation'],
+  ['/offline', 'Offline'],
+];
+
+export function terminalScreenTitle(pathname: string | null | undefined): string | null {
+  if (!isTerminalRoute(pathname)) return null;
+  const path = pathname as string;
+  // `/history/digits` is under a prefix whose own page draws a bar, but it is a different page and
+  // draws none. The exact-match test is what tells the parent from the child.
+  if (OWN_TITLE_BAR.includes(path)) return null;
+  const hit = SHELL_TITLES.find(([prefix]) => underPrefix(path, prefix));
+  if (hit) return hit[1];
+  // A child of a screen that titles itself: `/history/digits`. Title it after its parent.
+  const parent = OWN_TITLE_BAR.find((p) => underPrefix(path, p));
+  return parent === undefined ? null : parent.slice(1).replace(/^./, (c) => c.toUpperCase());
+}

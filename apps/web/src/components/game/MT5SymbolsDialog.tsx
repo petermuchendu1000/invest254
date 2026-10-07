@@ -62,28 +62,28 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
       role="dialog"
       aria-modal="true"
       aria-label="Symbols"
-      className="fixed inset-0 z-[86] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[86] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-[78vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[78vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
           {/* MetaTrader's own icon for this window: "Title: `Symbols`, with the yellow `$` badge
               icon" (docs/mt5/10-market-watch.md 999), the same badge its context-menu entry carries
               (442) and the same one the tree's group nodes wear. It was a blue `S`, which is a
               letter from the window's title rather than MetaTrader's mark. */}
           <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[2px] bg-[#f0b90b] text-[11px] font-black leading-none text-[#1a1a1a]">$</span>
           <span className="flex-1 truncate text-[15px] font-semibold leading-tight">Symbols</span>
-          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white">×</button>
+          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[var(--mt5-muted)] transition hover:text-white">×</button>
         </div>
 
-        <div className="shrink-0 border-b border-[#2b3543] px-3 py-2">
+        <div className="shrink-0 border-b border-[var(--mt5-border)] px-3 py-2">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Find symbol"
             aria-label="Find symbol"
-            className="h-7 w-full rounded-sm border border-[#2b3543] bg-[#202933] px-2 text-[11px] text-white outline-none placeholder:text-[#4a5666] focus:border-[#3183ff]"
+            className="h-7 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-2 text-[11px] text-white outline-none placeholder:text-[#4a5666] focus:border-[var(--mt5-blue)]"
           />
-          <p className={cn('mt-1.5 text-[10px] leading-snug', full ? 'text-[#f0b90b]' : 'text-[#8fa2b8]')}>
+          <p className={cn('mt-1.5 text-[10px] leading-snug', full ? 'text-[#f0b90b]' : 'text-[var(--mt5-muted)]')}>
             {picked.length} of {MAX_WATCHED} shown.
             {full ? ' That is the most this feed quotes at once; hide one to add another.' : ''}
           </p>
@@ -100,7 +100,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
           column is present and empty throughout — which is also why there is no "Show expired
           contracts" checkbox beside the search box.
         */}
-        <div className="flex shrink-0 items-center gap-2 border-b border-[#2b3543] bg-[#202933] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#8fa2b8]">
+        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--mt5-muted)]">
           <span aria-hidden className="w-3 shrink-0" />
           <span className="w-20 shrink-0">Symbol</span>
           <span className="min-w-0 flex-1">Description</span>
@@ -109,7 +109,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {groups.length === 0 ? (
-            <p className="px-3 py-4 text-center text-[11px] text-[#8fa2b8]">No symbol matches that.</p>
+            <p className="px-3 py-4 text-center text-[11px] text-[var(--mt5-muted)]">No symbol matches that.</p>
           ) : groups.map(([group, rows]) => {
             const expanded = open.includes(group) || query.trim() !== '';
             return (
@@ -118,12 +118,12 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
                   type="button"
                   onClick={() => setOpen((p) => (p.includes(group) ? p.filter((g) => g !== group) : [...p, group]))}
                   aria-expanded={expanded}
-                  className="flex w-full items-center gap-2 border-b border-[#2b3543]/60 bg-[#202933] px-3 py-1.5 text-left text-[11px] font-semibold text-white"
+                  className="flex w-full items-center gap-2 border-b border-[var(--mt5-border)]/60 bg-[var(--mt5-raised)] px-3 py-1.5 text-left text-[11px] font-semibold text-white"
                 >
-                  <span aria-hidden className="w-3 text-[#8fa2b8]">{expanded ? '−' : '+'}</span>
+                  <span aria-hidden className="w-3 text-[var(--mt5-muted)]">{expanded ? '−' : '+'}</span>
                   {/* MetaTrader prints the tree path with a backslash; the leaf is what reads as a heading. */}
                   <span className="flex-1 truncate">{group.replace('\\', ' › ')}</span>
-                  <span className="w-16 shrink-0 text-right font-mono text-[10px] text-[#8fa2b8]">{rows.length}</span>
+                  <span className="w-16 shrink-0 text-right font-mono text-[10px] text-[var(--mt5-muted)]">{rows.length}</span>
                 </button>
                 {expanded ? rows.map((r) => {
                   const on = picked.includes(r.symbol);
@@ -131,7 +131,7 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
                     <label
                       key={r.symbol}
                       className={cn(
-                        'flex cursor-pointer items-center gap-2 border-b border-[#2b3543]/40 px-3 py-1.5 text-[11px] transition hover:bg-[#202933]',
+                        'flex cursor-pointer items-center gap-2 border-b border-[var(--mt5-border)]/40 px-3 py-1.5 text-[11px] transition hover:bg-[var(--mt5-raised)]',
                         !on && full ? 'opacity-50' : '',
                       )}
                     >
@@ -140,11 +140,11 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
                         checked={on}
                         disabled={!on && full}
                         onChange={() => toggle(r.symbol)}
-                        className="h-3 w-3 shrink-0 accent-[#3183ff]"
+                        className="h-3 w-3 shrink-0 accent-[var(--mt5-blue)]"
                       />
                       <span className="w-20 shrink-0 font-semibold text-white">{r.symbol}</span>
-                      <span className="min-w-0 flex-1 truncate text-[#8fa2b8]">{r.description}</span>
-                      <span className="w-16 shrink-0 text-right text-[#8fa2b8]" />
+                      <span className="min-w-0 flex-1 truncate text-[var(--mt5-muted)]">{r.description}</span>
+                      <span className="w-16 shrink-0 text-right text-[var(--mt5-muted)]" />
                     </label>
                   );
                 }) : null}
@@ -153,11 +153,11 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
           })}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-t border-[#2b3543] px-3 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-t border-[var(--mt5-border)] px-3 py-2.5">
           <button
             type="button"
             onClick={() => setPicked([])}
-            className="h-8 rounded-sm border border-[#2b3543] px-3 text-[11px] font-semibold text-[#8fa2b8] transition hover:text-white"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] px-3 text-[11px] font-semibold text-[var(--mt5-muted)] transition hover:text-white"
           >
             Hide all
           </button>
@@ -165,14 +165,14 @@ export function MT5SymbolsDialog({ catalogue, watched, onApply, onDismiss }: {
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm border border-[#2b3543] px-3 text-[11px] font-semibold text-[#8fa2b8] transition hover:text-white"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] px-3 text-[11px] font-semibold text-[var(--mt5-muted)] transition hover:text-white"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={() => { onApply(picked); onDismiss(); }}
-            className="h-8 rounded-sm bg-[#3183ff] px-5 text-[11px] font-semibold text-white transition hover:brightness-110"
+            className="h-8 rounded-sm bg-[var(--mt5-blue)] px-5 text-[11px] font-semibold text-white transition hover:brightness-110"
           >
             OK
           </button>

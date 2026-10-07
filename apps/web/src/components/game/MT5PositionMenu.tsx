@@ -52,11 +52,11 @@ export function MT5PositionMenu({
   return (
     <div role="dialog" aria-modal="true" aria-label="Position menu" className="fixed inset-0 z-[80] flex flex-col justify-end sm:items-center sm:justify-center">
       <button type="button" aria-label="Dismiss menu" onClick={onDismiss} className="absolute inset-0 bg-black/60" />
-      <div className="relative w-full border-t border-[#2b3543] bg-[#0f1720] sm:max-w-[320px] sm:rounded-sm sm:border">
+      <div className="relative w-full border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] sm:max-w-[320px] sm:rounded-sm sm:border">
         {/* MetaTrader heads the sheet with the position it acts on, so there is no doubt which. */}
-        <div className="border-b border-[#2b3543] px-3 py-2.5">
+        <div className="border-b border-[var(--mt5-border)] px-3 py-2.5">
           <span className="block truncate text-[13px] font-semibold text-white">{title}</span>
-          <span className="block truncate font-mono text-[11px] text-[#8fa2b8]">{subtitle}</span>
+          <span className="block truncate font-mono text-[11px] text-[var(--mt5-muted)]">{subtitle}</span>
         </div>
         <ul>
           {items.map((it) => (
@@ -65,10 +65,10 @@ export function MT5PositionMenu({
                 type="button"
                 onClick={it.onPick}
                 disabled={it.disabled}
-                className="flex w-full flex-col items-start border-b border-[#2b3543]/60 px-3 py-3 text-left text-[14px] text-white transition last:border-b-0 hover:bg-[#202933] disabled:cursor-not-allowed disabled:text-[#8fa2b8]"
+                className="flex w-full flex-col items-start border-b border-[var(--mt5-border)]/60 px-3 py-3 text-left text-[14px] text-white transition last:border-b-0 hover:bg-[var(--mt5-raised)] disabled:cursor-not-allowed disabled:text-[var(--mt5-muted)]"
               >
                 {it.label}
-                {it.note ? <span className="mt-0.5 text-[11px] leading-snug text-[#8fa2b8]">{it.note}</span> : null}
+                {it.note ? <span className="mt-0.5 text-[11px] leading-snug text-[var(--mt5-muted)]">{it.note}</span> : null}
               </button>
             </li>
           ))}

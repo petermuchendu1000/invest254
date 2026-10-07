@@ -98,7 +98,7 @@ export function MT5SwipeRow({ commands, label, children }: {
         role="group"
         aria-label={`${label} quick commands`}
         aria-hidden={!open}
-        className="absolute inset-y-0 right-0 flex items-stretch bg-[#3183ff]"
+        className="absolute inset-y-0 right-0 flex items-stretch bg-[var(--mt5-blue)]"
         style={{ width: barW, pointerEvents: open ? 'auto' : 'none' }}
       >
         {commands.map((c) => (
@@ -132,7 +132,7 @@ export function MT5SwipeRow({ commands, label, children }: {
          * `pan-y` hands the browser the vertical axis: the list still scrolls through this row, and
          * only the horizontal gesture is the row's own.
          */
-        className="relative touch-pan-y bg-[#0f1720]"
+        className="relative touch-pan-y bg-[var(--mt5-surface)]"
         style={{
           transform: `translateX(${-offset}px)`,
           transition: drag.current === null ? 'transform 160ms ease-out' : 'none',

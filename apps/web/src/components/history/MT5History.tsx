@@ -136,12 +136,13 @@ export function MT5History({ embedded = false }: {
   const shown = tab === 'orders' ? sortedOrders.length : tab === 'deals' ? sortedDeals.length : sortedClosed.length;
 
   return (
-    <div className="flex flex-1 flex-col bg-[#0f1720] text-white">
+    <div className="flex min-h-full flex-1 flex-col bg-[var(--mt5-surface)] text-white">
       {/* MetaTrader keeps the screen name, the symbol filter and the tabs all inside the one blue
           band. One instrument is quoted, so "All symbols" is a statement of fact rather than a picker
           that would open on a list of one. */}
       <MT5TitleBar
         embedded={embedded}
+        {...(embedded ? {} : { back: true as const })}
         title="History"
         subtitle="All symbols"
         actions={<>
@@ -168,7 +169,7 @@ export function MT5History({ embedded = false }: {
                   onClick={() => setMenu(null)}
                   className="fixed inset-0 z-30 cursor-default"
                 />
-                <div className="absolute right-0 top-full z-40 mt-1 w-60 overflow-hidden rounded border border-[#2b3543] bg-[#202933] shadow-2xl">
+                <div className="absolute right-0 top-full z-40 mt-1 w-60 overflow-hidden rounded border border-[var(--mt5-border)] bg-[var(--mt5-raised)] shadow-2xl">
                   {menu === 'period' ? (
                     <PeriodMenu
                       period={period}
@@ -231,7 +232,7 @@ export function MT5History({ embedded = false }: {
         )}
       </MT5Summary>
 
-      <div className="flex-1">
+      <div className="flex-1 shrink-0">
         {!token ? (
           <MT5Empty>Sign in to see your trading history.</MT5Empty>
         ) : loading ? (
@@ -264,7 +265,7 @@ export function MT5History({ embedded = false }: {
                       <Td className={sideClass(r.side)}>{r.side}</Td>
                       <Td>{r.lots} / {r.filledLots}</Td>
                       <Td>{r.state === 'CANCELED' ? '-' : px(r.price)}</Td>
-                      <Td className="text-[#8fa2b8]">{r.state}</Td>
+                      <Td className="text-[var(--mt5-muted)]">{r.state}</Td>
                     </Row>
                   ))}
                 </Table>
@@ -329,7 +330,7 @@ function useAutoPage(
 // ───────────────────────────────── entries ─────────────────────────────────
 
 
-const sideClass = (side: string | null) => (side === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]');
+const sideClass = (side: string | null) => (side === 'buy' ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]');
 
 function OrderEntry({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
   return (
@@ -337,7 +338,7 @@ function OrderEntry({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
       title={<>{row.symbol}, <span className={sideClass(row.side)}>{row.side}</span></>}
       time={stamp(row.atMs)}
       detail={`${row.lots} / ${row.filledLots} ${row.state === 'CANCELED' ? '' : px(row.price)}`.trim()}
-      result={<span className="text-[#8fa2b8]">{row.state}</span>}
+      result={<span className="text-[var(--mt5-muted)]">{row.state}</span>}
       onOpen={onOpen}
     />
   );
@@ -395,7 +396,7 @@ function Table({ head, children }: { head: string[]; children: React.ReactNode }
   return (
     <table className="w-full border-collapse text-right font-mono text-[12px] tabular-nums">
       <thead>
-        <tr className="border-b border-[#2b3543] text-[#8fa2b8]">
+        <tr className="border-b border-[var(--mt5-border)] text-[var(--mt5-muted)]">
           {head.map((h) => (
             <th key={h} className={cn('whitespace-nowrap px-3 py-1.5 font-normal', h === 'Symbol' && 'text-left')}>{h}</th>
           ))}
@@ -409,7 +410,7 @@ function Table({ head, children }: { head: string[]; children: React.ReactNode }
 function Row({ children, onOpen }: { children: React.ReactNode; onOpen?: (() => void) | undefined }) {
   return (
     <tr
-      {...(onOpen ? { onClick: onOpen, className: 'cursor-pointer border-b border-[#2b3543] hover:bg-[#202933]' } : { className: 'border-b border-[#2b3543]' })}
+      {...(onOpen ? { onClick: onOpen, className: 'cursor-pointer border-b border-[var(--mt5-border)] hover:bg-[var(--mt5-raised)]' } : { className: 'border-b border-[var(--mt5-border)]' })}
     >
       {children}
     </tr>
@@ -457,11 +458,11 @@ function PeriodMenu({
           key={p.key}
           type="button"
           onClick={() => onPeriod(p.key)}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[#2b3543]"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[var(--mt5-border)]"
         >
           {/* MetaTrader marks each period with a calendar glyph; the two that are not a plain span
               carry what distinguishes them inside the frame. */}
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden className="shrink-0 text-[#8fa2b8]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden className="shrink-0 text-[var(--mt5-muted)]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
             <rect x="3.5" y="5.5" width="17" height="15" rx="1.5" />
             <path d="M3.5 10h17M8 3v4M16 3v4" />
             {p.key === 'quarter' ? <text x="12" y="18" textAnchor="middle" fontSize="7" stroke="none" fill="currentColor">3</text> : null}
@@ -470,32 +471,32 @@ function PeriodMenu({
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] text-white">{p.label}</span>
             {p.key !== 'custom' ? (
-              <span className="block truncate font-mono text-[11px] text-[#8fa2b8]">
+              <span className="block truncate font-mono text-[11px] text-[var(--mt5-muted)]">
                 {periodSubtitle(periodRange(p.key, Date.now()))}
               </span>
             ) : null}
           </span>
-          {period === p.key ? <span className="shrink-0 text-[#4597ff]" aria-hidden>✓</span> : null}
+          {period === p.key ? <span className="shrink-0 text-[var(--mt5-blue-link)]" aria-hidden>✓</span> : null}
         </button>
       ))}
       {period === 'custom' ? (
-        <div className="flex flex-col gap-1.5 border-t border-[#2b3543] px-3 py-2">
-          <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+        <div className="flex flex-col gap-1.5 border-t border-[var(--mt5-border)] px-3 py-2">
+          <label className="flex items-center gap-2 text-[11px] text-[var(--mt5-muted)]">
             From
             <input
               type="date"
               value={custom.from}
               onChange={(e) => onCustom({ ...custom, from: e.target.value })}
-              className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[#3183ff]"
+              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[var(--mt5-blue)]"
             />
           </label>
-          <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+          <label className="flex items-center gap-2 text-[11px] text-[var(--mt5-muted)]">
             To
             <input
               type="date"
               value={custom.to}
               onChange={(e) => onCustom({ ...custom, to: e.target.value })}
-              className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[#3183ff]"
+              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[12px] text-white outline-none focus:border-[var(--mt5-blue)]"
             />
           </label>
         </div>
@@ -514,11 +515,11 @@ function SortMenu({
           key={s.key}
           type="button"
           onClick={() => onPick(s.key)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-white hover:bg-[#2b3543]"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-white hover:bg-[var(--mt5-border)]"
         >
           <span className="flex-1">{s.label}</span>
           {sort === s.key ? (
-            <span className="shrink-0 text-[#4597ff]" aria-hidden>{ascending ? '↑' : '↓'}</span>
+            <span className="shrink-0 text-[var(--mt5-blue-link)]" aria-hidden>{ascending ? '↑' : '↓'}</span>
           ) : null}
         </button>
       ))}

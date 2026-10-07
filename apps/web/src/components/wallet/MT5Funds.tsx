@@ -45,8 +45,8 @@ export function MT5Funds() {
   const server = mt5ServerName(brand, figures.demo ? 'demo' : 'real');
 
   return (
-    <div className="flex flex-1 flex-col bg-[#0f1720] text-white">
-      <MT5TitleBar title="Funds" subtitle={figures.demo ? 'Demo account' : 'Real account'} />
+    <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
+      <MT5TitleBar title="Funds" back subtitle={figures.demo ? 'Demo account' : 'Real account'} />
 
       <div className="mx-auto w-full lg:max-w-3xl">
         <MT5Summary>
@@ -62,7 +62,7 @@ export function MT5Funds() {
           <button
             type="button"
             onClick={() => openDeposit()}
-            className="flex-1 rounded bg-[#3183ff] px-4 py-3 text-[14px] font-semibold text-white transition hover:bg-[#2567cc]"
+            className="flex-1 rounded bg-[var(--mt5-blue)] px-4 py-3 text-[14px] font-semibold text-white transition hover:bg-[#2567cc]"
           >
             Deposit
           </button>
@@ -72,7 +72,7 @@ export function MT5Funds() {
             <button
               type="button"
               onClick={openWithdraw}
-              className="flex-1 rounded border border-[#2b3543] bg-[#202933] px-4 py-3 text-[14px] font-semibold text-white transition hover:bg-[#2b3543]"
+              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-4 py-3 text-[14px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
             >
               Withdraw
             </button>
@@ -80,12 +80,12 @@ export function MT5Funds() {
         </div>
 
         {figures.demo ? (
-          <p className="px-3 pb-3 text-[12px] leading-snug text-[#8fa2b8]">
+          <p className="px-3 pb-3 text-[12px] leading-snug text-[var(--mt5-muted)]">
             This is practice money: not real cash, and never withdrawable. Switch to your real account
             to deposit or withdraw.
           </p>
         ) : bonus > 0 ? (
-          <p className="px-3 pb-3 text-[12px] leading-snug text-[#8fa2b8]">
+          <p className="px-3 pb-3 text-[12px] leading-snug text-[var(--mt5-muted)]">
             {/* MetaTrader's own word for money a broker adds that is not a deposit is CREDIT, and
                 it is a field of the account alongside Balance and Equity. "Stakeable" and
                 "wagering" are this platform's older vocabulary and not a terminal's. */}
@@ -112,13 +112,13 @@ export function MT5Funds() {
                 }
                 // A pending deposit has not moved the balance yet, so it carries no amount — the same
                 // rule the History screen's Deals tab applies.
-                result={isCompleted(t) ? <MT5Amount cents={signedCents(t)} fmt={money.fmt} /> : <span className="text-[#8fa2b8]">-</span>}
+                result={isCompleted(t) ? <MT5Amount cents={signedCents(t)} fmt={money.fmt} /> : <span className="text-[var(--mt5-muted)]">-</span>}
               />
             ))
           )}
           <Link
             href="/history"
-            className="flex items-center justify-between border-b border-[#2b3543] px-3 py-3 text-[13px] text-[#4597ff]"
+            className="flex items-center justify-between border-b border-[var(--mt5-border)] px-3 py-3 text-[13px] text-[var(--mt5-blue-link)]"
           >
             See the full history
             <span aria-hidden>›</span>

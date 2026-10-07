@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useNavDrawer } from '@/lib/ui/drawer';
+import { MT5Back } from '@/components/mt5/MT5Back';
 import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 import { cn } from '@/lib/cn';
 
@@ -31,11 +32,20 @@ import { cn } from '@/lib/cn';
  * Above `lg` the app's own title bar is on screen with its own hamburger, so this one draws none.
  */
 export function MT5TitleBar({
-  title, subtitle, actions, children, embedded = false,
+  title, subtitle, actions, children, embedded = false, back,
 }: {
   title: string;
   subtitle?: string | undefined;
   actions?: React.ReactNode;
+  /**
+   * A way back, drawn where MetaTrader draws one: left of the title, in place of the hamburger.
+   *
+   * Every screen this bar titles is PUSHED from the chart, and none of them had one — the only
+   * exit was to re-open the drawer and tap Trade, which is two taps to undo one and is not what
+   * the back gesture on the phone does either. `true` uses the browser's own history; an object
+   * overrides the handler or the fallback for a screen that was opened from a link.
+   */
+  back?: boolean | { onBack?: (() => void) | undefined; fallback?: string } | undefined;
   /** Tabs, which MetaTrader draws inside the bar rather than under it. */
   children?: React.ReactNode;
   /**
@@ -61,7 +71,7 @@ export function MT5TitleBar({
   return (
     <div
       className={cn(
-        'sticky z-20 bg-[#3183ff]',
+        'sticky z-20 bg-[var(--mt5-blue)]',
         // 48px is the terminal app bar's height (TopBar, `h-12`); it used to be told 56 and left a
         // 7px strip of page showing between the two bands.
         embedded ? 'top-0' : 'top-0 lg:top-12',
@@ -77,7 +87,17 @@ export function MT5TitleBar({
           ownsBar && !subtitle && 'max-lg:py-1',
         )}
       >
-        {ownsBar ? (
+        {/* The back control replaces the hamburger rather than sitting beside it: this screen was
+            pushed from somewhere, so going back is what the left of the bar is for, and the drawer
+            is still one swipe or one tap on the chart away. Drawn at every width, because a desktop
+            window has no system back gesture at all. */}
+        {back ? (
+          <MT5Back
+            {...(typeof back === 'object' && back.onBack ? { onBack: back.onBack } : {})}
+            {...(typeof back === 'object' && back.fallback ? { fallback: back.fallback } : {})}
+            className={ownsBar ? '' : '-ml-1'}
+          />
+        ) : ownsBar ? (
           <button
             type="button"
             onClick={toggleDrawer}
@@ -109,13 +129,21 @@ export function MT5TitleBar({
  * the hamburger and is the ONLY bar on the screen, so a route that drops it while it loads — or
  * because nobody is signed in — drops the app's navigation with it and strands the screen.
  */
-export function MT5Screen({ title, children }: { title: string; children: React.ReactNode }) {
+export function MT5Screen({ title, children, back = true }: {
+  title: string;
+  children: React.ReactNode;
+  /**
+   * A way back to where this screen was pushed from. ON by default, because every screen this
+   * wraps is reached from the chart and none of them had one.
+   */
+  back?: boolean | { onBack?: (() => void) | undefined; fallback?: string };
+}) {
   return (
     // The tokens, because what these states hold is the app's own components — a Skeleton, an
     // EmptyState with a Log in button — and on a MetaTrader screen that button is blue and square,
     // not the app's green pill.
-    <div style={MT5_TOKENS} className="mt5-square flex flex-1 flex-col bg-[#0f1720] text-white">
-      <MT5TitleBar title={title} />
+    <div style={MT5_TOKENS} className="mt5-square flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
+      <MT5TitleBar title={title} back={back} />
       {children}
     </div>
   );
@@ -131,8 +159,8 @@ export function MT5SummaryLine({ label, value, tone }: { label: string; value: s
   return (
     <div className="flex items-baseline gap-2 py-0.5">
       <span className="shrink-0 text-[13px] font-semibold">{label}:</span>
-      <span aria-hidden className="min-w-4 flex-1 translate-y-[-3px] border-b border-dotted border-[#2b3543]" />
-      <span className={cn('shrink-0 font-mono text-[13px] font-semibold tabular-nums', tone === 'bad' ? 'text-[#f23645]' : 'text-[#4597ff]')}>
+      <span aria-hidden className="min-w-4 flex-1 translate-y-[-3px] border-b border-dotted border-[var(--mt5-border)]" />
+      <span className={cn('shrink-0 font-mono text-[13px] font-semibold tabular-nums', tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-[var(--mt5-blue-link)]')}>
         {value}
       </span>
     </div>
@@ -141,17 +169,17 @@ export function MT5SummaryLine({ label, value, tone }: { label: string; value: s
 
 /** The container those figures sit in. */
 export function MT5Summary({ children }: { children: React.ReactNode }) {
-  return <div className="border-b border-[#2b3543] px-3 py-2 lg:max-w-md">{children}</div>;
+  return <div className="border-b border-[var(--mt5-border)] px-3 py-2 lg:max-w-md">{children}</div>;
 }
 
 /** A group heading on a settings-style list. */
 export function MT5Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h2 className="border-t border-[#2b3543] px-3 pb-1.5 pt-4 text-[12px] font-bold uppercase tracking-wide text-white">
+      <h2 className="border-t border-[var(--mt5-border)] px-3 pb-1.5 pt-4 text-[12px] font-bold uppercase tracking-wide text-white">
         {title}
       </h2>
-      <div className="border-t border-[#2b3543]">{children}</div>
+      <div className="border-t border-[var(--mt5-border)]">{children}</div>
     </section>
   );
 }
@@ -181,14 +209,14 @@ export function MT5Row({
   const body = (
     <>
       <span className="min-w-0 flex-1">
-        <span className={cn('block truncate text-[15px] leading-tight', tone === 'bad' ? 'text-[#f23645]' : 'text-white')}>
+        <span className={cn('block truncate text-[15px] leading-tight', tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-white')}>
           {label}
         </span>
         {sub ? (
           <span
             className={cn(
               'mt-0.5 line-clamp-2 block break-words text-[13px] leading-tight',
-              subTone === 'ok' ? 'text-[#41be56]' : subTone === 'bad' ? 'text-[#f23645]' : 'text-[#8fa2b8]',
+              subTone === 'ok' ? 'text-[var(--mt5-green)]' : subTone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-[var(--mt5-muted)]',
             )}
           >
             {sub}
@@ -197,15 +225,15 @@ export function MT5Row({
       </span>
       {control ?? null}
       {value !== undefined && value !== null ? (
-        <span className="shrink-0 font-mono text-[13px] text-[#4597ff]">{value}</span>
+        <span className="shrink-0 font-mono text-[13px] text-[var(--mt5-blue-link)]">{value}</span>
       ) : null}
       {check !== undefined ? <MT5Check on={check} /> : null}
-      {chevron ? <span aria-hidden className="shrink-0 text-[#8fa2b8]">›</span> : null}
+      {chevron ? <span aria-hidden className="shrink-0 text-[var(--mt5-muted)]">›</span> : null}
     </>
   );
 
   const className = cn(
-    'flex w-full items-center gap-3 border-b border-[#2b3543] px-3 py-3 text-left',
+    'flex w-full items-center gap-3 border-b border-[var(--mt5-border)] px-3 py-3 text-left',
     disabled && 'opacity-50',
   );
 
@@ -224,7 +252,7 @@ export function MT5Check({ on }: { on: boolean }) {
     <span
       className={cn(
         'grid h-5 w-5 shrink-0 place-items-center rounded-[2px] border',
-        on ? 'border-[#3183ff] bg-[#3183ff]' : 'border-[#8fa2b8]',
+        on ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]' : 'border-[var(--mt5-muted)]',
       )}
     >
       {on ? (
@@ -253,14 +281,14 @@ export function MT5Entry({
   return (
     <Tag
       {...(onOpen ? { type: 'button' as const, onClick: onOpen } : {})}
-      className="flex w-full items-start gap-3 border-b border-[#2b3543] px-3 py-2 text-left"
+      className="flex w-full items-start gap-3 border-b border-[var(--mt5-border)] px-3 py-2 text-left"
     >
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-semibold leading-tight">{title}</div>
-        <div className="mt-0.5 truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">{detail}</div>
+        <div className="mt-0.5 truncate font-mono text-[12px] leading-tight text-[var(--mt5-muted)]">{detail}</div>
       </div>
       <div className="shrink-0 text-right">
-        <div className="font-mono text-[11px] leading-tight text-[#8fa2b8]">{time}</div>
+        <div className="font-mono text-[11px] leading-tight text-[var(--mt5-muted)]">{time}</div>
         <div className="mt-0.5 font-mono text-[12px] font-semibold leading-tight tabular-nums">{result}</div>
       </div>
     </Tag>
@@ -269,10 +297,10 @@ export function MT5Entry({
 
 /** A signed amount: MetaTrader's blue for a credit, red for a debit. */
 export function MT5Amount({ cents, fmt }: { cents: number | null; fmt: (cents: number) => string }) {
-  if (cents === null) return <span className="text-[#8fa2b8]">-</span>;
-  return <span className={cents < 0 ? 'text-[#f23645]' : 'text-[#3183ff]'}>{fmt(cents)}</span>;
+  if (cents === null) return <span className="text-[var(--mt5-muted)]">-</span>;
+  return <span className={cents < 0 ? 'text-[var(--mt5-red)]' : 'text-[var(--mt5-blue)]'}>{fmt(cents)}</span>;
 }
 
 export function MT5Empty({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 py-10 text-center text-[13px] text-[#8fa2b8]">{children}</div>;
+  return <div className="px-3 py-10 text-center text-[13px] text-[var(--mt5-muted)]">{children}</div>;
 }

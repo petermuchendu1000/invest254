@@ -58,7 +58,7 @@ export function TopBar() {
     <header
       className={cn(
         'sticky top-0 z-30 border-b',
-        terminal ? 'border-[#2b3543] bg-[#3183ff]' : 'border-border bg-surface/90 backdrop-blur',
+        terminal ? 'border-[var(--mt5-border)] bg-[var(--mt5-blue)]' : 'border-border bg-surface/90 backdrop-blur',
         screenOwnsBar && 'hidden lg:block',
       )}
     >

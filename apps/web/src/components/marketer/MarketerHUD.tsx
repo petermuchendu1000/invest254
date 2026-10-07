@@ -40,6 +40,10 @@ const TAP: React.CSSProperties = { WebkitTapHighlightColor: 'transparent' };
  *
  * It covers the logo, so a marketer's tap opens the dashboard instead of following the logo's own
  * link home. That is the trick as it has always worked; the logo is simply where it now lives.
+ *
+ * It is mounted INSIDE a link in both of its homes, so it stops the event as well as handling it.
+ * Without that the browser runs the handler and then follows the enclosing anchor anyway, which on
+ * the drawer's account card raced the dashboard against /account and landed on whichever won.
  */
 export function MarketerLogoHotspot() {
   const { show, open } = useOpenDashboard();
@@ -47,7 +51,7 @@ export function MarketerLogoHotspot() {
   return (
     <button
       type="button"
-      onClick={open}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); open(); }}
       onContextMenu={(e) => e.preventDefault()}
       aria-label="Open marketer dashboard"
       className={`absolute inset-0 z-[5] ${HOTSPOT}`}

@@ -63,8 +63,19 @@ export function MT5ModifyPosition({
   const setLevels = useLevelsStore((s) => s.set);
   const levelRef = useLevelsStore((s) => s.ref);
   const anchor = levelRef ?? openPrice;
-  // The engine's own setter: what it accepts is what will fire.
-  const pushLevels = useGameSocket().setLevels;
+  /**
+   * The engine's own setter, aimed at THIS position: what it accepts is what will fire.
+   *
+   * The id is not optional in practice, and leaving it off was a defect rather than a shorthand.
+   * `setLevels` with no id falls back to "the newest open position" (`pick` in GameSocketProvider),
+   * which was the only position there could be when this form was written. The engine holds several
+   * now and both the desktop Trade grid and the phone Trade screen list them, so a trader opening
+   * Modify on the first of three rows was moving the stop on the third. It is still a fallback and
+   * not a silent one: `positionId` is null only while an open is optimistic, and the engine refuses
+   * a level on a position it has not acknowledged either way.
+   */
+  const push = useGameSocket().setLevels;
+  const pushLevels = (sl: number | null, tp: number | null) => push(sl, tp, pos.positionId ?? undefined);
   const slPrice = levelPrice(levels, anchor, 'sl', digits);
   const tpPrice = levelPrice(levels, anchor, 'tp', digits);
 
@@ -115,16 +126,16 @@ export function MT5ModifyPosition({
       role="dialog"
       aria-modal="true"
       aria-label="Modify position"
-      className="fixed inset-0 z-[80] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
-        <div className="flex items-start gap-2 border-b border-[#2b3543] px-3 py-2.5">
-          <button type="button" onClick={onDismiss} aria-label="Back" className="-ml-1 shrink-0 px-1 text-[20px] leading-none text-[#8fa2b8] transition hover:text-white">‹</button>
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
+        <div className="flex items-start gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
+          <button type="button" onClick={onDismiss} aria-label="Back" className="-ml-1 shrink-0 px-1 text-[20px] leading-none text-[var(--mt5-muted)] transition hover:text-white">‹</button>
           <span className="min-w-0">
             <span className="block truncate text-[15px] font-semibold leading-tight">
               Modify position #{ticketLabel(pos)}
             </span>
-            <span className="block truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">
+            <span className="block truncate font-mono text-[12px] leading-tight text-[var(--mt5-muted)]">
               {pos.direction} {lotsOfStake(pos.stakeCents, volumeDigits)} {symbol} at {openPrice === null ? '-' : openPrice.toFixed(digits)}
             </span>
           </span>
@@ -156,7 +167,7 @@ export function MT5ModifyPosition({
         <button
           type="button"
           onClick={onDismiss}
-          className="w-full shrink-0 border-t border-[#2b3543] px-3 py-4 text-[14px] font-semibold text-[#4597ff] transition hover:bg-[#202933]"
+          className="w-full shrink-0 border-t border-[var(--mt5-border)] px-3 py-4 text-[14px] font-semibold text-[var(--mt5-blue-link)] transition hover:bg-[var(--mt5-raised)]"
         >
           Done
         </button>
@@ -176,7 +187,7 @@ export function MT5ModifyPosition({
           * fire they explained at length that the controls above them did nothing. A control that
           * cannot act is not labelled, it is not drawn (see `MT5LevelRows`).
           */}
-        <p className="shrink-0 px-3 pb-3 text-[11px] leading-snug text-[#8fa2b8]">
+        <p className="shrink-0 px-3 pb-3 text-[11px] leading-snug text-[var(--mt5-muted)]">
           Stop Loss or Take Profit you set must differ from market price by at least 0 points.
           <br />
           Stops processing is performed on the broker side.
@@ -211,7 +222,7 @@ function LevelRow({ label, accent, price, points, digits, disabled, onMove, onCl
   onMove: (deltaPoints: number) => void;
   onClear: () => void;
 }) {
-  const step = 'h-8 w-8 shrink-0 rounded border border-[#2b3543] font-mono text-[13px] text-[#3183ff] transition hover:border-[#3183ff] disabled:opacity-40';
+  const step = 'h-8 w-8 shrink-0 rounded border border-[var(--mt5-border)] font-mono text-[13px] text-[var(--mt5-blue)] transition hover:border-[var(--mt5-blue)] disabled:opacity-40';
   return (
     <div className="border-b px-3 py-2.5" style={{ borderColor: accent }}>
       <div className="flex items-center gap-2">
@@ -225,12 +236,12 @@ function LevelRow({ label, accent, price, points, digits, disabled, onMove, onCl
       <div className="mt-1.5 flex items-center gap-2">
         <span className="w-20 shrink-0" />
         <button type="button" onClick={() => onMove(-10)} disabled={disabled} aria-label={`Lower ${label} by ten points`} className={step}>−</button>
-        <span className="min-w-[4.5rem] flex-1 text-center font-mono text-[13px] tabular-nums text-[#8fa2b8]">
+        <span className="min-w-[4.5rem] flex-1 text-center font-mono text-[13px] tabular-nums text-[var(--mt5-muted)]">
           {points === null ? '-' : Math.round(points)} <span className="text-[11px]">points</span>
         </span>
         <button type="button" onClick={() => onMove(10)} disabled={disabled} aria-label={`Raise ${label} by ten points`} className={step}>+</button>
         {price === null ? null : (
-          <button type="button" onClick={onClear} aria-label={`Clear ${label}`} className="shrink-0 px-1 text-[11px] text-[#3183ff]">clear</button>
+          <button type="button" onClick={onClear} aria-label={`Clear ${label}`} className="shrink-0 px-1 text-[11px] text-[var(--mt5-blue)]">clear</button>
         )}
       </div>
     </div>

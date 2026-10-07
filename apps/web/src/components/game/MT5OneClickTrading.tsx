@@ -71,7 +71,7 @@ export function MT5OneClickTrading({ symbols, quoteOf, digitsOf, settledSymbol }
 
   if (symbols.length === 0) {
     return (
-      <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">
+      <div className="px-3 py-4 text-center text-[11px] leading-snug text-[var(--mt5-muted)]">
         No symbols shown. One Click Trading uses the Symbols tab&apos;s own list.
       </div>
     );
@@ -153,10 +153,10 @@ function OneClickPanel({
   const hhmmss = t === null ? '' : new Date(t).toLocaleTimeString('en-GB', { hour12: false });
 
   return (
-    <div data-one-click={symbol} className="rounded-sm border border-[#2b3543] bg-[#1b232d]">
-      <div className="flex items-baseline gap-2 border-b border-[#2b3543] px-2 py-1">
+    <div data-one-click={symbol} className="rounded-sm border border-[var(--mt5-border)] bg-[#1b232d]">
+      <div className="flex items-baseline gap-2 border-b border-[var(--mt5-border)] px-2 py-1">
         <span className="text-[12px] font-semibold text-white">{symbol}</span>
-        <span className="ml-auto font-mono text-[10px] text-[#8fa2b8]">{hhmmss}</span>
+        <span className="ml-auto font-mono text-[10px] text-[var(--mt5-muted)]">{hhmmss}</span>
       </div>
 
       {/* MetaTrader's button strip: SELL, the volume between its two steppers, BUY. */}
@@ -167,12 +167,12 @@ function OneClickPanel({
           onClick={() => onTrade('sell')}
           className={cn(
             'flex-1 rounded-sm py-1 text-[11px] font-semibold tracking-wide transition',
-            tradable ? 'bg-[#f23645]/85 text-white hover:bg-[#f23645]' : 'bg-[#2b3543] text-[#8fa2b8]',
+            tradable ? 'bg-[var(--mt5-red)]/85 text-white hover:bg-[var(--mt5-red)]' : 'bg-[var(--mt5-border)] text-[var(--mt5-muted)]',
           )}
         >
           SELL
         </button>
-        <div className="flex items-stretch overflow-hidden rounded-sm border border-[#2b3543]">
+        <div className="flex items-stretch overflow-hidden rounded-sm border border-[var(--mt5-border)]">
           <Stepper label="▾" onClick={() => entry.bump(-entry.volStep)} disabled={!tradable || entry.lots <= entry.minLots} />
           <span className="grid w-[4.5rem] place-items-center bg-[#151b23] font-mono text-[11px] tabular-nums text-white">
             {entry.lots.toFixed(entry.volDigits)}
@@ -185,7 +185,7 @@ function OneClickPanel({
           onClick={() => onTrade('buy')}
           className={cn(
             'flex-1 rounded-sm py-1 text-[11px] font-semibold tracking-wide transition',
-            tradable ? 'bg-[#3183ff]/85 text-white hover:bg-[#3183ff]' : 'bg-[#2b3543] text-[#8fa2b8]',
+            tradable ? 'bg-[var(--mt5-blue)]/85 text-white hover:bg-[var(--mt5-blue)]' : 'bg-[var(--mt5-border)] text-[var(--mt5-muted)]',
           )}
         >
           BUY
@@ -200,7 +200,7 @@ function OneClickPanel({
 
       {/* MetaTrader's footer, two lines. The middle is the LAST price rather than a spread and a
           swap, which is its own documented alternative for a symbol that has one. */}
-      <div className="mt-1.5 grid grid-cols-3 border-t border-[#2b3543] px-2 py-1 text-center">
+      <div className="mt-1.5 grid grid-cols-3 border-t border-[var(--mt5-border)] px-2 py-1 text-center">
         {([
           ['LOW', quote?.dayLow ?? null],
           ['Last', price],
@@ -209,7 +209,7 @@ function OneClickPanel({
           <div key={label}>
             {/* LOW and HIGH are MetaTrader's own capitals; the middle cell is not one of them (its
                 own middle reads `Spread: 0` / `Swap: …`), so `Last` keeps its case. */}
-            <div className={cn('text-[9px] tracking-wide text-[#8fa2b8]', label !== 'Last' && 'uppercase')}>{label}</div>
+            <div className={cn('text-[9px] tracking-wide text-[var(--mt5-muted)]', label !== 'Last' && 'uppercase')}>{label}</div>
             <div className="font-mono text-[10.5px] tabular-nums text-[#c8d2de]">
               {value === null ? '-' : value.toFixed(digits)}
             </div>
@@ -218,17 +218,17 @@ function OneClickPanel({
       </div>
 
       {blocked === null ? null : (
-        <p className="border-t border-[#2b3543] px-2 py-1 text-[10px] leading-snug text-[#8fa2b8]">
+        <p className="border-t border-[var(--mt5-border)] px-2 py-1 text-[10px] leading-snug text-[var(--mt5-muted)]">
           {blocked}
           {onChartSettled === null ? null : (
-            <button type="button" onClick={onChartSettled} className="ml-1 text-[#3183ff] underline">
+            <button type="button" onClick={onChartSettled} className="ml-1 text-[var(--mt5-blue)] underline">
               Chart {symbol}
             </button>
           )}
         </p>
       )}
       {refusal === null ? null : (
-        <p className="border-t border-[#2b3543] px-2 py-1 text-[10px] leading-snug text-[#f23645]">{refusal}</p>
+        <p className="border-t border-[var(--mt5-border)] px-2 py-1 text-[10px] leading-snug text-[var(--mt5-red)]">{refusal}</p>
       )}
     </div>
   );
@@ -241,7 +241,7 @@ function Stepper({ label, onClick, disabled }: { label: string; onClick: () => v
       onClick={onClick}
       disabled={disabled}
       aria-label={label === '▴' ? 'Increase volume' : 'Decrease volume'}
-      className="w-6 bg-[#202933] text-[10px] text-[#c8d2de] transition hover:bg-[#2b3543] disabled:text-[#4a5666]"
+      className="w-6 bg-[var(--mt5-raised)] text-[10px] text-[#c8d2de] transition hover:bg-[var(--mt5-border)] disabled:text-[#4a5666]"
     >
       {label}
     </button>

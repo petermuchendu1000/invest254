@@ -94,16 +94,16 @@ export function MT5ClosePosition({
       role="dialog"
       aria-modal="true"
       aria-label={`Close position ${ticketOf(pos)}`}
-      className="fixed inset-0 z-[80] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         {/* Title block: MetaTrader names the ticket on the first line and the deal on the second. */}
-        <div className="flex items-start gap-2 border-b border-[#2b3543] px-3 py-2.5">
+        <div className="flex items-start gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
           <button
             type="button"
             onClick={onDismiss}
             aria-label="Back"
-            className="-ml-1 shrink-0 px-1 text-[20px] leading-none text-[#8fa2b8] transition hover:text-white"
+            className="-ml-1 shrink-0 px-1 text-[20px] leading-none text-[var(--mt5-muted)] transition hover:text-white"
           >
             ‹
           </button>
@@ -111,7 +111,7 @@ export function MT5ClosePosition({
             <span className="block truncate text-[15px] font-semibold leading-tight">
               Close position #{ticketOf(pos)}
             </span>
-            <span className="block truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">
+            <span className="block truncate font-mono text-[12px] leading-tight text-[var(--mt5-muted)]">
               {pos.direction} {lots} {symbol} at {px(openPrice)}
             </span>
           </span>
@@ -122,7 +122,7 @@ export function MT5ClosePosition({
           <Row label="Volume">
             <span className="font-mono text-[14px] font-semibold tabular-nums">{lots}</span>
           </Row>
-          <p className="px-3 pb-2 text-[11px] leading-snug text-[#8fa2b8]">
+          <p className="px-3 pb-2 text-[11px] leading-snug text-[var(--mt5-muted)]">
             This contract closes in full. Partial close is a MetaTrader position feature that a
             fixed-term contract does not have.
           </p>
@@ -130,7 +130,7 @@ export function MT5ClosePosition({
           {/* The price, large, as the mobile form shows it. One price, not two: this feed quotes a
               single rate, and rendering a fabricated bid/ask spread would be the exact kind of
               invention this screen exists to undo. */}
-          <div className="flex items-end justify-center gap-2 border-y border-[#2b3543] px-3 py-4">
+          <div className="flex items-end justify-center gap-2 border-y border-[var(--mt5-border)] px-3 py-4">
             <span className="font-mono text-[32px] font-semibold leading-none tabular-nums">
               {px(price)}
             </span>
@@ -147,21 +147,21 @@ export function MT5ClosePosition({
             level is blank — which this row still was not printing, so all three now are.
           */}
           <Row label="S / L" accent={SL_ORANGE}>
-            <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
+            <span className="font-mono text-[13px] tabular-nums text-[var(--mt5-muted)]">
               {slPrice === null ? '' : slPrice.toFixed(digits)}
             </span>
           </Row>
           <Row label="T / P" accent={TP_GREEN}>
-            <span className="font-mono text-[13px] tabular-nums text-[#8fa2b8]">
+            <span className="font-mono text-[13px] tabular-nums text-[var(--mt5-muted)]">
               {tpPrice === null ? '' : tpPrice.toFixed(digits)}
             </span>
           </Row>
           <Row label="Fill policy">
-            <span className="font-mono text-[13px] text-[#8fa2b8]">Fill or Kill</span>
+            <span className="font-mono text-[13px] text-[var(--mt5-muted)]">Fill or Kill</span>
           </Row>
 
           {/* MetaTrader's own warning, verbatim from the Android close screen. */}
-          <p className="px-3 py-3 text-[11px] leading-snug text-[#8fa2b8]">
+          <p className="px-3 py-3 text-[11px] leading-snug text-[var(--mt5-muted)]">
             Attention! The trade will be executed at market conditions, difference with requested
             price may be significant!
           </p>
@@ -186,7 +186,7 @@ export function MT5ClosePosition({
           type="button"
           onClick={onConfirm}
           disabled={busy}
-          className="flex w-full shrink-0 items-center justify-center gap-2 border-t border-[#2b3543] px-3 py-4 text-[14px] font-bold uppercase tracking-wide transition disabled:opacity-50"
+          className="flex w-full shrink-0 items-center justify-center gap-2 border-t border-[var(--mt5-border)] px-3 py-4 text-[14px] font-bold uppercase tracking-wide transition disabled:opacity-50"
         >
           <span style={{ color: ORANGE }}>{busy ? 'Closing…' : closeVerb}</span>
           {busy ? null : (
@@ -209,7 +209,7 @@ function Row({ label, children, accent }: { label: string; children: React.React
       className={cn('flex items-center justify-between gap-3 border-b px-3 py-2.5')}
       style={{ borderColor: accent ?? '#2b3543' }}
     >
-      <span className="text-[12px] uppercase tracking-wide text-[#8fa2b8]">{label}</span>
+      <span className="text-[12px] uppercase tracking-wide text-[var(--mt5-muted)]">{label}</span>
       {children}
     </div>
   );

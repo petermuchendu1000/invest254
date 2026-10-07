@@ -49,13 +49,13 @@ export function InterfaceModeToggle() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Interface settings"
-        className="grid h-8 w-8 place-items-center rounded-lg border border-[#2b3543] bg-[#0f1720]/80 text-[#8fa2b8] transition hover:text-fg"
+        className="grid h-8 w-8 place-items-center rounded-lg border border-[var(--mt5-border)] bg-[var(--mt5-surface)]/80 text-[var(--mt5-muted)] transition hover:text-fg"
       >
         <GearIcon className="h-[18px] w-[18px]" />
       </button>
       {open ? (
-        <div role="menu" aria-label="Interface" className="absolute right-0 z-40 mt-2 w-56 overflow-hidden rounded-sm border border-[#2b3543] bg-[#0f1720] p-1 shadow-2xl shadow-black/50">
-          <div className="px-2.5 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-[#8fa2b8]">Interface</div>
+        <div role="menu" aria-label="Interface" className="absolute right-0 z-40 mt-2 w-56 overflow-hidden rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] p-1 shadow-2xl shadow-black/50">
+          <div className="px-2.5 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--mt5-muted)]">Interface</div>
           {OPTIONS.map((o) => (
             <button
               key={o.id}
@@ -63,13 +63,13 @@ export function InterfaceModeToggle() {
               role="menuitemradio"
               aria-checked={mode === o.id}
               onClick={() => { setMode(o.id); setOpen(false); }}
-              className={cn('flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition hover:bg-[#0f1720]-2', mode === o.id && 'bg-[#0f1720]-2')}
+              className={cn('flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition hover:bg-[var(--mt5-raised)]', mode === o.id && 'bg-[var(--mt5-raised)]')}
             >
               <span className="min-w-0">
                 <span className="block text-[13px] font-semibold text-fg">{o.label}</span>
-                <span className="block text-[11px] text-[#8fa2b8]">{o.desc}</span>
+                <span className="block text-[11px] text-[var(--mt5-muted)]">{o.desc}</span>
               </span>
-              {mode === o.id ? <Check className="h-4 w-4 shrink-0 text-[#3183ff]" /> : null}
+              {mode === o.id ? <Check className="h-4 w-4 shrink-0 text-[var(--mt5-blue)]" /> : null}
             </button>
           ))}
         </div>

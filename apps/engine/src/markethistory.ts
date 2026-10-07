@@ -156,7 +156,7 @@ export class MarketHistory {
    * that happens. That re-anchors the series at the instrument's anchor price rather than letting it
    * drift with no floor, and it is invisible in practice: a chart only ever shows a window.
    */
-  private chainThrough(through: string, withBars?: ReadonlySet<string>): void {
+  private chainThrough(through: string, withBars?: ReadonlySet<string> | "all"): void {
     const genesis = this.genesisKey();
     if (this.chainedTo === null || !this.days.has(genesis)) {
       this.days.clear();
@@ -180,7 +180,9 @@ export class MarketHistory {
       // The day's curve is in hand and costs ~8ms to build, so a day whose bars this request
       // actually needs is filled here rather than constructing the same curve again later. Without
       // this, a cold request for a year of dailies built 400 curves to chain and 365 more to fold.
-      if (withBars?.has(key)) slice.h1 = aggregate(this.fillMinutes(slice, curve), "H1");
+      if (withBars === "all" || (withBars !== undefined && withBars.has(key))) {
+        slice.h1 = aggregate(this.fillMinutes(slice, curve), "H1");
+      }
       base = slice.nextBase;
       this.chainedTo = key;
       key = nextKey(key);
@@ -271,16 +273,40 @@ export class MarketHistory {
    * Concurrent calls are safe but wasteful rather than wrong — each would chain the days the other
    * has not reached yet — so a caller with several symbols to warm should queue them (see
    * `SymbolHistories.warm`).
+   *
+   * ── Why it folds the hourly bars as it goes ("all") ─────────────────────────────────────────────
+   *
+   * The day's curve is the expensive thing (about 5ms); folding its H1 bars while it is in hand
+   * costs about 6ms more, and doing it LATER costs the whole 5ms again. The `withBars` argument
+   * existed for exactly this and was never passed, so warming built 400 curves and threw every one
+   * away — and the first request for any period of H1 or above then rebuilt them all, inside the
+   * WebSocket handler, on the shared event loop. Measured on this container: a cold daily request
+   * blocked the tick loop for 3.7 seconds, late-delivering every other trader's prices with it.
+   *
+   * With this, the cost moves into the slice loop above, which yields to the event loop between
+   * slices and runs before any client is served. Every H1-and-above request afterwards is a lookup
+   * (0.2 to 17ms). The memory is the H1 bars of 400 days, about 400KB per symbol; the minute bars
+   * stay evictable, which is what `fillMinutes` is for.
    */
   async warm(): Promise<void> {
     const today = dateKeyUTC(this.now());
     let cursor = this.genesisKey();
     while (cursor < today) {
       for (let i = 0; i < WARM_SLICE_DAYS && cursor < today; i++) cursor = nextKey(cursor);
-      this.chainThrough(cursor);
-      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      this.chainThrough(cursor, "all");
+      /**
+       * Yield through a TIMER, not `setImmediate`.
+       *
+       * `setImmediate` runs in the check phase, which comes after timers but before the loop turns
+       * over, so a tight immediate loop keeps handing control back to itself and the tick
+       * `setInterval` is served late or not at all. That is not theoretical: with the bars being
+       * folded here, warming starved the tick stream badly enough that a brand resolved live
+       * emitted fewer than two ticks in 300ms. A zero-delay timer puts this work in the same queue
+       * as the ticks and they take turns.
+       */
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
     }
-    this.chainThrough(today);
+    this.chainThrough(today, "all");
   }
 
   /** Whether the chain already reaches today, so a caller can tell a warm history from a cold one. */

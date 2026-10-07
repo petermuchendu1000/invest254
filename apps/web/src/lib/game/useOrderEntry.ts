@@ -7,7 +7,7 @@ import { valueOfRate } from '@invest254/shared/candles';
 import { LOT_STAKE_CENTS } from '@invest254/shared/account';
 import { effectiveVolume, volumeSpecOf, volumeDigitsOf } from '@invest254/shared/symbols';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
-import { useChartSymbolStore } from '@/lib/game/chartSymbol';
+import { useChartSymbolStore, chartOverride } from '@/lib/game/chartSymbol';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useSession } from '@/lib/auth/session';
 import { useWallet } from '@/lib/wallet/hooks';
@@ -130,7 +130,7 @@ export function useOrderEntry(): OrderEntry {
   const limits = useStakeLimits();
   const { data: wallet } = useWallet();
   const { status, activePosition, openPosition, earlyCloseEnabled, spread } = useGameSocket();
-  const { getLastTick, getMarket, getSymbolQuote } = useGameSocketApi();
+  const { getLastTick, getMarket, getSymbolQuote, getSettledSymbol } = useGameSocketApi();
   const charted = useChartSymbolStore((st) => st.symbol);
   const setCharted = useChartSymbolStore((st) => st.set);
   const { data: config } = useQuery({
@@ -170,10 +170,17 @@ export function useOrderEntry(): OrderEntry {
    * MetaTrader's own `Disabled` trade mode, and the surface says so rather than offering a button
    * that would open a position on a different instrument from the one on screen.
    */
-  const quote = charted === null ? null : getSymbolQuote(charted);
-  const tradeDisabled = charted !== null;
-  const settledSymbol = market?.instrument.symbol ?? 'XAUUSD';
-  const symbol = charted ?? settledSymbol;
+  /**
+   * `charted` is what was STORED; `override` is whether the chart is genuinely on another
+   * instrument. They are not the same question, and conflating them is what printed
+   * `Trade disabled for XAUUSD` on a chart drawing XAUUSD. See `chartOverride` in lib/game/chartSymbol.
+   */
+  const settled = getSettledSymbol() ?? market?.instrument.symbol ?? null;
+  const settledSymbol = settled ?? 'XAUUSD';
+  const override = chartOverride(charted, settled);
+  const quote = override === null ? null : getSymbolQuote(override);
+  const tradeDisabled = override !== null;
+  const symbol = override ?? settledSymbol;
   const digits = quote?.instrument.digits ?? market?.instrument.digits ?? 2;
   /**
    * The live quote, which must be one the ENGINE sent.
@@ -188,7 +195,7 @@ export function useOrderEntry(): OrderEntry {
     market && rate !== null && rate !== undefined
       ? market.anchor.base + market.instrument.scale * (valueOfRate(rate) - market.anchor.openValue)
       : null;
-  const price = charted === null ? (tick ? priceOfRate(tick.rate) : null) : quote?.price ?? null;
+  const price = override === null ? (tick ? priceOfRate(tick.rate) : null) : quote?.price ?? null;
 
   /**
    * MetaTrader's BID and ASK, which this brand has always had and never showed.

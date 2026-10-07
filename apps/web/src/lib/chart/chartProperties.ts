@@ -316,14 +316,31 @@ export function storageKey(symbol: string): string { return `${KEY}:${symbol}`; 
  * Properties are per SYMBOL, as MetaTrader's are per chart window: its title is "Properties of
  * EURUSD,M1" because the settings belong to that chart and not to the terminal.
  */
-export function parseProperties(raw: string | null): ChartProperties {
-  if (!raw) return DEFAULT_PROPERTIES;
+/**
+ * The chart's colours for a trader who has never chosen any, given the app's theme.
+ *
+ * MetaTrader keeps chart colours as a CHART PROPERTY, not an app theme, and this terminal does the
+ * same: the F8 dialog's Colors tab and its four schemes are where a trader decides. But a trader
+ * who has decided NOTHING should not be shown MetaTrader's dark chart inside a light app, which is
+ * what happened the moment the light theme started working. `Black on White` is MetaTrader's own
+ * light scheme and the one scheme MetaQuotes publishes pixel values for, so that is the default
+ * there. A trader who has picked a scheme keeps it in both themes, because they picked it.
+ */
+export function defaultSchemeFor(theme: 'dark' | 'light'): SchemeName | null {
+  return theme === 'light' ? 'Black on White' : null;
+}
+
+export function parseProperties(raw: string | null, theme: 'dark' | 'light' = 'dark'): ChartProperties {
+  const base = theme === 'light'
+    ? { ...DEFAULT_PROPERTIES, scheme: 'Black on White' as SchemeName, colours: SCHEMES['Black on White'] }
+    : DEFAULT_PROPERTIES;
+  if (!raw) return base;
   try {
     const got = JSON.parse(raw) as Partial<ChartProperties>;
-    if (typeof got !== 'object' || got === null) return DEFAULT_PROPERTIES;
-    const colours = { ...DEFAULT_COLOURS, ...(got.colours ?? {}) };
-    return applyShowRules(DEFAULT_PROPERTIES, { ...got, colours });
-  } catch { return DEFAULT_PROPERTIES; }
+    if (typeof got !== 'object' || got === null) return base;
+    const colours = { ...base.colours, ...(got.colours ?? {}) };
+    return applyShowRules(base, { ...got, colours });
+  } catch { return base; }
 }
 
 export const serializeProperties = (p: ChartProperties): string => JSON.stringify(p);

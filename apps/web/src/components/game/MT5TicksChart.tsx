@@ -120,7 +120,7 @@ export function MT5TicksChart({ symbol, getTicks, digits, spread, scale }: {
         {symbol}
       </span>
       {empty ? (
-        <p className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-4 text-center text-[11px] leading-snug text-[#8fa2b8]">
+        <p className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-4 text-center text-[11px] leading-snug text-[var(--mt5-muted)]">
           Waiting for ticks on {symbol}. The chart fills as the server quotes, and is cleared when
           the symbol is removed from Market Watch.
         </p>

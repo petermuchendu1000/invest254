@@ -182,6 +182,15 @@ interface GameSocketValue {
    */
   requestSymbols: () => Promise<SymbolsReply>;
   /**
+   * The symbol this brand SETTLES, as the engine itself names it, or null before it has said.
+   *
+   * The one authority for the question. Everything that needs to know whether the chart is on
+   * another instrument asks `chartOverride`/`useChartedSymbol` (lib/game/chartSymbol), which asks
+   * this: three separate derivations of "the brand's own symbol" used to disagree, and the order
+   * ticket printed a refusal naming the very symbol it was already on.
+   */
+  getSettledSymbol: () => string | null;
+  /**
    * Replace the set of symbols this client wants live quotes for.
    *
    * A SET, not an addition, because that is what a Market Watch list is: the client owns it and
@@ -544,6 +553,22 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const marketRef = useRef<{ instrument: MarketSymbol; anchor: CandlesReply['anchor'] } | null>(null);
   const getMarket = useCallback(() => marketRef.current, []);
   /**
+   * The symbol this brand SETTLES, which is a different question from the one the chart is drawing.
+   *
+   * The engine answers it outright: the `symbols` reply carries `defaultSymbol`, documented there as
+   * "the symbol the chart draws when a client asks for none, so a client need not know which of the
+   * list that is". Holding it here makes it one answer for the whole app. It used to be derived in
+   * three places from two different sources, and the three could disagree — which is how the order
+   * ticket came to print `Trade disabled for XAUUSD` while the chart was drawing XAUUSD.
+   *
+   * Null until the first `symbols` reply or the first default-symbol `candles` reply lands. Null
+   * means "not known yet", which is never the same as "the chart is on something else".
+   */
+  const settledSymbolRef = useRef<string | null>(null);
+  const getSettledSymbol = useCallback(() => settledSymbolRef.current, []);
+  /** The candle requests that asked for the brand's own symbol, so only their replies may anchor it. */
+  const defaultCandleReqsRef = useRef(new Set<string>());
+  /**
    * Candle frames raised before the socket was open, flushed once it is.
    *
    * The chart mounts with the page and asks for history immediately, which is almost always before
@@ -566,18 +591,73 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     for (const [id] of candleWaitersRef.current) settleCandleWaiter(id, { err: new Error(reason) });
   }, [settleCandleWaiter]);
 
+  /**
+   * Replies already in hand, and requests already on the wire, keyed by what was asked for.
+   *
+   * The engine builds history from a seeded curve rather than reading it out of a table, so an
+   * answer costs it real work: measured here, a cold request for daily bars took four and a half
+   * seconds and blocked the tick loop for every trader in the process while it ran. The same
+   * answer being asked for twice was therefore not a wasted round trip but a wasted four seconds.
+   *
+   * Two things were asking twice. A trader clicking through periods and back (M1, M5, M1) refetched
+   * each one from scratch, and the chart itself fired a second identical request on its first
+   * connect. Both are now free.
+   *
+   * CLOSED bars only. A request with no `to` ends at the last closed bar, which never changes once
+   * it has closed, so a cached reply cannot go stale — except across a UTC midnight, when the
+   * engine reseeds the day and the chart force-refetches anyway; `clearCandleCache` is called from
+   * that same path. The live edge is drawn from the tick stream, never from these.
+   */
+  const candleCacheRef = useRef(new Map<string, { reply: CandlesReply; atMs: number }>());
+  /** The engine's current trade date, so a reseed at UTC midnight can drop the cache. */
+  const lastTradeDateRef = useRef<string | null>(null);
+  const candleInflightRef = useRef(new Map<string, Promise<CandlesReply>>());
+  const CANDLE_CACHE_MAX = 40;
+  const clearCandleCache = useCallback(() => {
+    candleCacheRef.current.clear();
+    candleInflightRef.current.clear();
+  }, []);
+
   const requestCandles = useCallback((tf: Timeframe, count: number, to?: number, symbol?: string): Promise<CandlesReply> => {
+    const key = `${symbol ?? ''}|${tf}|${count}|${to ?? ''}`;
+    const hit = candleCacheRef.current.get(key);
+    if (hit) return Promise.resolve(hit.reply);
+    const flying = candleInflightRef.current.get(key);
+    if (flying) return flying;
     const reqId = `c${++candleSeqRef.current}`;
-    return new Promise<CandlesReply>((resolve, reject) => {
+    const promise = new Promise<CandlesReply>((resolve, reject) => {
       // No symbol means the brand's default, which is what every caller written before multi-symbol
       // asks for. Naming one that the brand does not offer is refused by the engine rather than
       // answered with the default's bars under the requested name.
       const frame = { reqId, tf, count, ...(to === undefined ? {} : { to }), ...(symbol === undefined ? {} : { symbol }) };
+      // Remembered so the reply can be told apart from another symbol's. Only a reply to a request
+      // that named NO symbol may re-anchor the shared market axis: the axis is what stamps a
+      // position's entry price and what every open position's P/L is measured against, so letting
+      // a chart lookup of EURUSD set it would re-price trades that were never on EURUSD.
+      if (symbol === undefined || symbol === settledSymbolRef.current) defaultCandleReqsRef.current.add(reqId);
       if (!send('candles', frame)) candleOutboxRef.current.push(frame);
       // Without a deadline a dropped reply would leave the chart spinning for ever.
       const timer = setTimeout(() => settleCandleWaiter(reqId, { err: new Error('CANDLES_TIMEOUT') }), 20_000);
       candleWaitersRef.current.set(reqId, { resolve, reject, timer });
     });
+    candleInflightRef.current.set(key, promise);
+    return promise.then(
+      (reply) => {
+        candleInflightRef.current.delete(key);
+        // Oldest out first, so a session that pages a long way back cannot grow this without bound.
+        if (candleCacheRef.current.size >= CANDLE_CACHE_MAX) {
+          const oldest = candleCacheRef.current.keys().next().value;
+          if (oldest !== undefined) candleCacheRef.current.delete(oldest);
+        }
+        candleCacheRef.current.set(key, { reply, atMs: Date.now() });
+        return reply;
+      },
+      (err: Error) => {
+        // A failure is never cached: the next attempt must really ask.
+        candleInflightRef.current.delete(key);
+        throw err;
+      },
+    );
   }, [send, settleCandleWaiter]);
 
   // ── Day anchors ────────────────────────────────────────────────────────────────────────────────
@@ -1016,6 +1096,10 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             logJournal('info', 'Network', `server ready: trade date ${h.tradeDate ?? '?'}, seed ${(h.serverSeedHash ?? '').slice(0, 12)}`);
           }
           const d = data as HelloData;
+          // Same rule as `fairness` below: a reconnect that lands on a new trade date must not
+          // redraw yesterday's cached bars.
+          if (d?.tradeDate && lastTradeDateRef.current !== null && d.tradeDate !== lastTradeDateRef.current) clearCandleCache();
+          if (d?.tradeDate) lastTradeDateRef.current = d.tradeDate;
           if (d?.serverSeedHash) setFairness({ serverSeedHash: d.serverSeedHash, tradeDate: d.tradeDate });
           setEarlyCloseEnabled(d?.gameConfig?.earlyCloseEnabled === true);
           {
@@ -1062,6 +1146,13 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         }
         case 'fairness': {
           const d = data as FairnessData;
+          /**
+           * A new trade date means a new seed, so every cached bar belongs to a curve that is no
+           * longer the one being drawn. Dropped here rather than aged out on a timer: the engine
+           * says when the day turns, and nothing else can.
+           */
+          if (d?.tradeDate && lastTradeDateRef.current !== null && d.tradeDate !== lastTradeDateRef.current) clearCandleCache();
+          if (d?.tradeDate) lastTradeDateRef.current = d.tradeDate;
           if (d?.serverSeedHash) setFairness({ serverSeedHash: d.serverSeedHash, tradeDate: d.tradeDate });
           break;
         }
@@ -1348,17 +1439,30 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
         }
         case 'candles': {
           const d = data as CandlesReply & { reqId?: string; symbol?: string };
-          // Only the brand's DEFAULT symbol may set the shared market axis. A chart that has been
-          // switched to another symbol would otherwise re-anchor the price strip, the order ticket
-          // and every open position's P/L onto an instrument nothing was traded on.
-          if (d.instrument && d.anchor && (marketRef.current === null || d.instrument.symbol === marketRef.current.instrument.symbol)) {
+          /**
+           * Only the brand's DEFAULT symbol may set the shared market axis.
+           *
+           * Decided by which REQUEST this answers, not by comparing the reply against whatever
+           * happened to arrive first. The old test was `marketRef.current === null || same symbol`,
+           * which means the first reply of any symbol won: Market Watch asks for H1 bars of its
+           * first visible row on mount, so a watch list that had been sorted or had its top row
+           * hidden anchored the whole session on the wrong instrument, and the ticket then offered
+           * to "Chart" a symbol the brand does not settle.
+           */
+          const forDefault = d.reqId !== undefined && defaultCandleReqsRef.current.delete(d.reqId);
+          if (forDefault && d.instrument && d.anchor) {
             marketRef.current = { instrument: d.instrument, anchor: d.anchor };
+            if (settledSymbolRef.current === null) settledSymbolRef.current = d.instrument.symbol;
           }
           if (d.reqId) settleCandleWaiter(d.reqId, { ok: d });
           break;
         }
         case 'symbols': {
           const d = data as SymbolsReply;
+          // The engine's own word for which of the list this brand settles. It outranks the guess
+          // made from the first candles reply, so a session that started before this arrived is
+          // corrected rather than left on an assumption.
+          if (typeof d.defaultSymbol === 'string' && d.defaultSymbol !== '') settledSymbolRef.current = d.defaultSymbol;
           for (const w of symbolsWaitersRef.current.splice(0)) { clearTimeout(w.timer); w.resolve(d); }
           break;
         }
@@ -1708,12 +1812,12 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     getTicks, getLastTick, openPosition, setLevels, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
-    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks,
+    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks, getSettledSymbol,
     placePending, cancelPending,
   }), [getTicks, getLastTick, openPosition, setLevels, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
-    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks,
+    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks, getSettledSymbol,
     placePending, cancelPending]);
   const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, pendingOrders, lastTradeError }), [status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, pendingOrders, lastTradeError]);
 

@@ -90,9 +90,9 @@ export function MT5AccountPanel({ embedded = false }: {
   const demoCents = figures.demoBalance;
 
   return (
-    <section className="overflow-hidden rounded-sm border border-[#2b3543] bg-[#0f1720]">
+    <section className="overflow-hidden rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)]">
       {embedded ? null : (
-        <header className="bg-[#3183ff] px-3 py-2 text-[13px] font-semibold text-white">
+        <header className="bg-[var(--mt5-blue)] px-3 py-2 text-[13px] font-semibold text-white">
           Trading account: {brand.name || brand.slug || 'invest254'}
         </header>
       )}
@@ -102,7 +102,7 @@ export function MT5AccountPanel({ embedded = false }: {
           feature that exists, rather than chrome for its own sake. Stacks above the detail on a
           phone, sits beside it from `sm`, as the dialog does. */}
       <div className="flex flex-col sm:flex-row">
-        <nav className="shrink-0 border-b border-[#2b3543] sm:w-56 sm:border-b-0 sm:border-r">
+        <nav className="shrink-0 border-b border-[var(--mt5-border)] sm:w-56 sm:border-b-0 sm:border-r">
           {([['real', 'Real account', realCents], ['demo', 'Demo account', demoCents]] as const).map(([mode, label, cents]) => {
             const active = demo ? mode === 'demo' : mode === 'real';
             return (
@@ -113,18 +113,18 @@ export function MT5AccountPanel({ embedded = false }: {
                 onClick={() => setMode.mutate(mode)}
                 className={cn(
                   'flex w-full items-center gap-2 px-3 py-2.5 text-left transition',
-                  active ? 'bg-[#202933]' : 'hover:bg-[#202933]/60',
+                  active ? 'bg-[var(--mt5-raised)]' : 'hover:bg-[var(--mt5-raised)]/60',
                 )}
               >
-                <span className={cn('grid h-5 w-5 shrink-0 place-items-center rounded-sm', active ? 'bg-[#3183ff]' : 'bg-[#2b3543]')}>
+                <span className={cn('grid h-5 w-5 shrink-0 place-items-center rounded-sm', active ? 'bg-[var(--mt5-blue)]' : 'bg-[var(--mt5-border)]')}>
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
                     <circle cx="12" cy="8" r="3.2" />
                     <path d="M5 20a7 7 0 0114 0" strokeLinecap="round" />
                   </svg>
                 </span>
                 <span className="min-w-0">
-                  <span className={cn('block truncate text-[13px]', active ? 'text-[#4597ff]' : 'text-white')}>{label}</span>
-                  <span className={cn('block truncate font-mono text-[11px]', active ? 'text-[#4597ff]' : 'text-[#8fa2b8]')}>
+                  <span className={cn('block truncate text-[13px]', active ? 'text-[var(--mt5-blue-link)]' : 'text-white')}>{label}</span>
+                  <span className={cn('block truncate font-mono text-[11px]', active ? 'text-[var(--mt5-blue-link)]' : 'text-[var(--mt5-muted)]')}>
                     {money.fmt(cents)}
                   </span>
                 </span>
@@ -158,7 +158,7 @@ export function MT5AccountPanel({ embedded = false }: {
               type="button"
               onClick={() => topup.mutate()}
               disabled={topup.isPending}
-              className="rounded border border-[#2b3543] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#202933] disabled:opacity-60"
+              className="rounded border border-[var(--mt5-border)] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[var(--mt5-raised)] disabled:opacity-60"
             >
               {topup.isPending ? 'Topping up…' : 'Top up demo balance'}
             </button>
@@ -170,7 +170,7 @@ export function MT5AccountPanel({ embedded = false }: {
             // MetaTrader's primary action is BLUE. This was the app's own accent green, which is
             // the one colour that still said "casino" on an otherwise MetaTrader screen. The deposit
             // and withdraw sheets this opens are already blue, through MT5_TOKENS.
-            className="rounded bg-[#3183ff] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#2567cc] disabled:opacity-60"
+            className="rounded bg-[var(--mt5-blue)] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#2567cc] disabled:opacity-60"
           >
             {demo ? 'Switch to your live account' : 'Fund your account'}
           </button>
@@ -178,12 +178,12 @@ export function MT5AccountPanel({ embedded = false }: {
         </div>
       </div>
 
-      <footer className="flex items-center justify-between gap-3 border-t border-[#2b3543] bg-[#202933] px-3 py-2">
-        <span className="text-[12px] text-[#8fa2b8]">Quote this ID when you contact support</span>
+      <footer className="flex items-center justify-between gap-3 border-t border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-3 py-2">
+        <span className="text-[12px] text-[var(--mt5-muted)]">Quote this ID when you contact support</span>
         <button
           type="button"
           onClick={copyId}
-          className={cn('flex items-center gap-1.5 text-[12px] font-medium transition', copied ? 'text-[#41be56]' : 'text-[#4597ff] hover:text-[#3183ff]')}
+          className={cn('flex items-center gap-1.5 text-[12px] font-medium transition', copied ? 'text-[var(--mt5-green)]' : 'text-[var(--mt5-blue-link)] hover:text-[var(--mt5-blue)]')}
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
             <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -199,7 +199,7 @@ export function MT5AccountPanel({ embedded = false }: {
 function Row({ label, value, strong, mono }: { label: string; value: string; strong?: boolean; mono?: boolean }) {
   return (
     <>
-      <dt className="text-[#8fa2b8]">{label}</dt>
+      <dt className="text-[var(--mt5-muted)]">{label}</dt>
       <dd className={cn('break-all text-white', strong && 'font-semibold', mono && 'font-mono text-[12px]')}>{value}</dd>
     </>
   );

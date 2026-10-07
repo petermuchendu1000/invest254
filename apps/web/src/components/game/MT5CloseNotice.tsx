@@ -39,8 +39,8 @@ export function MT5CloseNotice({ fx, visible, onDismiss }: {
   const volDigits = useVolumeDigits(settledSymbol);
   const won = fx.result === 'win';
   // MetaTrader's money colours: blue for a profit, red for a loss. Never green.
-  const tone = fx.pnlCents > 0 ? 'text-[#3183ff]' : fx.pnlCents < 0 ? 'text-[#f23645]' : 'text-white';
-  const sideTone = fx.direction === 'sell' ? 'text-[#f23645]' : 'text-[#3183ff]';
+  const tone = fx.pnlCents > 0 ? 'text-[var(--mt5-blue)]' : fx.pnlCents < 0 ? 'text-[var(--mt5-red)]' : 'text-white';
+  const sideTone = fx.direction === 'sell' ? 'text-[var(--mt5-red)]' : 'text-[var(--mt5-blue)]';
 
   return (
     // The wrapper spans the screen only so the card can be placed in a corner; it never takes a
@@ -53,28 +53,28 @@ export function MT5CloseNotice({ fx, visible, onDismiss }: {
     >
       <div
         className={cn(
-          'w-full max-w-[320px] overflow-hidden rounded-sm border border-[#2b3543] bg-[#202933] shadow-lg transition-all duration-200',
+          'w-full max-w-[320px] overflow-hidden rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] shadow-lg transition-all duration-200',
           // On the way out it must stop taking clicks before it stops being painted, or an
           // invisible card sits over the screen for the length of the fade.
           visible ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none -translate-y-2 opacity-0',
         )}
       >
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8fa2b8]">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mt5-muted)]">
             {fx.mode === 'manual' ? 'Position closed' : 'Position closed at expiry'}
           </span>
           <button
             type="button"
             onClick={onDismiss}
             aria-label="Dismiss"
-            className="ml-auto -mr-1 px-1 text-[13px] leading-none text-[#8fa2b8] transition hover:text-white"
+            className="ml-auto -mr-1 px-1 text-[13px] leading-none text-[var(--mt5-muted)] transition hover:text-white"
           >
             ×
           </button>
         </div>
 
         <div className="flex items-baseline justify-between gap-3 px-3 py-2 font-mono text-[12px] tabular-nums">
-          <span className="min-w-0 truncate text-[#8fa2b8]">
+          <span className="min-w-0 truncate text-[var(--mt5-muted)]">
             {fx.ticket ? <span className="text-white">#{fx.ticket.slice(0, 8)}</span> : null}{' '}
             {fx.direction ? <span className={sideTone}>{fx.direction}</span> : null}{' '}
             {lotsOfStake(fx.stakeCents, volDigits)}

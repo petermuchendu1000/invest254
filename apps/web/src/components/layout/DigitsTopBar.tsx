@@ -18,7 +18,7 @@ import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { useMyNotifications, useDismissNotification } from '@/lib/notifications/hooks';
 import { DIcon, type IconName } from '@/components/game/digits/icons';
 import { AccountMenu, AccountPill, ChangePasswordModal } from '@/components/layout/DigitsAccount';
-import { useAccountUi } from '@/lib/account/accountUi';
+import { useAccountUi, useMyKyc, kycLabelSuffix } from '@/lib/account/accountUi';
 import { SoundToggle } from '@/components/layout/SoundToggle';
 import { useSound } from '@/lib/sound/sound';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
@@ -156,6 +156,8 @@ export function DigitsTopBar() {
   }, [menuOpen]);
 
   const authed = hydrated && !!token;
+  // Only once signed in: the entry it labels is itself behind `authed`.
+  const kyc = useMyKyc(authed);
   const figures = useWalletFigures();
   const needAuth = (fn: () => void) => () => (authed ? fn() : openAuth('login'));
 
@@ -171,7 +173,10 @@ export function DigitsTopBar() {
     { icon: 'user', label: 'Account', href: '/account' },
     // phones had no way to these two (the avatar menu is desktop-only)
     ...(authed ? [
-      { icon: 'idcard' as IconName, label: 'Verify Identity', onClick: () => openAccountDialog('verify') },
+      // The state goes in the label, as the desktop menu already does. On a phone this drawer is
+      // the only way to the dialog, so a plain "Verify Identity" was the one place a trader whose
+      // documents were already under review saw no trace of it.
+      { icon: 'idcard' as IconName, label: `Verify Identity${kycLabelSuffix(kyc.data?.status)}`, onClick: () => openAccountDialog('verify') },
       { icon: 'lock' as IconName, label: 'Change Password', onClick: () => setPwOpen(true) },
     ] : []),
     { icon: 'shield', label: 'Legal', href: '/legal' },

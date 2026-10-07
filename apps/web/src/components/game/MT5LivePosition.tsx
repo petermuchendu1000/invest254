@@ -63,7 +63,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
   // MetaTrader paints a profit BLUE and a loss RED. Not green: green in MT5 belongs to a rising
   // candle, and using it for money made the one figure a trader reads say "casino win" rather than
   // "position in profit". The Trade tab, the Toolbox and this card now agree.
-  const pnlTone = pnl > 0 ? 'text-[#3183ff]' : pnl < 0 ? 'text-[#f23645]' : 'text-white';
+  const pnlTone = pnl > 0 ? 'text-[var(--mt5-blue)]' : pnl < 0 ? 'text-[var(--mt5-red)]' : 'text-white';
 
   const state =
     pos.phase === 'pending' ? 'Opening…' : pos.phase === 'settling' ? 'Closing…' : `${secs}s`;
@@ -91,7 +91,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
 
       {/* The profit, which is the number a trader is actually watching. */}
       <div className="flex items-end justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-[#8fa2b8]">Profit</span>
+        <span className="text-[10px] uppercase tracking-wide text-[var(--mt5-muted)]">Profit</span>
         <span className={cn('font-mono text-[22px] font-semibold leading-none tabular-nums', pnlTone)}>
           {pnl > 0 ? '+' : ''}{money.mt(pnl)}
         </span>
@@ -128,7 +128,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
 
       {/* A one-pixel rule rather than a coloured bar: it is chrome telling the time, and MetaTrader
           does not decorate a position with a progress meter. */}
-      <div className="h-px w-full bg-[#2b3543]">
+      <div className="h-px w-full bg-[var(--mt5-border)]">
         <div
           className="h-px transition-[width] duration-100 ease-linear"
           style={{ width: `${progress * 100}%`, background: side }}
@@ -140,7 +140,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           onClick={() => setClosing(true)}
           disabled={!closable}
           title={pos.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
-          className="h-9 w-full rounded-sm border border-[#2b3543] bg-[#202933] text-[12px] font-semibold text-white transition hover:border-[#3183ff] disabled:cursor-not-allowed disabled:opacity-40"
+          className="h-9 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[12px] font-semibold text-white transition hover:border-[var(--mt5-blue)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {closeWhy}
         </button>
@@ -160,7 +160,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
         MetaTrader has no equivalent for. That divergence is stated once, plainly, and only there.
       */}
       {continuous ? null : (
-        <p className="text-[10px] text-[#8fa2b8]">
+        <p className="text-[10px] text-[var(--mt5-muted)]">
           This contract runs to its term: {pos.durationS}s from opening.
         </p>
       )}
@@ -174,7 +174,10 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
           openPrice={openPrice}
           busy={pos.phase === 'settling'}
           onDismiss={() => setClosing(false)}
-          onConfirm={() => { sell(); setClosing(false); }}
+          // This card's OWN position. A bare `sell()` closes whichever one the provider holds as
+          // newest, which was this one when only one could exist; several can now, and a card drawn
+          // for a position has to close the position it was drawn for.
+          onConfirm={() => { sell(pos.positionId ?? undefined); setClosing(false); }}
         />
       ) : null}
     </div>
@@ -184,7 +187,7 @@ export function MT5LivePosition({ pos, symbol, digits, price, openPrice }: {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <>
-      <dt className="text-[#8fa2b8]">{label}</dt>
+      <dt className="text-[var(--mt5-muted)]">{label}</dt>
       <dd className="text-right text-white">{value}</dd>
     </>
   );

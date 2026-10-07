@@ -46,6 +46,17 @@ export async function generateViewport(): Promise<Viewport> {
     width: 'device-width',
     initialScale: 1,
     viewportFit: 'cover',
+    /**
+     * The soft keyboard must SHRINK the layout, not slide over it.
+     *
+     * The default, `resizes-visual`, leaves the layout viewport at its full height when the
+     * keyboard opens. Every full-height surface in this app is `fixed inset-0` or `h-dvh`, so they
+     * all kept their pre-keyboard height and the keyboard simply covered the bottom of them — and
+     * on the phone order ticket the bottom is the SELL and BUY row, which sits outside the
+     * scrolling area precisely so that it is always reachable. Typing a volume therefore hid the
+     * two buttons the screen exists for, with no scroll able to bring them back.
+     */
+    interactiveWidget: 'resizes-content',
     themeColor: b.colorBg,
   };
 }
@@ -56,7 +67,31 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // before paint to avoid a flash. 'auto'/'dark' → dark-first; 'light' → light.
   const brandDefaultTheme = brand.theme === 'light' ? 'light' : 'dark';
   const initialClass = brandDefaultTheme === 'light' ? 'light' : 'dark';
-  const themeInit = `(function(){try{var d=${JSON.stringify(brandDefaultTheme)};var s=localStorage.getItem('pp-theme');var t=s||d;var e=document.documentElement;e.classList.remove('light','dark');e.classList.add(t==='light'?'light':'dark');var p=localStorage.getItem('pp-pnl');if(p==='classic')e.classList.add('pnl-classic');else e.classList.remove('pnl-classic');}catch(e){}})();`;
+  /**
+   * Which mode the brand's OWN palette was authored for.
+   *
+   * A brand supplies one set of greys, and they are the greys of its own theme. When the trader
+   * asks for the other mode those greys are the wrong ones, and feeding them through anyway is
+   * exactly why "light mode" looked like nothing had happened: `--pp-bg` resolves
+   * `var(--brand-bg, <light fallback>)`, `--brand-bg` is always set inline on this element, so the
+   * fallback is never reached and the page stayed the brand's dark colour under a light class.
+   *
+   * This class lets the stylesheet tell the two cases apart: in the brand's own mode its palette is
+   * used, and in the other mode the published neutral palette is. The brand's identity tokens (its
+   * accent, its hue, its type and its radius) are brand-driven in BOTH modes, because those are the
+   * brand rather than the theme.
+   */
+  const brandPaletteClass = brandDefaultTheme === 'light' ? 'brand-light' : 'brand-dark';
+  /**
+   * The stored theme, applied before the first paint so there is no flash of the other one.
+   *
+   * It no longer touches `pnl-classic`. That class was written here and by a `PnlColorToggle`
+   * component, and read by NO stylesheet rule anywhere: a profit/loss colour setting that could not
+   * change a colour. The component was also mounted nowhere, so the only trace of the feature was
+   * this line keeping a meaningless class in sync. Both are gone. MetaTrader's own answer to
+   * "which colours" is the chart's Colors tab, which this terminal has with its four schemes.
+   */
+  const themeInit = `(function(){try{var d=${JSON.stringify(brandDefaultTheme)};var s=localStorage.getItem('pp-theme');var t=s||d;var e=document.documentElement;e.classList.remove('light','dark');e.classList.add(t==='light'?'light':'dark');}catch(e){}})();`;
   // Load the brand's title + body + mono faces from Google Fonts (empty when the brand sets none).
   const fontHref = googleFontsHref([
     brand.themeTokens?.fontTitle ?? '',
@@ -65,7 +100,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   ]);
 
   return (
-    <html lang="en" className={initialClass} data-brand={brand.slug} data-brand-resolved={String(brand.resolved ?? false)} style={brandRootStyle(brand) as React.CSSProperties}>
+    <html lang="en" className={`${initialClass} ${brandPaletteClass}`} data-brand={brand.slug} data-brand-resolved={String(brand.resolved ?? false)} style={brandRootStyle(brand) as React.CSSProperties}>
       <head>
         {fontHref ? (
           <>

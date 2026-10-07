@@ -135,6 +135,21 @@ export class SiteRegistry {
         });
       }
       const history: MarketHistory | undefined = histories?.primary;
+      /**
+       * Build the brand's own history NOW, in the background, before any client can ask for it.
+       *
+       * Nothing warmed at boot, so the first trader to open a chart paid for the whole 400-day
+       * chain inside their own request: measured on this container, two seconds before the first
+       * bar could even be computed, and the engine's tick loop blocked for most of it. `warm()`
+       * yields to the event loop between slices, so doing it here costs the ticks nothing and the
+       * first request arrives to a history that is already standing.
+       *
+       * Not awaited, and failures are reported rather than thrown: a brand whose history could not
+       * be warmed still serves its ticks, and the next request simply pays what it used to.
+       */
+      if (history) {
+        void history.warm().catch((err: unknown) => this.report(err as Error, `warm ${siteId}`));
+      }
       // On a candlestick brand, record the chart price every trade executed at (migration 0180), so
       // a receipt can print the number the player actually saw instead of "at market". The wrapper
       // writes AFTER the atomic money RPC returns and never awaits the write, so settlement is

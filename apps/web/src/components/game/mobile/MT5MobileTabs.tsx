@@ -106,7 +106,7 @@ export function MT5MobileTabs({ unread = 0 }: { unread?: number }) {
        * hand, and that reservation getting out of step with the bar's real height is exactly how
        * the old layout came to clip its own content.
        */
-      className="shrink-0 border-t border-[#2b3543] bg-[#0f1720] pb-[env(safe-area-inset-bottom)]"
+      className="shrink-0 border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] pb-[env(safe-area-inset-bottom)]"
     >
       <ul className="flex items-stretch">
         {MOBILE_TABS.map(({ id, label }) => {
@@ -122,7 +122,7 @@ export function MT5MobileTabs({ unread = 0 }: { unread?: number }) {
                   // 56px is the Material bottom-bar height Android's own bar uses, and it keeps the
                   // whole target above the 48px minimum with the label inside it.
                   'relative flex h-14 w-full flex-col items-center justify-center gap-1 text-[10px] font-medium transition',
-                  active ? 'text-[#3183ff]' : 'text-[#8fa2b8]',
+                  active ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-muted)]',
                 )}
               >
                 <Icon className="h-5 w-5" />
@@ -131,7 +131,7 @@ export function MT5MobileTabs({ unread = 0 }: { unread?: number }) {
                   // "a red unread badge" — MetaTrader's own, on the Messages tab on Android.
                   <span
                     aria-label={`${unread} unread`}
-                    className="absolute left-1/2 top-1.5 ml-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-[#f23645] px-1 text-[9px] font-bold text-white"
+                    className="absolute left-1/2 top-1.5 ml-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-[var(--mt5-red)] px-1 text-[9px] font-bold text-white"
                   >
                     {unread > 99 ? '99+' : unread}
                   </span>

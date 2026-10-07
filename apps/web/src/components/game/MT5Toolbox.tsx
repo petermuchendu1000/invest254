@@ -306,7 +306,7 @@ export function MT5Toolbox() {
   const alerts = useAlertsStore((s) => s.alerts);
 
   return (
-    <div className="flex shrink-0 flex-col overflow-hidden rounded-sm border border-[#2b3543] bg-[#0f1720] text-[#ffffff]">
+    <div className="flex shrink-0 flex-col overflow-hidden rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-[#ffffff]">
       {/* The account line is the toggle, and the only place these figures appear. Collapsed it is a
           single scrolling row so the chart keeps its height on a phone; open, it wraps to
           MetaTrader's full five. The chevron sits outside the scrolling area, or it rides off. */}
@@ -361,14 +361,14 @@ export function MT5Toolbox() {
               It is the only figure there that is not an account total, which is why it sits apart
               from the five rather than among them. Absent with nothing open, as MetaTrader's is. */}
           {live ? (
-            <span className={cn('font-mono text-[12px] font-semibold tabular-nums', floatingCents > 0 ? 'text-[#3183ff]' : floatingCents < 0 ? 'text-[#f23645]' : 'text-[#ffffff]')}>
+            <span className={cn('font-mono text-[12px] font-semibold tabular-nums', floatingCents > 0 ? 'text-[var(--mt5-blue)]' : floatingCents < 0 ? 'text-[var(--mt5-red)]' : 'text-[#ffffff]')}>
               {mtAmount(money.toDisplay(floatingCents))}
             </span>
           ) : null}
-          {openPositions.length ? <span className="rounded bg-[#3183ff]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#3183ff]">{openPositions.length} open</span> : null}
-          <span className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
+          {openPositions.length ? <span className="rounded bg-[var(--mt5-blue)]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mt5-blue)]">{openPositions.length} open</span> : null}
+          <span className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[var(--mt5-green)]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[var(--mt5-red)]')}
             title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} />
-          <span className={cn('text-[#8fa2b8] transition', open && 'rotate-180')} aria-hidden>▾</span>
+          <span className={cn('text-[var(--mt5-muted)] transition', open && 'rotate-180')} aria-hidden>▾</span>
         </span>
       </button>
 
@@ -386,7 +386,7 @@ export function MT5Toolbox() {
           />
           <div
             ref={panelRef}
-            className="fixed inset-x-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom))] z-40 flex max-h-[68vh] flex-col overflow-hidden rounded border border-[#2b3543] bg-[#0f1720] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none"
+            className="fixed inset-x-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom))] z-40 flex max-h-[68vh] flex-col overflow-hidden rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:border-0 sm:border-t sm:shadow-none"
             style={panel.px === null ? undefined : { height: panel.px, maxHeight: 'none' }}
           >
           {/* The splitter. Drag up for more Toolbox, down for more chart; double-click hands the
@@ -394,7 +394,7 @@ export function MT5Toolbox() {
               under the finger, which is the same gesture as the desktop drag. */}
           <PaneSplitter onGrab={grabPanel} onMove={panel.move} onRelease={panel.end} onReset={panel.reset} />
           <div
-            className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[#2b3543]"
+            className="min-h-0 flex-1 overflow-auto sm:border-t sm:border-[var(--mt5-border)]"
             // Unsized, the pane keeps the height it always had. Once a trader has dragged it, the
             // pane itself carries the height and the scroller just fills it.
             style={panel.px === null ? { maxHeight: 'min(46vh, 22rem)' } : undefined}
@@ -517,15 +517,15 @@ export function MT5Toolbox() {
               !token ? (
                 <Empty>Sign in to read your messages.</Empty>
               ) : (notifications.data?.items?.length ?? 0) > 0 ? (
-                <ul className="divide-y divide-[#2b3543]/60">
+                <ul className="divide-y divide-[var(--mt5-border)]/60">
                   {(notifications.data?.items ?? []).map((n) => (
                     <li key={n.id} className="px-3 py-2">
                       <div className="flex items-baseline gap-2">
-                        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', n.level === 'error' ? 'bg-[#f23645]' : n.level === 'warning' ? 'bg-[#f0b90b]' : n.level === 'success' ? 'bg-[#41be56]' : 'bg-[#3183ff]')} />
+                        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', n.level === 'error' ? 'bg-[var(--mt5-red)]' : n.level === 'warning' ? 'bg-[#f0b90b]' : n.level === 'success' ? 'bg-[var(--mt5-green)]' : 'bg-[var(--mt5-blue)]')} />
                         <span className="text-[11px] font-semibold text-white">{n.title}</span>
-                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#8fa2b8]">{stamp(n.createdAtMs)}</span>
+                        <span className="ml-auto shrink-0 font-mono text-[10px] text-[var(--mt5-muted)]">{stamp(n.createdAtMs)}</span>
                       </div>
-                      <p className="mt-0.5 pl-3.5 text-[11px] leading-snug text-[#8fa2b8]">{n.body}</p>
+                      <p className="mt-0.5 pl-3.5 text-[11px] leading-snug text-[var(--mt5-muted)]">{n.body}</p>
                     </li>
                   ))}
                 </ul>
@@ -591,7 +591,7 @@ export function MT5Toolbox() {
               tabs are "flat labels separated by thin vertical rules" (docs/mt5/09-toolbox.md:140),
               each its own width, and a panel tab strip with no room for them all grows
               `◀ ▶` scroll arrows at its right end (docs/mt5/10-market-watch.md:96). */}
-          <div className="flex items-stretch overflow-x-auto border-t border-[#2b3543] bg-[#202933] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex items-stretch overflow-x-auto border-t border-[var(--mt5-border)] bg-[var(--mt5-raised)] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map((t) => {
               // MetaTrader puts a count on a tab that has something waiting, and it puts one on
               // Articles too: `Articles₇` on its own screenshot is the UNREAD count.
@@ -608,12 +608,12 @@ export function MT5Toolbox() {
                   aria-pressed={tab === t.id}
                   className={cn(
                     'shrink-0 whitespace-nowrap px-2 py-1.5 text-[10.5px] font-semibold leading-tight transition',
-                    tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
+                    tab === t.id ? 'bg-[var(--mt5-border)] text-white' : 'text-[var(--mt5-muted)] hover:text-white',
                   )}
                 >
                   {t.label}
                   {count > 0 ? (
-                    <sup className={cn('ml-0.5 text-[9px]', t.id === 'mailbox' ? 'text-[#3183ff]' : 'text-[#8fa2b8]')}>{count}</sup>
+                    <sup className={cn('ml-0.5 text-[9px]', t.id === 'mailbox' ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-muted)]')}>{count}</sup>
                   ) : null}
                 </button>
               );
@@ -708,18 +708,18 @@ function NewsTab({ active }: { active: boolean }) {
   if (!items) return <Empty>Loading news…</Empty>;
   if (items.length === 0) return <Empty>No news.</Empty>;
   return (
-    <ul className="divide-y divide-[#2b3543]/60">
+    <ul className="divide-y divide-[var(--mt5-border)]/60">
       {items.map((n) => (
         <li key={n.id}>
           {/* Opened in a new tab, and `noreferrer` so a third-party page is not told where the
               player came from. The text itself is rendered as text — never as markup. */}
-          <a href={n.url} target="_blank" rel="noopener noreferrer" className="block px-3 py-2 hover:bg-[#2b3543]/40">
+          <a href={n.url} target="_blank" rel="noopener noreferrer" className="block px-3 py-2 hover:bg-[var(--mt5-border)]/40">
             <div className="flex items-baseline gap-2">
-              <span className="shrink-0 font-mono text-[10px] text-[#8fa2b8]">{stamp(n.publishedAtMs)}</span>
-              <span className="shrink-0 rounded bg-[#2b3543] px-1 text-[10px] text-[#8fa2b8]">{n.source}</span>
+              <span className="shrink-0 font-mono text-[10px] text-[var(--mt5-muted)]">{stamp(n.publishedAtMs)}</span>
+              <span className="shrink-0 rounded bg-[var(--mt5-border)] px-1 text-[10px] text-[var(--mt5-muted)]">{n.source}</span>
               <span className="min-w-0 text-[11px] font-semibold leading-snug text-white">{n.title}</span>
             </div>
-            {n.summary ? <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-[#8fa2b8]">{n.summary}</p> : null}
+            {n.summary ? <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-[var(--mt5-muted)]">{n.summary}</p> : null}
           </a>
         </li>
       ))}
@@ -809,7 +809,7 @@ function AlertsTab({ symbol, digits, livePrice, alerts }: {
             key={a.id}
             onClick={() => setSelected(a.id)}
             onDoubleClick={() => { setSelected(a.id); setEditing({ id: a.id, draft: draftOf(a) }); }}
-            className={cn('cursor-pointer border-t border-[#2b3543]/60', selected === a.id ? 'bg-[#2b3543]' : 'hover:bg-[#202933]')}
+            className={cn('cursor-pointer border-t border-[var(--mt5-border)]/60', selected === a.id ? 'bg-[var(--mt5-border)]' : 'hover:bg-[var(--mt5-raised)]')}
           >
             <Td first>
               <span className="flex items-center gap-1.5">
@@ -840,7 +840,7 @@ function AlertsTab({ symbol, digits, livePrice, alerts }: {
         <span>Alerts fire while this terminal is open.</span>
         <span>Checked against {symbol}, the open chart&apos;s symbol.</span>
         {current?.counter ? (
-          <button type="button" onClick={() => rearm(current.id)} className="text-[#3183ff] hover:underline">
+          <button type="button" onClick={() => rearm(current.id)} className="text-[var(--mt5-blue)] hover:underline">
             Re-arm {current.symbol}
           </button>
         ) : null}
@@ -852,7 +852,7 @@ function AlertsTab({ symbol, digits, livePrice, alerts }: {
           <div
             role="menu"
             data-alerts-menu=""
-            className="fixed z-[71] w-48 overflow-hidden rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            className="fixed z-[71] w-48 overflow-hidden rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[12px] shadow-2xl"
             style={{ left: menu.x, top: menu.y }}
           >
             {/* Verbatim, with MetaTrader's accelerators and no ellipses (09-toolbox.md 912-922).
@@ -898,7 +898,7 @@ function AlertBell({ on }: { on: boolean }) {
       <path d="M8 1.5a1 1 0 0 1 1 1v.3a3.8 3.8 0 0 1 2.8 3.7v2.3l1 1.6H3.2l1-1.6V6.5A3.8 3.8 0 0 1 7 2.8v-.3a1 1 0 0 1 1-1Zm0 13a1.8 1.8 0 0 1-1.7-1.3h3.4A1.8 1.8 0 0 1 8 14.5Z" />
     </svg>
   ) : (
-    <svg viewBox="0 0 16 16" width="11" height="11" aria-label="Disabled" role="img" className="shrink-0 text-[#f23645]" fill="none" stroke="currentColor" strokeWidth="1.8">
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-label="Disabled" role="img" className="shrink-0 text-[var(--mt5-red)]" fill="none" stroke="currentColor" strokeWidth="1.8">
       <circle cx="8" cy="8" r="6" />
       <path d="M4 12 12 4" />
     </svg>
@@ -914,11 +914,11 @@ function AlertMenuItem({ label, accel, onPick, disabled, checked }: {
       role="menuitem"
       onClick={onPick}
       disabled={disabled ?? false}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-[#2b3543] disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-[var(--mt5-border)] disabled:cursor-not-allowed disabled:opacity-40"
     >
-      <span className="w-3 shrink-0 text-[#4597ff]" aria-hidden>{checked ? '✓' : ''}</span>
+      <span className="w-3 shrink-0 text-[var(--mt5-blue-link)]" aria-hidden>{checked ? '✓' : ''}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className="shrink-0 text-[10px] text-[#8fa2b8]">{accel}</span>
+      <span className="shrink-0 text-[10px] text-[var(--mt5-muted)]">{accel}</span>
     </button>
   );
 }
@@ -957,13 +957,13 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
       role="dialog"
       aria-modal="true"
       aria-label="Alert Editor"
-      className="fixed inset-0 z-[80] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <form
         onSubmit={(e) => { e.preventDefault(); onOk(draft); }}
-        className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]"
+        className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-auto sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]"
       >
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
           <span className="text-[15px] font-semibold leading-tight">Alert Editor</span>
         </div>
 
@@ -977,7 +977,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
             <select
               value="notification"
               onChange={() => { /* the three others are disabled options; nothing to select */ }}
-              className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
             >
               <option value="notification">Notification</option>
               <option value="sound" disabled>Sound (no sound files on this platform)</option>
@@ -992,7 +992,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
               aria-label="Expiration"
               value={dtLocal(draft.expiresAtMs)}
               onChange={(e) => onChange({ ...draft, expiresAtMs: e.target.value ? new Date(e.target.value).getTime() : null })}
-              className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
             />
           </Field>
 
@@ -1004,7 +1004,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
               readOnly
               aria-label="Symbol"
               title="Alerts are checked against the open chart's symbol."
-              className="w-full rounded border border-[#2b3543] bg-[#202933] px-1.5 py-1 text-[#8fa2b8] outline-none"
+              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-1.5 py-1 text-[var(--mt5-muted)] outline-none"
             />
           </Field>
 
@@ -1013,12 +1013,12 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
               value={draft.condition}
               aria-label="Condition"
               onChange={(e) => onChange({ ...draft, condition: e.target.value as AlertCondition })}
-              className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+              className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
             >
               {ALERT_CONDITIONS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
           </Field>
-          <p className="mb-2 text-[10px] leading-snug text-[#8fa2b8]">
+          <p className="mb-2 text-[10px] leading-snug text-[var(--mt5-muted)]">
             MetaTrader also offers Bid and Ask conditions. This platform quotes one price per symbol,
             so there is no bid, no ask and no spread to compare, and Volume is not published at all.
           </p>
@@ -1030,7 +1030,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
                 aria-label="Value"
                 placeholder="15:00"
                 onChange={(e) => onChange({ ...draft, timeHHMM: e.target.value })}
-                className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+                className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
               />
             ) : (
               <input
@@ -1038,7 +1038,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
                 aria-label="Value"
                 inputMode="decimal"
                 onChange={(e) => onChange({ ...draft, price: Number(e.target.value) })}
-                className="w-full rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+                className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
               />
             )}
           </Field>
@@ -1046,9 +1046,9 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
             // MetaTrader's own wording for this field: "Specify the local computer time in the
             // format "HH:MM"" (09-toolbox.md 937-938). It is the one field on the tab that is not
             // in the server's time zone.
-            <p className="mb-2 text-[10px] leading-snug text-[#8fa2b8]">Local computer time, HH:MM.</p>
+            <p className="mb-2 text-[10px] leading-snug text-[var(--mt5-muted)]">Local computer time, HH:MM.</p>
           ) : (
-            <p className="mb-2 text-[10px] leading-snug text-[#8fa2b8]">Price to {digits} decimal places.</p>
+            <p className="mb-2 text-[10px] leading-snug text-[var(--mt5-muted)]">Price to {digits} decimal places.</p>
           )}
 
           <Field label="Source:">
@@ -1058,9 +1058,9 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
                 readOnly
                 aria-label="Source"
                 title="MetaTrader browses for a sound file or a mail template here; a browser tab has neither."
-                className="w-full rounded border border-[#2b3543] bg-[#202933] px-1.5 py-1 text-[#8fa2b8] outline-none"
+                className="w-full rounded border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-1.5 py-1 text-[var(--mt5-muted)] outline-none"
               />
-              <button type="button" disabled title="No file to browse for on this platform." className="shrink-0 rounded border border-[#2b3543] px-2 text-[#8fa2b8] disabled:cursor-not-allowed disabled:opacity-40">...</button>
+              <button type="button" disabled title="No file to browse for on this platform." className="shrink-0 rounded border border-[var(--mt5-border)] px-2 text-[var(--mt5-muted)] disabled:cursor-not-allowed disabled:opacity-40">...</button>
             </span>
           </Field>
 
@@ -1072,9 +1072,9 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
                 aria-label="Timeout"
                 value={draft.timeoutS}
                 onChange={(e) => onChange({ ...draft, timeoutS: Math.max(1, Number(e.target.value) || 1) })}
-                className="w-24 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+                className="w-24 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
               />
-              <span className="text-[#8fa2b8]">sec</span>
+              <span className="text-[var(--mt5-muted)]">sec</span>
             </span>
           </Field>
 
@@ -1085,15 +1085,15 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
               aria-label="Maximum iterations"
               value={draft.limit}
               onChange={(e) => onChange({ ...draft, limit: Math.max(1, Number(e.target.value) || 1) })}
-              className="w-24 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-white outline-none focus:border-[#3183ff]"
+              className="w-24 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-white outline-none focus:border-[var(--mt5-blue)]"
             />
           </Field>
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[#2b3543] px-3 py-2.5">
-          <button type="submit" autoFocus className="rounded bg-[#3183ff] px-3 py-1 text-[12px] font-semibold text-white">OK</button>
-          <button type="button" onClick={() => onTest(draft)} className="rounded border border-[#2b3543] px-3 py-1 text-[12px] text-white">Test</button>
-          <button type="button" onClick={onCancel} className="rounded border border-[#2b3543] px-3 py-1 text-[12px] text-[#8fa2b8]">Cancel</button>
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--mt5-border)] px-3 py-2.5">
+          <button type="submit" autoFocus className="rounded bg-[var(--mt5-blue)] px-3 py-1 text-[12px] font-semibold text-white">OK</button>
+          <button type="button" onClick={() => onTest(draft)} className="rounded border border-[var(--mt5-border)] px-3 py-1 text-[12px] text-white">Test</button>
+          <button type="button" onClick={onCancel} className="rounded border border-[var(--mt5-border)] px-3 py-1 text-[12px] text-[var(--mt5-muted)]">Cancel</button>
         </div>
       </form>
     </div>
@@ -1104,7 +1104,7 @@ function AlertEditor({ draft, digits, onChange, onOk, onTest, onCancel }: {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="mb-2 flex items-center gap-2">
-      <span className="w-32 shrink-0 text-[#8fa2b8]">{label}</span>
+      <span className="w-32 shrink-0 text-[var(--mt5-muted)]">{label}</span>
       <span className="min-w-0 flex-1">{children}</span>
     </label>
   );
@@ -1129,21 +1129,21 @@ function PositionRow({
     <Tag
       {...(onOpenMenu ? { type: 'button' as const, onClick: onOpenMenu, 'aria-label': `Position menu for ${symbol} ${direction} ${lots}` } : {})}
       className={cn(
-        'flex w-full items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2 text-left',
-        onOpenMenu && 'transition hover:bg-[#202933]',
+        'flex w-full items-start justify-between gap-2 border-b border-[var(--mt5-border)]/60 px-3 py-2 text-left',
+        onOpenMenu && 'transition hover:bg-[var(--mt5-raised)]',
         className,
       )}
     >
       <div className="min-w-0">
         <div className="text-[12px] font-semibold text-white">
           {symbol},{' '}
-          <span className={buy ? 'text-[#3183ff]' : 'text-[#f23645]'}>{direction} {lots}</span>
+          <span className={buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]'}>{direction} {lots}</span>
         </div>
-        <div className="font-mono text-[11px] text-[#8fa2b8]">{from} → {to}</div>
+        <div className="font-mono text-[11px] text-[var(--mt5-muted)]">{from} → {to}</div>
       </div>
       <div className="shrink-0 text-right">
-        <div className={cn('font-mono text-[12px] font-semibold tabular-nums', profitCents > 0 ? 'text-[#3183ff]' : profitCents < 0 ? 'text-[#f23645]' : 'text-[#ffffff]')}>{profit}</div>
-        {note ? <div className="font-mono text-[10px] text-[#8fa2b8]">{note}</div> : null}
+        <div className={cn('font-mono text-[12px] font-semibold tabular-nums', profitCents > 0 ? 'text-[var(--mt5-blue)]' : profitCents < 0 ? 'text-[var(--mt5-red)]' : 'text-[#ffffff]')}>{profit}</div>
+        {note ? <div className="font-mono text-[10px] text-[var(--mt5-muted)]">{note}</div> : null}
       </div>
     </Tag>
   );
@@ -1178,19 +1178,19 @@ function PendingGridRow({
 }) {
   const buy = order.kind === 'buyLimit' || order.kind === 'buyStop';
   return (
-    <tr data-pending-order={order.id} className="border-t border-[#2b3543]/60 hover:bg-[#202933]">
+    <tr data-pending-order={order.id} className="border-t border-[var(--mt5-border)]/60 hover:bg-[var(--mt5-raised)]">
       <Td first>{order.symbol}</Td>
       <Td>{order.id.slice(0, 8)}</Td>
       <Td>{stamp(order.createdAtMs)}</Td>
-      <Td className={buy ? 'text-[#3183ff]' : 'text-[#f23645]'}>{PENDING_LABELS[order.kind].toLowerCase()}</Td>
+      <Td className={buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]'}>{PENDING_LABELS[order.kind].toLowerCase()}</Td>
       <Td>{lots(order.stakeCents)} / 0</Td>
       <Td>{order.triggerPrice.toFixed(digits)}</Td>
-      <Td><span className="text-[#8fa2b8]">{order.slPrice === null ? '' : order.slPrice.toFixed(digits)}</span></Td>
-      <Td><span className="text-[#8fa2b8]">{order.tpPrice === null ? '' : order.tpPrice.toFixed(digits)}</span></Td>
+      <Td><span className="text-[var(--mt5-muted)]">{order.slPrice === null ? '' : order.slPrice.toFixed(digits)}</span></Td>
+      <Td><span className="text-[var(--mt5-muted)]">{order.tpPrice === null ? '' : order.tpPrice.toFixed(digits)}</span></Td>
       <Td>{px(nowRate)}</Td>
       <Td>
         <span className="flex items-center justify-end gap-2">
-          <span className="text-[#8fa2b8]">placed</span>
+          <span className="text-[var(--mt5-muted)]">placed</span>
           {/* MetaTrader deletes a pending order from its own row. Nothing is debited while an order
               waits, so there is nothing to settle: it simply stops existing. */}
           <button
@@ -1198,7 +1198,7 @@ function PendingGridRow({
             onClick={onCancel}
             aria-label="Delete order"
             title="Delete this order. Nothing has been staked, so there is nothing to settle."
-            className="rounded-sm border border-[#2b3543] px-1.5 text-[11px] font-normal text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645]"
+            className="rounded-sm border border-[var(--mt5-border)] px-1.5 text-[11px] font-normal text-[var(--mt5-muted)] transition hover:border-[var(--mt5-red)] hover:text-[var(--mt5-red)]"
           >
             ×
           </button>
@@ -1221,22 +1221,22 @@ function PendingPhoneRow({
   return (
     <div
       data-pending-order={order.id}
-      className="flex w-full items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2 sm:hidden"
+      className="flex w-full items-start justify-between gap-2 border-b border-[var(--mt5-border)]/60 px-3 py-2 sm:hidden"
     >
       <div className="min-w-0">
         <div className="text-[12px] font-semibold text-white">
           {order.symbol},{' '}
-          <span className={buy ? 'text-[#3183ff]' : 'text-[#f23645]'}>
+          <span className={buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]'}>
             {PENDING_LABELS[order.kind].toLowerCase()} {lots(order.stakeCents)}
           </span>
         </div>
-        <div className="font-mono text-[11px] text-[#8fa2b8]">at {order.triggerPrice.toFixed(digits)}</div>
+        <div className="font-mono text-[11px] text-[var(--mt5-muted)]">at {order.triggerPrice.toFixed(digits)}</div>
       </div>
       <button
         type="button"
         onClick={onCancel}
         aria-label="Delete order"
-        className="shrink-0 rounded-sm border border-[#2b3543] px-2 py-1 text-[11px] text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645]"
+        className="shrink-0 rounded-sm border border-[var(--mt5-border)] px-2 py-1 text-[11px] text-[var(--mt5-muted)] transition hover:border-[var(--mt5-red)] hover:text-[var(--mt5-red)]"
       >
         Delete
       </button>
@@ -1249,10 +1249,10 @@ function Figure({ label, value, tone, className }: { label: string; value: strin
     <span className={cn('flex shrink-0 items-baseline gap-1.5 whitespace-nowrap', className)}>
       {/* No `uppercase`: MetaTrader's own casing is part of the label ("Free Margin:", not "FREE
           MARGIN"), and forcing it here would throw away the thing the screenshots were read for. */}
-      <span className="text-[10px] tracking-wide text-[#8fa2b8]">{label}</span>
+      <span className="text-[10px] tracking-wide text-[var(--mt5-muted)]">{label}</span>
       {/* Equity carries this tone when the floating P/L is non-zero, so it is money, not a price:
           MetaTrader's blue for a profit, red for a loss. */}
-      <span className={cn('font-mono text-[12px] font-semibold tabular-nums', tone === 'up' ? 'text-[#3183ff]' : tone === 'down' ? 'text-[#f23645]' : 'text-[#ffffff]')}>{value}</span>
+      <span className={cn('font-mono text-[12px] font-semibold tabular-nums', tone === 'up' ? 'text-[var(--mt5-blue)]' : tone === 'down' ? 'text-[var(--mt5-red)]' : 'text-[#ffffff]')}>{value}</span>
     </span>
   );
 }
@@ -1296,7 +1296,7 @@ function Table({ head, children, left = [0], grow }: {
   return (
     <table className="w-full border-collapse text-right font-mono text-[11px] tabular-nums">
       <thead>
-        <tr className="text-[#8fa2b8]">
+        <tr className="text-[var(--mt5-muted)]">
           {head.map((h, i) => (
             <th
               key={`${h}:${i}`}
@@ -1326,14 +1326,14 @@ function Td({ children, className, first }: { children: React.ReactNode; classNa
  */
 function ToolboxFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[#2b3543] py-1.5 pl-3 pr-20 text-[10px] text-[#8fa2b8]">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mt5-border)] py-1.5 pl-3 pr-20 text-[10px] text-[var(--mt5-muted)]">
       {children}
     </div>
   );
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">{children}</div>;
+  return <div className="px-3 py-4 text-center text-[11px] leading-snug text-[var(--mt5-muted)]">{children}</div>;
 }
 
 /**
@@ -1573,16 +1573,16 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
           Twelve columns cannot be read at 390px, which is what the Trade tab above says about ten. */}
       <div className="sm:hidden">
         {grid.map((r) => (
-          <div key={r.id} className="flex items-start justify-between gap-2 border-b border-[#2b3543]/60 px-3 py-2">
+          <div key={r.id} className="flex items-start justify-between gap-2 border-b border-[var(--mt5-border)]/60 px-3 py-2">
             <div className="min-w-0">
               <div className="text-[12px] font-semibold text-white">
                 {r.symbol ? `${r.symbol}, ` : ''}
-                <span className={r.side === 'buy' ? 'text-[#3183ff]' : r.side === 'sell' ? 'text-[#f23645]' : ''}>
+                <span className={r.side === 'buy' ? 'text-[var(--mt5-blue)]' : r.side === 'sell' ? 'text-[var(--mt5-red)]' : ''}>
                   {r.type} {r.volume}
                 </span>
-                {r.direction ? <span className="text-[#8fa2b8]"> {r.direction}</span> : null}
+                {r.direction ? <span className="text-[var(--mt5-muted)]"> {r.direction}</span> : null}
               </div>
-              <div className="font-mono text-[11px] text-[#8fa2b8]">{stamp(r.timeMs)} {r.price}</div>
+              <div className="font-mono text-[11px] text-[var(--mt5-muted)]">{stamp(r.timeMs)} {r.price}</div>
             </div>
             <div className="shrink-0 text-right">
               <div className={cn('font-mono text-[12px] font-semibold tabular-nums', toneClass(r.profitCents))}>
@@ -1597,11 +1597,11 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
       <div className="hidden sm:block">
         <Table head={head}>
           {grid.map((r) => (
-            <tr key={r.id} className="border-t border-[#2b3543]/60">
+            <tr key={r.id} className="border-t border-[var(--mt5-border)]/60">
               <Td first className={r.child ? 'pl-6' : ''}>{stamp(r.timeMs)}</Td>
               <Td>{r.symbol}</Td>
               <Td>{r.ticket}</Td>
-              <Td className={r.side === 'buy' ? 'text-[#3183ff]' : r.side === 'sell' ? 'text-[#f23645]' : ''}>{r.type}</Td>
+              <Td className={r.side === 'buy' ? 'text-[var(--mt5-blue)]' : r.side === 'sell' ? 'text-[var(--mt5-red)]' : ''}>{r.type}</Td>
               <Td>{r.direction}</Td>
               <Td>{r.volume}</Td>
               <Td>{r.price}</Td>
@@ -1623,7 +1623,7 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
               grid's last row so the two totals land under their own columns, which is the whole
               point of putting them on the strip. No currency code anywhere on this line, "not even
               after Balance" (:729). */}
-          <tr className="border-t border-[#2b3543] bg-[#202933]">
+          <tr className="border-t border-[var(--mt5-border)] bg-[var(--mt5-raised)]">
             <td colSpan={9} className="whitespace-nowrap px-2 py-1 text-left text-[11px]" data-history-strip="">
               <span className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
                 <StripField label="Profit:" value={amount(strip.profitCents)} />
@@ -1661,13 +1661,13 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
           <div
             role="menu"
             data-history-menu=""
-            className="fixed z-[71] w-52 overflow-hidden rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            className="fixed z-[71] w-52 overflow-hidden rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[12px] shadow-2xl"
             style={{ left: Math.min(menu.x, 1200), top: menu.y }}
           >
             {HISTORY_MODES.map((m) => (
               <MenuItem key={m.key} checked={mode === m.key} label={m.label} onPick={() => { setMode(m.key); setMenu(null); }} />
             ))}
-            <div className="my-1 border-t border-[#2b3543]" />
+            <div className="my-1 border-t border-[var(--mt5-border)]" />
             {DESKTOP_PERIODS.map((p) => (
               <MenuItem
                 key={p.key}
@@ -1680,31 +1680,31 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
               />
             ))}
             {period === 'custom' ? (
-              <div className="flex flex-col gap-1.5 border-t border-[#2b3543] px-3 py-2">
-                <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+              <div className="flex flex-col gap-1.5 border-t border-[var(--mt5-border)] px-3 py-2">
+                <label className="flex items-center gap-2 text-[11px] text-[var(--mt5-muted)]">
                   From
                   <input
                     type="date"
                     aria-label="Custom period from"
                     value={custom.from}
                     onChange={(e) => setCustom({ ...custom, from: e.target.value })}
-                    className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[#3183ff]"
+                    className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
                   />
                 </label>
-                <label className="flex items-center gap-2 text-[11px] text-[#8fa2b8]">
+                <label className="flex items-center gap-2 text-[11px] text-[var(--mt5-muted)]">
                   To
                   <input
                     type="date"
                     aria-label="Custom period to"
                     value={custom.to}
                     onChange={(e) => setCustom({ ...custom, to: e.target.value })}
-                    className="flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[#3183ff]"
+                    className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 py-1 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
                   />
                 </label>
-                <button type="button" onClick={() => setMenu(null)} className="self-end rounded bg-[#3183ff] px-2 py-0.5 text-[11px] font-semibold text-white">Apply</button>
+                <button type="button" onClick={() => setMenu(null)} className="self-end rounded bg-[var(--mt5-blue)] px-2 py-0.5 text-[11px] font-semibold text-white">Apply</button>
               </div>
             ) : null}
-            <div className="my-1 border-t border-[#2b3543]" />
+            <div className="my-1 border-t border-[var(--mt5-border)]" />
             <MenuItem
               checked={false}
               label={ascending ? 'Sort: Time ▲' : 'Sort: Time ▼'}
@@ -1719,12 +1719,12 @@ function HistoryTab({ symbol, digits, lots, amount, token }: {
 
 /** Blue up, red down, nothing at zero — MetaTrader's pairing, and never green (09-toolbox.md 646). */
 const toneClass = (n: number | null): string =>
-  n === null || n === 0 ? '' : n > 0 ? 'text-[#3183ff]' : 'text-[#f23645]';
+  n === null || n === 0 ? '' : n > 0 ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]';
 
 function StripField({ label, value }: { label: string; value: string }) {
   return (
     <span className="flex items-baseline gap-1 whitespace-nowrap">
-      <span className="text-[#8fa2b8]">{label}</span>
+      <span className="text-[var(--mt5-muted)]">{label}</span>
       <span className="font-semibold tabular-nums">{value}</span>
     </span>
   );
@@ -1738,9 +1738,9 @@ function MenuItem({ checked, label, glyph, onPick }: {
       type="button"
       role="menuitem"
       onClick={onPick}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-[#2b3543]"
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-[var(--mt5-border)]"
     >
-      <span className="w-3 shrink-0 text-[#4597ff]" aria-hidden>{checked ? '✓' : glyph ?? ''}</span>
+      <span className="w-3 shrink-0 text-[var(--mt5-blue-link)]" aria-hidden>{checked ? '✓' : glyph ?? ''}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
     </button>
   );
@@ -1796,10 +1796,10 @@ function ExposureTab({ symbol, live, currency, fmt }: {
   headers[3] = currency;
   return (
     <table className="w-full table-fixed border-collapse text-[11px]">
-      <thead className="bg-[#202933] text-[#8fa2b8]">
+      <thead className="bg-[var(--mt5-raised)] text-[var(--mt5-muted)]">
         <tr>
           {headers.map((h, i) => (
-            <th key={i} scope="col" className="border-b border-[#2b3543] px-2 py-1.5 text-left font-semibold">{h}</th>
+            <th key={i} scope="col" className="border-b border-[var(--mt5-border)] px-2 py-1.5 text-left font-semibold">{h}</th>
           ))}
         </tr>
       </thead>
@@ -1807,12 +1807,12 @@ function ExposureTab({ symbol, live, currency, fmt }: {
         {rows.map((r) => {
           const long = r.netLots >= 0;
           return (
-            <tr key={r.symbol} className="border-b border-[#2b3543]">
+            <tr key={r.symbol} className="border-b border-[var(--mt5-border)]">
               <td className="truncate px-2 py-1.5 font-semibold">{r.symbol}</td>
               <td className="truncate px-2 py-1.5 font-mono tabular-nums">{r.netLots.toFixed(2)}</td>
               {/* Rate is 1 because a contract is staked and settled in the deposit currency: there
                   is no conversion to make, and printing an invented FX rate would be worse. */}
-              <td className="truncate px-2 py-1.5 font-mono tabular-nums text-[#8fa2b8]">1.00</td>
+              <td className="truncate px-2 py-1.5 font-mono tabular-nums text-[var(--mt5-muted)]">1.00</td>
               <td className="truncate px-2 py-1.5 font-mono tabular-nums">{fmt(r.valueCents)}</td>
               <td className="px-2 py-1.5">
                 {/* A bar from a centre zero: blue for long, red for short, as MetaTrader draws it. */}
@@ -1820,7 +1820,7 @@ function ExposureTab({ symbol, live, currency, fmt }: {
                   <span className="flex h-2 flex-1 justify-end">
                     {long ? null : <span className="h-2 rounded-l-sm" style={{ width: `${r.share * 100}%`, background: '#f23645' }} />}
                   </span>
-                  <span aria-hidden className="h-3 w-px bg-[#2b3543]" />
+                  <span aria-hidden className="h-3 w-px bg-[var(--mt5-border)]" />
                   <span className="flex h-2 flex-1">
                     {long ? <span className="h-2 rounded-r-sm" style={{ width: `${r.share * 100}%`, background: '#3183ff' }} /> : null}
                   </span>
@@ -1872,7 +1872,7 @@ function TradeGridRow({
   const tpPrice = pos.tpPrice;
   return (
     <tr
-      className="cursor-pointer border-t border-[#2b3543]/60 hover:bg-[#202933]"
+      className="cursor-pointer border-t border-[var(--mt5-border)]/60 hover:bg-[var(--mt5-raised)]"
       onClick={onOpenMenu}
       title="Open the position menu"
     >
@@ -1881,14 +1881,14 @@ function TradeGridRow({
       {/* MetaTrader's Time column: `YYYY.MM.DD HH:MM` plus the seconds its own rendered values
           carry, in the broker's server time (09-toolbox.md 289-291). */}
       <Td>{pos.expiresAtMs ? stamp(pos.expiresAtMs - pos.durationS * 1000) : '-'}</Td>
-      <Td className={pos.direction === 'buy' ? 'text-[#3183ff]' : 'text-[#f23645]'}>{pos.direction}</Td>
+      <Td className={pos.direction === 'buy' ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]'}>{pos.direction}</Td>
       <Td>{lots(pos.stakeCents)}</Td>
       <Td>{px(pos.entryRate)}</Td>
       <Td>
         {/* MetaTrader's S/L column: the LEVEL, as a price. An UNSET level leaves the cell BLANK and
             draws no cross (09-toolbox.md 336-338, "the cell is blank and no × is drawn"). */}
         <span
-          className="text-[#8fa2b8]"
+          className="text-[var(--mt5-muted)]"
           title={continuous
             ? 'The stop closes this position at its price, for what it is worth there. Stops processing is performed on the broker side.'
             : 'This contract settles a loss at expiry, so the stop cannot fire. The level is the trader’s.'}
@@ -1901,19 +1901,19 @@ function TradeGridRow({
             the same reason the S/L cell is. The steppers do not open the menu the row click does. */}
         {continuous ? (
           <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-            <button type="button" onClick={() => onStepTp(-1)} className="px-1 text-[#8fa2b8] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
+            <button type="button" onClick={() => onStepTp(-1)} className="px-1 text-[var(--mt5-muted)] hover:text-white disabled:opacity-40" aria-label="Lower take profit">−</button>
             <span className="min-w-16 text-center">{tpPrice === null ? '' : tpPrice.toFixed(digits)}</span>
-            <button type="button" onClick={() => onStepTp(1)} className="px-1 text-[#8fa2b8] hover:text-white" aria-label="Raise take profit">+</button>
+            <button type="button" onClick={() => onStepTp(1)} className="px-1 text-[var(--mt5-muted)] hover:text-white" aria-label="Raise take profit">+</button>
           </span>
         ) : (
           // A target that can never fire is not a setting, it is a decoration.
-          <span className="text-[#8fa2b8]" title="This brand settles every contract at expiry, so a target cannot close it early.">
+          <span className="text-[var(--mt5-muted)]" title="This brand settles every contract at expiry, so a target cannot close it early.">
             at expiry
           </span>
         )}
       </Td>
       <Td>{px(nowRate)}</Td>
-      <Td className={cn('font-semibold', pos.livePnlCents > 0 ? 'text-[#3183ff]' : pos.livePnlCents < 0 ? 'text-[#f23645]' : '')}>
+      <Td className={cn('font-semibold', pos.livePnlCents > 0 ? 'text-[var(--mt5-blue)]' : pos.livePnlCents < 0 ? 'text-[var(--mt5-red)]' : '')}>
         <span className="flex items-center justify-end gap-2">
           {money.mt(pos.livePnlCents)}
           {/* MetaTrader closes a position from its row with a small ×. Shown only where the engine
@@ -1925,7 +1925,7 @@ function TradeGridRow({
               disabled={pos.phase !== 'open' || !pos.sellable || !pos.positionId}
               aria-label="Close position"
               title={pos.sellable ? 'Close this position at the current price' : 'This contract settles at expiry'}
-              className="rounded-sm border border-[#2b3543] px-1.5 text-[11px] font-normal text-[#8fa2b8] transition hover:border-[#f23645] hover:text-[#f23645] disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-sm border border-[var(--mt5-border)] px-1.5 text-[11px] font-normal text-[var(--mt5-muted)] transition hover:border-[var(--mt5-red)] hover:text-[var(--mt5-red)] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ×
             </button>
@@ -1997,20 +1997,20 @@ function CalendarTab() {
             <tr
               key={e.id}
               className={cn(
-                'border-t border-[#2b3543]/60',
-                surprise < 0 ? 'bg-[#f23645]/10' : surprise > 0 ? 'bg-[#3183ff]/10' : '',
+                'border-t border-[var(--mt5-border)]/60',
+                surprise < 0 ? 'bg-[var(--mt5-red)]/10' : surprise > 0 ? 'bg-[var(--mt5-blue)]/10' : '',
               )}
             >
               <Td first>{stamp(e.atMs)}</Td>
               <Td>{e.currency}</Td>
               <Td className="text-left">{e.event}</Td>
               <Td><span className="flex justify-end"><PriorityFan level={e.priority} /></span></Td>
-              <Td className="text-[#8fa2b8]">{e.period}</Td>
-              <Td className={cn('font-semibold', surprise < 0 ? 'text-[#f23645]' : surprise > 0 ? 'text-[#3183ff]' : 'text-white')}>
+              <Td className="text-[var(--mt5-muted)]">{e.period}</Td>
+              <Td className={cn('font-semibold', surprise < 0 ? 'text-[var(--mt5-red)]' : surprise > 0 ? 'text-[var(--mt5-blue)]' : 'text-white')}>
                 {calendarFigure(e.actual, e.unit, e.decimals)}
               </Td>
-              <Td className="text-[#8fa2b8]">{calendarFigure(e.forecast, e.unit, e.decimals)}</Td>
-              <Td className="text-[#8fa2b8]">{calendarFigure(e.previous, e.unit, e.decimals)}</Td>
+              <Td className="text-[var(--mt5-muted)]">{calendarFigure(e.forecast, e.unit, e.decimals)}</Td>
+              <Td className="text-[var(--mt5-muted)]">{calendarFigure(e.previous, e.unit, e.decimals)}</Td>
             </tr>
           );
         })}
@@ -2037,13 +2037,13 @@ function CalendarTab() {
           <div
             role="menu"
             data-calendar-menu=""
-            className="fixed z-[71] max-h-[70vh] w-56 overflow-y-auto rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            className="fixed z-[71] max-h-[70vh] w-56 overflow-y-auto rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[12px] shadow-2xl"
             style={{ left: menu.x, top: menu.y }}
           >
             {CALENDAR_PERIODS.map((p) => (
               <MenuItem key={p.key} checked={period === p.key} label={p.label} onPick={() => { setPeriod(p.key); setMenu(null); }} />
             ))}
-            <div className="my-1 border-t border-[#2b3543]" />
+            <div className="my-1 border-t border-[var(--mt5-border)]" />
             {/* "filter events in the list ... by priority". The three levels are the fan's. */}
             {([1, 2, 3] as const).map((lv) => (
               <MenuItem
@@ -2053,7 +2053,7 @@ function CalendarTab() {
                 onPick={() => { setMinPriority(lv); setMenu(null); }}
               />
             ))}
-            <div className="my-1 border-t border-[#2b3543]" />
+            <div className="my-1 border-t border-[var(--mt5-border)]" />
             <MenuItem checked={currency === null} label="All currencies" onPick={() => { setCurrency(null); setMenu(null); }} />
             {CALENDAR_CURRENCIES.map((c) => (
               <MenuItem key={c} checked={currency === c} label={c} onPick={() => { setCurrency(c); setMenu(null); }} />
@@ -2143,7 +2143,7 @@ function ArticlesTab() {
           return (
             <tr
               key={a.id}
-              className="cursor-pointer border-t border-[#2b3543]/60 hover:bg-[#2b3543]/40"
+              className="cursor-pointer border-t border-[var(--mt5-border)]/60 hover:bg-[var(--mt5-border)]/40"
               onClick={() => view(a)}
               onDoubleClick={() => view(a)}
             >
@@ -2156,8 +2156,8 @@ function ArticlesTab() {
                   </span>
                 </span>
               </Td>
-              <Td className="text-left text-[#8fa2b8]">{a.category}</Td>
-              <Td className="text-[#8fa2b8]">{mtDate(a.atMs)}</Td>
+              <Td className="text-left text-[var(--mt5-muted)]">{a.category}</Td>
+              <Td className="text-[var(--mt5-muted)]">{mtDate(a.atMs)}</Td>
             </tr>
           );
         })}
@@ -2181,12 +2181,12 @@ function ArticlesTab() {
           <div
             role="menu"
             data-articles-menu=""
-            className="fixed z-[71] max-h-[70vh] w-52 overflow-y-auto rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            className="fixed z-[71] max-h-[70vh] w-52 overflow-y-auto rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[12px] shadow-2xl"
             style={{ left: menu.x, top: menu.y }}
           >
             <MenuItem checked={false} label="Select All" onPick={() => { setHidden(new Set()); setMenu(null); }} />
             <MenuItem checked={false} label="Unselect All" onPick={() => { setHidden(new Set(ARTICLE_CATEGORIES)); setMenu(null); }} />
-            <div className="my-1 border-t border-[#2b3543]" />
+            <div className="my-1 border-t border-[var(--mt5-border)]" />
             {ARTICLE_CATEGORIES.map((c) => (
               <MenuItem key={c} checked={!hidden.has(c)} label={c} onPick={() => { toggleCategory(c); setMenu(null); }} />
             ))}
@@ -2221,12 +2221,12 @@ function ArticleReader({ article, onBack }: { article: Article; onBack: () => vo
       <button
         type="button"
         onClick={onBack}
-        className="mb-2 text-[11px] font-semibold text-[#4597ff] hover:underline"
+        className="mb-2 text-[11px] font-semibold text-[var(--mt5-blue-link)] hover:underline"
       >
         ← Articles
       </button>
       <h3 className="text-[13px] font-semibold leading-snug text-white">{article.name}</h3>
-      <p className="mt-0.5 font-mono text-[10px] text-[#8fa2b8]">
+      <p className="mt-0.5 font-mono text-[10px] text-[var(--mt5-muted)]">
         {article.category} · {mtDate(article.atMs)}
       </p>
       {/* `max-w-[70ch]`: a 1440px panel would otherwise set prose to 170 characters a line, which is
@@ -2290,8 +2290,8 @@ function CodeBaseTab() {
               aria-disabled={blocked || undefined}
               data-applied={on || undefined}
               className={cn(
-                'border-t border-[#2b3543]/60',
-                blocked ? 'opacity-45' : 'cursor-pointer hover:bg-[#2b3543]/40',
+                'border-t border-[var(--mt5-border)]/60',
+                blocked ? 'opacity-45' : 'cursor-pointer hover:bg-[var(--mt5-border)]/40',
               )}
               onClick={() => { if (!blocked) toggleIndicator(def.id); }}
             >
@@ -2299,13 +2299,13 @@ function CodeBaseTab() {
                 <span className="flex items-center gap-1.5">
                   {/* The applied marker sits in the gutter, where MetaTrader's grids put a state
                       glyph, so the column of names stays a column of names. */}
-                  <span className={cn('w-2.5 shrink-0 text-[10px]', on ? 'text-[#4597ff]' : 'text-transparent')} aria-hidden>✓</span>
+                  <span className={cn('w-2.5 shrink-0 text-[10px]', on ? 'text-[var(--mt5-blue-link)]' : 'text-transparent')} aria-hidden>✓</span>
                   <span className={cn('min-w-0 truncate', on ? 'font-semibold text-white' : 'text-[#c8d2de]')}>{def.name}</span>
                 </span>
               </Td>
-              <Td className="text-[#8fa2b8]">{def.params}</Td>
-              <Td className="text-left text-[#8fa2b8]">{GROUP_LABELS[def.group]}</Td>
-              <Td className="text-left text-[#8fa2b8]">
+              <Td className="text-[var(--mt5-muted)]">{def.params}</Td>
+              <Td className="text-left text-[var(--mt5-muted)]">{GROUP_LABELS[def.group]}</Td>
+              <Td className="text-left text-[var(--mt5-muted)]">
                 {def.pane === 'price' ? 'Main chart' : 'Separate window'}
               </Td>
             </tr>
@@ -2319,7 +2319,7 @@ function CodeBaseTab() {
         {group === null ? null : <span>Group: {GROUP_LABELS[group]}</span>}
         <span className="ml-auto">Click a row to apply it to the chart, or again to remove it.</span>
       </ToolboxFooter>
-      <p className="border-t border-[#2b3543] px-3 py-1.5 text-[10px] leading-snug text-[#8fa2b8]">
+      <p className="border-t border-[var(--mt5-border)] px-3 py-1.5 text-[10px] leading-snug text-[var(--mt5-muted)]">
         {VOLUME_GROUP_NOTE}
       </p>
 
@@ -2329,7 +2329,7 @@ function CodeBaseTab() {
           <div
             role="menu"
             data-codebase-menu=""
-            className="fixed z-[71] w-52 rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            className="fixed z-[71] w-52 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[12px] shadow-2xl"
             style={{ left: menu.x, top: menu.y }}
           >
             <MenuItem checked={group === null} label="All groups" onPick={() => { setGroup(null); setMenu(null); }} />
@@ -2360,14 +2360,14 @@ function LogTab({ entries, empty }: { entries: readonly JournalEntry[]; empty: R
   return (
     <Table head={[...(TOOLBOX_COLUMNS.journal ?? [])]} left={[0, 1, 2]} grow={2}>
       {entries.slice().reverse().map((e) => (
-        <tr key={e.id} className="border-t border-[#2b3543]/40">
-          <Td first className="text-[#8fa2b8]">{stamp(e.atMs)}</Td>
-          <Td className="text-left text-[#8fa2b8]/70">{e.tag}</Td>
+        <tr key={e.id} className="border-t border-[var(--mt5-border)]/40">
+          <Td first className="text-[var(--mt5-muted)]">{stamp(e.atMs)}</Td>
+          <Td className="text-left text-[var(--mt5-muted)]/70">{e.tag}</Td>
           <Td className={cn(
             'whitespace-normal text-left',
-            e.level === 'error' ? 'text-[#f23645]'
+            e.level === 'error' ? 'text-[var(--mt5-red)]'
               : e.level === 'warn' ? 'text-[#f0b90b]'
-              : e.level === 'ok' ? 'text-[#41be56]' : 'text-[#8fa2b8]',
+              : e.level === 'ok' ? 'text-[var(--mt5-green)]' : 'text-[var(--mt5-muted)]',
           )}>
             {e.text}
           </Td>
@@ -2426,14 +2426,14 @@ function CompanyTab({ page }: { page: ReturnType<typeof companyPage> }) {
       <div>
         <h3 className="text-[14px] font-semibold text-white">{page.title}</h3>
         {page.licence === null ? null : (
-          <p className="mt-0.5 max-w-[70ch] text-[#8fa2b8]">{page.licence}</p>
+          <p className="mt-0.5 max-w-[70ch] text-[var(--mt5-muted)]">{page.licence}</p>
         )}
       </div>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-[11px]">
         {page.fields.map((f) => (
           <div key={f.label} className="contents">
-            <dt className="text-[#8fa2b8]">{f.label}</dt>
+            <dt className="text-[var(--mt5-muted)]">{f.label}</dt>
             <dd className="text-white">{f.value}</dd>
           </div>
         ))}
@@ -2441,7 +2441,7 @@ function CompanyTab({ page }: { page: ReturnType<typeof companyPage> }) {
 
       {page.support.length > 0 ? (
         <section>
-          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#8fa2b8]">Support</h4>
+          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--mt5-muted)]">Support</h4>
           <ul className="space-y-1">
             {page.support.map((l) => (
               <li key={l.href}>
@@ -2449,11 +2449,11 @@ function CompanyTab({ page }: { page: ReturnType<typeof companyPage> }) {
                   href={l.href}
                   target="_blank"
                   rel="noreferrer"
-                  className="font-mono text-[11px] text-[#4597ff] hover:underline"
+                  className="font-mono text-[11px] text-[var(--mt5-blue-link)] hover:underline"
                 >
                   {l.label}
                 </a>
-                <span className="ml-2 text-[#8fa2b8]">{l.note}</span>
+                <span className="ml-2 text-[var(--mt5-muted)]">{l.note}</span>
               </li>
             ))}
           </ul>
@@ -2461,14 +2461,14 @@ function CompanyTab({ page }: { page: ReturnType<typeof companyPage> }) {
       ) : null}
 
       <section>
-        <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#8fa2b8]">Published pages</h4>
+        <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--mt5-muted)]">Published pages</h4>
         <ul className="space-y-1">
           {page.resources.map((l) => (
             <li key={l.href}>
-              <a href={l.href} target="_blank" rel="noreferrer" className="text-[#4597ff] hover:underline">
+              <a href={l.href} target="_blank" rel="noreferrer" className="text-[var(--mt5-blue-link)] hover:underline">
                 {l.label}
               </a>
-              <span className="ml-2 text-[#8fa2b8]">{l.note}</span>
+              <span className="ml-2 text-[var(--mt5-muted)]">{l.note}</span>
             </li>
           ))}
         </ul>

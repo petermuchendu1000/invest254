@@ -14,6 +14,7 @@ import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { useDisplayMoney } from '@/lib/money';
 import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
+import { MarketerLogoHotspot } from '@/components/marketer/MarketerHUD';
 import { cn } from '@/lib/cn';
 
 /**
@@ -55,6 +56,22 @@ const SettingsIcon = () => (
     <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l1.7-1.3-1.8-3.1-2 .8a7.6 7.6 0 0 0-2.6-1.5L14.2 3H10.6l-.4 2.1a7.6 7.6 0 0 0-2.6 1.5l-2-.8L3.8 8.9l1.7 1.3a7.8 7.8 0 0 0 0 3l-1.7 1.3 1.8 3.1 2-.8a7.6 7.6 0 0 0 2.6 1.5l.4 2.1h3.6l.4-2.1a7.6 7.6 0 0 0 2.6-1.5l2 .8 1.8-3.1-1.7-1.3Z" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+/** An outward share: MetaTrader has no such screen, so this is the app's own, drawn to match. */
+const InviteIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M16 11a4 4 0 100-8 4 4 0 000 8zM3 21v-1a6 6 0 016-6h2" />
+    <path d="M19 14v6M16 17h6" />
+  </svg>
+);
+
+/** A document with a folded corner: the licence, the terms and the risk statement live behind it. */
+const LegalIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" />
+    <path d="M14 3v5h5M9 13h6M9 17h4" />
+  </svg>
+);
+
 const ChatIcon = () => (
   <svg viewBox="0 0 24 24" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
     <path d="M20 15a2 2 0 0 1-2 2H8l-4 3V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z" strokeLinecap="round" strokeLinejoin="round" />
@@ -118,26 +135,39 @@ export function MT5Drawer() {
       <button type="button" aria-label="Close menu" onClick={close} className="fixed inset-0 z-[70] bg-black/60" />
       <nav
         aria-label="Main menu"
-        className="fixed bottom-0 left-0 top-0 z-[71] flex w-[82%] max-w-[320px] flex-col overflow-y-auto border-r border-[#2b3543] bg-[#0f1720] text-white shadow-2xl"
+        className="fixed bottom-0 left-0 top-0 z-[71] flex w-[82%] max-w-[320px] flex-col overflow-y-auto border-r border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-white shadow-2xl"
       >
         {/* MetaTrader heads the panel with the account itself: who you are, which server, how much —
             and tapping it opens the account, which is also where the Real/Demo switch lives now that
             the title bar no longer carries the balance pill. */}
         {token && user ? (
-          <Link href="/account" className="block bg-[#3183ff] px-4 pb-3 pt-4 text-left">
+          <Link href="/account" className="block bg-[var(--mt5-blue)] px-4 pb-3 pt-4 text-left">
             <div className="flex items-baseline gap-2">
               <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{user.username}</span>
               <span className="shrink-0 rounded-sm bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
                 {demo ? 'Demo' : 'Real'}
               </span>
             </div>
-            <div className="truncate text-[11px] leading-tight text-white/75">{server}</div>
+            {/* The covert marketer entry, on the one line of this card that is not a destination.
+                It lives here because MetaTrader's phone shell has no brand logo to overlay: the
+                app bar that used to carry it is hidden below `lg` on a terminal brand (see
+                AppShell), since MetaTrader draws exactly one top bar and a second one above its
+                chrome is not its screen. A corner-anchored hotspot was not an option either, as
+                MarketerHUD's own note explains: it lands on the chart's hamburger.
+
+                The server name is text, so nothing is taken from anyone: a player sees and reaches
+                exactly what they did before, and a marketer's tap here opens the dashboard instead
+                of the account. The username above it still opens the account for both. */}
+            <div className="relative truncate text-[11px] leading-tight text-white/75">
+              {server}
+              <MarketerLogoHotspot />
+            </div>
             <div className="mt-2 font-mono text-[20px] font-semibold leading-none tabular-nums">
               {money.fmt(balanceCents)}
             </div>
           </Link>
         ) : (
-          <header className="bg-[#3183ff] px-4 pb-3 pt-4">
+          <header className="bg-[var(--mt5-blue)] px-4 pb-3 pt-4">
             <div className="truncate text-[15px] font-semibold leading-tight">{brand.name || 'invest254'}</div>
             <div className="truncate text-[11px] leading-tight text-white/75">Not connected</div>
           </header>
@@ -156,7 +186,7 @@ export function MT5Drawer() {
           />
         </div>
 
-        <div className="border-t border-[#2b3543] py-1">
+        <div className="border-t border-[var(--mt5-border)] py-1">
           {token ? (
             <Row onClick={() => { close(); logout(); }} icon={<SignOutIcon />} label="Log out" tone="bad" />
           ) : (
@@ -183,14 +213,14 @@ function Row({
     // 44px tall: MetaTrader's rows are compact, but a tap target below the Apple minimum is a worse
     // phone screen than a faithful one.
     'flex w-full items-center gap-3 px-4 py-3 text-left text-[14px]',
-    active ? 'bg-[#202933] text-[#4597ff]' : tone === 'bad' ? 'text-[#f23645]' : 'text-white',
+    active ? 'bg-[var(--mt5-raised)] text-[var(--mt5-blue-link)]' : tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-white',
   );
   const body = (
     <>
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {badge ? (
-        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[#f23645] px-1 text-[10px] font-bold text-white">
+        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--mt5-red)] px-1 text-[10px] font-bold text-white">
           {badge}
         </span>
       ) : null}

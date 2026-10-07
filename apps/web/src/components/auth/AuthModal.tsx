@@ -620,7 +620,7 @@ function Header({ onClose, mt5, title }: { onClose: () => void; mt5?: boolean; t
   // header, not to MetaTrader's.
   if (mt5) {
     return (
-      <div className="flex items-center gap-3 border-b border-[#2b3543] bg-[#3183ff] px-3 py-2.5">
+      <div className="flex items-center gap-3 border-b border-[var(--mt5-border)] bg-[var(--mt5-blue)] px-3 py-2.5">
         <div className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-white">{title}</div>
         <button
           type="button"

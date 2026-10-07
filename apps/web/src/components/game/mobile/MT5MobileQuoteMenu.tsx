@@ -51,11 +51,11 @@ export function MT5MobileQuoteMenu({ title, subtitle, items, onDismiss }: {
       <div
         role="dialog"
         aria-label={`${title} menu`}
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-xl border-t border-[#2b3543] bg-[#0f1720] pb-[env(safe-area-inset-bottom)] shadow-2xl"
+        className="fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-xl border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] pb-[env(safe-area-inset-bottom)] shadow-2xl"
       >
-        <div className="border-b border-[#2b3543] px-4 py-3">
+        <div className="border-b border-[var(--mt5-border)] px-4 py-3">
           <div className="text-[14px] font-bold text-white">{title}</div>
-          <div className="pt-0.5 font-mono text-[11px] text-[#8fa2b8] tabular-nums">{subtitle}</div>
+          <div className="pt-0.5 font-mono text-[11px] text-[var(--mt5-muted)] tabular-nums">{subtitle}</div>
         </div>
         <ul>
           {items.map((it) => (
@@ -68,7 +68,7 @@ export function MT5MobileQuoteMenu({ title, subtitle, items, onDismiss }: {
                 onClick={() => { it.onPick?.(); onDismiss(); }}
                 className={cn(
                   'flex w-full items-center gap-2 px-4 py-3 text-left text-[14px] transition',
-                  it.unavailable === undefined ? 'text-white active:bg-[#202933]' : 'cursor-not-allowed text-[#8fa2b8] opacity-55',
+                  it.unavailable === undefined ? 'text-white active:bg-[var(--mt5-raised)]' : 'cursor-not-allowed text-[var(--mt5-muted)] opacity-55',
                 )}
               >
                 <span className="flex-1">{it.label}</span>
@@ -81,7 +81,7 @@ export function MT5MobileQuoteMenu({ title, subtitle, items, onDismiss }: {
                 ) : null}
               </button>
               {it.unavailable === undefined ? null : (
-                <p className="px-4 pb-2 text-[10px] leading-snug text-[#8fa2b8]">{it.unavailable}</p>
+                <p className="px-4 pb-2 text-[10px] leading-snug text-[var(--mt5-muted)]">{it.unavailable}</p>
               )}
             </li>
           ))}

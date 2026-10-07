@@ -238,7 +238,7 @@ function ToolbarButton({ b }: { b: ToolButton }) {
       onClick={b.run}
       aria-label={b.label}
       title={b.accel === undefined ? b.label : `${b.label} (${b.accel})`}
-      className="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-[#8fa2b8] transition hover:bg-[#2b3543] hover:text-white"
+      className="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-[var(--mt5-muted)] transition hover:bg-[var(--mt5-border)] hover:text-white"
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d={b.icon} />
@@ -329,9 +329,9 @@ export function MT5Chrome() {
     setActiveTf(key);
   };
 
-  const title = 'flex h-full items-center px-2 text-[11px] leading-none text-[#cfd8e3] transition hover:bg-[#3183ff] hover:text-white aria-expanded:bg-[#3183ff] aria-expanded:text-white';
-  const row = 'flex w-full items-center gap-3 px-3 py-1 text-left text-[11px] text-white transition hover:bg-[#3183ff]';
-  const grip = <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" />;
+  const title = 'flex h-full items-center px-2 text-[11px] leading-none text-[#cfd8e3] transition hover:bg-[var(--mt5-blue)] hover:text-white aria-expanded:bg-[var(--mt5-blue)] aria-expanded:text-white';
+  const row = 'flex w-full items-center gap-3 px-3 py-1 text-left text-[11px] text-white transition hover:bg-[var(--mt5-blue)]';
+  const grip = <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--mt5-border)]" />;
 
   return (
     <div
@@ -345,10 +345,10 @@ export function MT5Chrome() {
        * The negative margins cancel the shell's own gutters (`lg:px-3 lg:pt-2 xl:px-4` in AppShell)
        * so the chrome sits flush under the title bar, edge to edge, the way MetaTrader stacks it.
        */
-      className="-mx-3 -mt-2 hidden shrink-0 select-none border-b border-[#2b3543] bg-[#202933] lg:block xl:-mx-4"
+      className="-mx-3 -mt-2 hidden shrink-0 select-none border-b border-[var(--mt5-border)] bg-[var(--mt5-raised)] lg:block xl:-mx-4"
     >
       {/* ── the menu bar ─────────────────────────────────────────────────────────────────────── */}
-      <div ref={bar} role="menubar" aria-label="Terminal" className="flex h-[22px] items-center border-b border-[#2b3543]">
+      <div ref={bar} role="menubar" aria-label="Terminal" className="flex h-[22px] items-center border-b border-[var(--mt5-border)]">
         {/*
           File. MetaQuotes documents exactly two of its items and they are both account routes:
           "Click 'Open an Account' in the File menu or in the context menu of the Navigator window"
@@ -359,7 +359,7 @@ export function MT5Chrome() {
         <div className="relative h-full">
           <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={menu === 'file'} onClick={() => setMenu(menu === 'file' ? null : 'file')} className={title}>File</button>
           {menu === 'file' ? (
-            <div role="menu" aria-label="File" className="absolute left-0 top-full z-[60] min-w-[200px] rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl">
+            <div role="menu" aria-label="File" className="absolute left-0 top-full z-[60] min-w-[200px] rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 shadow-xl">
               <button type="button" role="menuitem" className={row} onClick={() => { setMenu(null); openAuth('register'); }}>Open an Account</button>
               <button type="button" role="menuitem" className={row} onClick={() => { setMenu(null); openAuth('login'); }}>Login to Trade Account</button>
             </div>
@@ -381,7 +381,7 @@ export function MT5Chrome() {
         <div className="relative h-full">
           <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={menu === 'view'} onClick={() => setMenu(menu === 'view' ? null : 'view')} className={title}>View</button>
           {menu === 'view' ? (
-            <div role="menu" aria-label="View" className="absolute left-0 top-full z-[60] min-w-[200px] rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl">
+            <div role="menu" aria-label="View" className="absolute left-0 top-full z-[60] min-w-[200px] rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 shadow-xl">
               {TOOLBARS.map((t) => (
                 <button
                   key={t.id}
@@ -393,7 +393,7 @@ export function MT5Chrome() {
                 >
                   {/* The tick column is reserved whether or not it is ticked, so the labels line up
                       however many toolbars are on — the same reason the chart menu reserves one. */}
-                  <span aria-hidden className="w-2.5 shrink-0 text-[#3183ff]">{toolbars[t.id] ? '✓' : ''}</span>
+                  <span aria-hidden className="w-2.5 shrink-0 text-[var(--mt5-blue)]">{toolbars[t.id] ? '✓' : ''}</span>
                   <span className="flex-1">{t.label}</span>
                 </button>
               ))}
@@ -415,10 +415,10 @@ export function MT5Chrome() {
         <div className="relative h-full">
           <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={menu === 'insert'} onClick={() => setMenu(menu === 'insert' ? null : 'insert')} className={title}>Insert</button>
           {menu === 'insert' ? (
-            <div role="menu" aria-label="Insert" className="absolute left-0 top-full z-[60] min-w-[200px] rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl">
+            <div role="menu" aria-label="Insert" className="absolute left-0 top-full z-[60] min-w-[200px] rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 shadow-xl">
               <button type="button" role="menuitem" className={row} onClick={() => { setMenu(null); clickTerminalControl('Objects'); }}>
                 <span className="flex-1">Objects</span>
-                <span aria-hidden className="shrink-0 text-[#8fa2b8]">▸</span>
+                <span aria-hidden className="shrink-0 text-[var(--mt5-muted)]">▸</span>
               </button>
             </div>
           ) : null}
@@ -494,7 +494,7 @@ export function MT5Chrome() {
                   aria-pressed={activeTf === k}
                   className={cn(
                     'h-5 shrink-0 rounded-sm px-1.5 text-[10px] font-semibold leading-none transition',
-                    activeTf === k ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
+                    activeTf === k ? 'bg-[var(--mt5-border)] text-white' : 'text-[var(--mt5-muted)] hover:text-white',
                   )}
                 >
                   {k}

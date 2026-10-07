@@ -69,7 +69,7 @@ export function LiveChatPanel() {
       {/* MetaTrader's screens are titled by a solid blue band, not a tinted gradient. */}
       <header className={cn(
         'flex items-center gap-3 border-b border-border',
-        mt5 ? 'bg-[#3183ff] px-3 py-2.5' : 'rounded-t-2xl bg-gradient-to-r from-accent/15 to-transparent px-4 py-3',
+        mt5 ? 'bg-[var(--mt5-blue)] px-3 py-2.5' : 'rounded-t-2xl bg-gradient-to-r from-accent/15 to-transparent px-4 py-3',
       )}>
         {mt5 ? null : <span className="grid h-10 w-10 place-items-center rounded-full bg-accent text-accent-fg"><DIcon name="headset" className="h-5 w-5" /></span>}
         <div className="flex-1">
@@ -149,10 +149,10 @@ export function LiveChatLauncher() {
          */
         '[@media(max-height:480px)]:bottom-24',
         // The one brand-green element left floating over the terminal.
-        mt5 ? 'bg-[#3183ff] text-white shadow-lg shadow-black/40' : 'bg-accent text-accent-fg shadow-[0_6px_22px_-6px_var(--pp-accent)]',
+        mt5 ? 'bg-[var(--mt5-blue)] text-white shadow-lg shadow-black/40' : 'bg-accent text-accent-fg shadow-[0_6px_22px_-6px_var(--pp-accent)]',
       )}>
       <DIcon name="chat" className="h-5 w-5" />
-      {unread ? <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-[#f23645] px-1 text-[10px] font-bold text-white">{unread}</span> : null}
+      {unread ? <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-[var(--mt5-red)] px-1 text-[10px] font-bold text-white">{unread}</span> : null}
     </button>
   );
 }

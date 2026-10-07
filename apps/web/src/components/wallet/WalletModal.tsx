@@ -63,7 +63,7 @@ export function WalletModal() {
       <div
         className={cn(
           'flex items-center justify-between border-b',
-          mt5 ? 'border-[#2b3543] bg-[#3183ff] px-3 py-2.5' : 'border-border p-4',
+          mt5 ? 'border-[var(--mt5-border)] bg-[var(--mt5-blue)] px-3 py-2.5' : 'border-border p-4',
         )}
       >
         <h2 className={cn('font-semibold', mt5 ? 'text-[15px] text-white' : 'text-lg')}>
@@ -111,7 +111,7 @@ export function WalletModal() {
           <div
             className={cn(
               'flex',
-              mt5 ? 'border-b border-[#2b3543]' : 'rounded-xl border border-border bg-surface-2 p-1',
+              mt5 ? 'border-b border-[var(--mt5-border)]' : 'rounded-xl border border-border bg-surface-2 p-1',
             )}
             role="tablist"
             aria-label="Wallet action"
@@ -130,7 +130,7 @@ export function WalletModal() {
                     mt5
                       ? cn(
                         'border-b-2 py-2.5 uppercase tracking-wider',
-                        on ? 'border-[#3183ff] text-white' : 'border-transparent text-[#8fa2b8]',
+                        on ? 'border-[var(--mt5-blue)] text-white' : 'border-transparent text-[var(--mt5-muted)]',
                       )
                       : cn('rounded-lg py-2', on ? 'bg-accent text-accent-fg shadow-sm' : 'text-muted hover:text-fg'),
                   )}

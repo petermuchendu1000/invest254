@@ -24,7 +24,9 @@ import { MarketerHUD } from '@/components/marketer/MarketerHUD';
 import { MT5Drawer } from '@/components/layout/MT5Drawer';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
-import { isTerminalScreen, isTerminalRoute } from '@/lib/ui/terminalScreen';
+import { isTerminalScreen, isTerminalRoute, terminalScreenTitle } from '@/lib/ui/terminalScreen';
+import { MT5Screen } from '@/components/mt5/kit';
+import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -87,7 +89,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
     return (
       <div className="flex h-dvh flex-col overflow-hidden">
-        <TopBar />
+        {/**
+          * MetaTrader's phone draws ONE top bar, and below `lg` this shell is MetaTrader's phone.
+          *
+          * The app bar sat above MT5MobileShell's own chrome, so every phone screen carried two
+          * stacked bars: the brand's blue lockup and then MetaTrader's. That is 56px of a phone
+          * screen spent on a second bar MetaTrader does not have, and it is the most visible way
+          * the terminal stopped looking like the terminal.
+          *
+          * Hidden rather than unmounted, so nothing it carries is lost at a width where it IS
+          * MetaTrader's bar: from `lg` up this is the desktop terminal, whose title bar is the app
+          * bar. What the phone would otherwise lose is reached through the drawer, which is
+          * MetaTrader's own answer to the same question -- the account, the balance, Funds,
+          * Settings, Chat and the session action are all rows in it, and the covert marketer entry
+          * moved onto its account card (MT5Drawer).
+          */}
+        {/* A wrapper rather than `display: contents` on the header itself: `contents` and the
+            `hidden` that has to override it are the same property, and which one wins would come
+            down to stylesheet order. A box that is simply not displayed cannot be ambiguous. */}
+        <div className={cn('shrink-0', terminal ? 'hidden lg:block' : '')}>
+          <TopBar />
+        </div>
         <NotificationBanners />
         <main className={cn(
           'relative flex w-full min-h-0 flex-1 flex-col',
@@ -123,12 +145,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // the window edge to edge, draws its own blue title bar flush under the app bar, and ends at the
   // toolbar — so no centred reading column, no page padding, and no marketing footer under it.
   if (isTerminalScreen(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer) && isTerminalRoute(pathname)) {
+    const shellTitle = terminalScreenTitle(pathname);
     return (
-      <div className="flex min-h-dvh flex-col">
+      /**
+       * MetaTrader's palette for the WHOLE screen, applied once here.
+       *
+       * Every component in this app paints from `--pp-*`, so re-pointing those tokens on the
+       * container is what puts a page on the terminal brand — see lib/ui/mt5Tokens. Doing it at the
+       * shell rather than page by page is the only way this stays true: there are a dozen
+       * player-facing routes and they were each either remembering to wrap themselves or quietly
+       * rendering in the house style, with a blue MetaTrader bar sitting on top of it.
+       *
+       * It also squares the corners (`--pp-radius: 2px`), which is most of what made the shared
+       * `Card`, `Button` and `Input` read as a consumer app inside a terminal.
+       */
+      <div className="flex min-h-dvh flex-col bg-[var(--mt5-surface)]" style={MT5_TOKENS}>
         <TopBar />
         <NotificationBanners />
         <main className="flex w-full flex-1 flex-col pb-[env(safe-area-inset-bottom)] md:pb-4">
-          {children}
+          {/* A page that draws its own MetaTrader bar keeps it; one that does not is given one,
+              with a way back and a reading column. Before this they were bare pages in a shell
+              with no gutters, so the heading sat against the window edge with nothing above it. */}
+          {shellTitle === null ? children : (
+            <MT5Screen title={shellTitle}>
+              <div className="mx-auto w-full max-w-app px-3 py-3 md:px-4">{children}</div>
+            </MT5Screen>
+          )}
         </main>
         <BottomNav />
         <SessionBootstrap />
