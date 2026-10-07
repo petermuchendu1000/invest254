@@ -63,25 +63,38 @@ export async function generateViewport(): Promise<Viewport> {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const brand = await currentBrand();
-  // Brand default theme seeds the class; a stored user preference (pp-theme) still wins, applied
-  // before paint to avoid a flash. 'auto'/'dark' → dark-first; 'light' → light.
-  const brandDefaultTheme = brand.theme === 'light' ? 'light' : 'dark';
-  const initialClass = brandDefaultTheme === 'light' ? 'light' : 'dark';
   /**
-   * Which mode the brand's OWN palette was authored for.
+   * DARK, for every brand, until the trader says otherwise.
    *
-   * A brand supplies one set of greys, and they are the greys of its own theme. When the trader
-   * asks for the other mode those greys are the wrong ones, and feeding them through anyway is
-   * exactly why "light mode" looked like nothing had happened: `--pp-bg` resolves
-   * `var(--brand-bg, <light fallback>)`, `--brand-bg` is always set inline on this element, so the
-   * fallback is never reached and the page stayed the brand's dark colour under a light class.
+   * This used to be the brand's own `theme` column, so a brand row set to 'light' opened light for
+   * everyone who had never touched the toggle. A terminal is a dark product -- MetaTrader's own
+   * desktop ships dark, and this one is a chart on a dark pane with a dark Market Watch beside it --
+   * so dark is the platform's default and light is a choice a trader makes, not one a brand record
+   * makes for them.
    *
-   * This class lets the stylesheet tell the two cases apart: in the brand's own mode its palette is
-   * used, and in the other mode the published neutral palette is. The brand's identity tokens (its
-   * accent, its hue, its type and its radius) are brand-driven in BOTH modes, because those are the
-   * brand rather than the theme.
+   * A stored preference still wins, which is the whole point of the toggle: this decides only what
+   * someone sees before they have ever chosen.
    */
-  const brandPaletteClass = brandDefaultTheme === 'light' ? 'brand-light' : 'brand-dark';
+  const defaultTheme = 'dark' as const;
+  const initialClass = defaultTheme;
+  /**
+   * Which mode the brand's OWN palette was authored for -- `brand.theme`, NOT the default above.
+   *
+   * These two were one value, and separating them is the point of this comment. A brand supplies one
+   * set of greys and they are the greys of its own theme; when the trader is in the other mode those
+   * greys are the wrong ones. Feeding them through anyway is exactly why "light mode" used to look
+   * like nothing had happened: `--pp-bg` resolves `var(--brand-bg, <light fallback>)`, `--brand-bg`
+   * is always set inline on this element, so the fallback was never reached.
+   *
+   * So this class still has to follow the brand, even though the default no longer does. A brand
+   * authored for light now OPENS dark and keeps its own palette for the trader who asks for light;
+   * reading `defaultTheme` here instead would tag its light greys `brand-dark` and apply them in
+   * dark mode, which is the bug this class exists to prevent.
+   *
+   * The brand's identity tokens (its accent, its hue, its type and its radius) are brand-driven in
+   * BOTH modes, because those are the brand rather than the theme.
+   */
+  const brandPaletteClass = brand.theme === 'light' ? 'brand-light' : 'brand-dark';
   /**
    * The stored theme, applied before the first paint so there is no flash of the other one.
    *
@@ -91,7 +104,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
    * this line keeping a meaningless class in sync. Both are gone. MetaTrader's own answer to
    * "which colours" is the chart's Colors tab, which this terminal has with its four schemes.
    */
-  const themeInit = `(function(){try{var d=${JSON.stringify(brandDefaultTheme)};var s=localStorage.getItem('pp-theme');var t=s||d;var e=document.documentElement;e.classList.remove('light','dark');e.classList.add(t==='light'?'light':'dark');}catch(e){}})();`;
+  const themeInit = `(function(){try{var d=${JSON.stringify(defaultTheme)};var s=localStorage.getItem('pp-theme');var t=s||d;var e=document.documentElement;e.classList.remove('light','dark');e.classList.add(t==='light'?'light':'dark');}catch(e){}})();`;
   // Load the brand's title + body + mono faces from Google Fonts (empty when the brand sets none).
   const fontHref = googleFontsHref([
     brand.themeTokens?.fontTitle ?? '',
