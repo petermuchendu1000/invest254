@@ -171,6 +171,8 @@ interface GameSocketValue {
   subscribeSymbols: (symbols: readonly string[]) => void;
   /** A watched symbol's live quote, or null before its first one lands. */
   getSymbolQuote: (symbol: string) => SymbolQuote | null;
+  /** The symbol's recent quotes, newest last, which is what the Ticks tab draws. */
+  getSymbolTicks: (symbol: string) => readonly { t: number; price: number }[];
   /**
    * Instrument and day anchor from the most recent candle reply, or null before one has landed.
    *
@@ -213,6 +215,12 @@ export interface SymbolsReply { defaultSymbol: string; symbols: SymbolRow[] }
  * `price` is kept alongside `rate` because every consumer would otherwise redo the same arithmetic
  * against the same anchor, and one of them would eventually use the wrong symbol's anchor.
  */
+/** Stable empty result, so a symbol with no ticks yet does not hand out a fresh array a frame. */
+const EMPTY_TICKS: ReadonlyArray<{ t: number; price: number }> = [];
+
+/** MetaTrader's own depth: "The platform stores up to 2000 last ticks for each symbol." */
+const SYMBOL_TICK_CAP = 2_000;
+
 export interface SymbolQuote {
   symbol: string;
   instrument: MarketSymbol;
@@ -598,14 +606,45 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   /** The symbols asked for, kept so the subscription can be re-armed after a reconnect. */
   const watchedRef = useRef<readonly string[]>([]);
   const quotesRef = useRef(new Map<string, SymbolQuote>());
+  /**
+   * The recent quotes of each watched symbol, which is what Market Watch's Ticks tab draws.
+   *
+   * MetaTrader "stores up to 2000 last ticks for each symbol" and clears a symbol's chart when it
+   * is removed from Market Watch, so that is exactly what this is: a bounded ring per symbol,
+   * dropped with the quote when the symbol leaves the list.
+   *
+   * Prices, not rates. Every entry is already mapped through the day's anchor the quote arrived
+   * with, so a tick drawn here is the same number the row above it prints and cannot be replotted
+   * against a different anchor later.
+   */
+  const symbolTicksRef = useRef(new Map<string, Array<{ t: number; price: number }>>());
   const subscribeSymbols = useCallback((symbols: readonly string[]) => {
     watchedRef.current = [...symbols];
     // Quotes for symbols no longer watched are dropped: keeping them would let a stale price from
     // minutes ago be printed as if it were live.
     for (const sym of [...quotesRef.current.keys()]) if (!symbols.includes(sym)) quotesRef.current.delete(sym);
+    for (const sym of [...symbolTicksRef.current.keys()]) if (!symbols.includes(sym)) symbolTicksRef.current.delete(sym);
     send('subscribe_symbols', { symbols: [...symbols] }); // no-op while closed; re-sent on hello
   }, [send]);
   const getSymbolQuote = useCallback((symbol: string) => quotesRef.current.get(symbol) ?? null, []);
+  /**
+   * One quote onto a symbol's ring. MetaTrader's own cap is 2000 ticks per symbol, so that is the
+   * cap; a repeated price at the same instant is dropped, because a tick chart draws when a quote
+   * CHANGED and two identical points would only thicken the step.
+   */
+  const pushSymbolTick = useCallback((symbol: string, t: number, price: number): void => {
+    if (!Number.isFinite(price) || !Number.isFinite(t)) return;
+    const ring = symbolTicksRef.current.get(symbol);
+    if (!ring) { symbolTicksRef.current.set(symbol, [{ t, price }]); return; }
+    const last = ring[ring.length - 1];
+    if (last && last.t === t && last.price === price) return;
+    ring.push({ t, price });
+    if (ring.length > SYMBOL_TICK_CAP) ring.splice(0, ring.length - SYMBOL_TICK_CAP);
+  }, []);
+  const getSymbolTicks = useCallback(
+    (symbol: string): readonly { t: number; price: number }[] => symbolTicksRef.current.get(symbol) ?? EMPTY_TICKS,
+    [],
+  );
 
   const newsWaitersRef = useRef<Array<{ resolve: (r: NewsReply) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
   const newsOutboxRef = useRef<Array<{ limit: number }>>([]);
@@ -1300,6 +1339,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             up: prev?.up ?? null, changedAt: prev?.changedAt ?? null,
             dayHigh: prev?.dayHigh ?? null, dayLow: prev?.dayLow ?? null,
           });
+          pushSymbolTick(d.symbol, d.t, price);
           break;
         }
         case 'symbol_ticks': {
@@ -1324,6 +1364,7 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
               dayHigh: typeof q.high === 'number' ? q.high : prev.dayHigh,
               dayLow: typeof q.low === 'number' ? q.low : prev.dayLow,
             });
+            pushSymbolTick(q.symbol, d.t, price);
           }
           break;
         }
@@ -1580,11 +1621,11 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
     getTicks, getLastTick, openPosition, setLevels, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
-    requestSymbols, subscribeSymbols, getSymbolQuote,
+    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks,
   }), [getTicks, getLastTick, openPosition, setLevels, sell, getInstrumentTicks, getLastInstrumentTick, subscribeInstrument,
     openDigit, onDigitSettled, onDigitRejected, onDigitOpened, openMultiplier, closeMultiplier, onMultiplier,
     requestCandles, getMarket, requestNews, requestAnchors,
-    requestSymbols, subscribeSymbols, getSymbolQuote]);
+    requestSymbols, subscribeSymbols, getSymbolQuote, getSymbolTicks]);
   const stateValue = useMemo<GameSocketState>(() => ({ status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, lastTradeError }), [status, online, fairness, activePosition, positions, earlyCloseEnabled, spread, lastTradeError]);
 
   return (

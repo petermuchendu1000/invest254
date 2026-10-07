@@ -5,6 +5,7 @@ import { detailRows, sessionSoFar } from './symbolDetails.js';
 const base = {
   digits: 5,
   last: 1.08920,
+  sides: null,
   session: { open: 1.10415, high: 1.10477, low: 1.08996 },
   previousClose: 1.10415,
   faceValue: '10 000.00',
@@ -17,9 +18,29 @@ const base = {
  */
 
 test("the rows are MetaTrader's, in MetaTrader's order", () => {
+  // A brand that publishes no spread has no two sides, so the Bid and Ask rows are absent rather
+  // than printing the same number twice.
   assert.deepEqual(detailRows(base).map((r) => r.label), [
     'Tick Size', 'Face Value', 'Last', 'Last High', 'Last Low', 'Daily Change', 'Open Price', 'Close Price',
   ]);
+});
+
+test('Bid and Ask appear, ahead of Last, once the brand publishes a spread', () => {
+  const rows = detailRows({ ...base, sides: { bid: 1.08915, ask: 1.08925 } });
+  assert.deepEqual(rows.map((r) => r.label), [
+    'Tick Size', 'Face Value', 'Bid', 'Ask', 'Last', 'Last High', 'Last Low',
+    'Daily Change', 'Open Price', 'Close Price',
+  ]);
+  // Both are quoted to the symbol's digits, and both tick, as Last does.
+  const bid = rows.find((r) => r.label === 'Bid')!;
+  const ask = rows.find((r) => r.label === 'Ask')!;
+  assert.equal(bid.value, '1.08915');
+  assert.equal(ask.value, '1.08925');
+  assert.equal(bid.live, true);
+  assert.equal(ask.live, true);
+  // The HIGH and LOW pair stays the Last trio's: MetaTrader uses those when a symbol's chart is
+  // built on Last prices, which is what this one's Chart mode says.
+  assert.ok(!rows.some((r) => r.label === 'Bid High' || r.label === 'Ask Low'));
 });
 
 /**
@@ -56,7 +77,7 @@ test('every value prints to the symbol’s own digit count', () => {
   assert.equal(rows[3]!.value, '1.10477');
   assert.equal(rows[4]!.value, '1.08996');
   // Gold, at two.
-  const gold = detailRows({ digits: 2, last: 3079.43, session: { open: 3080, high: 3081, low: 3077 }, previousClose: 3080, faceValue: '10 000.00' });
+  const gold = detailRows({ digits: 2, last: 3079.43, sides: null, session: { open: 3080, high: 3081, low: 3077 }, previousClose: 3080, faceValue: '10 000.00' });
   assert.equal(gold[0]!.value, '0.01');
   assert.equal(gold[2]!.value, '3079.43');
 });
@@ -79,7 +100,7 @@ test('only the rows that actually tick are marked live', () => {
 });
 
 test('a row with nothing behind it prints a dash rather than a number', () => {
-  const cold = detailRows({ digits: 5, last: null, session: null, previousClose: null, faceValue: '10 000.00' });
+  const cold = detailRows({ digits: 5, last: null, sides: null, session: null, previousClose: null, faceValue: '10 000.00' });
   assert.deepEqual(cold.map((r) => r.value), ['0.00001', '10 000.00', '-', '-', '-', '-', '-', '-']);
 });
 

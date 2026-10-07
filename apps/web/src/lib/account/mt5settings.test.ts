@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ABOUT_ROWS, aboutRows, kycSub, kycTone } from './mt5settings.js';
+import { aboutRows, kycSub, kycTone } from './mt5settings.js';
 
-test('About: a player sees every row', () => {
-  assert.deepEqual(aboutRows(false).map((r) => r.id), ABOUT_ROWS.map((r) => r.id));
+test('About: a signed-in account sees every row', () => {
+  assert.deepEqual(aboutRows(false).map((r) => r.id), ['terms', 'privacy', 'responsible', 'licence']);
 });
 
 test('About: a marketer screen drops every gambling row, and keeps the rest', () => {
@@ -11,13 +11,26 @@ test('About: a marketer screen drops every gambling row, and keeps the rest', ()
   assert.deepEqual(ids, ['terms', 'privacy']);
   // Stated as the property rather than the list, so a row added later is covered too.
   assert.ok(aboutRows(true).every((r) => !r.gambling));
-  assert.ok(ABOUT_ROWS.filter((r) => !r.gambling).every((r) => ids.includes(r.id)));
+  assert.ok(aboutRows(true, 'trading').every((r) => !r.gambling));
+});
+
+test('About: a broker links to its risk disclosure, a gaming brand to its own page', () => {
+  const trading = aboutRows(false, 'trading').find((r) => r.id === 'responsible')!;
+  assert.equal(trading.label, 'Risk disclosure');
+  assert.equal(trading.href, '/legal#risk');
+  const gaming = aboutRows(false, 'gaming').find((r) => r.id === 'responsible')!;
+  assert.equal(gaming.label, 'Responsible gaming');
+  assert.equal(gaming.href, '/legal#responsible-gaming');
+  // Neither reaches the other's page, which is the whole reason the anchor comes from one module.
+  assert.notEqual(trading.href, gaming.href);
 });
 
 test('About: every row points somewhere and says what it is', () => {
-  for (const r of ABOUT_ROWS) {
-    assert.ok(r.href.startsWith('/'), `${r.id} href`);
-    assert.ok(r.label.length > 0 && r.sub.length > 0, `${r.id} text`);
+  for (const reg of ['trading', 'gaming'] as const) {
+    for (const r of aboutRows(false, reg)) {
+      assert.ok(r.href.startsWith('/'), `${reg} ${r.id} href`);
+      assert.ok(r.label.length > 0 && r.sub.length > 0, `${reg} ${r.id} text`);
+    }
   }
 });
 

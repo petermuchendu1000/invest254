@@ -19,6 +19,7 @@ import { MT5AccountPanel } from '@/components/account/MT5AccountPanel';
 import { useWallet, useWalletFigures } from '@/lib/wallet/hooks';
 import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { aboutRows, kycSub, kycTone } from '@/lib/account/mt5settings';
+import { useRegister } from '@/lib/ui/useRegister';
 import { MT5TitleBar, MT5Section as Section, MT5Row as Row } from '@/components/mt5/kit';
 import { cn } from '@/lib/cn';
 
@@ -42,6 +43,8 @@ export function MT5Settings() {
   const user = useSession((s) => s.user);
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
+  // A broker's Settings owes a risk disclosure, not a responsible-gaming page. See lib/ui/register.
+  const { register } = useRegister();
   const { logout } = useAuthActions();
   const openDialog = useAccountUi((s) => s.open);
   const kyc = useMyKyc();
@@ -104,13 +107,24 @@ export function MT5Settings() {
       <InterfaceSection />
 
       <Section title="About">
-        {aboutRows(isMarketer).map((r) => (
+        {aboutRows(isMarketer, register).map((r) => (
           <Row key={r.id} label={r.label} sub={r.sub} href={r.href} chevron />
         ))}
-        {/* The problem-gambling helpline is a gambling disclosure, so it follows the same rule as the
-            rows above and is absent from a marketer screen. Same number the footer carries. */}
-        {!isMarketer ? <Row label="Helpline" sub="Free, confidential support" href="tel:1190" value="1190" /> : null}
-        <Row label="Operated by" sub={brand.licenceLine || 'Operated under licence.'} value={brand.name || brand.slug} />
+        {/* The problem-gambling helpline is a gambling disclosure, so it follows the same rule as
+            the rows above and is absent from a marketer screen. It is also absent from a BROKER's
+            settings: a helpline for a service that does not cover what this reader is doing is
+            worse than none. Same number the footer carries, under the same rule. */}
+        {isMarketer || register === 'trading'
+          ? null
+          : <Row label="Helpline" sub="Free, confidential support" href="tel:1190" value="1190" />}
+        {/* No "Operated under licence." fallback: a brand that publishes no licence line has not
+            told us it is licensed, and saying so for it would be the platform inventing a claim
+            about its own operator. */}
+        <Row
+          label="Operated by"
+          sub={brand.licenceLine?.trim() ? brand.licenceLine : 'No licence details published. Ask support.'}
+          value={brand.name || brand.slug}
+        />
       </Section>
 
       <Section title="Session">

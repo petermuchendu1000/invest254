@@ -4,15 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { valueOfRate } from '@invest254/shared/candles';
 import { accountSummary, accountStripFields, mtAmount, lotsOfStake } from '@invest254/shared/account';
 import { useGameSocket, useGameSocketApi, type NewsItemDto, type DayAnchor } from '@/lib/game/GameSocketProvider';
-import { useWallet, useTransactions } from '@/lib/wallet/hooks';
+import { useWallet, useWalletFigures, useTransactions } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useSession } from '@/lib/auth/session';
 import { useMyNotifications } from '@/lib/notifications/hooks';
-import { useJournal, logJournal } from '@/lib/game/journal';
+import { useJournal, useExperts, logJournal, type JournalEntry } from '@/lib/game/journal';
+import { ARTICLES, ARTICLE_CATEGORIES, articlesNewestFirst, type Article, type ArticleCategory } from '@/lib/terminal/articles';
+import { markArticleRead, useReadArticles } from '@/lib/terminal/articlesRead';
+import { companyPage } from '@/lib/terminal/company';
+import { mt5ServerName } from '@/lib/brand/mt5Server';
+import { GROUP_LABELS, INDICATOR_GROUPS, MT5_INDICATOR_COUNT, VOLUME_GROUP_NOTE, type IndicatorGroup } from '@/lib/chart/indicatorCatalog';
+import { toggleIndicator, useEnabledIndicators } from '@/lib/chart/indicatorsStore';
 import {
   ALERT_CONDITIONS, ALERT_DEFAULTS, conditionLabel, useAlertsStore, useAlertWatch,
-  type AlertCondition, type AlertDraft, type PriceAlert,
+  type AlertCondition, type AlertDraft, type AlertQuote, type PriceAlert,
 } from '@/lib/game/alerts';
 import { useLevelsStore, useRestoreLevels } from '@/lib/game/levelsStore';
 import { levelPrice, isContinuousBrand } from '@/lib/game/levelWatch';
@@ -29,9 +35,13 @@ import { useVolumeDigits } from '@/lib/game/volumeDigits';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
 import {
-  TOOLBOX_COLUMNS, VISIBLE_TOOLBOX_TABS, toolboxTab, type ToolboxTab,
+  PLATFORM_COLUMNS, TOOLBOX_COLUMNS, visibleToolboxTabs, type ToolboxTab,
 } from '@/lib/game/toolboxTabs';
 import { exposureRows } from '@invest254/shared/account';
+import {
+  calendarBetween, calendarRange, calendarFigure, CALENDAR_CURRENCIES, CALENDAR_PERIODS,
+  type CalendarPeriod, type CalendarPriority,
+} from '@invest254/shared/calendar';
 import { MIN_PANEL_PX } from '@/lib/chart/paneSplit';
 import { MT5PositionMenu } from '@/components/game/MT5PositionMenu';
 import { MT5ClosePosition } from '@/components/game/MT5ClosePosition';
@@ -61,7 +71,7 @@ import { MT5ModifyPosition } from '@/components/game/MT5ModifyPosition';
 type Tab = ToolboxTab;
 
 export function MT5Toolbox() {
-  const { positions, status, earlyCloseEnabled, setLevels: pushLevels } = useGameSocket();
+  const { positions, status, earlyCloseEnabled, spread, setLevels: pushLevels } = useGameSocket();
   const brand = useBrand();
   /**
    * Whether the engine acts on the S/L and T/P levels at all: a brand with a price axis, pool mode
@@ -76,6 +86,26 @@ export function MT5Toolbox() {
 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('trade');
+
+  /**
+   * The tab strip. Company rides on whether THIS brand publishes a company page, which is
+   * MetaTrader's own rule for the one tab it hides: "This tab is hidden if the web page is disabled
+   * by the broker." A brand with no licence line and no support channel publishes nothing, so it
+   * gets eleven tabs; one that does gets twelve.
+   */
+  // MetaTrader's own server string, the same one the account strip and the Funds screen print.
+  const figures = useWalletFigures();
+  const server = mt5ServerName(brand, figures.demo ? 'demo' : 'real');
+  const company = useMemo(() => companyPage(brand, { server }), [brand, server]);
+  /** The Articles tab's own count, which MetaTrader draws as a subscript on the tab. */
+  const readArticles = useReadArticles();
+  const unreadArticles = ARTICLES.length - readArticles.size;
+  const tabs = useMemo(() => visibleToolboxTabs({ company: company.published }), [company.published]);
+  // A brand change can take the active tab away under the trader. Fall back to Trade rather than
+  // leaving the panel on a tab that is no longer in the strip.
+  useEffect(() => {
+    if (!tabs.some((t) => t.id === tab)) setTab('trade');
+  }, [tabs, tab]);
 
   /**
    * MetaTrader's two Toolbox shortcuts, and it has no others.
@@ -135,8 +165,19 @@ export function MT5Toolbox() {
     const p = priceOfRate(rate);
     return p === null ? '-' : p.toFixed(digits);
   };
-  // Alerts fire against the same price the chart draws, and against the clock for `Time =`.
-  useAlertWatch(livePrice, symbol, (a, price) => {
+  /**
+   * The quote an alert is checked against: the same price the chart draws, and the two sides around
+   * it by the spread the engine charges, so a `Bid >` alert fires at the bid a sell would fill at.
+   * The arithmetic is the order ticket's own (`useOrderEntry.bidAsk`).
+   */
+  const liveQuote = useCallback((): AlertQuote => {
+    const last = livePrice();
+    const scale = getMarket()?.instrument.scale ?? null;
+    if (last === null || spread === null || scale === null) return { last, bid: null, ask: null };
+    return { last, bid: last - spread.sell * scale, ask: last + spread.buy * scale };
+  }, [livePrice, getMarket, spread]);
+  // Alerts fire against that quote, and against the clock for `Time =`.
+  useAlertWatch(liveQuote, symbol, (a, price) => {
     toast.push({
       tone: 'info',
       title: `${a.symbol} alert`,
@@ -460,6 +501,9 @@ export function MT5Toolbox() {
 
             {tab === 'alerts' ? <AlertsTab symbol={symbol} digits={digits} livePrice={livePrice} alerts={alerts} /> : null}
 
+            {/* MetaTrader's Economic Calendar, over generated releases. See `CalendarTab`. */}
+            {tab === 'calendar' ? <CalendarTab /> : null}
+
             {/* Exposure: real numbers, computed from the contracts that are open. Its fourth column
                 is headed with the deposit currency's own code, as MetaTrader heads it. */}
             {tab === 'exposure' ? (
@@ -471,31 +515,30 @@ export function MT5Toolbox() {
               />
             ) : null}
 
-            {/* The tabs MetaTrader fills from somewhere this platform is not connected to. The panel
-                says which, rather than showing an empty grid that looks broken. */}
-            {UNFILLABLE.includes(tab) ? (
-              <Empty>{toolboxTab(tab)?.unavailable}</Empty>
-            ) : null}
+            {/* The broker's own article library, in MetaTrader's `Name | Category | Date` grid. */}
+            {tab === 'articles' ? <ArticlesTab /> : null}
 
+            {/* MetaTrader's program library is MQL5's; this terminal's is its own 38 indicators, and
+                this tab applies them to the chart the way Code Base downloads a program. */}
+            {tab === 'codebase' ? <CodeBaseTab /> : null}
+
+            {/* The Experts journal: what the programs on the chart did. See `logExperts`. */}
+            {tab === 'experts' ? <ExpertsTab /> : null}
+
+            {/* The broker's own page. Drawn only when this brand publishes one, which is also why
+                the tab itself is in the strip; MetaTrader hides it otherwise. */}
+            {tab === 'company' ? <CompanyTab page={company} /> : null}
+
+            {/* The platform's own log. Drawn by the same component as Experts, because MetaTrader
+                draws its two logs identically and states one set of columns for both. */}
             {tab === 'journal' ? (
-              journal.length > 0 ? (
-                <ul className="divide-y divide-[#2b3543]/40 font-mono text-[11px]">
-                  {journal.slice().reverse().map((e) => (
-                    <li key={e.id} className="flex gap-2 px-3 py-1">
-                      <span className="shrink-0 text-[#8fa2b8]">{stamp(e.atMs)}</span>
-                      <span className="w-14 shrink-0 text-[#8fa2b8]/50">{e.tag}</span>
-                      <span className={cn(e.level === 'error' ? 'text-[#f23645]' : e.level === 'warn' ? 'text-[#f0b90b]' : e.level === 'ok' ? 'text-[#41be56]' : 'text-[#8fa2b8]')}>{e.text}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <Empty>Journal is empty.</Empty>
-              )
+              <LogTab entries={journal} empty="Journal is empty." />
             ) : null}
           </div>
 
           {/* MetaTrader puts the Toolbox tabs along the BOTTOM edge of the panel, and there are
-              eleven of them drawn (Company is hidden, as MetaTrader hides it). Eleven cannot share
+              eleven or twelve of them drawn (Company appears only for a brand that publishes a
+              company page, which is MetaTrader's own rule). Eleven cannot share
               a 390px phone evenly — "Code Base" alone would not fit in a thirty-pixel slot — so the
               strip SCROLLS rather than crushing the labels, which is what the period row above the
               chart already does with twenty-one periods.
@@ -514,21 +557,23 @@ export function MT5Toolbox() {
               each its own width, and a panel tab strip with no room for them all grows
               `◀ ▶` scroll arrows at its right end (docs/mt5/10-market-watch.md:96). */}
           <div className="flex items-stretch overflow-x-auto border-t border-[#2b3543] bg-[#202933] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {VISIBLE_TOOLBOX_TABS.map((t) => {
+            {tabs.map((t) => {
+              // MetaTrader puts a count on a tab that has something waiting, and it puts one on
+              // Articles too: `Articles₇` on its own screenshot is the UNREAD count.
               const count = t.id === 'mailbox'
                 ? (notifications.data?.items?.length ?? 0)
-                : t.id === 'alerts' ? alerts.length : 0;
+                : t.id === 'alerts' ? alerts.length
+                : t.id === 'articles' ? unreadArticles
+                : 0;
               return (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => setTab(t.id)}
                   aria-pressed={tab === t.id}
-                  title={t.unavailable}
                   className={cn(
                     'shrink-0 whitespace-nowrap px-2 py-1.5 text-[10.5px] font-semibold leading-tight transition',
                     tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
-                    t.unavailable ? 'opacity-55' : '',
                   )}
                 >
                   {t.label}
@@ -756,7 +801,7 @@ function AlertsTab({ symbol, digits, livePrice, alerts }: {
 
       {/* MetaTrader runs alerts on its server, so they fire with the app closed. These live in this
           browser, so they can only fire while the terminal is open — said plainly. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[#2b3543] px-3 py-1.5 text-[10px] text-[#8fa2b8]">
+      <ToolboxFooter>
         <span>Alerts fire while this terminal is open.</span>
         <span>Checked against {symbol}, the open chart&apos;s symbol.</span>
         {current?.counter ? (
@@ -764,7 +809,7 @@ function AlertsTab({ symbol, digits, livePrice, alerts }: {
             Re-arm {current.symbol}
           </button>
         ) : null}
-      </div>
+      </ToolboxFooter>
 
       {menu ? (
         <>
@@ -1093,13 +1138,42 @@ function Figure({ label, value, tone, className }: { label: string; value: strin
  *
  * The first column is the one exception because it holds a NAME, and names read from the left.
  */
-function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
+function Table({ head, children, left = [0], grow }: {
+  head: string[];
+  children: React.ReactNode;
+  /**
+   * Which columns are LEFT-aligned, headers and cells alike.
+   *
+   * MetaTrader right-aligns a grid "from `Ticket` rightwards, including its header"
+   * (09-toolbox.md 268), which makes the first column the only left one on the Trade tab. A grid
+   * whose middle column is a NAME rather than a figure needs one more: the Calendar's `Event` is
+   * prose, and right-aligning its header while its cells read left left a gap down the middle with
+   * the header floating off the end of it.
+   */
+  left?: readonly number[];
+  /**
+   * Which column absorbs the slack.
+   *
+   * A grid of figures wants every column hugging its content, which is the default here. A grid
+   * whose rows carry PROSE does not: an article title, an indicator name or a log message is the
+   * column a trader is reading, and leaving the table to share the width evenly truncates it at a
+   * third of the panel while the date column floats in 600px of nothing. `width: 100%` on one
+   * header is the table-layout way to say "this one takes what is left"; the cell still needs
+   * `max-w-0` to be allowed to truncate below its content.
+   */
+  grow?: number;
+}) {
   return (
     <table className="w-full border-collapse text-right font-mono text-[11px] tabular-nums">
       <thead>
         <tr className="text-[#8fa2b8]">
           {head.map((h, i) => (
-            <th key={`${h}:${i}`} className={cn('whitespace-nowrap px-2 py-1 font-normal', i === 0 && 'text-left')}>{h}</th>
+            <th
+              key={`${h}:${i}`}
+              className={cn('whitespace-nowrap px-2 py-1 font-normal', left.includes(i) && 'text-left', grow === i && 'w-full')}
+            >
+              {h}
+            </th>
           ))}
         </tr>
       </thead>
@@ -1113,12 +1187,24 @@ function Td({ children, className, first }: { children: React.ReactNode; classNa
   return <td className={cn('whitespace-nowrap px-2 py-1', first && 'text-left', className)}>{children}</td>;
 }
 
+/**
+ * The status line under a tab's grid: what the grid is showing, and what the filters have done to
+ * it. MetaTrader puts the same kind of summary under its own panels.
+ *
+ * `pr-20` is not decoration. The support bubble is fixed to the bottom-right corner of the window
+ * and floats over this panel, so without it the right-most item is drawn underneath the bubble.
+ */
+function ToolboxFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[#2b3543] py-1.5 pl-3 pr-20 text-[10px] text-[#8fa2b8]">
+      {children}
+    </div>
+  );
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">{children}</div>;
 }
-
-/** The tabs MetaTrader has and this platform cannot fill. Company is hidden, so it is not here. */
-const UNFILLABLE: readonly ToolboxTab[] = ['calendar', 'articles', 'codebase', 'experts'];
 
 /**
  * MetaTrader's History tab.
@@ -1717,5 +1803,546 @@ function TradeGridRow({
         </span>
       </Td>
     </tr>
+  );
+}
+
+/**
+ * MetaTrader's Economic Calendar.
+ *
+ * Specified in full at docs/mt5/09-toolbox.md 831-882 and built to that:
+ *
+ *   Columns  `Time | Currency | Event | Priority | Period | Actual | Forecast | Previous`
+ *   Priority a blue fan, three levels, "a dot alone / dot + one arc / dot + two arcs", verified at
+ *            10x. MetaQuotes never names the levels, so neither does this.
+ *   Colour   verbatim: "If this value is less than the predicted one, the indicator is highlighted
+ *            in red. If the current value is larger, the indicator is shown in blue." The
+ *            screenshot tints the WHOLE ROW, and the pixels win over the prose.
+ *   Figures  a comma thousands separator and NO space before `%`, which is the opposite of the
+ *            account strip's spacing. Both are MetaQuotes'.
+ *   Period   "By default, the calendar displays current week events, including past and upcoming
+ *            events. Use the context menu to switch to another period."
+ *   Filters  "by priority / by the currency of the country for which the indicator is published".
+ *
+ * The releases come from `calendarBetween`, which generates real indicators on their real
+ * recurrence from a seed. Why generated rather than fetched is argued in packages/shared/calendar.
+ */
+function CalendarTab() {
+  /**
+   * Its own clock, at minute resolution and only while the tab is mounted.
+   *
+   * A calendar has to move: a release that was upcoming a minute ago has printed now, and the row
+   * gains its Actual and its tint without the trader doing anything. Minute resolution because the
+   * Time column is written to the minute, so anything finer would re-render for nothing.
+   */
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const [period, setPeriod] = useState<CalendarPeriod>('thisWeek');
+  /** MetaTrader filters by priority and by currency, both from the context menu. */
+  const [minPriority, setMinPriority] = useState<CalendarPriority>(1);
+  const [currency, setCurrency] = useState<string | null>(null);
+  const [menu, setMenu] = useState<null | { x: number; y: number }>(null);
+
+  const { fromMs, toMs } = calendarRange(period, nowMs);
+  const all = useMemo(() => calendarBetween(fromMs, toMs, nowMs), [fromMs, toMs, nowMs]);
+  const rows = all.filter((e) => e.priority >= minPriority && (currency === null || e.currency === currency));
+
+  return (
+    <div
+      data-calendar-tab=""
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+    >
+      {/* Time and Event read left; every figure column reads right, as MetaTrader's grids do. */}
+      <Table head={[...(TOOLBOX_COLUMNS.calendar ?? [])]} left={[0, 2]} grow={2}>
+        {rows.map((e) => {
+          /**
+           * The row tint, on MetaTrader's own rule. Only a PUBLISHED reading can be compared, so a
+           * release still to come is never tinted; that is the difference between "no surprise" and
+           * "no number yet".
+           */
+          const surprise = e.actual === null || e.forecast === null ? 0 : e.actual - e.forecast;
+          return (
+            <tr
+              key={e.id}
+              className={cn(
+                'border-t border-[#2b3543]/60',
+                surprise < 0 ? 'bg-[#f23645]/10' : surprise > 0 ? 'bg-[#3183ff]/10' : '',
+              )}
+            >
+              <Td first>{stamp(e.atMs)}</Td>
+              <Td>{e.currency}</Td>
+              <Td className="text-left">{e.event}</Td>
+              <Td><span className="flex justify-end"><PriorityFan level={e.priority} /></span></Td>
+              <Td className="text-[#8fa2b8]">{e.period}</Td>
+              <Td className={cn('font-semibold', surprise < 0 ? 'text-[#f23645]' : surprise > 0 ? 'text-[#3183ff]' : 'text-white')}>
+                {calendarFigure(e.actual, e.unit, e.decimals)}
+              </Td>
+              <Td className="text-[#8fa2b8]">{calendarFigure(e.forecast, e.unit, e.decimals)}</Td>
+              <Td className="text-[#8fa2b8]">{calendarFigure(e.previous, e.unit, e.decimals)}</Td>
+            </tr>
+          );
+        })}
+      </Table>
+
+      {rows.length === 0 ? (
+        <Empty>
+          No releases in this period{currency === null ? '' : ` for ${currency}`}. Right-click to
+          change the period or the filters.
+        </Empty>
+      ) : null}
+
+      <ToolboxFooter>
+        <span>{CALENDAR_PERIODS.find((p) => p.key === period)?.label}</span>
+        <span>{rows.length} of {all.length} events</span>
+        {currency === null ? null : <span>Currency: {currency}</span>}
+        {minPriority > 1 ? <span>Priority {minPriority}+</span> : null}
+        <span className="ml-auto">Times are the broker&apos;s server time, UTC.</span>
+      </ToolboxFooter>
+
+      {menu ? (
+        <>
+          <button type="button" aria-label="Close menu" onClick={() => setMenu(null)} className="fixed inset-0 z-[70] cursor-default" />
+          <div
+            role="menu"
+            data-calendar-menu=""
+            className="fixed z-[71] max-h-[70vh] w-56 overflow-y-auto rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            {CALENDAR_PERIODS.map((p) => (
+              <MenuItem key={p.key} checked={period === p.key} label={p.label} onPick={() => { setPeriod(p.key); setMenu(null); }} />
+            ))}
+            <div className="my-1 border-t border-[#2b3543]" />
+            {/* "filter events in the list ... by priority". The three levels are the fan's. */}
+            {([1, 2, 3] as const).map((lv) => (
+              <MenuItem
+                key={`p${lv}`}
+                checked={minPriority === lv}
+                label={lv === 1 ? 'All priorities' : `Priority ${lv} and above`}
+                onPick={() => { setMinPriority(lv); setMenu(null); }}
+              />
+            ))}
+            <div className="my-1 border-t border-[#2b3543]" />
+            <MenuItem checked={currency === null} label="All currencies" onPick={() => { setCurrency(null); setMenu(null); }} />
+            {CALENDAR_CURRENCIES.map((c) => (
+              <MenuItem key={c} checked={currency === c} label={c} onPick={() => { setCurrency(c); setMenu(null); }} />
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * MetaTrader's importance marker: a blue fan, read off `fundamental_calendar_event.png` at 10x.
+ *
+ * "a dot alone" / "dot + one arc" / "dot + two arcs" (09-toolbox.md 844-851). Drawn rather than
+ * lettered because that is what MetaTrader draws, and because three glyphs scan far faster down a
+ * column than three words would.
+ */
+function PriorityFan({ level }: { level: CalendarPriority }) {
+  const on = '#3183ff';
+  const off = '#3b4756';
+  return (
+    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" role="img" aria-label={`Priority ${level}`} data-priority={level}>
+      {/* The dot is always lit: every release has at least the lowest importance. */}
+      <circle cx="3.5" cy="12.5" r="1.6" fill={on} />
+      <path d="M3.5 8.4a4.1 4.1 0 014.1 4.1" fill="none" stroke={level >= 2 ? on : off} strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M3.5 4.3a8.2 8.2 0 018.2 8.2" fill="none" stroke={level >= 3 ? on : off} strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** MetaTrader's date column format, `YYYY.MM.DD`, read off `en/articles.png`. */
+const mtDate = (ms: number): string => {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}.${p(d.getUTCMonth() + 1)}.${p(d.getUTCDate())}`;
+};
+
+/**
+ * MetaTrader's Articles tab, over the broker's own library.
+ *
+ * MetaTrader reads MQL5.community here, which is MetaQuotes' own service and not something a broker
+ * has. What a broker DOES publish is market analysis and trader education, so that is the shelf:
+ * ten pieces written about the instruments this platform quotes and the mechanics it actually
+ * implements (see lib/terminal/articles.ts, which explains why the content lives beside the code).
+ *
+ * The grid is MetaTrader's, verbatim: `Name | Category | Date ▽`, name leftmost, date rightmost and
+ * right-aligned with the sort triangle, rendered `YYYY.MM.DD`, and a page icon in the gutter
+ * (09-toolbox.md 7.5). Its context menu carries `View  Enter`, `Refresh`, a `Categories ▸` submenu
+ * and the `Category R` / `Auto Arrange A` / `Grid G` toggles; `View` is what a click does here, and
+ * the category filter is the submenu's. Refresh is not drawn: this library is compiled into the
+ * app, so there is nothing to re-fetch and a control that did nothing would be the placeholder this
+ * tab exists to remove.
+ */
+function ArticlesTab() {
+  const [openId, setOpenId] = useState<string | null>(null);
+  /** The `Categories ▸` filter. Every category starts checked, as MetaTrader's submenu shows them. */
+  const [hidden, setHidden] = useState<ReadonlySet<ArticleCategory>>(() => new Set());
+  const [menu, setMenu] = useState<null | { x: number; y: number }>(null);
+  const read = useReadArticles();
+
+  const all = useMemo(() => articlesNewestFirst(), []);
+  const rows = all.filter((a) => !hidden.has(a.category));
+  const open = openId === null ? null : (all.find((a) => a.id === openId) ?? null);
+
+  const view = (a: Article): void => { setOpenId(a.id); markArticleRead(a.id); };
+
+  if (open !== null) return <ArticleReader article={open} onBack={() => setOpenId(null)} />;
+
+  const toggleCategory = (c: ArticleCategory): void => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c); else next.add(c);
+      return next;
+    });
+  };
+
+  return (
+    <div
+      data-articles-tab=""
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+    >
+      {/* `Date` is the sorted column, so it carries the triangle MetaTrader draws on it. */}
+      <Table head={['Name', 'Category', 'Date ▽']} left={[0, 1]} grow={0}>
+        {rows.map((a) => {
+          const unread = !read.has(a.id);
+          return (
+            <tr
+              key={a.id}
+              className="cursor-pointer border-t border-[#2b3543]/60 hover:bg-[#2b3543]/40"
+              onClick={() => view(a)}
+              onDoubleClick={() => view(a)}
+            >
+              <Td first className="max-w-0">
+                <span className="flex items-center gap-1.5">
+                  <PageIcon unread={unread} />
+                  {/* MetaTrader truncates a column rather than wrapping it or dropping it. */}
+                  <span className={cn('min-w-0 truncate', unread ? 'font-semibold text-white' : 'text-[#c8d2de]')}>
+                    {a.name}
+                  </span>
+                </span>
+              </Td>
+              <Td className="text-left text-[#8fa2b8]">{a.category}</Td>
+              <Td className="text-[#8fa2b8]">{mtDate(a.atMs)}</Td>
+            </tr>
+          );
+        })}
+      </Table>
+
+      {rows.length === 0 ? (
+        <Empty>Every category is unchecked. Right-click to pick the ones to list.</Empty>
+      ) : null}
+
+      <ToolboxFooter>
+        <span>{rows.length} of {all.length} articles</span>
+        <span>{all.length - read.size} unread</span>
+        {/* No "published by": the publisher is this platform, and the Company tab is where the
+            broker's own details belong. */}
+        <span className="ml-auto">Click an article to read it.</span>
+      </ToolboxFooter>
+
+      {menu ? (
+        <>
+          <button type="button" aria-label="Close menu" onClick={() => setMenu(null)} className="fixed inset-0 z-[70] cursor-default" />
+          <div
+            role="menu"
+            data-articles-menu=""
+            className="fixed z-[71] max-h-[70vh] w-52 overflow-y-auto rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <MenuItem checked={false} label="Select All" onPick={() => { setHidden(new Set()); setMenu(null); }} />
+            <MenuItem checked={false} label="Unselect All" onPick={() => { setHidden(new Set(ARTICLE_CATEGORIES)); setMenu(null); }} />
+            <div className="my-1 border-t border-[#2b3543]" />
+            {ARTICLE_CATEGORIES.map((c) => (
+              <MenuItem key={c} checked={!hidden.has(c)} label={c} onPick={() => { toggleCategory(c); setMenu(null); }} />
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** The page glyph MetaTrader puts in the Articles gutter. Filled while the article is unread. */
+function PageIcon({ unread }: { unread: boolean }) {
+  return (
+    <svg viewBox="0 0 12 14" className="h-3 w-2.5 shrink-0" role="img" aria-label={unread ? 'Unread' : 'Read'}>
+      <path
+        d="M1 1h6l4 4v8H1z"
+        fill={unread ? '#3183ff' : 'none'}
+        stroke={unread ? '#3183ff' : '#8fa2b8'}
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+/**
+ * The reading pane. MetaTrader's `View` (Enter) opens the article inside the platform rather than
+ * in a browser, which is the whole point of the tab, so the body is drawn here in the panel.
+ */
+function ArticleReader({ article, onBack }: { article: Article; onBack: () => void }) {
+  return (
+    <div data-article-reader={article.id} className="px-3 py-2">
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-2 text-[11px] font-semibold text-[#4597ff] hover:underline"
+      >
+        ← Articles
+      </button>
+      <h3 className="text-[13px] font-semibold leading-snug text-white">{article.name}</h3>
+      <p className="mt-0.5 font-mono text-[10px] text-[#8fa2b8]">
+        {article.category} · {mtDate(article.atMs)}
+      </p>
+      {/* `max-w-[70ch]`: a 1440px panel would otherwise set prose to 170 characters a line, which is
+          twice what anyone reads comfortably. */}
+      <div className="mt-2 max-w-[70ch] space-y-2 text-[11.5px] leading-relaxed text-[#c8d2de]">
+        {article.body.map((p, i) => <p key={i}>{p}</p>)}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * MetaTrader's Code Base tab, over this terminal's own program library.
+ *
+ * MetaTrader's Code Base is MQL5's free source library: *"you can access a huge code base of free
+ * applications for automated trading… When you download the code, it is automatically compiled,
+ * after which a ready-to-use application is created"*, and its one documented hot key is
+ * ***"D — Download the selected application"*** (09-toolbox.md 7.6). None of that transfers: there
+ * is no MQL5 account behind this platform, and a compiled MQL5 binary has no meaning in a browser.
+ *
+ * What DOES transfer is the thing the tab is for — a library of programs the terminal can run, with
+ * a control that puts one to work. This terminal ships 38 of them: MetaTrader's own built-in
+ * indicators, in its own four Navigator groups, under its own names (lib/chart/indicatorCatalog).
+ * So this is that library, and the download is an APPLY: clicking a row switches the indicator onto
+ * the chart, through the same store the chart's own Indicators menu writes to, and the row shows
+ * `✓` while it is applied.
+ *
+ * The seven that read traded volume are listed and disabled with the reason, exactly as they are in
+ * the chart's menu: a synthetic price curve reports no volume, and omitting them would hide the gap
+ * while feeding them an invented volume would draw a confident line that means nothing.
+ *
+ * The columns are this platform's own and are declared as such in `PLATFORM_COLUMNS`; MetaQuotes
+ * has never rendered this grid, so there is nothing of its to copy.
+ */
+function CodeBaseTab() {
+  const applied = useEnabledIndicators();
+  const [group, setGroup] = useState<IndicatorGroup | null>(null);
+  const [menu, setMenu] = useState<null | { x: number; y: number }>(null);
+
+  const rows = useMemo(
+    () => INDICATOR_GROUPS.flatMap((g) => (group === null || g.group === group ? g.items : [])),
+    [group],
+  );
+  const appliedCount = INDICATOR_GROUPS.reduce(
+    (n, g) => n + g.items.filter((i) => applied.has(i.id)).length, 0,
+  );
+
+  return (
+    <div
+      data-codebase-tab=""
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+    >
+      <Table head={[...(PLATFORM_COLUMNS.codebase ?? [])]} left={[0, 2, 3]} grow={0}>
+        {rows.map((def) => {
+          const on = applied.has(def.id);
+          const blocked = def.unavailable !== undefined;
+          return (
+            <tr
+              key={def.id}
+              title={def.unavailable}
+              aria-disabled={blocked || undefined}
+              data-applied={on || undefined}
+              className={cn(
+                'border-t border-[#2b3543]/60',
+                blocked ? 'opacity-45' : 'cursor-pointer hover:bg-[#2b3543]/40',
+              )}
+              onClick={() => { if (!blocked) toggleIndicator(def.id); }}
+            >
+              <Td first className="max-w-0">
+                <span className="flex items-center gap-1.5">
+                  {/* The applied marker sits in the gutter, where MetaTrader's grids put a state
+                      glyph, so the column of names stays a column of names. */}
+                  <span className={cn('w-2.5 shrink-0 text-[10px]', on ? 'text-[#4597ff]' : 'text-transparent')} aria-hidden>✓</span>
+                  <span className={cn('min-w-0 truncate', on ? 'font-semibold text-white' : 'text-[#c8d2de]')}>{def.name}</span>
+                </span>
+              </Td>
+              <Td className="text-[#8fa2b8]">{def.params}</Td>
+              <Td className="text-left text-[#8fa2b8]">{GROUP_LABELS[def.group]}</Td>
+              <Td className="text-left text-[#8fa2b8]">
+                {def.pane === 'price' ? 'Main chart' : 'Separate window'}
+              </Td>
+            </tr>
+          );
+        })}
+      </Table>
+
+      <ToolboxFooter>
+        <span>{rows.length} of {MT5_INDICATOR_COUNT} programs</span>
+        <span>{appliedCount} applied to the chart</span>
+        {group === null ? null : <span>Group: {GROUP_LABELS[group]}</span>}
+        <span className="ml-auto">Click a row to apply it to the chart, or again to remove it.</span>
+      </ToolboxFooter>
+      <p className="border-t border-[#2b3543] px-3 py-1.5 text-[10px] leading-snug text-[#8fa2b8]">
+        {VOLUME_GROUP_NOTE}
+      </p>
+
+      {menu ? (
+        <>
+          <button type="button" aria-label="Close menu" onClick={() => setMenu(null)} className="fixed inset-0 z-[70] cursor-default" />
+          <div
+            role="menu"
+            data-codebase-menu=""
+            className="fixed z-[71] w-52 rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[12px] shadow-2xl"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <MenuItem checked={group === null} label="All groups" onPick={() => { setGroup(null); setMenu(null); }} />
+            {INDICATOR_GROUPS.map((g) => (
+              <MenuItem key={g.group} checked={group === g.group} label={g.label} onPick={() => { setGroup(g.group); setMenu(null); }} />
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * MetaTrader's two logs, which it draws identically.
+ *
+ * `Time | Source | Message` are the only Toolbox columns the help states outright, and it states
+ * them for the Journal: *"Time — the date and time of the event… Source — event type: Network,
+ * Alert, HistoryBase, Experts, the name of a separate Expert Advisor or indicator…; Message —
+ * description of the event."* (09-toolbox.md 7.8.) The Experts tab is documented as the same kind
+ * of log and never rendered, so it borrows them rather than inventing a shape.
+ *
+ * Newest first. All three columns read left: these are a clock, a name and a sentence, and none of
+ * them is a figure to line up a decimal point in.
+ */
+function LogTab({ entries, empty }: { entries: readonly JournalEntry[]; empty: React.ReactNode }) {
+  if (entries.length === 0) return <Empty>{empty}</Empty>;
+  return (
+    <Table head={[...(TOOLBOX_COLUMNS.journal ?? [])]} left={[0, 1, 2]} grow={2}>
+      {entries.slice().reverse().map((e) => (
+        <tr key={e.id} className="border-t border-[#2b3543]/40">
+          <Td first className="text-[#8fa2b8]">{stamp(e.atMs)}</Td>
+          <Td className="text-left text-[#8fa2b8]/70">{e.tag}</Td>
+          <Td className={cn(
+            'whitespace-normal text-left',
+            e.level === 'error' ? 'text-[#f23645]'
+              : e.level === 'warn' ? 'text-[#f0b90b]'
+              : e.level === 'ok' ? 'text-[#41be56]' : 'text-[#8fa2b8]',
+          )}>
+            {e.text}
+          </Td>
+        </tr>
+      ))}
+    </Table>
+  );
+}
+
+/**
+ * MetaTrader's Experts tab: what the programs attached to the chart did.
+ *
+ * *"Experts Journal… contains information about the running indicators and Expert Advisor,
+ * including opening/closing of positions, modification of orders, Expert Advisor alerts and
+ * comments"* (09-toolbox.md 7.7). This platform runs no Expert Advisors, and it is not going to
+ * pretend otherwise — but it does run INDICATORS, which is the other half of that sentence, and
+ * they genuinely initialise when the chart opens with them attached, get applied and get removed.
+ * Each writes a line (see `logExperts`), so the tab carries real events from this session.
+ *
+ * It is empty until an indicator is switched on, which is also when MetaTrader's is empty: a log
+ * with nothing in it is not a placeholder, and the empty state says what fills it rather than
+ * apologising for a feed that does not exist.
+ */
+function ExpertsTab() {
+  const experts = useExperts();
+  return (
+    <LogTab
+      entries={experts}
+      empty={
+        <>
+          No programs have logged anything this session.
+          <br />
+          This log records what the programs on the chart do. Apply an indicator, from the Code Base
+          tab or the chart&apos;s own Indicators menu, and it reports here.
+        </>
+      }
+    />
+  );
+}
+
+/**
+ * MetaTrader's Company tab: the broker's own page.
+ *
+ * *"A broker may choose to show a useful web resource here, for example a support website. Any link
+ * added here opens in a separate web browser window. This tab is hidden if the web page is disabled
+ * by the broker."* (09-toolbox.md 7.9.) Not a grid, and no screenshot of it exists, so what is
+ * drawn is the substance: this brand's identity, its licence, the currency it settles in, its
+ * support channels and the pages it publishes. Every one of those comes off the `sites` row the
+ * whole app is skinned from, so a second brand on this deployment shows its own.
+ *
+ * Every link opens in a separate window, as MetaTrader says they do.
+ */
+function CompanyTab({ page }: { page: ReturnType<typeof companyPage> }) {
+  return (
+    <div data-company-tab="" className="space-y-3 px-3 py-3 text-[11.5px] leading-relaxed">
+      <div>
+        <h3 className="text-[14px] font-semibold text-white">{page.title}</h3>
+        {page.licence === null ? null : (
+          <p className="mt-0.5 max-w-[70ch] text-[#8fa2b8]">{page.licence}</p>
+        )}
+      </div>
+
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-[11px]">
+        {page.fields.map((f) => (
+          <div key={f.label} className="contents">
+            <dt className="text-[#8fa2b8]">{f.label}</dt>
+            <dd className="text-white">{f.value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {page.support.length > 0 ? (
+        <section>
+          <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#8fa2b8]">Support</h4>
+          <ul className="space-y-1">
+            {page.support.map((l) => (
+              <li key={l.href}>
+                <a
+                  href={l.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-[11px] text-[#4597ff] hover:underline"
+                >
+                  {l.label}
+                </a>
+                <span className="ml-2 text-[#8fa2b8]">{l.note}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section>
+        <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#8fa2b8]">Published pages</h4>
+        <ul className="space-y-1">
+          {page.resources.map((l) => (
+            <li key={l.href}>
+              <a href={l.href} target="_blank" rel="noreferrer" className="text-[#4597ff] hover:underline">
+                {l.label}
+              </a>
+              <span className="ml-2 text-[#8fa2b8]">{l.note}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
   );
 }

@@ -141,7 +141,10 @@ export function TradeSurface() {
         The Toolbox is deliberately NOT one of them, and sits below this row instead: see its note.
       */}
       <div className={cn('flex min-h-0 flex-1 flex-col gap-2 md:gap-3', terminal && 'lg:flex-row lg:gap-3')}>
-      {terminal ? <MarketWatch className="hidden lg:flex lg:w-60 lg:shrink-0 xl:w-72" /> : null}
+      {/* 240 / 288 / 344px. The widest step arrives at `2xl`, where there is finally room for
+          MetaTrader's full Market Watch column set (Symbol, Bid, Ask, Spread, Time, Daily Change);
+          below it the grid drops columns from the right, as MetaTrader's own narrow window does. */}
+      {terminal ? <MarketWatch className="hidden lg:flex lg:w-60 lg:shrink-0 xl:w-72 2xl:w-[21.5rem]" /> : null}
 
       {/* `min-w-0` is load-bearing on the desktop row: without it this column refuses to shrink
           below the chart toolbar's min-content width, the row grows past the viewport and the order

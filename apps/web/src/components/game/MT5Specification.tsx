@@ -118,6 +118,11 @@ export interface MarketWatchMenuItem {
   separatorBefore?: boolean;
   checked?: boolean;
   onPick?: () => void;
+  /**
+   * A flyout, as MetaTrader's `Columns ▸` is. An item with one opens on hover and on click and
+   * picks nothing itself; its children are ordinary items.
+   */
+  submenu?: readonly MarketWatchMenuItem[];
 }
 
 const NO_BOOK =
@@ -137,6 +142,10 @@ export function marketWatchMenu(opts: {
   grid?: { on: boolean; toggle: () => void } | undefined;
   /** Whether the chart can be switched to the symbol the menu was opened on. */
   onChartWindow?: (() => void) | undefined;
+  /** `Tick Chart`: show this window's Ticks tab. */
+  onTickChart?: (() => void) | undefined;
+  /** `Columns ▸`: MetaTrader's optional column set, with each column's state and toggle. */
+  columns?: { items: ReadonlyArray<{ label: string; on: boolean; toggle: () => void }> } | undefined;
 }): MarketWatchMenuItem[] {
   // An action is offered when this platform can genuinely do it and carries a reason when it
   // cannot. A disabled item with no reason is worse than no item: it looks like a bug.
@@ -148,7 +157,8 @@ export function marketWatchMenu(opts: {
       label: 'Chart Window',
       ...act(opts.onChartWindow, 'The chart draws the symbol this brand settles on. Charting another is not built yet, and a chart the order ticket could not trade would be worse than none.'),
     },
-    { label: 'Tick Chart', unavailable: 'This feed is served as bars from M1 up, so there is no tick series to chart.' },
+    // MetaTrader's `Tick Chart` opens the Market Watch Ticks tab, which this window now has.
+    { label: 'Tick Chart', ...act(opts.onTickChart, 'The Ticks tab is already open.') },
     { label: 'Depth Of Market', shortcut: 'Alt+B', unavailable: NO_BOOK },
     // Greyed in MetaTrader's own screenshot.
     { label: 'Options Board', unavailable: 'Greyed in MetaTrader too: there are no options on this instrument.' },
@@ -180,10 +190,14 @@ export function marketWatchMenu(opts: {
     ...(opts.grid
       ? [{ label: 'Grid', checked: opts.grid.on, onPick: opts.grid.toggle }]
       : [{ label: 'Grid', checked: true, unavailable: 'The grid is on.' }]),
+    // MetaTrader's `Columns ▸` submenu. Its optional set is Bid, Ask, Spread, Time and Daily
+    // Change; `Symbol` is not among them, because MetaTrader offers no way to hide it.
     {
       label: 'Columns',
       separatorBefore: true,
-      unavailable: 'MetaTrader\u2019s optional columns are Bid, Ask, Spread and Time. There is no spread on these contracts and one price rather than two, so the column set is fixed.',
+      ...(opts.columns
+        ? { submenu: opts.columns.items.map((c) => ({ label: c.label, checked: c.on, onPick: c.toggle })) }
+        : { unavailable: 'The column set is fixed on this surface.' }),
     },
   ];
 }
@@ -221,7 +235,7 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
       style={{ left: at.x, top: at.y }}
     >
       {items.map((it) => (
-        <div key={it.label}>
+        <div key={it.label} className={it.submenu ? 'group relative' : undefined}>
           {it.separatorBefore ? <div className="my-1 h-px bg-[#2b3543]" /> : null}
           <button
             type="button"
@@ -232,7 +246,9 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
             data-mw-checked={it.checked === true ? '' : undefined}
             title={it.unavailable}
             disabled={it.unavailable !== undefined}
-            onClick={() => { it.onPick?.(); onDismiss(); }}
+            // An item with a flyout picks nothing of its own: it is a heading for its children, and
+            // dismissing the menu on its click would close the flyout before it could be used.
+            onClick={() => { if (it.submenu) return; it.onPick?.(); onDismiss(); }}
             className={cn(
               'flex w-full items-center gap-2 px-3 py-1.5 text-left transition',
               it.unavailable ? 'cursor-not-allowed text-[#4a5666]' : 'text-white hover:bg-[#3183ff]',
@@ -241,7 +257,37 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
             <span aria-hidden className="w-3 shrink-0 text-[#41be56]">{it.checked ? '✓' : ''}</span>
             <span className="flex-1">{it.label}</span>
             {it.shortcut ? <span className="shrink-0 text-[10px] text-[#8fa2b8]">{it.shortcut}</span> : null}
+            {it.submenu ? <span aria-hidden className="shrink-0 text-[10px] text-[#8fa2b8]">▸</span> : null}
           </button>
+          {it.submenu ? (
+            /* MetaTrader's flyout, opening to the RIGHT of its parent row. It is hidden rather than
+               unmounted so the hover that opens it is not interrupted by a remount, and it stays
+               open while the pointer is anywhere in the group, which is what lets a trader cross
+               the gap between the row and the panel. */
+            <div
+              role="menu"
+              aria-label={it.label}
+              data-mw-submenu={it.label}
+              className="absolute left-full top-0 z-[91] hidden min-w-40 rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl group-hover:block group-focus-within:block"
+            >
+              {it.submenu.map((sub) => (
+                <button
+                  key={sub.label}
+                  type="button"
+                  role="menuitem"
+                  data-mw-item={sub.label}
+                  data-mw-checked={sub.checked === true ? '' : undefined}
+                  // A column toggle does NOT dismiss: MetaTrader's own stays open so several can be
+                  // switched in one visit, and the grid behind it updates as each is picked.
+                  onClick={() => sub.onPick?.()}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white transition hover:bg-[#3183ff]"
+                >
+                  <span aria-hidden className="w-3 shrink-0 text-[#41be56]">{sub.checked ? '✓' : ''}</span>
+                  <span className="flex-1">{sub.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

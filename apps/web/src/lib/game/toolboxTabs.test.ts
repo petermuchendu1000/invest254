@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TOOLBOX_TABS, TOOLBOX_COLUMNS, VISIBLE_TOOLBOX_TABS, MT5_TOOLBOX_TAB_COUNT, toolboxTab,
+  TOOLBOX_TABS, TOOLBOX_COLUMNS, PLATFORM_COLUMNS, MT5_TOOLBOX_TAB_COUNT, toolboxTab,
+  visibleToolboxTabs,
 } from './toolboxTabs.js';
 
 /**
@@ -20,29 +21,32 @@ test("the Toolbox carries MetaTrader's twelve tabs, in its order and under its l
   assert.equal(toolboxTab('codebase')?.label, 'Code Base');
 });
 
-test('Company is hidden rather than disabled, which is MetaTrader s own behaviour', () => {
-  // "This tab is hidden if the web page is disabled by the broker." No brand here publishes one.
-  assert.equal(toolboxTab('company')?.hidden, true);
-  assert.equal(VISIBLE_TOOLBOX_TABS.length, 11);
-  assert.ok(!VISIBLE_TOOLBOX_TABS.some((t) => t.id === 'company'));
-  // It is the only tab MetaTrader hides.
-  assert.equal(TOOLBOX_TABS.filter((t) => t.hidden).length, 1);
+test('Company is drawn only when the brand publishes a company page, as MetaTrader hides it', () => {
+  // "This tab is hidden if the web page is disabled by the broker." The brand's own data decides;
+  // see `companyPage` in lib/terminal/company.ts for what counts as published.
+  const with_ = visibleToolboxTabs({ company: true });
+  assert.equal(with_.length, 12);
+  assert.ok(with_.some((t) => t.id === 'company'));
+
+  const without = visibleToolboxTabs({ company: false });
+  assert.equal(without.length, 11);
+  assert.ok(!without.some((t) => t.id === 'company'));
+  // Hiding Company does not disturb the order of the rest.
+  assert.deepEqual(
+    without.map((t) => t.id),
+    TOOLBOX_TABS.filter((t) => t.id !== 'company').map((t) => t.id),
+  );
 });
 
-test('the tabs this platform cannot fill are present and say why', () => {
-  const blocked = TOOLBOX_TABS.filter((t) => t.unavailable !== undefined).map((t) => t.label);
-  assert.deepEqual(blocked, ['Calendar', 'Company', 'Articles', 'Code Base', 'Experts']);
-  for (const t of TOOLBOX_TABS.filter((x) => x.unavailable)) {
-    assert.ok(t.unavailable!.length > 30, t.label);
+test('every tab carries real content: none is disabled with an excuse', () => {
+  // The four that read MQL5.com or an external feed in MetaTrader are each filled from what this
+  // platform genuinely has in that place: a generated economic calendar, the broker's own article
+  // library, the terminal's 38-indicator program library, and the log those indicators write.
+  for (const t of TOOLBOX_TABS) {
+    assert.ok(!('unavailable' in t), `${t.label} carries no "cannot fill this" reason`);
   }
-  // Exposure is NOT among them: it is computed from the open contracts and carries real numbers.
-  assert.equal(toolboxTab('exposure')?.unavailable, undefined);
-});
-
-test('the six tabs that already carried real data still do', () => {
-  for (const id of ['trade', 'exposure', 'history', 'news', 'mailbox', 'alerts', 'journal'] as const) {
-    assert.equal(toolboxTab(id)?.unavailable, undefined, id);
-  }
+  // And the only conditional tab is Company, so nothing else can quietly become hidden.
+  for (const t of TOOLBOX_TABS) assert.ok(!('hidden' in t), `${t.label} is not hard-hidden`);
 });
 
 test("the Trade grid is MetaTrader's ten columns, including its two headed Price", () => {
@@ -69,8 +73,19 @@ test('Exposure has a column headed with the deposit currency, filled in at rende
   assert.equal(TOOLBOX_COLUMNS.exposure![3], '');
 });
 
-test('Code Base and Experts carry no invented headers', () => {
-  // MetaQuotes has never rendered either grid and describes neither, so neither is guessed at.
+test("Articles is MetaTrader's own three columns", () => {
+  // Read off en/articles.png, the only published image of the tab.
+  assert.deepEqual(TOOLBOX_COLUMNS.articles, ['Name', 'Category', 'Date']);
+});
+
+test("Code Base and Experts do not guess at MetaTrader's headers", () => {
+  // MetaQuotes has never rendered either grid, so neither appears in the table of ITS columns.
   assert.equal(TOOLBOX_COLUMNS.codebase, undefined);
   assert.equal(TOOLBOX_COLUMNS.experts, undefined);
+  // What they draw is this platform's own, declared separately so the two can never be confused.
+  assert.deepEqual(PLATFORM_COLUMNS.codebase, ['Name', 'Parameters', 'Group', 'Window']);
+  // The Experts journal is documented as a log like Journal, and Journal's fields ARE published.
+  assert.deepEqual(PLATFORM_COLUMNS.experts, TOOLBOX_COLUMNS.journal);
+  // Nothing else is ours: every other tab's headers are MetaTrader's.
+  assert.deepEqual(Object.keys(PLATFORM_COLUMNS).sort(), ['codebase', 'experts']);
 });
