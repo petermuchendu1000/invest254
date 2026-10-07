@@ -72,7 +72,9 @@ test('the page carries the brand own figures, not a fixed set', () => {
 test('every published page links to real routes in this deployment', () => {
   const page = companyPage(BRAND);
   assert.deepEqual(page.resources.map((l) => l.href), [
-    '/legal#terms', '/legal#privacy', '/legal#licence', '/legal#responsible-gaming',
+    // The last anchor is the TRADING register's. A terminal brand publishes a risk disclosure, and
+    // `riskAnchor` is what decides the id, so this cannot drift from the page that serves it.
+    '/legal#terms', '/legal#privacy', '/legal#licence', '/legal#risk',
   ]);
   // Each one says what the trader gets, rather than leaving a bare link to be guessed at.
   for (const l of [...page.resources, ...page.support]) {

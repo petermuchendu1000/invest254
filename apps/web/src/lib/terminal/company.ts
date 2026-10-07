@@ -18,6 +18,8 @@
  * as a boolean in the tab table.
  */
 
+import { riskAnchor } from '../legal/legalPage.js';
+
 export interface CompanyBrand {
   name: string;
   wordmarkText?: string | null;
@@ -96,7 +98,10 @@ export function companyPage(
     { label: 'Terms of Service', href: '/legal#terms', note: 'The agreement every account trades under.' },
     { label: 'Privacy', href: '/legal#privacy', note: 'What is held about you, and for how long.' },
     { label: 'Licence', href: '/legal#licence', note: 'Who operates this platform and under what authority.' },
-    { label: 'Responsible trading', href: '/legal#responsible-gaming', note: 'Limits, self-exclusion and where to get help.' },
+    // The anchor comes from the legal module rather than being written here: a terminal brand
+    // publishes a risk disclosure, not a responsible-gaming statement, and the two have different
+    // ids so neither is reached under the other's name.
+    { label: 'Risk disclosure', href: `/legal#${riskAnchor('trading')}`, note: 'What you are taking on, and how to pause the account.' },
   ];
 
   return {
