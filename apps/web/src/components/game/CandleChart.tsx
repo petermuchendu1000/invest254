@@ -1105,6 +1105,14 @@ export function CandleChart({
     const chart = chartRef.current, main = mainRef.current;
     if (!chart) return;
     const t = themeOf(props.colours);
+    /**
+     * A test seam, for the same reason `chartBars` and `data-chart-trade-level` are seams: the axis
+     * labels are painted INTO a canvas, so from outside the only way to ask what colour they are is
+     * to count pixels -- and white text on a white pane leaves no pixels to count, which is exactly
+     * the state this exists to catch. It says plainly which foreground the chart is running.
+     */
+    const plot = plotRef.current;
+    if (plot) plot.dataset.chartForeground = t.text;
     chart.applyOptions({
       layout: { textColor: t.text },
       // Show grid. MetaTrader's Ctrl+G, and its own checkbox on the Show tab.
@@ -1343,7 +1351,21 @@ export function CandleChart({
       if (disposed) return;
       // Held so indicators can add their own series and panes after the chart exists.
       lcRef.current = lc;
-      const up = TV.up, down = TV.down, accent = TV.accent, info = TV.info, border = TV.border;
+      /**
+       * The colours the chart is BUILT with, read from the ref rather than from the closure.
+       *
+       * This effect does not depend on `props`, so `TV` here is whatever the scheme was in the
+       * render that last created the chart -- and the effect that re-themes a live chart can never
+       * repair it, because this effect's cleanup nulls `chartRef` first and that one returns early
+       * on a null chart. The result was a chart built once with the dark palette and kept: under the
+       * light theme its axis labels were painted white onto MetaTrader's white `Black on White`
+       * pane, so the price and time scales simply were not there. `propsRef` is updated on every
+       * render, so this reads the scheme as it is NOW.
+       */
+      const TVnow = themeOf(propsRef.current.colours);
+      const plotEl = plotRef.current;
+      if (plotEl) plotEl.dataset.chartForeground = TVnow.text;
+      const up = TVnow.up, down = TVnow.down, accent = TVnow.accent, info = TVnow.info, border = TVnow.border;
 
       const chart = createChart(host, {
         autoSize: true,
@@ -1352,8 +1374,8 @@ export function CandleChart({
          * "Draw object as background" set can be drawn BETWEEN the colour and the candles. The
          * chart's own background is transparent for that one reason; see DrawingsBackdrop.
          */
-        layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: TV.text, fontSize: 11, attributionLogo: true },
-        grid: { vertLines: { color: TV.grid }, horzLines: { color: TV.grid } },
+        layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: TVnow.text, fontSize: 11, attributionLogo: true },
+        grid: { vertLines: { color: TVnow.grid }, horzLines: { color: TVnow.grid } },
         // The price axis is MetaTrader's second control surface, not decoration: it is where the
         // vertical scale is set. `visible` and `minimumWidth` are stated rather than left to the
         // library's defaults so a narrow phone cannot be the one layout that drops it, and
@@ -1372,8 +1394,8 @@ export function CandleChart({
         localization: { timeFormatter: (t: Time) => labelFor(t as number, tfRef.current) },
         crosshair: {
           mode: CrosshairMode.Normal,
-          vertLine: { color: TV.cross, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TV.crossLabel },
-          horzLine: { color: TV.cross, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TV.crossLabel },
+          vertLine: { color: TVnow.cross, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TVnow.crossLabel },
+          horzLine: { color: TVnow.cross, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TVnow.crossLabel },
         },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
         // MT5's axis gestures, both of them. Dragging the PRICE axis stretches and compresses the
@@ -1567,8 +1589,12 @@ export function CandleChart({
 
   // TradingView Supercharts chrome — fixed palette so the whole view reads as a TV/MT5 terminal.
   const pill = 'h-6 min-w-[1.6rem] [@media(pointer:coarse)]:min-h-8 shrink-0 rounded px-1 text-[11px] font-semibold leading-none transition sm:px-1.5';
-  const idle = 'text-[var(--mt5-muted)] hover:text-white';
-  const active = 'bg-[var(--mt5-border)] text-white';
+  // `--mt5-text`, not white: these sit on `--mt5-border`, which is a DARK grey under the dark
+  // theme and a LIGHT one under the light theme. White was readable on one of those and
+  // invisible on the other, so the selected period -- the one pill that has to be legible --
+  // disappeared the moment a trader chose the light theme.
+  const idle = 'text-[var(--mt5-muted)] hover:text-[var(--mt5-text)]';
+  const active = 'bg-[var(--mt5-border)] text-[var(--mt5-text)]';
   const up = (legend?.changePct ?? 0) >= 0;
   const row = 'flex items-center gap-0.5';
   /**
@@ -2224,7 +2250,8 @@ export function CandleChart({
             onUndoDelete={undoDelete}
           />
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-            <span className="select-none text-4xl font-black uppercase tracking-widest text-white/[0.04]">{instrument.symbol}</span>
+            <span className="select-none text-4xl font-black uppercase tracking-widest"
+                  style={{ color: TV.text, opacity: 0.04 }}>{instrument.symbol}</span>
           </div>
           {legend && (props.showTicker || props.showOHLC) ? (
             // One line, always. Wrapped onto two it covered the top of the plot on a phone, so the
@@ -2245,7 +2272,12 @@ export function CandleChart({
               {props.showOHLC ? <span className="hidden text-[var(--mt5-muted)] sm:inline">H <span style={{ color: TV.text }}>{legend.h.toFixed(dp)}</span></span> : null}
               {props.showOHLC ? <span className="hidden text-[var(--mt5-muted)] sm:inline">L <span style={{ color: TV.text }}>{legend.l.toFixed(dp)}</span></span> : null}
               {props.showOHLC ? <span className="text-[var(--mt5-muted)]">C <span style={{ color: TV.text }}>{legend.c.toFixed(dp)}</span></span> : null}
-              {props.showOHLC ? <span className="font-semibold" style={{ color: up ? TV.up : TV.down }}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span> : null}
+              {/* `barUp`/`barDown`, not `bullCandle`/`bearCandle`: the candle fields are a FILL, and
+                  MetaQuotes' own `Black on White` sets the bull fill to #ffffff (a hollow candle with
+                  a black outline). Painting a figure with a fill meant the day's change was white on
+                  a white pane. The bar fields are the scheme's line colours and every scheme defines
+                  both. */}
+              {props.showOHLC ? <span className="font-semibold" style={{ color: up ? TV.barUp : TV.barDown }}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span> : null}
             </div>
           ) : null}
           {loading ? (
@@ -2611,7 +2643,7 @@ function DrawRail({
                       'flex h-6 items-center rounded-md border px-2 text-left text-[10px] font-semibold transition',
                       o.kind !== null && tool === o.kind
                         ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/15 text-[var(--mt5-blue)]'
-                        : 'border-[var(--mt5-border)] bg-[var(--mt5-surface)]/80 text-[var(--mt5-muted)] hover:text-white',
+                        : 'border-[var(--mt5-border)] bg-[var(--mt5-surface)]/80 text-[var(--mt5-muted)] hover:text-[var(--mt5-text)]',
                       o.unavailable && 'cursor-not-allowed opacity-45 hover:text-[var(--mt5-muted)]',
                     )}
                   >
@@ -2680,7 +2712,7 @@ function Toggle({ on, onClick, children, disabled, title }: {
       title={title}
       className={cn(
         'flex h-6 items-center justify-between rounded-md border px-2 text-[10px] font-semibold transition',
-        on ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/15 text-[var(--mt5-blue)]' : 'border-[var(--mt5-border)] bg-[var(--mt5-surface)]/80 text-[var(--mt5-muted)] hover:text-white',
+        on ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/15 text-[var(--mt5-blue)]' : 'border-[var(--mt5-border)] bg-[var(--mt5-surface)]/80 text-[var(--mt5-muted)] hover:text-[var(--mt5-text)]',
         disabled && 'cursor-not-allowed opacity-45 hover:text-[var(--mt5-muted)]',
       )}
     >
@@ -2820,7 +2852,9 @@ function MobileChartBar({
           aria-label={`Period ${mobileTfLabel(tf)}`}
           className={cn(
             'ml-auto h-9 shrink-0 rounded px-2 font-mono text-[13px] font-bold leading-none transition',
-            open === 'strip' ? on : 'text-white',
+            // Not `text-white`: this bar's background is `--mt5-surface`, white under the light
+            // theme, so the period a trader is looking at vanished exactly when they switched.
+            open === 'strip' ? on : 'text-[var(--mt5-text)]',
           )}
         >
           {mobileTfLabel(tf)}

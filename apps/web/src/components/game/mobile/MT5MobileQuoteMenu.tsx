@@ -68,7 +68,7 @@ export function MT5MobileQuoteMenu({ title, subtitle, items, onDismiss }: {
                 onClick={() => { it.onPick?.(); onDismiss(); }}
                 className={cn(
                   'flex w-full items-center gap-2 px-4 py-3 text-left text-[14px] transition',
-                  it.unavailable === undefined ? 'text-white active:bg-[var(--mt5-raised)]' : 'cursor-not-allowed text-[var(--mt5-muted)] opacity-55',
+                  it.unavailable === undefined ? 'text-[var(--mt5-text)] active:bg-[var(--mt5-raised)]' : 'cursor-not-allowed text-[var(--mt5-muted)] opacity-55',
                 )}
               >
                 <span className="flex-1">{it.label}</span>

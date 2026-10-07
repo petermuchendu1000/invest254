@@ -45,7 +45,7 @@ export function MT5Funds() {
   const server = mt5ServerName(brand, figures.demo ? 'demo' : 'real');
 
   return (
-    <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
+    <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)]">
       <MT5TitleBar title="Funds" back subtitle={figures.demo ? 'Demo account' : 'Real account'} />
 
       <div className="mx-auto w-full lg:max-w-3xl">
@@ -72,7 +72,7 @@ export function MT5Funds() {
             <button
               type="button"
               onClick={openWithdraw}
-              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-4 py-3 text-[14px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
+              className="flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-4 py-3 text-[14px] font-semibold text-[var(--mt5-text)] transition hover:bg-[var(--mt5-border)]"
             >
               Withdraw
             </button>

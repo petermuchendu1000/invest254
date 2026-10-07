@@ -93,7 +93,7 @@ export function MT5ObjectProperties({
       role="dialog"
       aria-modal="true"
       aria-label={objectNameOf(drawing)}
-      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)] sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[72vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         {/* MetaTrader's title bar carries the object's NAME and nothing else. The type is shown
@@ -143,7 +143,7 @@ export function MT5ObjectProperties({
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-[var(--mt5-text)] transition hover:bg-[var(--mt5-border)]"
           >
             Cancel
           </button>
@@ -155,8 +155,8 @@ export function MT5ObjectProperties({
 
 type Setter = <K extends keyof Drawing>(k: K, v: Drawing[K]) => void;
 
-const input = 'h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 font-mono text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]';
-const select = 'h-8 min-w-0 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]';
+const input = 'h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 font-mono text-[11px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]';
+const select = 'h-8 min-w-0 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-[var(--mt5-text)] outline-none focus:border-[var(--mt5-blue)]';
 
 /** A labelled row. MetaTrader right-aligns the label to the left of its control, with a colon. */
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -412,7 +412,7 @@ function LvlBtn({ label, onClick, disabled }: { label: string; onClick: () => vo
         'h-8 flex-1 rounded-sm border text-[11px] font-semibold transition',
         disabled
           ? 'cursor-not-allowed border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[var(--mt5-border)]'
-          : 'border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-white hover:border-[var(--mt5-blue)] hover:bg-[var(--mt5-border)]',
+          : 'border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[var(--mt5-text)] hover:border-[var(--mt5-blue)] hover:bg-[var(--mt5-border)]',
       )}
     >
       {label}

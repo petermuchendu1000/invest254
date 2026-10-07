@@ -9,6 +9,7 @@ import { ReferralCapture } from '@/components/ReferralCapture';
 import { SecurityQuestionsGate } from '@/components/auth/SecurityQuestionsGate';
 import { MfaEnrolmentGate } from '@/components/auth/MfaEnrolmentGate';
 import { SessionCacheGuard } from '@/components/auth/SessionCacheGuard';
+import { SoundBootstrap } from '@/components/layout/SoundToggle';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -23,6 +24,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={client}>
       <ToastProvider>
         {children}
+        {/**
+          * The stored sound preference, restored for EVERY shell.
+          *
+          * It was mounted in the digits branch of AppShell alone, so on a terminal brand -- where
+          * Settings is the only sound control there is -- the store kept its `muted: false` default
+          * on every load and the row came back ticked however the trader had left it. The toggle
+          * wrote `pp:sound-muted` faithfully; nothing ever read it back.
+          *
+          * Here rather than in the three remaining AppShell branches, because a preference that has
+          * to be restored in four places is one a fifth shell will forget.
+          */}
+        <SoundBootstrap />
         <SessionCacheGuard />
         <ReferralCapture />
         <OutcomeOverlay />

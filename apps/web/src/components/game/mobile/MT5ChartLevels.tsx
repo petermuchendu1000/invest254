@@ -221,7 +221,7 @@ export function MT5ChartLevels({ project, width, height, digits, price, stakeCen
         {/* While dragging, MetaTrader shows the potential result in points and in money. */}
         {live ? (
           <span
-            className="pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-[var(--mt5-surface)]/90 px-1.5 py-0.5 font-mono text-[10px] leading-none text-white tabular-nums"
+            className="pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-[var(--mt5-surface)]/90 px-1.5 py-0.5 font-mono text-[10px] leading-none text-[var(--mt5-text)] tabular-nums"
             style={{ outline: `1px solid ${colour}`, top: nudge[field] }}
           >
             {points > 0 ? '+' : ''}{points} pts

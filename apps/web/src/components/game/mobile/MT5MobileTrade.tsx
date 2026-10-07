@@ -185,7 +185,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   ];
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-white">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)]">
       {/* Android's top bar, all four of its controls (04-mobile-app.md 210):
           `☰` | "Trade" small with the total floating profit beneath it in blue | sort (↑↓) | new
           order. */}

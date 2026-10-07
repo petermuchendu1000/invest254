@@ -11,7 +11,6 @@ import { DigitsBottomNav } from '@/components/layout/DigitsBottomNav';
 import { PositionsSheet } from '@/components/game/digits/PositionsSheet';
 import { TransactionHistoryModal } from '@/components/game/digits/TransactionHistoryModal';
 import { HowToTradeModal } from '@/components/game/digits/HowToTradeModal';
-import { SoundBootstrap } from '@/components/layout/SoundToggle';
 import { LiveChatPanel, LiveChatLauncher } from '@/components/chat/LiveChatPanel';
 import { AccountDialogs } from '@/components/account/AccountDialogs';
 import { Footer } from '@/components/layout/Footer';
@@ -66,7 +65,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <PositionsSheet />
         <TransactionHistoryModal />
         <HowToTradeModal />
-        <SoundBootstrap />
         <LiveChatPanel />
         <AccountDialogs />
         <SessionBootstrap />
@@ -160,7 +158,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
        * `Card`, `Button` and `Input` read as a consumer app inside a terminal.
        */
       <div className="flex min-h-dvh flex-col bg-[var(--mt5-surface)]" style={MT5_TOKENS}>
-        <TopBar />
+        {/* The same one-bar rule as the trade surface above, for the same reason: below `lg` this
+            is MetaTrader's phone, and every screen here already carries a MetaTrader title bar --
+            its own, or the one `MT5Screen` gives it -- with a way back in the place MetaTrader puts
+            one. The brand's app bar above that was a second bar on a sub-screen that MetaTrader
+            draws with one. From `lg` up it is the desktop terminal's title bar and stays. */}
+        <div className="hidden shrink-0 lg:block">
+          <TopBar />
+        </div>
         <NotificationBanners />
         <main className="flex w-full flex-1 flex-col pb-[env(safe-area-inset-bottom)] md:pb-4">
           {/* A page that draws its own MetaTrader bar keeps it; one that does not is given one,

@@ -167,7 +167,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
       <div
         role="dialog"
         aria-label="New order"
-        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-xl border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-white pb-[env(safe-area-inset-bottom)] shadow-2xl"
+        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-xl border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-[var(--mt5-text)] pb-[env(safe-area-inset-bottom)] shadow-2xl"
       >
         {/* MetaTrader's result, over the form it was sent from. */}
         {result === null ? null : <MT5OrderResult result={result} onDismiss={clear} />}

@@ -117,13 +117,13 @@ export function MT5AccountPanel({ embedded = false }: {
                 )}
               >
                 <span className={cn('grid h-5 w-5 shrink-0 place-items-center rounded-sm', active ? 'bg-[var(--mt5-blue)]' : 'bg-[var(--mt5-border)]')}>
-                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <svg viewBox="0 0 24 24" className={cn('h-3.5 w-3.5', active ? 'text-white' : 'text-[var(--mt5-text)]')} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
                     <circle cx="12" cy="8" r="3.2" />
                     <path d="M5 20a7 7 0 0114 0" strokeLinecap="round" />
                   </svg>
                 </span>
                 <span className="min-w-0">
-                  <span className={cn('block truncate text-[13px]', active ? 'text-[var(--mt5-blue-link)]' : 'text-white')}>{label}</span>
+                  <span className={cn('block truncate text-[13px]', active ? 'text-[var(--mt5-blue-link)]' : 'text-[var(--mt5-text)]')}>{label}</span>
                   <span className={cn('block truncate font-mono text-[11px]', active ? 'text-[var(--mt5-blue-link)]' : 'text-[var(--mt5-muted)]')}>
                     {money.fmt(cents)}
                   </span>
@@ -135,7 +135,7 @@ export function MT5AccountPanel({ embedded = false }: {
         </nav>
 
         <div className="min-w-0 flex-1 px-4 py-4">
-        <h2 className="mb-3 text-[14px] font-semibold text-white">
+        <h2 className="mb-3 text-[14px] font-semibold text-[var(--mt5-text)]">
           {demo ? 'Demo account' : 'Live account'}
         </h2>
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-[13px]">
@@ -158,7 +158,7 @@ export function MT5AccountPanel({ embedded = false }: {
               type="button"
               onClick={() => topup.mutate()}
               disabled={topup.isPending}
-              className="rounded border border-[var(--mt5-border)] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[var(--mt5-raised)] disabled:opacity-60"
+              className="rounded border border-[var(--mt5-border)] px-4 py-2 text-[13px] font-semibold text-[var(--mt5-text)] transition hover:bg-[var(--mt5-raised)] disabled:opacity-60"
             >
               {topup.isPending ? 'Topping up…' : 'Top up demo balance'}
             </button>
@@ -200,7 +200,7 @@ function Row({ label, value, strong, mono }: { label: string; value: string; str
   return (
     <>
       <dt className="text-[var(--mt5-muted)]">{label}</dt>
-      <dd className={cn('break-all text-white', strong && 'font-semibold', mono && 'font-mono text-[12px]')}>{value}</dd>
+      <dd className={cn('break-all text-[var(--mt5-text)]', strong && 'font-semibold', mono && 'font-mono text-[12px]')}>{value}</dd>
     </>
   );
 }

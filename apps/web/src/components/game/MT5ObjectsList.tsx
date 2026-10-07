@@ -83,7 +83,7 @@ export function MT5ObjectsList({
       role="dialog"
       aria-modal="true"
       aria-label={`Objects on ${symbol},${timeframe}`}
-      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)] sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[70vh] sm:max-w-[600px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
@@ -179,7 +179,7 @@ function Btn({ label, disabled, onClick, title, pressed }: {
           ? 'cursor-not-allowed border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[var(--mt5-border)]'
           : pressed
             ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/20 text-white'
-            : 'border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-white hover:border-[var(--mt5-blue)] hover:bg-[var(--mt5-border)]',
+            : 'border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[var(--mt5-text)] hover:border-[var(--mt5-blue)] hover:bg-[var(--mt5-border)]',
       )}
     >
       {label}

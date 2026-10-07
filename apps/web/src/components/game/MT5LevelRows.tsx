@@ -175,7 +175,7 @@ export function MT5LevelRows({ price, digits, continuous }: {
                 onChange={(e) => setTyping({ field, text: e.target.value })}
                 onBlur={() => commit(field, typing.text)}
                 onKeyDown={(e) => { if (e.key === 'Enter') commit(field, typing.text); if (e.key === 'Escape') setTyping(null); }}
-                className="h-8 min-w-0 flex-1 rounded border border-[var(--mt5-blue)] bg-[var(--mt5-surface)] px-1 text-center font-mono text-[12px] font-semibold text-white tabular-nums outline-none"
+                className="h-8 min-w-0 flex-1 rounded border border-[var(--mt5-blue)] bg-[var(--mt5-surface)] px-1 text-center font-mono text-[12px] font-semibold text-[var(--mt5-text)] tabular-nums outline-none"
               />
             ) : (
               /* Tap the value to type it, which is MetaTrader's own affordance on these fields and

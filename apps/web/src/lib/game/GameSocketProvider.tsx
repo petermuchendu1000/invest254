@@ -23,6 +23,7 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import { logJournal } from '@/lib/game/journal';
+import { play } from '@/lib/sound/sound';
 import {
   errorTitle, friendlyError, type LocalRefusal,
 } from '@/lib/game/orderResult';
@@ -1279,6 +1280,18 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
             const o = data as { positionId?: string; ticket?: number | null; direction?: string; stakeCents?: number; entryRate?: number };
             logJournal('ok', 'Trade', `#${ticketLabel({ ticket: o.ticket ?? null, positionId: o.positionId ?? null })} ${o.direction} accepted at ${o.entryRate?.toFixed?.(6) ?? '?'}`);
           }
+          /**
+           * The sound the Settings toggle governs, on the event it names.
+           *
+           * "Order sounds -- a sound when an order opens and when it settles" was true of the digits
+           * shell and of nothing else: `play` was called from `DigitsTradeScreen` alone, so on a
+           * terminal brand -- where that row is the only sound control there is -- the setting
+           * governed the live-chat chime and not one thing about an order. Here, because this is
+           * where the ENGINE says an order opened, so both shells and every surface that can place
+           * one are covered by the same two lines. `play` is a no-op while muted, and digits settle
+           * on their own `digit_settled` frame, so nothing sounds twice.
+           */
+          play('place');
           const d = data as PositionOpenedData;
           /**
            * Bound to the order that caused it by the `clientId` the engine echoes back.
@@ -1402,6 +1415,8 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
           void qc.invalidateQueries({ queryKey: ['wallet'] });
 
           const won = d.result === 'win';
+          // The other half of "and when it settles". The engine's own verdict, not a local one.
+          play(won ? 'win' : 'loss');
           // stake is recoverable from the authoritative figures: payout − pnl.
           const stakeCents = Math.max(0, Math.round(d.payoutCents - d.pnlCents));
           const mult = d.lockedMultiplier;

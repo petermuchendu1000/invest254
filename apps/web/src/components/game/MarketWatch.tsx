@@ -814,7 +814,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
               <button
                 type="button"
                 onClick={() => setSpecOpen(true)}
-                className="h-7 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[11px] font-semibold text-white transition hover:border-[var(--mt5-blue)]"
+                className="h-7 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[11px] font-semibold text-[var(--mt5-text)] transition hover:border-[var(--mt5-blue)]"
               >
                 Specification
               </button>

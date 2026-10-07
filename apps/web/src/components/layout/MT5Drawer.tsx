@@ -135,7 +135,7 @@ export function MT5Drawer() {
       <button type="button" aria-label="Close menu" onClick={close} className="fixed inset-0 z-[70] bg-black/60" />
       <nav
         aria-label="Main menu"
-        className="fixed bottom-0 left-0 top-0 z-[71] flex w-[82%] max-w-[320px] flex-col overflow-y-auto border-r border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-white shadow-2xl"
+        className="fixed bottom-0 left-0 top-0 z-[71] flex w-[82%] max-w-[320px] flex-col overflow-y-auto border-r border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-[var(--mt5-text)] shadow-2xl"
       >
         {/* MetaTrader heads the panel with the account itself: who you are, which server, how much —
             and tapping it opens the account, which is also where the Real/Demo switch lives now that
@@ -213,7 +213,7 @@ function Row({
     // 44px tall: MetaTrader's rows are compact, but a tap target below the Apple minimum is a worse
     // phone screen than a faithful one.
     'flex w-full items-center gap-3 px-4 py-3 text-left text-[14px]',
-    active ? 'bg-[var(--mt5-raised)] text-[var(--mt5-blue-link)]' : tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-white',
+    active ? 'bg-[var(--mt5-raised)] text-[var(--mt5-blue-link)]' : tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-[var(--mt5-text)]',
   );
   const body = (
     <>

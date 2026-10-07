@@ -28,7 +28,7 @@ export function MT5MobileMessages() {
   const items = notifications.data?.items ?? [];
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-white">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-[var(--mt5-text)]">
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2">
         <span className="text-[14px] font-semibold text-white">Messages</span>
       </div>
