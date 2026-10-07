@@ -1,46 +1,18 @@
 import type { Metadata, Viewport } from 'next';
-import { headers, cookies } from 'next/headers';
 import './globals.css';
 import { AppShell } from '@/components/layout/AppShell';
 import { Providers } from '@/components/Providers';
 import { BrandProvider } from '@/lib/brand/BrandProvider';
-import { resolveBrand, brandRootStyle, brandWordmark, type Brand } from '@/lib/brand/brand';
+import { brandRootStyle, brandWordmark } from '@/lib/brand/brand';
+import { currentBrand } from '@/lib/brand/currentBrand';
 import { googleFontsHref } from '@/lib/brand/fonts';
 import { env } from '@/lib/env';
+import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
+import { registerOf } from '@/lib/ui/register';
 
 // Cloudflare Pages runs on the edge; per-request per-brand SSR (Task G) makes every route dynamic,
 // so the whole app must opt into the Edge runtime. Set on the root layout -> cascades to all routes.
 export const runtime = 'edge';
-
-/** The incoming host (proxy-aware) — drives which brand this request renders. */
-function requestHost(): string {
-  const h = headers();
-  return (h.get('x-forwarded-host') ?? h.get('host') ?? '').split(',')[0]!.trim();
-}
-
-/**
- * #10 geo-currency: the visitor's ISO country from the CDN edge (Cloudflare `cf-ipcountry`, with a
- * Vercel fallback for preview deploys). Sentinels like 'XX'/'T1' are left as-is — the API ignores an
- * unmapped country and keeps the brand currency. Empty string when the header is absent (local dev).
- */
-function requestCountry(): string {
-  const h = headers();
-  return (h.get('cf-ipcountry') ?? h.get('x-vercel-ip-country') ?? '').trim();
-}
-
-/**
- * #10: the user's chosen display currency, read from the `pp-currency` cookie so it survives into SSR
- * (the bearer token lives only in localStorage, invisible to the server). The switcher sets this
- * cookie, and a signed-in user's saved server preference is synced into it after login.
- */
-function preferredCurrency(): string {
-  return cookies().get('pp-currency')?.value?.trim() ?? '';
-}
-
-/** Resolve the brand for the current request (host → API `sites` row, cached briefly upstream). */
-async function currentBrand(): Promise<Brand> {
-  return resolveBrand(env.apiBaseUrl, requestHost(), { country: requestCountry(), currency: preferredCurrency() });
-}
 
 // Per-brand document metadata: title/description/icons/theme-colour all come from the resolved
 // brand, so one deployment serves each domain its own identity (no rebuild per brand).
@@ -49,7 +21,12 @@ export async function generateMetadata(): Promise<Metadata> {
   const name = brandWordmark(b);
   return {
     title: { default: b.name, template: `%s · ${b.name}` },
-    description: `${b.name}: real-money trade-prediction game. Predict BUY/SELL on the live curve.`,
+    // The product this brand actually is. A brand whose shell is the MetaTrader terminal is a
+    // broker, and describing it as a prediction game put the wrong product in its page metadata,
+    // its manifest and every search and social preview of it. See lib/ui/register.
+    description: registerOf(tradingViewTypeOf(chartStyleOf(b.chartStyle)) !== null) === 'trading'
+      ? `${b.name}: a trading terminal for synthetic instruments. Live charts, market execution, server-side stops.`
+      : `${b.name}: real-money trade-prediction game. Predict BUY/SELL on the live curve.`,
     applicationName: b.name,
     manifest: '/manifest.webmanifest',
     appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: b.name },
