@@ -15,6 +15,7 @@ import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useHydrated } from '@/lib/useHydrated';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useVolumeStore, useRestoreVolume } from '@/lib/game/volume';
+import { useDurationStore, useRestoreDuration, effectiveDuration } from '@/lib/game/duration';
 import { api } from '@/lib/api/endpoints';
 import type { ActivePosition } from '@/lib/game/betting';
 import type { Tick } from '@/lib/game/types';
@@ -138,9 +139,22 @@ export function useOrderEntry(): OrderEntry {
     staleTime: 5 * 60_000,
   });
 
+  /**
+   * The contract term, from the store beside the volume's rather than a `useState`.
+   *
+   * See lib/game/duration for why: every order-entry surface, and the chart menu's pending-order
+   * row, has to be on the term the trader actually set. A stored term the brand no longer offers
+   * falls back to its default, which is what `effectiveDuration` is for.
+   */
   const defaultDurationS = config?.defaultDurationS ?? 10;
-  const [durationS, setDurationS] = useState<number>(defaultDurationS);
-  useEffect(() => { setDurationS(defaultDurationS); }, [defaultDurationS]);
+  const durations = useMemo(
+    () => Array.from(new Set([...DURATION_OPTIONS, defaultDurationS])).sort((a, b) => a - b),
+    [defaultDurationS],
+  );
+  useRestoreDuration();
+  const storedDuration = useDurationStore((s) => s.durationS);
+  const setDurationS = useDurationStore((s) => s.set);
+  const durationS = effectiveDuration(storedDuration, durations, defaultDurationS);
 
   // Quote updates ride the tick stream, which does not re-render React on its own.
   const [, force] = useState(0);
@@ -293,11 +307,6 @@ export function useOrderEntry(): OrderEntry {
   const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
   const overBalance = !!token && stakeCents > spendable;
   const connecting = status !== 'open';
-
-  const durations = useMemo(
-    () => Array.from(new Set([...DURATION_OPTIONS, defaultDurationS])).sort((a, b) => a - b),
-    [defaultDurationS],
-  );
 
   // The ticket's working copy of the levels, which `place` hands to the engine as absolute prices.
   const levels = useLevelsStore((s) => s.levels);

@@ -195,6 +195,29 @@ export interface GameRepository {
   setPositionLevels?(positionId: string, slPrice: number | null, tpPrice: number | null): Promise<void>;
 }
 
+/**
+ * A pending order as the repository stores and returns one (migration 0185).
+ *
+ * Declared here rather than imported from `./pending.js` so the repository layer does not depend on
+ * the engine's own types: this file is the boundary with the database, and the shape it reads back
+ * is its own contract. `PendingOrders` consumes it structurally.
+ */
+export interface PendingOrderRecord {
+  id: string;
+  userId: string;
+  kind: "buyLimit" | "sellLimit" | "buyStop" | "sellStop";
+  symbol: string;
+  stakeCents: number;
+  triggerPrice: number;
+  slPrice: number | null;
+  tpPrice: number | null;
+  durationS: number;
+  createdAtMs: number;
+}
+
+/** What is written: the record plus the brand it belongs to. */
+export type PendingOrderRow = PendingOrderRecord & { siteId: string | null };
+
 /** Minimal query surface compatible with `pg`'s Pool/Client. */
 export interface Querier { query(text: string, params: unknown[]): Promise<{ rows: any[] }>; }
 
@@ -389,6 +412,39 @@ export class InMemoryGameRepository implements GameRepository {
     if (!p || p.status !== "open") return;
     p.slPrice = slPrice;
     p.tpPrice = tpPrice;
+  }
+
+  /**
+   * Pending orders (0185), mirrored so a development engine behaves like a deployed one.
+   *
+   * It survives nothing, because this repository survives nothing: the point is that the engine's
+   * own recovery path is exercised rather than skipped, and that an order placed against this
+   * repository is listed, filled and cancelled by exactly the code that will run against Postgres.
+   */
+  private readonly pendingOrders = new Map<string, PendingOrderRow & { filled: boolean; canceled: boolean }>();
+
+  async insertPendingOrder(o: PendingOrderRow): Promise<void> {
+    if (this.pendingOrders.has(o.id)) return;
+    this.pendingOrders.set(o.id, { ...o, filled: false, canceled: false });
+  }
+
+  async markPendingFilled(id: string, _positionId: string): Promise<void> {
+    const o = this.pendingOrders.get(id);
+    if (!o || o.filled || o.canceled) return;
+    o.filled = true;
+  }
+
+  async markPendingCanceled(id: string): Promise<void> {
+    const o = this.pendingOrders.get(id);
+    if (!o || o.filled || o.canceled) return;
+    o.canceled = true;
+  }
+
+  async listLivePendingOrders(siteId: string | null): Promise<PendingOrderRecord[]> {
+    return [...this.pendingOrders.values()]
+      .filter((o) => !o.filled && !o.canceled && (siteId === null || o.siteId === siteId))
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .map(({ siteId: _s, filled: _f, canceled: _c, ...rest }) => rest);
   }
 
   async getFairness(tradeDate: string): Promise<FairnessRecord | null> {
@@ -751,6 +807,63 @@ export class PgGameRepository implements GameRepository {
     await this.q.query(
       "update positions set sl_price = $2, tp_price = $3 where id = $1::uuid and status = 'open'",
       [positionId, slPrice, tpPrice]);
+  }
+
+  // ── Pending orders (migration 0185) ────────────────────────────────────────────────────────────
+  // An order is an INSTRUCTION, never an amount: nothing here debits anyone, and the only thing a
+  // row ever causes is the same `fn_open_position` a market order calls, once, after the engine has
+  // already removed it from its own book. See apps/engine/src/pending.ts.
+
+  async insertPendingOrder(o: PendingOrderRow): Promise<void> {
+    await this.q.query(
+      `insert into pending_orders
+         (id, site_id, user_id, kind, symbol, stake_cents, trigger_price, sl_price, tp_price, duration_s, created_at)
+       values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, to_timestamp($11 / 1000.0))
+       on conflict (id) do nothing`,
+      [o.id, o.siteId, o.userId, o.kind, o.symbol, o.stakeCents, o.triggerPrice,
+       o.slPrice, o.tpPrice, o.durationS, o.createdAtMs]);
+  }
+
+  /**
+   * Stamp the fill. Guarded on the order still being live, so a replay after a restart cannot mark
+   * one order filled by two different positions, and `filled_position_id` records which it became.
+   */
+  async markPendingFilled(id: string, positionId: string): Promise<void> {
+    await this.q.query(
+      `update pending_orders set filled_at = now(), filled_position_id = $2::uuid
+        where id = $1::uuid and filled_at is null and canceled_at is null`,
+      [id, positionId]);
+  }
+
+  async markPendingCanceled(id: string): Promise<void> {
+    await this.q.query(
+      `update pending_orders set canceled_at = now()
+        where id = $1::uuid and filled_at is null and canceled_at is null`,
+      [id]);
+  }
+
+  /** Boot: everything still waiting for this brand, so a deploy does not disarm it. */
+  async listLivePendingOrders(siteId: string | null): Promise<PendingOrderRecord[]> {
+    const { rows } = await this.q.query(
+      `select id, user_id, kind, symbol, stake_cents, trigger_price, sl_price, tp_price,
+              duration_s, created_at
+         from pending_orders
+        where filled_at is null and canceled_at is null
+          and ($1::uuid is null or site_id = $1::uuid)
+        order by created_at asc`,
+      [siteId]);
+    return rows.map((x: any) => ({
+      id: String(x.id),
+      userId: String(x.user_id),
+      kind: String(x.kind) as PendingOrderRecord["kind"],
+      symbol: String(x.symbol),
+      stakeCents: Number(x.stake_cents),
+      triggerPrice: Number(x.trigger_price),
+      slPrice: x.sl_price === null || x.sl_price === undefined ? null : Number(x.sl_price),
+      tpPrice: x.tp_price === null || x.tp_price === undefined ? null : Number(x.tp_price),
+      durationS: Number(x.duration_s),
+      createdAtMs: toMs(x.created_at),
+    }));
   }
 }
 

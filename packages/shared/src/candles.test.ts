@@ -140,3 +140,46 @@ test("toTick rounds to the symbol's precision and never invents digits", () => {
   assert.equal(toTick(XAUUSD, 2650.125), 2650.13);
   assert.equal(toTick({ ...XAUUSD, digits: 0 }, 2650.7), 2651);
 });
+
+test("tick volume: price CHANGES per bar, and the sum of them at every higher period", () => {
+  /**
+   * MetaTrader's `Tick Volumes` is the number of price changes inside a bar, which is a figure this
+   * feed genuinely has (its quote is quantised to the instrument's tick) and traded volume is not.
+   *
+   * Two properties matter and both are checked here: a minute's count is a count of CHANGES rather
+   * than of samples, so it is below the 60 samples taken and above zero; and a higher period's
+   * count is the SUM of the minutes it folds, which is what makes a switch of timeframe show the
+   * same activity rather than a different one.
+   */
+  const curve = new CurveGenerator("tickvol-seed", DEFAULT_CONFIG, "market");
+  const m1 = minuteBars(XAUUSD, DAY0, 2650, (t) => curve.value(t));
+  for (const [i, b] of m1.entries()) {
+    assert.equal(typeof b.tickVolume, "number", `bar ${i} carries no tick volume`);
+    assert.ok(b.tickVolume! > 0, `bar ${i} claims the price never moved`);
+    assert.ok(b.tickVolume! <= 60, `bar ${i} counts more changes than samples taken`);
+  }
+  // It is a real histogram: the counts differ bar to bar rather than being a flat 60.
+  assert.ok(new Set(m1.map((b) => b.tickVolume)).size > 3, "every bar reported the same count");
+
+  const dayTotal = m1.reduce((n, b) => n + b.tickVolume!, 0);
+  for (const tf of ["M5", "M15", "H1", "H4", "D1"] as Timeframe[]) {
+    const bars = aggregate(m1, tf);
+    assert.equal(
+      bars.reduce((n, b) => n + b.tickVolume!, 0),
+      dayTotal,
+      `${tf} does not carry the day's tick volume`,
+    );
+  }
+});
+
+test("tick volume: a source that does not count them produces bars that do not either", () => {
+  // "Not counted" and "counted and zero" must stay different: a zero would draw a column saying
+  // the price never moved, which is a claim about the market rather than about the data.
+  const src = [
+    { time: DAY0, open: 1, high: 2, low: 1, close: 2 },
+    { time: DAY0 + 60, open: 2, high: 3, low: 2, close: 3 },
+  ];
+  const out = aggregate(src, "M5");
+  assert.equal(out.length, 1);
+  assert.equal(out[0]!.tickVolume, undefined);
+});

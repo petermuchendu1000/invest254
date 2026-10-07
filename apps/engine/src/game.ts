@@ -10,6 +10,7 @@ import {
   type MultiplierState, type MultDir, type MultCloseReason,
 } from "@invest254/shared";
 import type { GameRepository } from "./wallet.js";
+import { PendingOrders, type PendingOrder, type PendingOrderStore } from "./pending.js";
 import { overrideAffectsPricing, userSettlement, type UserOverride } from "./overrides.js";
 import type { PoolController } from "./poolcontroller.js";
 import { eatDay as poolEatDay } from "./poolcontroller.js";
@@ -62,7 +63,33 @@ export interface SettledEvent {
   closedBy?: CloseReason;
 }
 export interface UpdateEvent { positionId: string; liveMultiplier: number; livePnlCents: number; secondsLeft: number; sellable: boolean; }
-type Listener = { onTick?: (t: Tick) => void; onUpdate?: (u: UpdateEvent) => void; onSettled?: (e: SettledEvent) => void; onError?: (err: Error, ctx: string) => void; };
+type Listener = {
+  onTick?: (t: Tick) => void;
+  onUpdate?: (u: UpdateEvent) => void;
+  onSettled?: (e: SettledEvent) => void;
+  onError?: (err: Error, ctx: string) => void;
+  /**
+   * A pending order reached its level and became a position, or tried and could not.
+   *
+   * Its own event rather than a position event, because the trader is being told about something
+   * they armed earlier and are probably not watching: MetaTrader reports the fill in the Journal
+   * and moves the row from Orders to Trade, and a terminal cannot do either without being told.
+   */
+  onPendingFilled?: (e: {
+    order: PendingOrder;
+    positionId: string | null;
+    /**
+     * The position the order became, so a client can add it to its Trade grid at once.
+     *
+     * Carried rather than left to the client to go and fetch: `position_opened` is otherwise only
+     * ever sent as the reply to a client's OWN `open_position`, so a position the engine opened by
+     * itself would not appear anywhere until the tab was reloaded. A trader who armed an order and
+     * watched it fill would see the row vanish from Orders and nothing take its place.
+     */
+    position: Position | null;
+    error: string | null;
+  }) => void;
+};
 
 /**
  * The active trading day, supplied to the GameServer on every tick/open. Decoupling the
@@ -139,7 +166,36 @@ export class GameServer {
      * brand that charts a line, which therefore has no levels and keeps the committed contract.
      */
     private readonly priceAxis?: () => PriceAxis,
-  ) {}
+    /**
+     * Where pending orders are kept, so a deploy does not disarm them (migration 0185).
+     *
+     * Optional, like every other persistence seam here: absent means this brand holds its orders in
+     * memory for the life of the process, which is what every test fake and the in-memory
+     * development repository do.
+     */
+    pendingStore?: PendingOrderStore,
+    private readonly siteId: string | null = null,
+  ) {
+    this.pending = new PendingOrders(
+      pendingStore ?? {},
+      siteId,
+      async (order, direction) => {
+        const { position } = await this.openPosition({
+          userId: order.userId,
+          stakeCents: order.stakeCents,
+          direction,
+          durationS: order.durationS,
+          slPrice: order.slPrice,
+          tpPrice: order.tpPrice,
+        });
+        return { positionId: position.id };
+      },
+      this.now,
+    );
+  }
+
+  /** The orders armed at a price, waiting for the market. See apps/engine/src/pending.ts. */
+  readonly pending: PendingOrders;
 
   /**
    * The price a level is measured against right now, or null when this brand has no axis.
@@ -202,6 +258,34 @@ export class GameServer {
   private emitTick(t: Tick) { for (const l of this.listeners) l.onTick?.(t); }
   private emitUpdate(u: UpdateEvent) { for (const l of this.listeners) l.onUpdate?.(u); }
   private emitSettled(e: SettledEvent) { for (const l of this.listeners) l.onSettled?.(e); }
+  private emitPendingFilled(e: { order: PendingOrder; positionId: string | null; error: string | null }) {
+    const position = e.positionId === null ? null : this.positions.get(e.positionId) ?? null;
+    for (const l of this.listeners) l.onPendingFilled?.({ ...e, position });
+  }
+
+  /**
+   * The price right now, on this brand's own axis.
+   *
+   * Exposed because a pending order's level has to be checked against the market BEFORE it is
+   * armed, and the only price that can do that is the engine's: the browser's is a tick or two old,
+   * and an order placed against a stale price is an order that fills the instant it is made. Null
+   * when no price can be known this moment, which is what `priceNow` already means.
+   */
+  priceRightNow(): number | null {
+    return this.lastRate === undefined ? null : this.priceNow(this.lastRate, this.now());
+  }
+
+  /**
+   * The symbol this brand's price axis is on, which is the symbol a pending order's level belongs
+   * to. Null on a brand with no axis, which therefore has no pending orders either.
+   *
+   * Public because the socket layer has to refuse an order on any OTHER symbol: the tick sweep
+   * only ever offers this one to `pending.step`, so an order armed on a different instrument
+   * would sit in the book forever — armed, listed, and unfillable.
+   */
+  tradedSymbol(): string | null {
+    try { return this.priceAxis?.().instrument.symbol ?? null; } catch { return null; }
+  }
   private emitError(err: Error, ctx: string) { for (const l of this.listeners) l.onError?.(err, ctx); }
 
   start(): void {
@@ -270,6 +354,28 @@ export class GameServer {
         const g = (nowMs - p.openedAtMs) / (p.durationS * 1000);
         const live = this.liveMultiplier(p, g, ctx.settlement);
         this.emitUpdate({ positionId: p.id, liveMultiplier: live, livePnlCents: Math.round(p.stakeCents * live) - p.stakeCents, secondsLeft: Math.max(0, (p.expiresAtMs - nowMs) / 1000), sellable: p.sellable });
+      }
+      /**
+       * Pending orders, on the same tick and against the same price as the protective levels.
+       *
+       * After the sweep above rather than inside it, so a fill cannot open a position that the same
+       * loop then iterates over half-built. Skipped entirely when nothing is armed, which is the
+       * usual case and costs one map lookup.
+       */
+      if (this.pending.size > 0) {
+        const price = priceThisTick();
+        const symbol = this.tradedSymbol();
+        if (price !== null && symbol !== null) {
+          try {
+            for (const { order, outcome } of await this.pending.step(symbol, price)) {
+              this.emitPendingFilled({
+                order,
+                positionId: outcome.ok ? outcome.positionId : null,
+                error: outcome.ok ? null : outcome.reason,
+              });
+            }
+          } catch (err) { this.emitError(err as Error, "pending-step"); }
+        }
       }
       for (const { p, reason } of stopped) {
         try { await this.closeAtLevel(p, reason); } catch (err) { this.emitError(err as Error, `level-close ${p.id}`); }

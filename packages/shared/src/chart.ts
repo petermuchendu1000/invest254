@@ -18,6 +18,18 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
+  /**
+   * MetaTrader's TICK VOLUME: the number of PRICE CHANGES inside the bar.
+   *
+   * It is not traded volume and must never be read as one. Traded volume is a quantity exchanged
+   * between parties, which this feed has none of; a tick volume is a count of how many times the
+   * quote moved, which it genuinely has, and which is why MetaTrader draws the two as separate
+   * rows (`Volumes` / `Tick Volumes`) rather than one. See docs/mt5/08-chart-properties.md.
+   *
+   * Optional because a bar can be built by a caller that does not count them: a bar with no count
+   * draws no histogram rather than a zero, which would read as "the price never moved".
+   */
+  tickVolume?: number;
 }
 
 /** Minimal tick shape this module needs (a superset `Tick` also satisfies it). */

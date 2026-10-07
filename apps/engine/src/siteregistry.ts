@@ -2,6 +2,7 @@ import { GameServer, type LoadOverride } from "./game.js";
 import { SeedManager, type SeedManagerOptions } from "./daycontext.js";
 import { RecoveryService, type RecoveryReport } from "./recovery.js";
 import type { GameRepository } from "./wallet.js";
+import type { PendingOrderStore } from "./pending.js";
 import { affectsPricing, type ConfigProvider } from "./gameconfig.js";
 import type { PoolController } from "./poolcontroller.js";
 import { deriveSiteDaySeed, type CurveProfile } from "@invest254/shared";
@@ -158,7 +159,13 @@ export class SiteRegistry {
         // protective levels itself: a level is a chart PRICE, so every tick converts the current
         // rate to a price and compares. A line brand has no axis, no levels, and keeps the
         // committed contract. See docs/mt5/20-real-sl-tp.md.
-        ...(history ? [() => history!.axis()] as const : []),
+        history ? () => history.axis() : undefined,
+        // Where pending orders are kept, so a deploy does not disarm an order a trader armed
+        // before it (migration 0185). The repository carries the methods when the database does;
+        // the in-memory development repository does not, and such a brand holds its orders for the
+        // life of the process, which is what every other optional seam here means.
+        this.opts.repo as unknown as PendingOrderStore,
+        siteId,
       );
       const rt: SiteRuntime = {
         siteId, seeds, game, config, tradeRepo,
@@ -212,6 +219,18 @@ export class SiteRegistry {
       // price against (see PgGameRepository.setExecutionPrices).
       const rec = new RecoveryService(rt.tradeRepo, rt.seeds, rt.game, this.opts.now, this.opts.loadOverride, siteId, this.opts.poolController, this.opts.loadIsMarketer);
       out.set(siteId, await rec.recover());
+      /**
+       * And re-arm the orders that were still waiting (migration 0185).
+       *
+       * Separate from `RecoveryService`, which reconstructs open POSITIONS from their seeds and
+       * nonces; a pending order has no outcome to reconstruct, only a level to watch again. It is
+       * never allowed to fail the boot: an engine that refused to start because one order could not
+       * be read would take every trader's live position down with it.
+       */
+      try {
+        const armed = await rt.game.pending.recover();
+        if (armed > 0) console.log(`[pending] re-armed ${armed} order(s) for ${siteId}`);
+      } catch (err) { this.report(err as Error, `pending-recover ${siteId}`); }
     }
     return out;
   }

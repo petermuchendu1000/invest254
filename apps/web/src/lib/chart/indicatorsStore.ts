@@ -75,14 +75,53 @@ export function toggleIndicator(id: string): void {
     : 'indicator removed from the chart');
 }
 
-/** Remove every indicator, which is what the chart's own "Delete Indicator Window" sweep needs. */
+/** Remove every indicator. */
 export function clearIndicators(): void {
-  if (enabled.size === 0) return;
-  for (const id of enabled) {
+  removeIndicators([...enabled]);
+}
+
+/**
+ * Remove a named set, which is what MetaTrader's `Delete Indicator Window` does: it takes away the
+ * sub-pane under the cursor, and a sub-pane IS the indicators drawn into it.
+ */
+export function removeIndicators(ids: readonly string[]): void {
+  const next = new Set(enabled);
+  const gone: string[] = [];
+  for (const id of ids) if (next.delete(id)) gone.push(id);
+  if (gone.length === 0) return;
+  publish(next);
+  for (const id of gone) {
     const def = INDICATOR_BY_ID.get(id);
     if (def) logExperts('info', def.name, 'indicator removed from the chart');
   }
-  publish(new Set<string>());
+}
+
+/**
+ * Replace the whole set at once, which is what applying a TEMPLATE does.
+ *
+ * One publish rather than one per indicator: a template that switches four on and three off would
+ * otherwise redraw the chart seven times, and the Experts journal would read as seven separate acts
+ * instead of the one the trader performed. Unknown and unavailable ids are dropped, exactly as
+ * `toggleIndicator` refuses them.
+ */
+export function setIndicators(ids: readonly string[]): void {
+  const next = new Set<string>();
+  for (const id of ids) {
+    const def = INDICATOR_BY_ID.get(id);
+    if (def && def.unavailable === undefined) next.add(id);
+  }
+  const added = [...next].filter((id) => !enabled.has(id));
+  const gone = [...enabled].filter((id) => !next.has(id));
+  if (added.length === 0 && gone.length === 0) return;
+  publish(next);
+  for (const id of gone) {
+    const def = INDICATOR_BY_ID.get(id);
+    if (def) logExperts('info', def.name, 'indicator removed from the chart');
+  }
+  for (const id of added) {
+    const def = INDICATOR_BY_ID.get(id);
+    if (def) logExperts('info', def.name, `indicator applied to the chart${def.params ? ` ${def.params}` : ''}`);
+  }
 }
 
 export function getEnabledIndicators(): ReadonlySet<string> {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDisplayMoney } from '@/lib/money';
 import { useOrderEntry, DURATION_OPTIONS, durationLabel } from '@/lib/game/useOrderEntry';
 import { useOrderResult } from '@/lib/game/useOrderResult';
@@ -10,6 +10,7 @@ import { useRestoreLevels } from '@/lib/game/levelsStore';
 import { MT5LevelRows } from '@/components/game/MT5LevelRows';
 import { MT5Price } from '@/components/game/MT5Price';
 import { volClampReason } from '@/lib/game/volumeSteps';
+import { useNewOrderStore } from '@/lib/game/newOrder';
 import { cn } from '@/lib/cn';
 
 /**
@@ -99,6 +100,25 @@ export function MT5OrderTicket() {
    */
   useRestoreLevels();
 
+  /**
+   * MetaTrader's `New Order` (F9), answered where this terminal keeps its ticket.
+   *
+   * The request is published by lib/game/newOrder, because the chart's context menu row and the F9
+   * key both raise it and neither can reach this component. A docked ticket has nothing to open, so
+   * it scrolls itself into view and lights its border for a second, which is what "bring up the
+   * order window" means for a window that is already up.
+   */
+  const box = useRef<HTMLDivElement | null>(null);
+  const askRev = useNewOrderStore((s) => s.rev);
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (askRev === 0) return;
+    box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    setFlash(true);
+    const id = window.setTimeout(() => setFlash(false), 1_000);
+    return () => window.clearTimeout(id);
+  }, [askRev]);
+
   if (!ready) {
     return <div className="h-40 animate-pulse rounded-sm border border-[#2b3543] bg-[#0f1720]" />;
   }
@@ -138,7 +158,17 @@ export function MT5OrderTicket() {
   const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-0 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
 
   return (
-    <div className="relative flex flex-col gap-2 rounded-sm border border-[#2b3543] bg-[#0f1720] p-3 text-[#ffffff]">
+    <div
+      ref={box}
+      data-order-ticket=""
+      className={cn(
+        'relative flex flex-col gap-2 rounded-sm border bg-[#0f1720] p-3 text-[#ffffff] transition-colors',
+        // MetaTrader's F9 opens its order DIALOG. This ticket is docked and never closed, so the
+        // answer to F9 is to bring the eye here: the border lights for a moment, which is the
+        // least a request to "open the order window" can honestly mean on a window already open.
+        flash ? 'border-[#3183ff]' : 'border-[#2b3543]',
+      )}
+    >
       {/**
         * MetaTrader's execution result, in the window the order was sent from, same as the phone's.
         *

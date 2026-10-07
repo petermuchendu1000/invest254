@@ -14,6 +14,7 @@ import { useMobileTabStore, useRestoreMobileTab } from '@/lib/game/mobileTab';
 import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
 import { useRestoreLevels } from '@/lib/game/levelsStore';
 import { useOrderEntry } from '@/lib/game/useOrderEntry';
+import { useNewOrderStore } from '@/lib/game/newOrder';
 import { useIsLandscape } from '@/lib/ui/useIsPhone';
 import { useDeclareFullScreen } from '@/lib/ui/fullscreen';
 
@@ -65,6 +66,15 @@ export function MT5MobileShell() {
    * MetaTrader lays each of them out, which is not the same way.
    */
   const [ticketOpen, setTicketOpen] = useState(false);
+  /**
+   * MetaTrader's `New Order` (F9), raised from the chart's own context menu.
+   *
+   * The chart cannot reach this screen's state, so the request is published (lib/game/newOrder) and
+   * answered here, which is where this shell keeps MetaTrader's New Order screen. Watched as a
+   * counter so a second request is answered too.
+   */
+  const newOrderRev = useNewOrderStore((s) => s.rev);
+  useEffect(() => { if (newOrderRev > 0) setTicketOpen(true); }, [newOrderRev]);
   /**
    * MetaTrader's ADVANCED trading dialog, which is "used from the chart".
    *
