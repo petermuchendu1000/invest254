@@ -70,7 +70,7 @@ function MT5PositionDetail({ id, onClose }: { id: string | null; onClose: () => 
         role="dialog"
         aria-modal="true"
         aria-label="Position detail"
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto overscroll-contain border-t border-[#2b3543] bg-[#0f1720] pb-[env(safe-area-inset-bottom)] text-white shadow-2xl sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-sm sm:border"
+        className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto overscroll-contain border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] pb-[env(safe-area-inset-bottom)] text-white shadow-2xl sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-sm sm:border"
       >
         <MT5TitleBar
           embedded
@@ -85,9 +85,9 @@ function MT5PositionDetail({ id, onClose }: { id: string | null; onClose: () => 
           }
         />
         {isLoading ? (
-          <div className="px-3 py-6 text-center text-[12px] text-[#8fa2b8]">Loading…</div>
+          <div className="px-3 py-6 text-center text-[12px] text-[var(--mt5-muted)]">Loading…</div>
         ) : isError || !data ? (
-          <div className="px-3 py-6 text-center text-[12px] text-[#f23645]">Couldn&apos;t load this position.</div>
+          <div className="px-3 py-6 text-center text-[12px] text-[var(--mt5-red)]">Couldn&apos;t load this position.</div>
         ) : (
           <MT5Summary>
             {/* MetaTrader's own vocabulary on a settled trade: a CLOSED DEAL, with the signed and

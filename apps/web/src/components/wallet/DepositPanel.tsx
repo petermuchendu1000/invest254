@@ -80,7 +80,7 @@ export function DepositPanel() {
                   className={cn(
                     'flex-1 text-sm font-semibold transition',
                     mt5
-                      ? cn('border-b-2 py-2.5', isActive ? 'border-[#3183ff] text-fg' : 'border-transparent text-muted')
+                      ? cn('border-b-2 py-2.5', isActive ? 'border-[var(--mt5-blue)] text-fg' : 'border-transparent text-muted')
                       : cn('rounded-lg py-2', isActive ? 'bg-accent text-accent-fg shadow-sm' : 'text-muted hover:text-fg'),
                   )}
                 >

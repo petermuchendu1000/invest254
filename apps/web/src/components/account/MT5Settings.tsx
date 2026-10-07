@@ -11,6 +11,7 @@ import { useBrand } from '@/lib/brand/BrandProvider';
 import { readCurrencyCookie, writeCurrencyCookie } from '@/lib/brand/currency';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { useSound } from '@/lib/sound/sound';
+import { applyTheme, currentTheme } from '@/lib/ui/theme';
 import { useCan } from '@/lib/auth/can';
 import { useReferral } from '@/lib/affiliate/hooks';
 import { useDisplayMoney } from '@/lib/money';
@@ -52,7 +53,7 @@ export function MT5Settings() {
   const [accountOpen, setAccountOpen] = useState(false);
 
   return (
-    <div className="flex flex-1 flex-col bg-[#0f1720] text-white">
+    <div className="flex flex-1 flex-col bg-[var(--mt5-surface)] text-white">
       {/* MetaTrader's Settings title bar is a single line — there is no second instrument-filter
           line the way the History screen has one. */}
       <MT5TitleBar title="Settings" />
@@ -75,7 +76,7 @@ export function MT5Settings() {
         <div className="lg:hidden">
           <AccountCard open={accountOpen} onToggle={() => setAccountOpen((v) => !v)} />
           {accountOpen ? (
-            <div className="border-b border-[#2b3543] p-3">
+            <div className="border-b border-[var(--mt5-border)] p-3">
               <MT5AccountPanel embedded />
             </div>
           ) : null}
@@ -163,23 +164,23 @@ function AccountCard({ open, onToggle }: { open: boolean; onToggle: () => void }
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className="flex w-full items-center gap-3 border-b border-[#2b3543] px-3 py-3 text-left"
+      className="flex w-full items-center gap-3 border-b border-[var(--mt5-border)] px-3 py-3 text-left"
     >
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 truncate text-[15px] font-semibold leading-tight text-white">{user.username}</span>
-          <span className="shrink-0 rounded-sm bg-[#2b3543] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8fa2b8]">
+          <span className="shrink-0 rounded-sm bg-[var(--mt5-border)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--mt5-muted)]">
             {demo ? 'Demo' : 'Real'}
           </span>
         </span>
-        <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight text-[#8fa2b8]">
+        <span className="mt-0.5 block truncate font-mono text-[12px] leading-tight text-[var(--mt5-muted)]">
           {user.userId} - {server}
         </span>
-        <span className="mt-0.5 block truncate font-mono text-[13px] leading-tight text-[#4597ff]">
+        <span className="mt-0.5 block truncate font-mono text-[13px] leading-tight text-[var(--mt5-blue-link)]">
           {money.fmt(balanceCents)}
         </span>
       </span>
-      <span aria-hidden className={cn('shrink-0 text-[#8fa2b8] transition-transform', open && 'rotate-90')}>&#8250;</span>
+      <span aria-hidden className={cn('shrink-0 text-[var(--mt5-muted)] transition-transform', open && 'rotate-90')}>&#8250;</span>
     </button>
   );
 }
@@ -242,16 +243,12 @@ function InterfaceSection() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [currency, setCurrency] = useState('');
   useEffect(() => {
-    setTheme(window.localStorage.getItem('pp-theme') === 'light' ? 'light' : 'dark');
+    setTheme(currentTheme());
     setCurrency(readCurrencyCookie());
   }, []);
 
-  const setThemeTo = (next: 'dark' | 'light') => {
-    setTheme(next);
-    document.documentElement.classList.toggle('light', next === 'light');
-    document.documentElement.classList.toggle('dark', next !== 'light');
-    window.localStorage.setItem('pp-theme', next);
-  };
+  // One writer for the whole app: see lib/ui/theme for why this used to be two.
+  const setThemeTo = (next: 'dark' | 'light') => { setTheme(next); applyTheme(next); };
 
   const setCurrencyTo = (next: string) => {
     setCurrency(next);
@@ -283,7 +280,7 @@ function InterfaceSection() {
             value={currency}
             onChange={(e) => setCurrencyTo(e.target.value)}
             aria-label="Display currency"
-            className="rounded border border-[#2b3543] bg-[#0f1720] px-2 py-1 text-[13px] text-[#4597ff] outline-none focus:border-[#3183ff]"
+            className="rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 py-1 text-[13px] text-[var(--mt5-blue-link)] outline-none focus:border-[var(--mt5-blue)]"
           >
             <option value="">Auto ({brand.currency || 'KES'})</option>
             {SUPPORTED_DISPLAY_CURRENCIES.map((c) => (

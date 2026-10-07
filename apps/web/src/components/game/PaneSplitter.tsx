@@ -108,7 +108,7 @@ export function PaneSplitter({
       title="Drag to resize. Double-click to reset."
       className={[
         'group relative h-2.5 w-full shrink-0 cursor-row-resize touch-none select-none',
-        dragging ? 'bg-[#3183ff]/30' : 'hover:bg-[#2b3543]',
+        dragging ? 'bg-[var(--mt5-blue)]/30' : 'hover:bg-[var(--mt5-border)]',
         className ?? '',
       ].join(' ')}
       style={{ touchAction: 'none' }}
@@ -118,7 +118,7 @@ export function PaneSplitter({
         aria-hidden
         className={[
           'pointer-events-none absolute left-1/2 top-1/2 h-0.5 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full transition',
-          dragging ? 'bg-[#4597ff]' : 'bg-[#2b3543] group-hover:bg-[#8fa2b8]',
+          dragging ? 'bg-[var(--mt5-blue-link)]' : 'bg-[var(--mt5-border)] group-hover:bg-[var(--mt5-muted)]',
         ].join(' ')}
       />
     </div>

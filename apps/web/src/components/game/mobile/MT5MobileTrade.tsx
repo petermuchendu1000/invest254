@@ -127,17 +127,17 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   ];
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0f1720] text-white">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-white">
       {/* Android's top bar: the title small, with the total floating profit beneath it in blue, and
           the new-order button at the right. The hamburger is on the chart screen's own bar, so it
           is not repeated here. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-[#2b3543] px-3 py-2">
+      <div className="flex shrink-0 items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2">
         <div className="min-w-0">
-          <div className="text-[11px] leading-none text-[#8fa2b8]">Trade</div>
+          <div className="text-[11px] leading-none text-[var(--mt5-muted)]">Trade</div>
           <div
             className={cn(
               'pt-1 font-mono text-[18px] font-semibold leading-none tabular-nums',
-              floatingCents > 0 ? 'text-[#3183ff]' : floatingCents < 0 ? 'text-[#f23645]' : 'text-[#3183ff]',
+              floatingCents > 0 ? 'text-[var(--mt5-blue)]' : floatingCents < 0 ? 'text-[var(--mt5-red)]' : 'text-[var(--mt5-blue)]',
             )}
           >
             {/* The ONE figure on this screen that names the currency: "the total floating profit
@@ -147,7 +147,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
           </div>
         </div>
         <span
-          className={cn('ml-auto h-1.5 w-1.5 shrink-0 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
+          className={cn('ml-auto h-1.5 w-1.5 shrink-0 rounded-full', status === 'open' ? 'bg-[var(--mt5-green)]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[var(--mt5-red)]')}
           title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
         />
         {/* MetaTrader's new-order button: a document with a plus. */}
@@ -155,7 +155,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
           type="button"
           onClick={onNewOrder}
           aria-label="New order"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded text-[#3183ff]"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded text-[var(--mt5-blue)]"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
             <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" />
@@ -169,7 +169,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
         <dl className="px-3 py-2">
           {rows.map((r) => (
             <div key={r.label} className="flex items-baseline gap-1 py-[3px]">
-              <dt className="shrink-0 text-[12px] text-[#8fa2b8]">{r.label}</dt>
+              <dt className="shrink-0 text-[12px] text-[var(--mt5-muted)]">{r.label}</dt>
               {/* Android's dotted leader. A repeating radial gradient rather than a run of "."
                   characters: dots typed into the gap cannot be made to stop exactly where the
                   value starts at every screen width, and a leader that overruns reads as broken. */}
@@ -189,7 +189,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
         </dl>
 
         {/* MetaTrader's section header band. */}
-        <div className="border-y border-[#2b3543] bg-[#202933] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#8fa2b8]">
+        <div className="border-y border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--mt5-muted)]">
           Positions
         </div>
 
@@ -209,7 +209,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
             />
           </MT5SwipeRow>
         ) : (
-          <p className="px-3 py-6 text-center text-[11px] text-[#8fa2b8]">No open positions.</p>
+          <p className="px-3 py-6 text-center text-[11px] text-[var(--mt5-muted)]">No open positions.</p>
         )}
       </div>
 
@@ -300,19 +300,19 @@ function MobilePositionRow({
       type="button"
       onClick={onOpenMenu}
       aria-label={`Position menu for ${symbol} ${direction} ${lots}`}
-      className="flex w-full items-start justify-between gap-3 border-b border-[#2b3543] px-3 py-2.5 text-left transition active:bg-[#202933]"
+      className="flex w-full items-start justify-between gap-3 border-b border-[var(--mt5-border)] px-3 py-2.5 text-left transition active:bg-[var(--mt5-raised)]"
     >
       <div className="min-w-0">
         <div className="text-[13px] font-bold text-white">
           {symbol},{' '}
-          <span className={cn('font-semibold', buy ? 'text-[#3183ff]' : 'text-[#f23645]')}>{direction} {lots}</span>
+          <span className={cn('font-semibold', buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]')}>{direction} {lots}</span>
         </div>
-        <div className="pt-0.5 font-mono text-[12px] text-[#8fa2b8] tabular-nums">{from} → {to}</div>
+        <div className="pt-0.5 font-mono text-[12px] text-[var(--mt5-muted)] tabular-nums">{from} → {to}</div>
       </div>
       <div
         className={cn(
           'shrink-0 font-mono text-[13px] font-bold tabular-nums',
-          profitCents > 0 ? 'text-[#3183ff]' : profitCents < 0 ? 'text-[#f23645]' : 'text-white',
+          profitCents > 0 ? 'text-[var(--mt5-blue)]' : profitCents < 0 ? 'text-[var(--mt5-red)]' : 'text-white',
         )}
       >
         {profit}

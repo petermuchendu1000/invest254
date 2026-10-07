@@ -120,7 +120,9 @@ function PlayerSecurityCard() {
       ) : null}
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="text-muted">{PLAYER_TWO_FACTOR ? 'Identity · ' : null}<span className={st === 'approved' ? 'text-up' : st === 'rejected' ? 'text-down' : 'text-fg'}>{label}</span></span>
-        <Button variant="secondary" size="sm" onClick={() => open('verify')}>{st === 'approved' ? 'View' : 'Verify'}</Button>
+        {/* "View" for anything already sent, not just an approval: a pending submission has nothing
+                  left to do and inviting a second one is the defect this screen had. */}
+        <Button variant="secondary" size="sm" onClick={() => open('verify')}>{st === 'approved' || st === 'pending' ? 'View' : 'Verify'}</Button>
       </div>
     </Card>
   );

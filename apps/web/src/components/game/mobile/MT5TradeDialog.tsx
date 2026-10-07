@@ -83,7 +83,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
   const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
   const [typing, setTyping] = useState<null | { field: 'volume' | 'sl' | 'tp'; text: string }>(null);
 
-  if (!ready) return <div className="h-full animate-pulse bg-[#0f1720]" />;
+  if (!ready) return <div className="h-full animate-pulse bg-[var(--mt5-surface)]" />;
 
   const description = symbolDef(symbol)?.description ?? '';
   /**
@@ -167,14 +167,14 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
       <div
         role="dialog"
         aria-label="New order"
-        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden rounded-t-xl border-t border-[#2b3543] bg-[#0f1720] text-white pb-[env(safe-area-inset-bottom)] shadow-2xl"
+        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-xl border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-white pb-[env(safe-area-inset-bottom)] shadow-2xl"
       >
         {/* MetaTrader's result, over the form it was sent from. */}
         {result === null ? null : <MT5OrderResult result={result} onDismiss={clear} />}
         {/* 1. The grabber. MetaTrader's sheet can be dragged; this one is sized to its content, so
                the grabber is the dismiss affordance rather than a drag handle that leads nowhere. */}
         <button type="button" onClick={onDismiss} aria-label="Close" className="flex shrink-0 justify-center py-2">
-          <span aria-hidden className="h-1 w-10 rounded-full bg-[#2b3543]" />
+          <span aria-hidden className="h-1 w-10 rounded-full bg-[var(--mt5-border)]" />
         </button>
 
         {/* `overflow-x-hidden` is load-bearing. The order-type strip below bleeds past this box with
@@ -182,13 +182,13 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
             too — and once anything nudged it sideways the whole sheet sat 14px off the screen with
             the symbol, the SL chip and the money lines all clipped at the left edge. The strip
             keeps its own horizontal scrolling; this box must not have any. */}
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-3">
           {/* 2. Symbol and description, with the price on the right where MetaTrader puts Bid and
                  Ask. One price here, for the reason the order ticket documents. */}
           <div className="flex items-start gap-3">
             <div className="min-w-0">
               <div className="truncate text-[15px] font-bold leading-tight">{symbol}</div>
-              {description === '' ? null : <div className="truncate text-[11px] text-[#8fa2b8]">{description}</div>}
+              {description === '' ? null : <div className="truncate text-[11px] text-[var(--mt5-muted)]">{description}</div>}
             </div>
             <div className="ml-auto shrink-0 text-right">
               <MT5Price value={price} digits={digits} className="text-[15px] font-semibold" />
@@ -208,7 +208,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
                 aria-pressed={i === 0}
                 className={cn(
                   'h-8 shrink-0 rounded px-3 text-[12px] font-semibold transition',
-                  i === 0 ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] opacity-45',
+                  i === 0 ? 'bg-[var(--mt5-border)] text-white' : 'text-[var(--mt5-muted)] opacity-45',
                 )}
               >
                 {t}
@@ -235,7 +235,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
                 to be reserved". The margin on this contract IS the stake, which the row below
                 already prints, so the selector states the one unit rather than offering two names
                 for the same number. */}
-            <span className="shrink-0 rounded bg-[#202933] px-2 py-1 text-[11px] text-[#8fa2b8]" title="MetaTrader's other unit is Margin. The margin on this contract is the stake, which is on the line below.">
+            <span className="shrink-0 rounded bg-[var(--mt5-raised)] px-2 py-1 text-[11px] text-[var(--mt5-muted)]" title="MetaTrader's other unit is Margin. The margin on this contract is the stake, which is on the line below.">
               Lots
             </span>
           </Row>
@@ -250,7 +250,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
             onChange={(e) => setLots(Number(e.target.value))}
             aria-label="Volume slider"
             title={`Volume ${minLots.toFixed(volDigits)} to ${maxLots.toFixed(volDigits)} lots.`}
-            className="mt-2 h-1 w-full appearance-none rounded bg-[#2b3543] accent-[#3183ff]"
+            className="mt-2 h-1 w-full appearance-none rounded bg-[var(--mt5-border)] accent-[var(--mt5-blue)]"
           />
           {/* Why the slider has no travel, where it has none. A range input whose min equals its
               max cannot move, and MetaTrader states a symbol's volume limits rather than leaving
@@ -261,8 +261,8 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
 
           {/* 6. Margin on the left, free margin on the right. */}
           <div className="mt-2 flex items-baseline text-[11px]">
-            <span className="text-[#8fa2b8]">Margin = <span className="font-mono text-white tabular-nums">{money.fmt(stakeCents)}</span></span>
-            <span className="ml-auto text-[#8fa2b8]">Free: <span className="font-mono tabular-nums">{money.fmt(Math.max(0, spendable - stakeCents))}</span></span>
+            <span className="text-[var(--mt5-muted)]">Margin = <span className="font-mono text-white tabular-nums">{money.fmt(stakeCents)}</span></span>
+            <span className="ml-auto text-[var(--mt5-muted)]">Free: <span className="font-mono tabular-nums">{money.fmt(Math.max(0, spendable - stakeCents))}</span></span>
           </div>
 
           {/* 7. MetaTrader's unit control for the levels, with the ratio lock at its end.
@@ -271,7 +271,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
                  on a 360px screen, a level like 3080.52 was shrunk to 44px of a 52px figure and
                  ellipsized. It is still a level control, on the row that sets how levels read. */}
           <div className="mt-3 flex items-center gap-1">
-           <div className="flex min-w-0 flex-1 gap-1 rounded bg-[#202933] p-0.5">
+           <div className="flex min-w-0 flex-1 gap-1 rounded bg-[var(--mt5-raised)] p-0.5">
             {LEVEL_UNITS.map((u) => (
               <button
                 key={u.id}
@@ -280,7 +280,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
                 aria-pressed={unit === u.id}
                 className={cn(
                   'h-7 flex-1 rounded text-[11px] font-semibold transition',
-                  unit === u.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8]',
+                  unit === u.id ? 'bg-[var(--mt5-border)] text-white' : 'text-[var(--mt5-muted)]',
                 )}
               >
                 {u.label}
@@ -293,7 +293,7 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
              aria-pressed={locked}
              aria-label="Lock the take profit to stop loss ratio"
              title="Fix the TP:SL ratio: adjust one level and the other follows."
-             className={cn('grid h-8 w-8 shrink-0 place-items-center rounded transition', locked ? 'bg-[#2b3543] text-[#3183ff]' : 'text-[#8fa2b8]')}
+             className={cn('grid h-8 w-8 shrink-0 place-items-center rounded transition', locked ? 'bg-[var(--mt5-border)] text-[var(--mt5-blue)]' : 'text-[var(--mt5-muted)]')}
            >
              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden>
                <rect x="5" y="11" width="14" height="9" rx="2" />
@@ -345,12 +345,12 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
 
           {/* The pair contradicting itself is MetaTrader's red state, and it kills both buttons. */}
           {!sides.buy && !sides.sell ? (
-            <p data-levels-invalid="" className="pt-2 text-center text-[11px] text-[#f23645]">
+            <p data-levels-invalid="" className="pt-2 text-center text-[11px] text-[var(--mt5-red)]">
               The stop and the target are on the same side of the price. One has to be above it and
               one below.
             </p>
           ) : !sides.buy ? (
-            <p className="pt-2 text-center text-[11px] text-[#8fa2b8]">
+            <p className="pt-2 text-center text-[11px] text-[var(--mt5-muted)]">
               These levels are set for a sell, so only Sell is offered.
             </p>
           ) : null}
@@ -359,8 +359,8 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
           <Leader label="Fill policy" value="Fill or Kill" />
           {continuous ? null : <Leader label="Expiry" value={durationLabel(durationS)} />}
           <div className="flex items-baseline gap-2 py-1.5 text-[11px]">
-            <span className="text-[#8fa2b8]">Comment</span>
-            <span className="ml-auto text-[#8fa2b8]" title="MetaTrader attaches a comment of up to 31 characters to an order. Nothing on this platform reads one back, so the field is not offered.">
+            <span className="text-[var(--mt5-muted)]">Comment</span>
+            <span className="ml-auto text-[var(--mt5-muted)]" title="MetaTrader attaches a comment of up to 31 characters to an order. Nothing on this platform reads one back, so the field is not offered.">
               Not carried on this contract
             </span>
           </div>
@@ -374,14 +374,14 @@ export function MT5TradeDialog({ onDismiss }: { onDismiss: () => void }) {
               to place an order.
             </p>
           ) : null}
-          {connecting ? <p className="pt-1 text-center text-[11px] text-[#8fa2b8]">Connecting…</p> : null}
+          {connecting ? <p className="pt-1 text-center text-[11px] text-[var(--mt5-muted)]">Connecting…</p> : null}
           {overBalance && signedIn ? (
             <p className="pt-1 text-center text-[11px] text-[#f0b90b]">Not enough free margin: tap a side to top up.</p>
           ) : null}
         </div>
 
         {/* 12. Sell and Buy, filled, side by side, in Android's measured colours. */}
-        <div className="flex shrink-0 gap-2 border-t border-[#2b3543] p-3">
+        <div className="flex shrink-0 gap-2 border-t border-[var(--mt5-border)] p-3">
           <button
             type="button"
             onClick={() => trade('sell')}
@@ -419,7 +419,7 @@ const DEFAULT_POINTS = 100;
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mt-3 flex items-center gap-2">
-      <span className="shrink-0 text-[12px] text-[#8fa2b8]">{label}</span>
+      <span className="shrink-0 text-[12px] text-[var(--mt5-muted)]">{label}</span>
       {children}
     </div>
   );
@@ -446,9 +446,9 @@ function Stepper({
   // No fixed width: this app gives a labelled button a 44px minimum tap target, which is right on
   // a control that sets money at risk, and fighting it only produced a stepper too narrow for the
   // figure inside it. The layout is built around the 44px instead.
-  const btn = 'grid h-8 shrink-0 place-items-center rounded px-1 text-[16px] font-semibold leading-none text-[#3183ff] disabled:opacity-30';
+  const btn = 'grid h-8 shrink-0 place-items-center rounded px-1 text-[16px] font-semibold leading-none text-[var(--mt5-blue)] disabled:opacity-30';
   return (
-    <span className="flex min-w-0 flex-1 items-center rounded bg-[#202933]">
+    <span className="flex min-w-0 flex-1 items-center rounded bg-[var(--mt5-raised)]">
       <button type="button" onClick={onDown} disabled={downDisabled === true || disabled === true} title={downDisabled === true ? boundTitle : undefined} aria-label={`Decrease ${ariaLabel}`} className={btn}>−</button>
       {typing === null ? (
         <button
@@ -456,7 +456,7 @@ function Stepper({
           onClick={onStartTyping}
           disabled={disabled}
           aria-label={ariaLabel}
-          className="min-w-0 flex-1 whitespace-nowrap px-0.5 text-center font-mono text-[13px] font-bold tabular-nums disabled:text-[#8fa2b8]"
+          className="min-w-0 flex-1 whitespace-nowrap px-0.5 text-center font-mono text-[13px] font-bold tabular-nums disabled:text-[var(--mt5-muted)]"
         >
           {value}
         </button>
@@ -520,11 +520,11 @@ function LevelChip({
         </span>
         {/* MetaTrader's row 9: the money value of this level. What it says here is argued in the
             component's own header; the title carries the full reason. */}
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#8fa2b8] tabular-nums" title={detail}>
+        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[var(--mt5-muted)] tabular-nums" title={detail}>
           {note}
         </span>
         {set ? (
-          <button type="button" data-compact="" onClick={onClear} className="shrink-0 text-[10px] text-[#3183ff]">clear</button>
+          <button type="button" data-compact="" onClick={onClear} className="shrink-0 text-[10px] text-[var(--mt5-blue)]">clear</button>
         ) : null}
       </div>
       <Stepper
@@ -545,7 +545,7 @@ function LevelChip({
 function Leader({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-1 py-1.5">
-      <span className="shrink-0 text-[11px] text-[#8fa2b8]">{label}</span>
+      <span className="shrink-0 text-[11px] text-[var(--mt5-muted)]">{label}</span>
       <span
         aria-hidden
         className="min-w-4 flex-1 self-center"
@@ -556,7 +556,7 @@ function Leader({ label, value }: { label: string; value: string }) {
           backgroundRepeat: 'repeat-x',
         }}
       />
-      <span className="shrink-0 font-mono text-[11px] text-[#8fa2b8]">{value}</span>
+      <span className="shrink-0 font-mono text-[11px] text-[var(--mt5-muted)]">{value}</span>
     </div>
   );
 }

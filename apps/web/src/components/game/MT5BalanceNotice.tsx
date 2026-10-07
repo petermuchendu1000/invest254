@@ -25,7 +25,7 @@ export function MT5BalanceNotice({ amountCents, visible, onDismiss, comment }: {
 }) {
   const money = useDisplayMoney();
   // MetaTrader's money colours: blue for money in, never green.
-  const tone = amountCents >= 0 ? 'text-[#3183ff]' : 'text-[#f23645]';
+  const tone = amountCents >= 0 ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]';
 
   return (
     <div
@@ -36,7 +36,7 @@ export function MT5BalanceNotice({ amountCents, visible, onDismiss, comment }: {
         role="status"
         data-mt5-balance-notice=""
         className={cn(
-          'pointer-events-auto w-full max-w-sm rounded-sm border border-[#2b3543] bg-[#202933] px-3 py-2 shadow-xl transition',
+          'pointer-events-auto w-full max-w-sm rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-3 py-2 shadow-xl transition',
           visible ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0',
         )}
       >
@@ -50,12 +50,12 @@ export function MT5BalanceNotice({ amountCents, visible, onDismiss, comment }: {
             type="button"
             onClick={onDismiss}
             aria-label="Dismiss"
-            className="shrink-0 px-1 text-[14px] leading-none text-[#8fa2b8] transition hover:text-white"
+            className="shrink-0 px-1 text-[14px] leading-none text-[var(--mt5-muted)] transition hover:text-white"
           >
             ×
           </button>
         </div>
-        <p className="mt-0.5 text-[11px] leading-snug text-[#8fa2b8]">{comment}</p>
+        <p className="mt-0.5 text-[11px] leading-snug text-[var(--mt5-muted)]">{comment}</p>
       </div>
     </div>
   );

@@ -93,20 +93,20 @@ export function MT5ObjectProperties({
       role="dialog"
       aria-modal="true"
       aria-label={objectNameOf(drawing)}
-      className="fixed inset-0 z-[85] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-[72vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[72vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
         {/* MetaTrader's title bar carries the object's NAME and nothing else. The type is shown
             underneath because a name alone ("M1 Fibo 26637") does not say what it is on a phone. */}
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
           <span className="min-w-0 flex-1">
             <span className="block truncate font-mono text-[14px] font-semibold leading-tight">{objectNameOf(drawing)}</span>
-            <span className="block truncate text-[11px] text-[#8fa2b8]">{objectTypeName(drawing.kind)}</span>
+            <span className="block truncate text-[11px] text-[var(--mt5-muted)]">{objectTypeName(drawing.kind)}</span>
           </span>
-          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white">×</button>
+          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[var(--mt5-muted)] transition hover:text-white">×</button>
         </div>
 
-        <div role="tablist" aria-label="Object properties" className="flex shrink-0 border-b border-[#2b3543]">
+        <div role="tablist" aria-label="Object properties" className="flex shrink-0 border-b border-[var(--mt5-border)]">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -116,7 +116,7 @@ export function MT5ObjectProperties({
               onClick={() => setTab(t.id)}
               className={cn(
                 'flex-1 px-2 py-2 text-[11px] font-semibold transition',
-                tab === t.id ? 'border-b-2 border-[#3183ff] text-white' : 'text-[#8fa2b8] hover:text-white',
+                tab === t.id ? 'border-b-2 border-[var(--mt5-blue)] text-white' : 'text-[var(--mt5-muted)] hover:text-white',
               )}
             >
               {t.label}
@@ -132,18 +132,18 @@ export function MT5ObjectProperties({
         </div>
 
         {/* OK and Cancel, and nothing else: MetaTrader has no Apply here and no Delete. */}
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[#2b3543] px-3 py-2.5">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--mt5-border)] px-3 py-2.5">
           <button
             type="button"
             onClick={() => { onChange(draft); onDismiss(); }}
-            className="h-8 rounded-sm bg-[#3183ff] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
+            className="h-8 rounded-sm bg-[var(--mt5-blue)] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
           >
             OK
           </button>
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm border border-[#2b3543] bg-[#202933] px-5 text-[11px] font-semibold text-white transition hover:bg-[#2b3543]"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
           >
             Cancel
           </button>
@@ -155,14 +155,14 @@ export function MT5ObjectProperties({
 
 type Setter = <K extends keyof Drawing>(k: K, v: Drawing[K]) => void;
 
-const input = 'h-8 min-w-0 flex-1 rounded-sm border border-[#2b3543] bg-[#0f1720] px-2 font-mono text-[11px] text-white outline-none focus:border-[#3183ff]';
-const select = 'h-8 min-w-0 rounded-sm border border-[#2b3543] bg-[#0f1720] px-1.5 text-[11px] text-white outline-none focus:border-[#3183ff]';
+const input = 'h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 font-mono text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]';
+const select = 'h-8 min-w-0 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]';
 
 /** A labelled row. MetaTrader right-aligns the label to the left of its control, with a colon. */
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="mb-2 flex items-center gap-2 last:mb-0">
-      <span className="w-24 shrink-0 text-right text-[11px] text-[#8fa2b8]">{label}</span>
+      <span className="w-24 shrink-0 text-right text-[11px] text-[var(--mt5-muted)]">{label}</span>
       <span className="flex min-w-0 flex-1 items-center gap-1.5">{children}</span>
     </label>
   );
@@ -172,7 +172,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function Check({ label, on, onToggle }: { label: string; on: boolean; onToggle: (v: boolean) => void }) {
   return (
     <label className="mb-2 flex items-center gap-2 text-[11px] last:mb-0">
-      <input type="checkbox" checked={on} onChange={(e) => onToggle(e.target.checked)} className="h-3.5 w-3.5 accent-[#3183ff]" />
+      <input type="checkbox" checked={on} onChange={(e) => onToggle(e.target.checked)} className="h-3.5 w-3.5 accent-[var(--mt5-blue)]" />
       <span>{label}</span>
     </label>
   );
@@ -226,7 +226,7 @@ function CommonTab({ draft, set }: { draft: Drawing; set: Setter }) {
         onStyle={(v) => set('style', v)}
         onWidth={(v) => set('width', v)}
       />
-      <div className="mt-3 border-t border-[#2b3543] pt-3">
+      <div className="mt-3 border-t border-[var(--mt5-border)] pt-3">
         <Check label="Draw object as background" on={draft.back === true} onToggle={(v) => set('back', v)} />
         {/* MetaTrader words this as the negative and stores the positive (`OBJPROP_SELECTABLE`). */}
         <Check label="Disable selection" on={draft.selectable === false} onToggle={(v) => set('selectable', !v)} />
@@ -285,7 +285,7 @@ function ParametersTab({ draft, digits, barSeconds, setDraft, set }: {
           </div>
         );
       })}
-      {draft.points.length === 0 ? <p className="text-[11px] text-[#8fa2b8]">This object has no anchors.</p> : null}
+      {draft.points.length === 0 ? <p className="text-[11px] text-[var(--mt5-muted)]">This object has no anchors.</p> : null}
 
       {hasGannAngle(draft.kind) ? (
         <Row label="Gann angle:">
@@ -309,17 +309,17 @@ function ParametersTab({ draft, digits, barSeconds, setDraft, set }: {
       ) : null}
 
       {hasGannScale(draft.kind) && draft.kind !== 'gannLine' ? (
-        <div className="mt-3 border-t border-[#2b3543] pt-3">
+        <div className="mt-3 border-t border-[var(--mt5-border)] pt-3">
           <Check label="Downtrend" on={draft.downtrend === true} onToggle={(v) => set('downtrend', v)} />
         </div>
       ) : null}
       {hasFill(draft.kind) ? (
-        <div className="mt-3 border-t border-[#2b3543] pt-3">
+        <div className="mt-3 border-t border-[var(--mt5-border)] pt-3">
           <Check label="Fill" on={draft.fill === true} onToggle={(v) => set('fill', v)} />
         </div>
       ) : null}
       {hasRays(draft.kind) ? (
-        <div className="mt-3 border-t border-[#2b3543] pt-3">
+        <div className="mt-3 border-t border-[var(--mt5-border)] pt-3">
           {/* Ray right comes first in MetaTrader's dialog. Neither starts ticked: MetaQuotes does
               not document the defaults, so an untouched object is the segment it was drawn as. */}
           <Check label="Ray right" on={draft.rayRight === true} onToggle={(v) => set('rayRight', v)} />
@@ -336,7 +336,7 @@ function LevelsTab({ draft, set }: { draft: Drawing; set: Setter }) {
   const write = (next: ObjectLevel[]) => set('levels', next);
   return (
     <div>
-      <div className="mb-1 flex gap-1.5 border-b border-[#2b3543] pb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">
+      <div className="mb-1 flex gap-1.5 border-b border-[var(--mt5-border)] pb-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--mt5-muted)]">
         <span className="w-20">Level</span>
         <span className="flex-1">Description</span>
       </div>
@@ -345,7 +345,7 @@ function LevelsTab({ draft, set }: { draft: Drawing; set: Setter }) {
           <div
             key={i}
             onClick={() => setRow(i)}
-            className={cn('flex cursor-pointer items-center gap-1.5 border-b border-[#2b3543] py-1', row === i ? 'bg-[#3183ff]/25' : '')}
+            className={cn('flex cursor-pointer items-center gap-1.5 border-b border-[var(--mt5-border)] py-1', row === i ? 'bg-[var(--mt5-blue)]/25' : '')}
           >
             {/* MetaTrader prefixes each Level cell with a small glyph of that level's line. */}
             <span aria-hidden className="ml-0.5 h-0 w-3 shrink-0 border-t" style={{ borderColor: l.color ?? draft.color }} />
@@ -356,7 +356,7 @@ function LevelsTab({ draft, set }: { draft: Drawing; set: Setter }) {
       </div>
 
       {/* The same three-control Style field as the Common tab, below the grid rather than in it. */}
-      <div className="mt-3 border-t border-[#2b3543] pt-3">
+      <div className="mt-3 border-t border-[var(--mt5-border)] pt-3">
         <StyleField
           color={(row !== null ? levels[row]?.color : undefined) ?? draft.color}
           style={draft.style}
@@ -394,7 +394,7 @@ function LevelsTab({ draft, set }: { draft: Drawing; set: Setter }) {
         <LvlBtn label="Default" onClick={() => { write([...defaultLevelsOf(draft.kind)]); setRow(null); }} />
       </div>
 
-      <p className="mt-3 text-[11px] leading-snug text-[#8fa2b8]">
+      <p className="mt-3 text-[11px] leading-snug text-[var(--mt5-muted)]">
         A Fibonacci Retracement or Expansion shows a level&rsquo;s price when its description
         contains <span className="font-mono">%$</span>.
       </p>
@@ -411,8 +411,8 @@ function LvlBtn({ label, onClick, disabled }: { label: string; onClick: () => vo
       className={cn(
         'h-8 flex-1 rounded-sm border text-[11px] font-semibold transition',
         disabled
-          ? 'cursor-not-allowed border-[#2b3543] bg-[#202933] text-[#2b3543]'
-          : 'border-[#2b3543] bg-[#202933] text-white hover:border-[#3183ff] hover:bg-[#2b3543]',
+          ? 'cursor-not-allowed border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[var(--mt5-border)]'
+          : 'border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-white hover:border-[var(--mt5-blue)] hover:bg-[var(--mt5-border)]',
       )}
     >
       {label}
@@ -447,9 +447,9 @@ function TriState({ state }: { state: 'on' | 'off' | 'some' }) {
       aria-hidden
       className={cn(
         'grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[2px] border text-[9px] font-black leading-none',
-        state === 'on' ? 'border-[#41be56] text-[#41be56]'
-          : state === 'off' ? 'border-[#f23645] text-[#f23645]'
-            : 'border-[#8fa2b8] text-[#8fa2b8]',
+        state === 'on' ? 'border-[var(--mt5-green)] text-[var(--mt5-green)]'
+          : state === 'off' ? 'border-[var(--mt5-red)] text-[var(--mt5-red)]'
+            : 'border-[var(--mt5-muted)] text-[var(--mt5-muted)]',
       )}
     >
       {state === 'on' ? '✓' : state === 'off' ? '✕' : '–'}
@@ -482,7 +482,7 @@ function VisualizationTab({ draft, set }: { draft: Drawing; set: Setter }) {
   return (
     <div>
       <Check label="All timeframes" on={all} onToggle={(v) => set('timeframes', v ? undefined : [])} />
-      <div className="mt-2 rounded-sm border border-[#2b3543] p-1.5">
+      <div className="mt-2 rounded-sm border border-[var(--mt5-border)] p-1.5">
         {TREE.map((node) => (
           <div key={node.label}>
             <div className="flex items-center gap-1.5 py-0.5">
@@ -492,7 +492,7 @@ function VisualizationTab({ draft, set }: { draft: Drawing; set: Setter }) {
                   aria-label={`${open[node.label] ? 'Collapse' : 'Expand'} ${node.label}`}
                   aria-expanded={open[node.label] === true}
                   onClick={() => setOpen((o) => ({ ...o, [node.label]: !o[node.label] }))}
-                  className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[2px] border border-[#2b3543] text-[9px] leading-none text-[#8fa2b8] hover:text-white"
+                  className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[2px] border border-[var(--mt5-border)] text-[9px] leading-none text-[var(--mt5-muted)] hover:text-white"
                 >
                   {open[node.label] ? '−' : '+'}
                 </button>
@@ -526,7 +526,7 @@ function VisualizationTab({ draft, set }: { draft: Drawing; set: Setter }) {
           </div>
         ))}
       </div>
-      <p className="mt-3 text-[11px] leading-snug text-[#8fa2b8]">
+      <p className="mt-3 text-[11px] leading-snug text-[var(--mt5-muted)]">
         The object is drawn only on the ticked periods, so it can carry different settings on
         different periods.
       </p>

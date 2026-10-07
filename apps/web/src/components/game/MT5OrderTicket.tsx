@@ -120,7 +120,7 @@ export function MT5OrderTicket() {
   }, [askRev]);
 
   if (!ready) {
-    return <div className="h-40 animate-pulse rounded-sm border border-[#2b3543] bg-[#0f1720]" />;
+    return <div className="h-40 animate-pulse rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)]" />;
   }
 
   /**
@@ -143,7 +143,7 @@ export function MT5OrderTicket() {
   // A clamp report is about the last keystrokes and outranks the standing note.
   const volMessage = volClamp ?? volNote;
 
-  const rowLabel = 'w-20 shrink-0 text-[12px] text-[#8fa2b8] lg:w-auto lg:basis-full';
+  const rowLabel = 'w-20 shrink-0 text-[12px] text-[var(--mt5-muted)] lg:w-auto lg:basis-full';
   /**
    * No horizontal padding on a stepper, and a 2px gutter rather than 4px.
    *
@@ -155,18 +155,18 @@ export function MT5OrderTicket() {
    * zero clipping with room to spare. The five cells stay EQUAL, because that is the shape
    * MetaTrader's own stepper row has; what goes is the padding the label could not afford.
    */
-  const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] px-0 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[#3183ff] disabled:opacity-40';
+  const stepBtn = 'h-8 min-w-0 shrink-0 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-0 font-mono text-[12px] font-semibold text-[#ffffff] transition hover:border-[var(--mt5-blue)] disabled:opacity-40';
 
   return (
     <div
       ref={box}
       data-order-ticket=""
       className={cn(
-        'relative flex flex-col gap-2 rounded-sm border bg-[#0f1720] p-3 text-[#ffffff] transition-colors',
+        'relative flex flex-col gap-2 rounded-sm border bg-[var(--mt5-surface)] p-3 text-[#ffffff] transition-colors',
         // MetaTrader's F9 opens its order DIALOG. This ticket is docked and never closed, so the
         // answer to F9 is to bring the eye here: the border lights for a moment, which is the
         // least a request to "open the order window" can honestly mean on a window already open.
-        flash ? 'border-[#3183ff]' : 'border-[#2b3543]',
+        flash ? 'border-[var(--mt5-blue)]' : 'border-[var(--mt5-border)]',
       )}
     >
       {/**
@@ -181,7 +181,7 @@ export function MT5OrderTicket() {
       <div className="flex items-baseline gap-2">
         <span className="text-[13px] font-bold text-white">{symbol}</span>
         {/* MetaTrader states the execution mode on the ticket. Ours fills at the next engine tick. */}
-        <span className="text-[11px] text-[#8fa2b8]">Market Execution</span>
+        <span className="text-[11px] text-[var(--mt5-muted)]">Market Execution</span>
       </div>
 
       {/* Volume. MetaTrader's mobile stepper is a single full-width row of equal cells with NO
@@ -214,7 +214,7 @@ export function MT5OrderTicket() {
             onClick={() => setTypingVol(lots.toFixed(volDigits))}
             title={`Volume in lots. Type a value between ${minLots.toFixed(volDigits)} and ${maxLots.toFixed(volDigits)}.`}
             aria-label={`Volume ${lots.toFixed(volDigits)} lots`}
-            className="flex h-8 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-bold text-white tabular-nums transition hover:border-[#3183ff]"
+            className="flex h-8 items-center justify-center rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] font-mono text-[14px] font-bold text-white tabular-nums transition hover:border-[var(--mt5-blue)]"
           >
             {lots.toFixed(volDigits)}
           </button>
@@ -227,7 +227,7 @@ export function MT5OrderTicket() {
             onChange={(e) => setTypingVol(e.target.value)}
             onBlur={commitVol}
             onKeyDown={(e) => { if (e.key === 'Enter') commitVol(); if (e.key === 'Escape') setTypingVol(null); }}
-            className="flex h-8 w-full items-center justify-center rounded border border-[#3183ff] bg-[#0f1720] text-center font-mono text-[14px] font-bold text-white tabular-nums outline-none"
+            className="flex h-8 w-full items-center justify-center rounded border border-[var(--mt5-blue)] bg-[var(--mt5-surface)] text-center font-mono text-[14px] font-bold text-white tabular-nums outline-none"
           />
         )}
         {steps.map((st) => (
@@ -239,7 +239,7 @@ export function MT5OrderTicket() {
       {/* Both bounds, always. They are the symbol's own min and max intersected with the brand's,
           which is the pair MetaTrader's contract specification states, so hiding the ceiling when
           the brand set none left the ticket quoting a limit it had no second half for. */}
-      <div className="flex items-baseline gap-2 text-[11px] text-[#8fa2b8]">
+      <div className="flex items-baseline gap-2 text-[11px] text-[var(--mt5-muted)]">
         <span>= {money.fmt(stakeCents)}</span>
         <span className="ml-auto">min {minLots.toFixed(volDigits)} / max {maxLots.toFixed(volDigits)}</span>
       </div>
@@ -263,7 +263,7 @@ export function MT5OrderTicket() {
           at the next tick or rejects, which is that policy exactly. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={rowLabel}>Fill policy</span>
-        <span className="flex h-8 flex-1 items-center justify-center rounded border border-[#2b3543] bg-[#0f1720] text-[12px] text-[#8fa2b8] underline decoration-[#8fa2b8]/40 underline-offset-4">
+        <span className="flex h-8 flex-1 items-center justify-center rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-[12px] text-[var(--mt5-muted)] underline decoration-[var(--mt5-muted)]/40 underline-offset-4">
           Fill or Kill
         </span>
       </div>
@@ -300,10 +300,10 @@ export function MT5OrderTicket() {
       ) : (
         <div data-ticket-sides="" className="grid grid-cols-2 gap-2 pt-0.5">
           <span className="flex items-end justify-center">
-            <MT5Price value={bidAsk.bid} digits={digits} className="text-[22px] font-semibold text-[#f23645]" />
+            <MT5Price value={bidAsk.bid} digits={digits} className="text-[22px] font-semibold text-[var(--mt5-red)]" />
           </span>
           <span className="flex items-end justify-center">
-            <MT5Price value={bidAsk.ask} digits={digits} className="text-[22px] font-semibold text-[#3183ff]" />
+            <MT5Price value={bidAsk.ask} digits={digits} className="text-[22px] font-semibold text-[var(--mt5-blue)]" />
           </span>
         </div>
       )}
@@ -344,7 +344,7 @@ export function MT5OrderTicket() {
           to place an order.
         </p>
       ) : null}
-      {connecting ? <p className="text-center text-[11px] text-[#8fa2b8]">Connecting…</p> : null}
+      {connecting ? <p className="text-center text-[11px] text-[var(--mt5-muted)]">Connecting…</p> : null}
       {overBalance && signedIn ? (
         <p className="text-center text-[11px] text-[#f0b90b]">Not enough free margin: tap a side to top up.</p>
       ) : null}

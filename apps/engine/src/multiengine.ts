@@ -444,7 +444,28 @@ export async function startMultiEngine(opts: MultiEngineOptions): Promise<MultiE
   // Warm it at boot so the first player to open the tab is not the one who waits.
   void news.refresh().catch(() => { /* reported by onError */ });
 
-  const wss = new WebSocketServer({ host: opts.host ?? "0.0.0.0", port: opts.port });
+  /**
+   * Compressed frames. The candle replies are the reason: 240 M1 bars is ~23KB of JSON whose
+   * every row is the same six keys and prices that differ in their last two digits, which deflate
+   * takes down by four to five times. On a phone on a mobile network that is most of the wait.
+   *
+   * `threshold` keeps the tick stream out of it: a tick frame is ~90 bytes, where the deflate
+   * header alone would make it bigger, and ticks are the one thing here that must never be delayed.
+   * `concurrencyLimit` bounds the zlib thread pool so a burst of history requests cannot starve it.
+   */
+  const wss = new WebSocketServer({
+    host: opts.host ?? "0.0.0.0",
+    port: opts.port,
+    perMessageDeflate: {
+      threshold: 1024,
+      concurrencyLimit: 10,
+      zlibDeflateOptions: { level: 6 },
+      // Per-message context takeover costs memory per connection and buys little on frames this
+      // self-similar; without it each frame compresses independently and the sockets stay cheap.
+      serverNoContextTakeover: true,
+      clientNoContextTakeover: true,
+    },
+  });
 
   wss.on("connection", (ws, req) => {
     void (async () => {

@@ -10,7 +10,7 @@ import { MT5MobileTabs } from '@/components/game/mobile/MT5MobileTabs';
 import { MT5MobileTrade } from '@/components/game/mobile/MT5MobileTrade';
 import { MT5MobileMessages } from '@/components/game/mobile/MT5MobileMessages';
 import { MT5OneClickPanel } from '@/components/game/mobile/MT5OneClickPanel';
-import { useMobileTabStore, useRestoreMobileTab } from '@/lib/game/mobileTab';
+import { useMobileTabStore, useRestoreMobileTab, type MobileTab } from '@/lib/game/mobileTab';
 import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
 import { useRestoreLevels } from '@/lib/game/levelsStore';
 import { useOrderEntry } from '@/lib/game/useOrderEntry';
@@ -112,20 +112,27 @@ export function MT5MobileShell() {
   // Rotating back to portrait is not a decision to keep the chrome hidden: each rotation starts
   // from MetaTrader's own answer for that orientation.
   useEffect(() => { setShowChrome(false); }, [landscape]);
-  // Landscape is a chart gesture. Whatever tab was showing, a sideways phone shows the chart, and
-  // the tab it was on is still remembered for when it is turned back.
-  useEffect(() => { if (landscape) setTab('charts'); }, [landscape, setTab]);
+  /**
+   * Landscape is a chart gesture: a sideways phone shows the chart, and the tab it was on is still
+   * there when it is turned back.
+   *
+   * Shown WITHOUT writing to the tab store. `setTab` persists (lib/game/mobileTab), so the old
+   * version destroyed the trader's chosen tab on every rotation and on every resize of a desktop
+   * window past the breakpoint: turn the phone sideways while reading your positions, turn it back,
+   * and you were on the chart with no record that you had ever been anywhere else.
+   */
+  const shown: MobileTab = landscape ? 'charts' : tab;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0f1720]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--mt5-surface)]">
       <div className="relative min-h-0 flex-1">
         {/* Charts stays MOUNTED across tab switches, hidden rather than unmounted.
             A chart that is torn down every time the trader looks at their positions refetches its
             whole history on the way back, which on a phone is a second of blank screen each time.
             MetaTrader's own tabs do not do that. The other four are cheap, so they unmount. */}
         <div
-          className={tab === 'charts' ? 'flex h-full min-h-0 flex-col' : 'hidden'}
-          aria-hidden={tab === 'charts' ? undefined : true}
+          className={shown === 'charts' ? 'flex h-full min-h-0 flex-col' : 'hidden'}
+          aria-hidden={shown === 'charts' ? undefined : true}
         >
           <div className="min-h-0 flex-1">
             {/* The stake behind the chart's draggable Stop Loss: what a contract at the volume
@@ -151,7 +158,7 @@ export function MT5MobileShell() {
           {panelShown ? <MT5OneClickPanel onOpenTicket={() => setDialogOpen(true)} /> : null}
         </div>
 
-        {tab === 'quotes' ? (
+        {shown === 'quotes' ? (
           <MarketWatch
             phone
             className="h-full"
@@ -159,25 +166,29 @@ export function MT5MobileShell() {
             onNewOrder={() => setTicketOpen(true)}
           />
         ) : null}
-        {tab === 'trade' ? (
+        {shown === 'trade' ? (
           <MT5MobileTrade
             onNewOrder={() => setTicketOpen(true)}
             onChart={() => setTab('charts')}
           />
         ) : null}
-        {tab === 'history' ? (
-          <div className="flex h-full flex-col overflow-y-auto">
+        {shown === 'history' ? (
+          /* `min-h-0` with the scroll on the INNER box, which is the idiom every other tab here
+             uses. `h-full flex-col overflow-y-auto` wrapping a `flex-1` child pins the child to the
+             scroller's own height, so the list had no room to overflow into and scrolled only by
+             accident, through two `overflow: visible` boxes. */
+          <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
             <MT5History embedded />
           </div>
         ) : null}
-        {tab === 'messages' ? <MT5MobileMessages /> : null}
+        {shown === 'messages' ? <MT5MobileMessages /> : null}
       </div>
 
       {/* Hidden in landscape, which is MetaTrader's full-screen. */}
       {fullScreen ? null : <MT5MobileTabs />}
 
       {ticketOpen ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-[#0f1720]">
+        <div className="fixed inset-0 z-50 flex flex-col bg-[var(--mt5-surface)]">
           <MT5MobileOrder
             onBack={() => setTicketOpen(false)}
             onAdvanced={() => { setTicketOpen(false); setDialogOpen(true); }}

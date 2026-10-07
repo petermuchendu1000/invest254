@@ -65,17 +65,17 @@ export function MT5ChartProperties({
       role="dialog"
       aria-modal="true"
       aria-label={`Properties of ${symbol},${timeframe}`}
-      className="fixed inset-0 z-[85] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-[76vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[76vh] sm:max-w-[460px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
           <span className="flex-1 truncate text-[15px] font-semibold leading-tight">
             Properties of {symbol},{timeframe}
           </span>
-          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white">×</button>
+          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[var(--mt5-muted)] transition hover:text-white">×</button>
         </div>
 
-        <div role="tablist" aria-label="Chart properties" className="flex shrink-0 border-b border-[#2b3543]">
+        <div role="tablist" aria-label="Chart properties" className="flex shrink-0 border-b border-[var(--mt5-border)]">
           {([['common', 'Common'], ['show', 'Show'], ['colors', 'Colors']] as const).map(([id, label]) => (
             <button
               key={id}
@@ -85,7 +85,7 @@ export function MT5ChartProperties({
               onClick={() => setTab(id)}
               className={cn(
                 'flex-1 px-2 py-2 text-[11px] font-semibold transition',
-                tab === id ? 'border-b-2 border-[#3183ff] text-white' : 'text-[#8fa2b8] hover:text-white',
+                tab === id ? 'border-b-2 border-[var(--mt5-blue)] text-white' : 'text-[var(--mt5-muted)] hover:text-white',
               )}
             >
               {label}
@@ -100,18 +100,18 @@ export function MT5ChartProperties({
         </div>
 
         {/* OK, Cancel and Help. MetaTrader has no Apply on this dialog. */}
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[#2b3543] px-3 py-2.5">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--mt5-border)] px-3 py-2.5">
           <button
             type="button"
             onClick={() => { onChange(draft); onDismiss(); }}
-            className="h-8 rounded-sm bg-[#3183ff] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
+            className="h-8 rounded-sm bg-[var(--mt5-blue)] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
           >
             OK
           </button>
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm border border-[#2b3543] bg-[#202933] px-5 text-[11px] font-semibold text-white transition hover:bg-[#2b3543]"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
           >
             Cancel
           </button>
@@ -119,7 +119,7 @@ export function MT5ChartProperties({
             type="button"
             onClick={() => setTab('common')}
             title="MetaTrader opens its own help site here. This platform has no help site, so the button returns to the first tab."
-            className="h-8 rounded-sm border border-[#2b3543] bg-[#202933] px-4 text-[11px] font-semibold text-[#8fa2b8] transition hover:bg-[#2b3543]"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-4 text-[11px] font-semibold text-[var(--mt5-muted)] transition hover:bg-[var(--mt5-border)]"
           >
             Help
           </button>
@@ -149,7 +149,7 @@ function Check({ label, on, onToggle, disabled, title }: {
         checked={on}
         disabled={disabled}
         onChange={(e) => onToggle(e.target.checked)}
-        className="h-3.5 w-3.5 accent-[#3183ff]"
+        className="h-3.5 w-3.5 accent-[var(--mt5-blue)]"
       />
       <span>{label}</span>
     </label>
@@ -157,10 +157,10 @@ function Check({ label, on, onToggle, disabled, title }: {
 }
 
 function Group({ children }: { children: React.ReactNode }) {
-  return <div className="mb-3 rounded-sm border border-[#2b3543] p-2.5 last:mb-0">{children}</div>;
+  return <div className="mb-3 rounded-sm border border-[var(--mt5-border)] p-2.5 last:mb-0">{children}</div>;
 }
 
-const num = 'h-8 w-28 rounded-sm border border-[#2b3543] bg-[#0f1720] px-2 font-mono text-[11px] text-white outline-none focus:border-[#3183ff] disabled:opacity-40';
+const num = 'h-8 w-28 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 font-mono text-[11px] text-white outline-none focus:border-[var(--mt5-blue)] disabled:opacity-40';
 
 function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
   return (
@@ -174,10 +174,10 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
               name="chart-kind"
               checked={draft.kind === k.id}
               onChange={() => set({ kind: k.id as ChartKind })}
-              className="h-3.5 w-3.5 accent-[#3183ff]"
+              className="h-3.5 w-3.5 accent-[var(--mt5-blue)]"
             />
             <span className="flex-1">{k.label}</span>
-            <span className="text-[10px] text-[#8fa2b8]">{k.accelerator}</span>
+            <span className="text-[10px] text-[var(--mt5-muted)]">{k.accelerator}</span>
           </label>
         ))}
       </Group>
@@ -191,7 +191,7 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
       {/* The scale block, in MetaTrader's own order: the slider, then one to one ABOVE scale fix. */}
       <Group>
         <label className="mb-2 flex items-center gap-2 text-[11px]">
-          <span className="w-10 shrink-0 text-[#8fa2b8]">Scale</span>
+          <span className="w-10 shrink-0 text-[var(--mt5-muted)]">Scale</span>
           <input
             type="range"
             min={0}
@@ -199,7 +199,7 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
             step={1}
             value={draft.scale}
             onChange={(e) => set({ scale: clampScale(Number(e.target.value)) })}
-            className="min-w-0 flex-1 accent-[#3183ff]"
+            className="min-w-0 flex-1 accent-[var(--mt5-blue)]"
           />
           <span className="w-4 shrink-0 text-right font-mono">{draft.scale}</span>
         </label>
@@ -210,7 +210,7 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
         />
         <Check label="Scale fix" on={draft.scaleFix} onToggle={(v) => set({ scaleFix: v, ...(v ? {} : { scaleFixOneToOne: false }) })} />
         <label className={cn('mb-1.5 flex items-center gap-2 text-[11px]', !draft.scaleFix && 'opacity-45')}>
-          <span className="w-28 shrink-0 text-[#8fa2b8]">Fixed maximum</span>
+          <span className="w-28 shrink-0 text-[var(--mt5-muted)]">Fixed maximum</span>
           <input
             className={num}
             disabled={!draft.scaleFix}
@@ -220,7 +220,7 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
           />
         </label>
         <label className={cn('mb-1.5 flex items-center gap-2 text-[11px]', !draft.scaleFix && 'opacity-45')}>
-          <span className="w-28 shrink-0 text-[#8fa2b8]">Fixed minimum</span>
+          <span className="w-28 shrink-0 text-[var(--mt5-muted)]">Fixed minimum</span>
           <input
             className={num}
             disabled={!draft.scaleFix}
@@ -235,7 +235,7 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
           onToggle={(v) => set({ scalePointsPerBar: v })}
         />
         <label className={cn('flex items-center gap-2 text-[11px]', !draft.scalePointsPerBar && 'opacity-45')}>
-          <span className="w-28 shrink-0 text-[#8fa2b8]">Points per bar</span>
+          <span className="w-28 shrink-0 text-[var(--mt5-muted)]">Points per bar</span>
           {/* MetaTrader draws this one as a dropdown, not a spinner. */}
           <select
             className={cn(num, 'px-1')}
@@ -250,7 +250,7 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
         </label>
         {draft.chartShift ? (
           <label className="mt-2 flex items-center gap-2 text-[11px]">
-            <span className="w-28 shrink-0 text-[#8fa2b8]">Shift</span>
+            <span className="w-28 shrink-0 text-[var(--mt5-muted)]">Shift</span>
             <input
               type="range"
               min={10}
@@ -258,7 +258,7 @@ function CommonTab({ draft, set }: { draft: ChartProperties; set: Set }) {
               step={1}
               value={draft.shiftSize}
               onChange={(e) => set({ shiftSize: clampShift(Number(e.target.value)) })}
-              className="min-w-0 flex-1 accent-[#3183ff]"
+              className="min-w-0 flex-1 accent-[var(--mt5-blue)]"
             />
             <span className="w-8 shrink-0 text-right font-mono">{draft.shiftSize}%</span>
           </label>
@@ -302,7 +302,7 @@ function ShowTab({ draft, set }: { draft: ChartProperties; set: Set }) {
           />
         );
       })}
-      <p className="mt-3 text-[11px] leading-snug text-[#8fa2b8]">
+      <p className="mt-3 text-[11px] leading-snug text-[var(--mt5-muted)]">
         Unticking the ticker also unticks OHLC, and ticking OHLC ticks the ticker, which is how
         MetaTrader couples them.
       </p>
@@ -332,9 +332,9 @@ function ColorsTab({ draft, set }: { draft: ChartProperties; set: Set }) {
   return (
     <div>
       <label className="mb-3 flex items-center gap-2 text-[11px]">
-        <span className="w-24 shrink-0 text-right text-[#8fa2b8]">Scheme:</span>
+        <span className="w-24 shrink-0 text-right text-[var(--mt5-muted)]">Scheme:</span>
         <select
-          className="h-8 min-w-0 flex-1 rounded-sm border border-[#2b3543] bg-[#0f1720] px-1.5 text-[11px] text-white outline-none focus:border-[#3183ff]"
+          className="h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
           value={draft.scheme ?? ''}
           onChange={(e) => {
             const name = e.target.value as SchemeName;
@@ -350,15 +350,15 @@ function ColorsTab({ draft, set }: { draft: ChartProperties; set: Set }) {
 
       {COLOUR_FIELDS.map((f) => (
         <label key={f.id} className="mb-1.5 flex items-center gap-2 text-[11px] last:mb-0" title={f.note}>
-          <span className="w-24 shrink-0 text-right text-[#8fa2b8]">{f.label}</span>
+          <span className="w-24 shrink-0 text-right text-[var(--mt5-muted)]">{f.label}</span>
           <span
             aria-hidden
-            className="h-4 w-5 shrink-0 rounded-[2px] border border-[#2b3543]"
+            className="h-4 w-5 shrink-0 rounded-[2px] border border-[var(--mt5-border)]"
             style={{ background: draft.colours[f.id] }}
           />
           <select
             aria-label={f.label.replace(':', '')}
-            className="h-8 min-w-0 flex-1 rounded-sm border border-[#2b3543] bg-[#0f1720] px-1.5 text-[11px] text-white outline-none focus:border-[#3183ff]"
+            className="h-8 min-w-0 flex-1 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1.5 text-[11px] text-white outline-none focus:border-[var(--mt5-blue)]"
             value={draft.colours[f.id]}
             onChange={(e) => pick(f.id, e.target.value)}
           >

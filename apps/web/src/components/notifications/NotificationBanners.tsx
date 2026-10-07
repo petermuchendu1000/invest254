@@ -43,7 +43,7 @@ export function NotificationBanners() {
       // Each branch carries its OWN spacing rather than overriding the other's: Tailwind resolves
       // `pt-0` against `pt-3` by stylesheet order, not by the order they appear here, so emitting
       // both leaves a gap the override looks like it removed.
-      className={cn('flex w-full flex-col', mt5 ? 'gap-px bg-[#0f1720]' : 'mx-auto max-w-app gap-2 px-4 pt-3')}
+      className={cn('flex w-full flex-col', mt5 ? 'gap-px bg-[var(--mt5-surface)]' : 'mx-auto max-w-app gap-2 px-4 pt-3')}
       {...(mt5 ? { style: MT5_TOKENS } : {})}
     >
       {items.map((n) => (

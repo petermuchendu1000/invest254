@@ -17,7 +17,7 @@ import {
 } from '@/components/game/MT5Specification';
 import { MT5SymbolsDialog } from '@/components/game/MT5SymbolsDialog';
 import { useSymbolSetStore, MAX_WATCHED } from '@/lib/game/symbolSet';
-import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
+import { useChartSymbolStore, chartOverride, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
 import { detailRows, sessionSoFar } from '@/lib/game/symbolDetails';
 import { MT5MobileQuoteMenu } from '@/components/game/mobile/MT5MobileQuoteMenu';
 import {
@@ -74,7 +74,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
   /** Phone only: open the New Order screen, which is where `New order` goes. */
   onNewOrder?: (() => void) | undefined;
 }) {
-  const { getMarket, requestCandles, requestSymbols, getSymbolQuote, getSymbolTicks } = useGameSocketApi();
+  const { getMarket, requestCandles, requestSymbols, getSymbolQuote, getSymbolTicks, getSettledSymbol } = useGameSocketApi();
   const { status, spread } = useGameSocket();
   const money = useDisplayMoney();
   const [tab, setTab] = useState<Tab>('symbols');
@@ -280,10 +280,15 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
    * Switching back to the brand's own symbol stores null rather than its name, so a brand changing
    * its instrument does not strand the device on the old one.
    */
-  const chartSymbol = charted ?? defaultSymbol;
+  const chartSymbol = chartOverride(charted, getSettledSymbol() ?? defaultSymbol) ?? getSettledSymbol() ?? defaultSymbol;
   const openChart = useCallback((symbol: string) => {
-    setCharted(symbol === defaultSymbol ? null : symbol);
-  }, [setCharted, defaultSymbol]);
+    // The engine's own `defaultSymbol` first, then this window's copy of it. Before either has
+    // arrived `settled` is null and this would store the brand's OWN symbol as if it were another
+    // instrument; `chartOverride` normalises that away on every read, so a mis-timed click can no
+    // longer refuse to trade the symbol it just charted.
+    const settled = getSettledSymbol() ?? defaultSymbol;
+    setCharted(symbol === settled ? null : symbol);
+  }, [setCharted, defaultSymbol, getSettledSymbol]);
 
   const menuItems = marketWatchMenu({
     onSpecification: () => setSpecOpen(true),
@@ -309,22 +314,22 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
 
   return (
     <aside className={cn(
-      'flex flex-col overflow-hidden bg-[#0f1720] text-[#ffffff]',
+      'flex flex-col overflow-hidden bg-[var(--mt5-surface)] text-[#ffffff]',
       // On a phone this IS the Quotes tab, filling the screen, so it has no card edge to draw.
       // MetaTrader's desktop panes are FLUSH: a 1px rule and a square corner, not a floating card.
       // This drew a 14px radius, which is the app shell's own card edge on a MetaTrader-coloured box.
-      phone ? '' : 'rounded-sm border border-[#2b3543]',
+      phone ? '' : 'rounded-sm border border-[var(--mt5-border)]',
       className,
     )}>
       {/* On a phone, a tab other than Symbols is a SCREEN pushed over the list, so its bar is a back
           chevron and the screen's name — there is no tab strip down there to get back with. */}
       {phone && tab !== 'symbols' ? (
-        <div className="flex items-center gap-1 border-b border-[#2b3543] px-1 py-2">
+        <div className="flex items-center gap-1 border-b border-[var(--mt5-border)] px-1 py-2">
           <button
             type="button"
             onClick={() => setTab('symbols')}
             aria-label="Back to quotes"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded text-[#3183ff]"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded text-[var(--mt5-blue)]"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
               <path d="M15 5l-7 7 7 7" />
@@ -335,12 +340,12 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
           </span>
         </div>
       ) : (
-      <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2">
+      <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2">
         {/* The window is "Market Watch" on a desktop and the tab is "Quotes" on a phone, and those
             are MetaTrader's own two names for it. The phone bar is `☰ | Quotes | ＋ | ✎`; the
             hamburger lives on the chart screen's bar in this shell and the pencil's job (hide,
             reorder) is the row context menu, so the `＋` is what is carried over. */}
-        <span className={cn('font-semibold text-[#8fa2b8]', phone ? 'text-[14px] text-white' : 'text-[11px] uppercase tracking-wide')}>
+        <span className={cn('font-semibold text-[var(--mt5-muted)]', phone ? 'text-[14px] text-white' : 'text-[11px] uppercase tracking-wide')}>
           {phone ? 'Quotes' : 'Market Watch'}
         </span>
         <span className="ml-auto" />
@@ -351,7 +356,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
             type="button"
             onClick={() => setSymbolsOpen(true)}
             aria-label="Add symbol"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded text-[#3183ff]"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded text-[var(--mt5-blue)]"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-5 w-5" aria-hidden>
               <path d="M12 5v14M5 12h14" />
@@ -359,7 +364,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
           </button>
         ) : null}
         <span
-          className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[#41be56]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[#f23645]')}
+          className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[var(--mt5-green)]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[var(--mt5-red)]')}
           title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
         />
       </div>
@@ -368,9 +373,9 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {tab === 'symbols' ? (
           visible.length === 0 ? (
-            <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">
+            <div className="px-3 py-4 text-center text-[11px] leading-snug text-[var(--mt5-muted)]">
               No symbols shown.
-              <button type="button" onClick={() => setSymbolsOpen(true)} className="ml-1 text-[#3183ff] underline">
+              <button type="button" onClick={() => setSymbolsOpen(true)} className="ml-1 text-[var(--mt5-blue)] underline">
                 Add some
               </button>
               .
@@ -502,7 +507,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                     onDoubleClick={() => openChart(symbol)}
                     onContextMenu={(e) => { e.preventDefault(); setSelected(symbol); setMenu({ x: e.clientX, y: e.clientY, symbol }); }}
                     className={cn(
-                      'w-full text-left transition hover:bg-[#202933]',
+                      'w-full text-left transition hover:bg-[var(--mt5-raised)]',
                       phone
                         ? (view === 'simple' ? 'flex items-center gap-2 px-3 py-3' : 'flex items-start gap-2 px-3 py-2')
                         // Tighter than the phone row's: six columns share a docked panel that is
@@ -510,8 +515,8 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                         // be squeezed. MetaTrader drops columns off the right edge at this width;
                         // the breakpoints below do the same, deliberately rather than by clipping.
                         : 'flex items-center gap-1.5 px-2 py-1.5',
-                      grid ? 'border-b border-[#2b3543]/60' : '',
-                      symbol === active ? 'bg-[#202933]' : '',
+                      grid ? 'border-b border-[var(--mt5-border)]/60' : '',
+                      symbol === active ? 'bg-[var(--mt5-raised)]' : '',
                     )}
                   >
                     {phone && view === 'simple' ? (
@@ -573,7 +578,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                             </span>
                           </span>
                           <span className="block truncate text-[15px] font-bold leading-tight text-white">{symbol}</span>
-                          <span className="flex items-center gap-1.5 font-mono text-[10px] tabular-nums text-[#8fa2b8]">
+                          <span className="flex items-center gap-1.5 font-mono text-[10px] tabular-nums text-[var(--mt5-muted)]">
                             <span>{q?.t ? clockOf(q.t) : ''}</span>
                             {/* The I-beam MetaTrader draws beside the spread: two short verticals
                                 joined by a rule. Drawn, not typed — U+2336 is absent from most
@@ -603,7 +608,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                               print a high the price has not reached yet. Absent, not dashed, until
                               the first quote carrying them lands. */}
                           {q?.dayLow !== null && q?.dayLow !== undefined && q.dayHigh !== null ? (
-                            <span className="flex justify-end gap-2 pt-0.5 font-mono text-[10px] leading-none text-[#8fa2b8] tabular-nums">
+                            <span className="flex justify-end gap-2 pt-0.5 font-mono text-[10px] leading-none text-[var(--mt5-muted)] tabular-nums">
                               {/* A flex gap rather than two spaces in the text: HTML collapses
                                   runs of whitespace, so the pair would have read as one. */}
                               <span>L: {q.dayLow.toFixed(digits)}</span>
@@ -659,7 +664,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                     {/* Spread in the symbol's own POINTS, which is the unit MetaTrader's column
                         uses: its EURUSD row reads `0`, not `0.00001`. */}
                     {columns.includes('spread') ? (
-                      <span className="hidden w-[26px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] xl:inline">
+                      <span className="hidden w-[26px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[var(--mt5-muted)] xl:inline">
                         {points_ === null ? '' : points_}
                       </span>
                     ) : null}
@@ -668,7 +673,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                         off the right edge when the window is narrow; this panel does the same with
                         a breakpoint rather than by clipping. */}
                     {columns.includes('time') ? (
-                      <span className="hidden w-[46px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] 2xl:inline">
+                      <span className="hidden w-[46px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[var(--mt5-muted)] 2xl:inline">
                         {q?.t ? clockOf(q.t) : ''}
                       </span>
                     ) : null}
@@ -676,7 +681,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                         The account summary strip writes "1 076.68 %" WITH a space; MetaQuotes is
                         inconsistent between the two panels and both are copied as found. */}
                     {columns.includes('change') ? (
-                      <span className="hidden w-[42px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] xl:inline">
+                      <span className="hidden w-[42px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[var(--mt5-muted)] xl:inline">
                         {changePct === null ? '' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
                       </span>
                     ) : null}
@@ -703,11 +708,11 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                 type="button"
                 data-quote-add=""
                 onClick={() => setSymbolsOpen(true)}
-                className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] transition hover:bg-[#202933]"
+                className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] transition hover:bg-[var(--mt5-raised)]"
               >
-                <span aria-hidden className="w-3 shrink-0 text-center text-[11px] leading-none text-[#41be56]">+</span>
-                <span className="flex-1 truncate text-[#8fa2b8]">click to add...</span>
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-[#8fa2b8]">
+                <span aria-hidden className="w-3 shrink-0 text-center text-[11px] leading-none text-[var(--mt5-green)]">+</span>
+                <span className="flex-1 truncate text-[var(--mt5-muted)]">click to add...</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--mt5-muted)]">
                   {visible.length} / {catalogue.length || visible.length}
                 </span>
               </button>
@@ -739,7 +744,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
           <div className="text-[11px]">
             {/* MetaTrader's blue header line: the symbol, then its description. The Specification
                 dialog carries the same line. */}
-            <div className="bg-[#3183ff] px-3 py-1 text-[11px] font-semibold text-white">
+            <div className="bg-[var(--mt5-blue)] px-3 py-1 text-[11px] font-semibold text-white">
               {active}{describe(active) === '' ? '' : `, ${describe(active)}`}
             </div>
             {/* Not a grid: two columns, label left and value right-aligned, with the same
@@ -757,7 +762,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                     <span aria-hidden className="w-3 shrink-0 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[rowGlyph] }}>
                       {GUTTER_GLYPH[rowGlyph]}
                     </span>
-                    <dt className="min-w-0 flex-1 truncate text-[#8fa2b8]">{r.label}</dt>
+                    <dt className="min-w-0 flex-1 truncate text-[var(--mt5-muted)]">{r.label}</dt>
                     <dd
                       className="shrink-0 font-mono tabular-nums"
                       style={{ color: r.live && activeTone !== null ? QUOTE_TONE_COLOUR[activeTone] : '#ffffff' }}
@@ -774,7 +779,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
               <button
                 type="button"
                 onClick={() => setSpecOpen(true)}
-                className="h-7 w-full rounded-sm border border-[#2b3543] bg-[#202933] text-[11px] font-semibold text-white transition hover:border-[#3183ff]"
+                className="h-7 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[11px] font-semibold text-white transition hover:border-[var(--mt5-blue)]"
               >
                 Specification
               </button>
@@ -881,7 +886,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
           with no room ("when the panel is too narrow, `◀ ▶` scroll arrows appear at the right of
           the strip", docs/mt5/10-market-watch.md:96) rather than a tab hidden under an edge. */}
       {phone ? null : (
-      <div data-mw-tabs="" className="flex gap-0.5 overflow-x-auto border-t border-[#2b3543] bg-[#202933] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div data-mw-tabs="" className="flex gap-0.5 overflow-x-auto border-t border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -890,7 +895,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
             aria-pressed={tab === t.id}
             className={cn(
               'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold transition',
-              tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
+              tab === t.id ? 'bg-[var(--mt5-border)] text-white' : 'text-[var(--mt5-muted)] hover:text-white',
             )}
           >
             {t.label}

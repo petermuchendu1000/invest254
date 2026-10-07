@@ -118,13 +118,13 @@ export function MT5Drawer() {
       <button type="button" aria-label="Close menu" onClick={close} className="fixed inset-0 z-[70] bg-black/60" />
       <nav
         aria-label="Main menu"
-        className="fixed bottom-0 left-0 top-0 z-[71] flex w-[82%] max-w-[320px] flex-col overflow-y-auto border-r border-[#2b3543] bg-[#0f1720] text-white shadow-2xl"
+        className="fixed bottom-0 left-0 top-0 z-[71] flex w-[82%] max-w-[320px] flex-col overflow-y-auto border-r border-[var(--mt5-border)] bg-[var(--mt5-surface)] text-white shadow-2xl"
       >
         {/* MetaTrader heads the panel with the account itself: who you are, which server, how much —
             and tapping it opens the account, which is also where the Real/Demo switch lives now that
             the title bar no longer carries the balance pill. */}
         {token && user ? (
-          <Link href="/account" className="block bg-[#3183ff] px-4 pb-3 pt-4 text-left">
+          <Link href="/account" className="block bg-[var(--mt5-blue)] px-4 pb-3 pt-4 text-left">
             <div className="flex items-baseline gap-2">
               <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{user.username}</span>
               <span className="shrink-0 rounded-sm bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
@@ -137,7 +137,7 @@ export function MT5Drawer() {
             </div>
           </Link>
         ) : (
-          <header className="bg-[#3183ff] px-4 pb-3 pt-4">
+          <header className="bg-[var(--mt5-blue)] px-4 pb-3 pt-4">
             <div className="truncate text-[15px] font-semibold leading-tight">{brand.name || 'invest254'}</div>
             <div className="truncate text-[11px] leading-tight text-white/75">Not connected</div>
           </header>
@@ -156,7 +156,7 @@ export function MT5Drawer() {
           />
         </div>
 
-        <div className="border-t border-[#2b3543] py-1">
+        <div className="border-t border-[var(--mt5-border)] py-1">
           {token ? (
             <Row onClick={() => { close(); logout(); }} icon={<SignOutIcon />} label="Log out" tone="bad" />
           ) : (
@@ -183,14 +183,14 @@ function Row({
     // 44px tall: MetaTrader's rows are compact, but a tap target below the Apple minimum is a worse
     // phone screen than a faithful one.
     'flex w-full items-center gap-3 px-4 py-3 text-left text-[14px]',
-    active ? 'bg-[#202933] text-[#4597ff]' : tone === 'bad' ? 'text-[#f23645]' : 'text-white',
+    active ? 'bg-[var(--mt5-raised)] text-[var(--mt5-blue-link)]' : tone === 'bad' ? 'text-[var(--mt5-red)]' : 'text-white',
   );
   const body = (
     <>
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {badge ? (
-        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[#f23645] px-1 text-[10px] font-bold text-white">
+        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--mt5-red)] px-1 text-[10px] font-bold text-white">
           {badge}
         </span>
       ) : null}

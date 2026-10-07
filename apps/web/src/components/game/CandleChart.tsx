@@ -42,6 +42,7 @@ import { MT5ObjectMenu, type ObjectMenuAt } from '@/components/game/MT5ObjectMen
 import { MT5ObjectsList } from '@/components/game/MT5ObjectsList';
 import { MT5ObjectProperties } from '@/components/game/MT5ObjectProperties';
 import { useNavDrawer } from '@/lib/ui/drawer';
+import { currentTheme } from '@/lib/ui/theme';
 import { MT5ChartLevels } from '@/components/game/mobile/MT5ChartLevels';
 import { useOneClickStore, useRestoreOneClick } from '@/lib/game/oneClick';
 import { useAlertsStore, ALERT_DEFAULTS } from '@/lib/game/alerts';
@@ -154,8 +155,33 @@ const MENU_CHART_TYPES: ReadonlyArray<{ id: ChartKind; label: string; accel: str
 
 const DEFAULT_TF: Timeframe = 'M1';
 const TF_STORAGE_KEY = 'pp:chart:tf';
-/** Bars fetched on open, and per page when scrolling back. */
-const INITIAL_BARS = 500, PAGE_BARS = 500;
+/**
+ * Bars fetched on open, and per page when scrolling back — SCALED TO THE PERIOD.
+ *
+ * A flat 500 was the single biggest cost in getting a chart on screen. The engine builds its
+ * history day by day from a seeded curve, so the work is set by the SPAN asked for, not the number
+ * of bars: 500 bars of M1 is 3 days, but 500 of H4 is 85 days, 500 of H12 is 252, and 500 of D1,
+ * W1 or MN1 runs into the 400-day ceiling. Measured on this container, a cold D1 request blocked
+ * the engine's event loop for 4.5 seconds and came back with 500 bars for a pane that shows about
+ * 120; W1 spent 4.7 seconds to return 57 bars, and MN1 4.6 seconds to return 13.
+ *
+ * So the ceiling is on the SPAN. 240 bars is twice the visible pane at every period, which is the
+ * depth a trader can scroll into before `loadOlder` fetches the next page, and above H4 the span
+ * cap takes over and asks for what the brand's history actually holds rather than what cannot
+ * exist. Nothing is lost: paging back is a 0.2-10ms request once the chain is walked.
+ */
+const PANE_BARS = 240;
+/** The brand's history is 400 days, so asking for a wider span than that returns nothing more. */
+const HISTORY_DAYS = 400;
+const DAY_SECONDS = 86_400;
+export const barsFor = (tf: Timeframe): number => {
+  const span = TIMEFRAMES[tf] ?? 60;
+  // MN1 is bucketed by calendar month, which `TIMEFRAMES` cannot express; 30 days is close enough
+  // for sizing a request and the engine clamps the rest.
+  const seconds = tf === 'MN1' ? 30 * DAY_SECONDS : span;
+  const withinHistory = Math.floor((HISTORY_DAYS * DAY_SECONDS) / seconds);
+  return Math.max(24, Math.min(PANE_BARS, withinHistory));
+};
 /** Load older history once the view comes within this many bars of the left edge. */
 const PAGE_TRIGGER_BARS = 40;
 /** Ceiling on bars held client-side, so a long session cannot grow without bound. */
@@ -251,6 +277,7 @@ export function CandleChart({
   getLastTick, requestCandles, status, initialType = 'candles', openPosition = null, symbol,
   phone = false, levelStakeCents = 0, fullScreen, onFullScreen,
   onPlacePending, onTakeProfit, onNewOrder, pendingLevels = NO_PENDING,
+  onChartSettled, settledSymbol = null,
 }: {
   getLastTick: () => Tick | null;
   requestCandles: (tf: Timeframe, count: number, to?: number) => Promise<CandlesReply>;
@@ -305,6 +332,13 @@ export function CandleChart({
    * sees the order the menu above just armed.
    */
   pendingLevels?: ReadonlyArray<{ id: string; price: number; label: string }> | undefined;
+  /**
+   * Put the chart back on the symbol this brand settles. Absent when it is already on it, which is
+   * what makes the chart's title a plain label rather than a control in the ordinary case.
+   */
+  onChartSettled?: (() => void) | undefined;
+  /** That symbol's name, for the control's tooltip. */
+  settledSymbol?: string | null | undefined;
   /**
    * Phone, landscape only: MetaTrader's full-screen, with the app's tab bar hidden.
    *
@@ -362,7 +396,23 @@ export function CandleChart({
    * refetch would sit on the wrong axis).
    */
   const [reloadKey, setReloadKey] = useState(0);
-  const [tf, setTf] = useState<Timeframe>(DEFAULT_TF);
+  /**
+   * The period, read from storage in the INITIALISER rather than in an effect after mount.
+   *
+   * As an effect it cost a whole extra round trip: the chart mounted on M1, fired a 500-bar request
+   * for it, then the effect set the real period and fired a second one. The first reply was ~47 KiB
+   * of bars that were thrown away, and on a high period the engine had already spent seconds
+   * building them. `useState`'s initialiser runs on the client's first render; the server render
+   * still gets `DEFAULT_TF`, and the chart draws nothing until its own effect runs, so there is
+   * nothing to mismatch.
+   */
+  const [tf, setTf] = useState<Timeframe>(() => {
+    try {
+      const saved = window.localStorage.getItem(TF_STORAGE_KEY);
+      if (saved && (TIMEFRAME_KEYS as string[]).includes(saved)) return saved as Timeframe;
+    } catch { /* private mode / blocked storage — the default is fine */ }
+    return DEFAULT_TF;
+  });
   const tfRef = useRef<Timeframe>(tf); tfRef.current = tf;
   const [instrument, setInstrument] = useState<MarketSymbol>(XAUUSD);
   const [loading, setLoading] = useState(true);
@@ -463,13 +513,8 @@ export function CandleChart({
   const [legend, setLegend] = useState<Legend | null>(null);
   const visibleBarsRef = useRef(120);
 
-  // Restore the player's last period (MT5 remembers it too).
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(TF_STORAGE_KEY);
-      if (saved && (TIMEFRAME_KEYS as string[]).includes(saved)) setTf(saved as Timeframe);
-    } catch { /* private mode / blocked storage — the default is fine */ }
-  }, []);
+  // (The period is restored in `useState`'s initialiser above, not here: as an effect it cost an
+  // extra 500-bar round trip per load. MT5 remembers the period too.)
   const chooseTf = useCallback((next: Timeframe) => {
     setTf(next);
     try { window.localStorage.setItem(TF_STORAGE_KEY, next); } catch { /* non-fatal */ }
@@ -487,7 +532,9 @@ export function CandleChart({
     // restorable onto this one.
     undoRef.current = [];
     setCanUndoDelete(false);
-    try { setProps(parseProperties(window.localStorage.getItem(propsKey(instrument.symbol)))); }
+    // The theme decides the colours a trader who has chosen none gets: MetaTrader's own
+    // `Black on White` under a light app, its dark chart under a dark one. See `parseProperties`.
+    try { setProps(parseProperties(window.localStorage.getItem(propsKey(instrument.symbol)), currentTheme())); }
     catch { setProps(DEFAULT_PROPERTIES); }
   }, [instrument.symbol]);
 
@@ -1176,7 +1223,7 @@ export function CandleChart({
     const heldView = followingRef.current
       ? null
       : chartRef.current?.timeScale().getVisibleRange() ?? null;
-    requestCandles(tf, INITIAL_BARS)
+    requestCandles(tf, barsFor(tf))
       .then((reply) => {
         if (cancelled) return;
         candlesRef.current = reply.bars.slice();
@@ -1205,11 +1252,20 @@ export function CandleChart({
     return () => { cancelled = true; };
   }, [tf, reloadKey, requestCandles, paint, setFollow, snapToLive]);
 
-  // Refetch when the connection comes back: while it was down the engine kept printing bars we never
-  // saw, so the gap has to be filled rather than drawn over.
+  /**
+   * Refetch when the connection comes BACK: while it was down the engine kept printing bars we
+   * never saw, so the gap has to be filled rather than drawn over.
+   *
+   * `everOpenRef` is what makes this a RE-connect test. The provider starts at `'connecting'`, so
+   * the first successful connect used to satisfy `prevStatus !== 'open'` and fire a second,
+   * identical 500-bar request on every single load — doubling the slowest thing the chart does
+   * before it can draw anything.
+   */
   const prevStatusRef = useRef(status);
+  const everOpenRef = useRef(false);
   useEffect(() => {
-    if (status === 'open' && prevStatusRef.current !== 'open') setReloadKey((k) => k + 1);
+    if (status === 'open' && prevStatusRef.current !== 'open' && everOpenRef.current) setReloadKey((k) => k + 1);
+    if (status === 'open') everOpenRef.current = true;
     prevStatusRef.current = status;
   }, [status]);
 
@@ -1236,7 +1292,7 @@ export function CandleChart({
     if (!oldest || held.length >= MAX_HELD_BARS) return;
     pagingRef.current = true;
     const activeTf = tfRef.current;
-    requestCandles(activeTf, PAGE_BARS, oldest.time)
+    requestCandles(activeTf, barsFor(activeTf), oldest.time)
       .then((reply) => {
         if (tfRef.current !== activeTf) return; // the player switched period mid-flight
         const older = reply.bars.filter((b) => b.time < oldest.time);
@@ -1511,8 +1567,8 @@ export function CandleChart({
 
   // TradingView Supercharts chrome — fixed palette so the whole view reads as a TV/MT5 terminal.
   const pill = 'h-6 min-w-[1.6rem] [@media(pointer:coarse)]:min-h-8 shrink-0 rounded px-1 text-[11px] font-semibold leading-none transition sm:px-1.5';
-  const idle = 'text-[#8fa2b8] hover:text-white';
-  const active = 'bg-[#2b3543] text-white';
+  const idle = 'text-[var(--mt5-muted)] hover:text-white';
+  const active = 'bg-[var(--mt5-border)] text-white';
   const up = (legend?.changePct ?? 0) >= 0;
   const row = 'flex items-center gap-0.5';
   /**
@@ -1879,11 +1935,11 @@ export function CandleChart({
     return rows;
   }, [pendingPair, placeOrder, levelStakeCents, orderRefusal, onTakeProfit, onNewOrder, openPosition]);
 
-  const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[#2b3543]" aria-hidden />;
+  const sep = <span className="mx-1 h-4 w-px shrink-0 bg-[var(--mt5-border)]" aria-hidden />;
   const dp = instrument.digits;
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#0f1720] text-[#ffffff]">
+    <div className="flex h-full w-full flex-col bg-[var(--mt5-surface)] text-[#ffffff]">
       {/* MetaTrader draws a different chart screen on a phone, so this renders one or the other
           rather than one squeezed. See the `phone` prop for what the two actually differ in. */}
       {phone ? (
@@ -1908,8 +1964,29 @@ export function CandleChart({
         />
       ) : (
         /* Desktop: symbol, the full MT5 period set, the Tools menu and the interface gear. */
-          <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[#2b3543] px-2 text-[12px]">
-            <span className="shrink-0 pr-1 text-[13px] font-bold text-white">{instrument.symbol}</span>
+          <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[var(--mt5-border)] px-2 text-[12px]">
+            {/**
+              * The chart's own way back to the symbol this brand settles.
+              *
+              * While the chart is on another instrument the ticket refuses to trade, and the only
+              * way back used to be the refusal banner beside the Buy and Sell buttons: a trader who
+              * had scrolled, or who was on a surface that does not draw that banner, had none. The
+              * title of the chart IS the symbol, so that is where MetaTrader would put it and where
+              * the eye already is. Plain text when there is nothing to go back to.
+              */}
+            {onChartSettled ? (
+              <button
+                type="button"
+                onClick={onChartSettled}
+                data-chart-settled
+                title={`Back to ${settledSymbol ?? 'the symbol this account settles'}, the symbol this account trades`}
+                className="shrink-0 rounded-sm pr-1 text-[13px] font-bold text-white underline decoration-dotted underline-offset-4 transition hover:text-[var(--mt5-blue)]"
+              >
+                {instrument.symbol}
+              </button>
+            ) : (
+              <span className="shrink-0 pr-1 text-[13px] font-bold text-white">{instrument.symbol}</span>
+            )}
             {sep}
             {/* All 21 MT5 periods. The row scrolls rather than wrapping, so the toolbar keeps one height
                 on a phone and the chart keeps its own. */}
@@ -1922,7 +1999,7 @@ export function CandleChart({
               <div className="relative">
                 <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} className={cn(pill, menuOpen ? active : idle, 'px-2')} title="Chart features">⚙ Tools</button>
                 {menuOpen ? (
-                  <div className="absolute right-0 top-8 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
+                  <div className="absolute right-0 top-8 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[var(--mt5-border)] bg-[var(--mt5-surface)] p-2 text-left shadow-xl">
                     <Section title="Chart type">
                       {/* One per row, not three across. This menu is a fixed `w-60`, so a third of
                           it is a 71px cell, and `Candlesticks` needs 84px: it spilled 13px outside
@@ -2003,7 +2080,7 @@ export function CandleChart({
                           ))}
                         </div>
                         {g.group === 'volumes' ? (
-                          <p className="px-0.5 pt-1 text-[9px] leading-snug text-[#8fa2b8]">{VOLUME_GROUP_NOTE}</p>
+                          <p className="px-0.5 pt-1 text-[9px] leading-snug text-[var(--mt5-muted)]">{VOLUME_GROUP_NOTE}</p>
                         ) : null}
                       </Section>
                     ))}
@@ -2163,19 +2240,19 @@ export function CandleChart({
               {/* Show ticker is the symbol and period; Show OHLC is the four prices. MetaTrader
                   couples them: unticking the ticker unticks OHLC, so OHLC never shows alone. */}
               {props.showTicker ? <span className="font-semibold" style={{ color: TV.text }}>{instrument.symbol}</span> : null}
-              {props.showTicker ? <span className="text-[#8fa2b8]">{tf}</span> : null}
-              {props.showOHLC ? <span className="hidden text-[#8fa2b8] sm:inline">O <span style={{ color: TV.text }}>{legend.o.toFixed(dp)}</span></span> : null}
-              {props.showOHLC ? <span className="hidden text-[#8fa2b8] sm:inline">H <span style={{ color: TV.text }}>{legend.h.toFixed(dp)}</span></span> : null}
-              {props.showOHLC ? <span className="hidden text-[#8fa2b8] sm:inline">L <span style={{ color: TV.text }}>{legend.l.toFixed(dp)}</span></span> : null}
-              {props.showOHLC ? <span className="text-[#8fa2b8]">C <span style={{ color: TV.text }}>{legend.c.toFixed(dp)}</span></span> : null}
+              {props.showTicker ? <span className="text-[var(--mt5-muted)]">{tf}</span> : null}
+              {props.showOHLC ? <span className="hidden text-[var(--mt5-muted)] sm:inline">O <span style={{ color: TV.text }}>{legend.o.toFixed(dp)}</span></span> : null}
+              {props.showOHLC ? <span className="hidden text-[var(--mt5-muted)] sm:inline">H <span style={{ color: TV.text }}>{legend.h.toFixed(dp)}</span></span> : null}
+              {props.showOHLC ? <span className="hidden text-[var(--mt5-muted)] sm:inline">L <span style={{ color: TV.text }}>{legend.l.toFixed(dp)}</span></span> : null}
+              {props.showOHLC ? <span className="text-[var(--mt5-muted)]">C <span style={{ color: TV.text }}>{legend.c.toFixed(dp)}</span></span> : null}
               {props.showOHLC ? <span className="font-semibold" style={{ color: up ? TV.up : TV.down }}>{up ? '+' : ''}{legend.changePct.toFixed(2)}%</span> : null}
             </div>
           ) : null}
           {loading ? (
-            <div className="absolute inset-0 z-20 grid place-items-center bg-[#0f1720]/70 text-[11px] font-semibold text-[#8fa2b8]">Loading {tf} history…</div>
+            <div className="absolute inset-0 z-20 grid place-items-center bg-[var(--mt5-surface)]/70 text-[11px] font-semibold text-[var(--mt5-muted)]">Loading {tf} history…</div>
           ) : null}
           {loadError ? (
-            <div className="absolute inset-x-0 top-8 z-20 mx-auto w-fit rounded-sm border border-[#2b3543] bg-[#0f1720] px-3 py-1.5 text-[11px] text-[#8fa2b8]">
+            <div className="absolute inset-x-0 top-8 z-20 mx-auto w-fit rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-3 py-1.5 text-[11px] text-[var(--mt5-muted)]">
               History unavailable ({loadError}). The live bar is still updating.
             </div>
           ) : null}
@@ -2479,7 +2556,7 @@ function DrawRail({
   }, [treeOpen]);
 
   return (
-    <div ref={wrap} className="relative flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[#2b3543] bg-[#202933] py-1.5">
+    <div ref={wrap} className="relative flex w-10 shrink-0 flex-col items-center gap-1 border-r border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1.5">
       {TOOLS.map((t) => (
         <button
           key={t.id}
@@ -2490,7 +2567,7 @@ function DrawRail({
           onClick={() => onPick(t.id)}
           className={cn(
             'grid h-8 w-8 shrink-0 place-items-center rounded-md transition',
-            tool === t.id ? 'bg-[#3183ff] text-white' : 'text-[#8fa2b8] hover:bg-[#2b3543] hover:text-white',
+            tool === t.id ? 'bg-[var(--mt5-blue)] text-white' : 'text-[var(--mt5-muted)] hover:bg-[var(--mt5-border)] hover:text-white',
           )}
         >
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2508,7 +2585,7 @@ function DrawRail({
         onClick={() => setTreeOpen((v) => !v)}
         className={cn(
           'grid h-8 w-8 shrink-0 place-items-center rounded-md transition',
-          treeOpen ? 'bg-[#3183ff] text-white' : 'text-[#8fa2b8] hover:bg-[#2b3543] hover:text-white',
+          treeOpen ? 'bg-[var(--mt5-blue)] text-white' : 'text-[var(--mt5-muted)] hover:bg-[var(--mt5-border)] hover:text-white',
         )}
       >
         <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2517,10 +2594,10 @@ function DrawRail({
       </button>
 
       {treeOpen ? (
-        <div className="absolute left-10 top-1 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[#2b3543] bg-[#0f1720] p-2 text-left shadow-xl">
+        <div className="absolute left-10 top-1 z-30 max-h-[70vh] w-60 overflow-y-auto overscroll-contain rounded-lg border border-[var(--mt5-border)] bg-[var(--mt5-surface)] p-2 text-left shadow-xl">
           {OBJECT_GROUPS.map((g) => (
             <div key={g.group} className="mb-2 last:mb-0">
-              <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">{g.label}</div>
+              <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--mt5-muted)]">{g.label}</div>
               <div className="grid gap-1">
                 {g.items.map((o) => (
                   <button
@@ -2533,9 +2610,9 @@ function DrawRail({
                     className={cn(
                       'flex h-6 items-center rounded-md border px-2 text-left text-[10px] font-semibold transition',
                       o.kind !== null && tool === o.kind
-                        ? 'border-[#3183ff] bg-[#3183ff]/15 text-[#3183ff]'
-                        : 'border-[#2b3543] bg-[#0f1720]/80 text-[#8fa2b8] hover:text-white',
-                      o.unavailable && 'cursor-not-allowed opacity-45 hover:text-[#8fa2b8]',
+                        ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/15 text-[var(--mt5-blue)]'
+                        : 'border-[var(--mt5-border)] bg-[var(--mt5-surface)]/80 text-[var(--mt5-muted)] hover:text-white',
+                      o.unavailable && 'cursor-not-allowed opacity-45 hover:text-[var(--mt5-muted)]',
                     )}
                   >
                     <span className="truncate">{o.name}</span>
@@ -2554,7 +2631,7 @@ function DrawRail({
         title="Objects List (Ctrl+B)"
         aria-label="Objects List"
         onClick={onObjectsList}
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[#8fa2b8] transition hover:bg-[#2b3543] hover:text-white"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--mt5-muted)] transition hover:bg-[var(--mt5-border)] hover:text-white"
       >
         <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M4 7h16M4 12h16M4 17h16" />
@@ -2571,7 +2648,7 @@ function DrawRail({
         disabled={count === 0}
         className={cn(
           'mt-auto grid h-8 w-8 shrink-0 place-items-center rounded-md transition',
-          count === 0 ? 'cursor-not-allowed text-[#2b3543]' : 'text-[#8fa2b8] hover:bg-[#2b3543] hover:text-[#f23645]',
+          count === 0 ? 'cursor-not-allowed text-[var(--mt5-border)]' : 'text-[var(--mt5-muted)] hover:bg-[var(--mt5-border)] hover:text-[var(--mt5-red)]',
         )}
       >
         <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2585,7 +2662,7 @@ function DrawRail({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-2 last:mb-0">
-      <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">{title}</div>
+      <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--mt5-muted)]">{title}</div>
       {children}
     </div>
   );
@@ -2603,8 +2680,8 @@ function Toggle({ on, onClick, children, disabled, title }: {
       title={title}
       className={cn(
         'flex h-6 items-center justify-between rounded-md border px-2 text-[10px] font-semibold transition',
-        on ? 'border-[#3183ff] bg-[#3183ff]/15 text-[#3183ff]' : 'border-[#2b3543] bg-[#0f1720]/80 text-[#8fa2b8] hover:text-white',
-        disabled && 'cursor-not-allowed opacity-45 hover:text-[#8fa2b8]',
+        on ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/15 text-[var(--mt5-blue)]' : 'border-[var(--mt5-border)] bg-[var(--mt5-surface)]/80 text-[var(--mt5-muted)] hover:text-white',
+        disabled && 'cursor-not-allowed opacity-45 hover:text-[var(--mt5-muted)]',
       )}
     >
       {/* `min-w-0 flex-1` is what lets the label be truncated. A flex item's default
@@ -2690,12 +2767,12 @@ function MobileChartBar({
   const holdEnd = () => { if (held.current) clearTimeout(held.current); held.current = null; };
 
   const btn = 'grid h-9 w-9 shrink-0 place-items-center rounded transition';
-  const on = 'bg-[#2b3543] text-[#3183ff]';
-  const off = 'text-[#8fa2b8]';
+  const on = 'bg-[var(--mt5-border)] text-[var(--mt5-blue)]';
+  const off = 'text-[var(--mt5-muted)]';
 
   return (
     <>
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-[#2b3543] px-1">
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-[var(--mt5-border)] px-1">
         <button type="button" onClick={toggleDrawer} aria-label="Menu" className={cn(btn, off)}>
           <BarIcon.Menu />
         </button>
@@ -2792,7 +2869,7 @@ function MobileChartBar({
       {/* The quick strip: "a horizontal quick strip across the top ... with the current one
           highlighted in solid blue and a gear at the right end". */}
       {open === 'strip' ? (
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#2b3543] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--mt5-border)] px-1 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {quick.map((k) => (
             <button
               key={k}
@@ -2805,7 +2882,7 @@ function MobileChartBar({
               aria-pressed={tf === k}
               className={cn(
                 'h-8 shrink-0 rounded px-2.5 font-mono text-[12px] font-semibold leading-none transition',
-                tf === k ? 'bg-[#3183ff] text-white' : 'bg-[#202933] text-[#8fa2b8]',
+                tf === k ? 'bg-[var(--mt5-blue)] text-white' : 'bg-[var(--mt5-raised)] text-[var(--mt5-muted)]',
               )}
             >
               {mobileTfLabel(k)}
@@ -2815,7 +2892,7 @@ function MobileChartBar({
             type="button"
             onClick={() => setOpen('periods')}
             aria-label="Set up timeframes"
-            className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded bg-[#202933] text-[#8fa2b8]"
+            className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded bg-[var(--mt5-raised)] text-[var(--mt5-muted)]"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden>
               <circle cx="12" cy="12" r="3.2" />
@@ -2829,7 +2906,7 @@ function MobileChartBar({
           chart; long press adds or removes the period from the strip above. */}
       {open === 'periods' ? (
         <MobileSheet title="Timeframes" onClose={() => setOpen(null)}>
-          <p className="px-1 pb-2 text-[10px] leading-snug text-[#8fa2b8]">
+          <p className="px-1 pb-2 text-[10px] leading-snug text-[var(--mt5-muted)]">
             Tap to switch the chart. Press and hold to put a period on the quick strip, or take it
             off. The strip holds {MAX_QUICK_TF}.
           </p>
@@ -2838,7 +2915,7 @@ function MobileChartBar({
               {/* Title case, not the uppercase the desktop Tools menu uses for its own sections:
                   MetaTrader's phone period sheet heads its three groups "Minutes", "Hours" and
                   "Days", and shouting them would be this shell's styling rather than its. */}
-              <div className="mb-1 text-[10px] font-semibold tracking-wide text-[#8fa2b8]">{g.label}</div>
+              <div className="mb-1 text-[10px] font-semibold tracking-wide text-[var(--mt5-muted)]">{g.label}</div>
               <div className="grid grid-cols-4 gap-1">
                 {g.items.map((k) => (
                   <button
@@ -2855,10 +2932,10 @@ function MobileChartBar({
                       // MetaTrader's own two states on this sheet: solid blue = the chart's current
                       // period, outlined = on the quick strip.
                       tf === k
-                        ? 'bg-[#3183ff] text-white'
+                        ? 'bg-[var(--mt5-blue)] text-white'
                         : quick.includes(k)
-                          ? 'border border-[#3183ff] text-[#3183ff]'
-                          : 'bg-[#202933] text-[#8fa2b8]',
+                          ? 'border border-[var(--mt5-blue)] text-[var(--mt5-blue)]'
+                          : 'bg-[var(--mt5-raised)] text-[var(--mt5-muted)]',
                     )}
                   >
                     {mobileTfLabel(k)}
@@ -2884,7 +2961,7 @@ function MobileChartBar({
             onClick={() => { onPickTool('cursor'); setOpen(null); }}
             className={cn(
               'mb-2 h-9 w-full rounded text-[11px] font-semibold transition',
-              tool === 'cursor' ? 'bg-[#3183ff] text-white' : 'bg-[#202933] text-[#8fa2b8]',
+              tool === 'cursor' ? 'bg-[var(--mt5-blue)] text-white' : 'bg-[var(--mt5-raised)] text-[var(--mt5-muted)]',
             )}
           >
             Cursor
@@ -2892,13 +2969,13 @@ function MobileChartBar({
           <button
             type="button"
             onClick={() => { onObjectsList(); setOpen(null); }}
-            className="mb-3 h-9 w-full rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8] transition"
+            className="mb-3 h-9 w-full rounded bg-[var(--mt5-raised)] text-[11px] font-semibold text-[var(--mt5-muted)] transition"
           >
             Objects list
           </button>
           {OBJECT_GROUPS.map((g) => (
             <div key={g.group} className="mb-2 last:mb-0">
-              <div className="mb-1 text-[10px] font-semibold tracking-wide text-[#8fa2b8]">{g.label}</div>
+              <div className="mb-1 text-[10px] font-semibold tracking-wide text-[var(--mt5-muted)]">{g.label}</div>
               <div className="grid gap-1">
                 {g.items.map((o) => (
                   <button
@@ -2911,8 +2988,8 @@ function MobileChartBar({
                     className={cn(
                       'flex h-9 items-center rounded border px-2 text-left text-[11px] font-semibold transition',
                       o.kind !== null && tool === o.kind
-                        ? 'border-[#3183ff] bg-[#3183ff]/15 text-[#3183ff]'
-                        : 'border-[#2b3543] text-[#8fa2b8]',
+                        ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/15 text-[var(--mt5-blue)]'
+                        : 'border-[var(--mt5-border)] text-[var(--mt5-muted)]',
                       o.unavailable && 'cursor-not-allowed opacity-45',
                     )}
                   >
@@ -2938,7 +3015,7 @@ function MobileChartBar({
                   onClick={() => setChartType(c.id)}
                   className={cn(
                     'h-9 rounded text-[11px] font-semibold transition',
-                    chartType === c.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8]',
+                    chartType === c.id ? 'bg-[var(--mt5-border)] text-white' : 'text-[var(--mt5-muted)]',
                   )}
                 >
                   {c.label}
@@ -2948,8 +3025,8 @@ function MobileChartBar({
           </Section>
           <Section title="Chart">
             <div className="grid grid-cols-2 gap-1">
-              <button type="button" onClick={() => { setOpen(null); onProperties(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Properties</button>
-              <button type="button" onClick={() => { setOpen(null); onObjectsList(); }} className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]">Objects list</button>
+              <button type="button" onClick={() => { setOpen(null); onProperties(); }} className="h-9 rounded bg-[var(--mt5-raised)] text-[11px] font-semibold text-[var(--mt5-muted)]">Properties</button>
+              <button type="button" onClick={() => { setOpen(null); onObjectsList(); }} className="h-9 rounded bg-[var(--mt5-raised)] text-[11px] font-semibold text-[var(--mt5-muted)]">Objects list</button>
             </div>
           </Section>
           {/*
@@ -2967,7 +3044,7 @@ function MobileChartBar({
               <button
                 type="button"
                 onClick={() => { setOpen(null); resetVerticalScale(); }}
-                className="h-9 rounded bg-[#202933] text-[11px] font-semibold text-[#8fa2b8]"
+                className="h-9 rounded bg-[var(--mt5-raised)] text-[11px] font-semibold text-[var(--mt5-muted)]"
               >
                 Reset vertical scale
               </button>
@@ -2989,7 +3066,7 @@ function MobileChartBar({
                 ))}
               </div>
               {g.group === 'volumes' ? (
-                <p className="px-0.5 pt-1 text-[9px] leading-snug text-[#8fa2b8]">{VOLUME_GROUP_NOTE}</p>
+                <p className="px-0.5 pt-1 text-[9px] leading-snug text-[var(--mt5-muted)]">{VOLUME_GROUP_NOTE}</p>
               ) : null}
             </Section>
           ))}
@@ -3008,10 +3085,10 @@ function MobileSheet({ title, onClose, children }: { title: string; onClose: () 
   return (
     <>
       <button type="button" aria-label={`Close ${title}`} onClick={onClose} className="fixed inset-0 z-40 bg-black/60" />
-      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[68vh] overflow-y-auto overscroll-contain rounded-t-xl border-t border-[#2b3543] bg-[#0f1720] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl">
+      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[68dvh] overflow-y-auto overscroll-contain rounded-t-xl border-t border-[var(--mt5-border)] bg-[var(--mt5-surface)] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl">
         <div className="mb-2 flex items-center">
           <span className="text-[12px] font-semibold text-white">{title}</span>
-          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto grid h-7 w-7 place-items-center rounded text-[#8fa2b8]">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto grid h-7 w-7 place-items-center rounded text-[var(--mt5-muted)]">✕</button>
         </div>
         {children}
       </div>
@@ -3226,7 +3303,7 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
       // A right click on the menu itself must not raise the browser's menu over it; the plot's own
       // suppression does not reach here, because the menu is not inside the plot.
       onContextMenu={(e) => e.preventDefault()}
-      className="fixed z-[90] min-w-56 overflow-y-auto overscroll-contain rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[11px] shadow-xl"
+      className="fixed z-[90] min-w-56 overflow-y-auto overscroll-contain rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[11px] shadow-xl"
       /**
        * Twenty-seven rows is about 700px, which is taller than a landscape phone.
        *
@@ -3239,7 +3316,7 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
       {groups.map((group, g) => (
         <div key={g} className="contents">
           {/* MetaTrader's group separators, which are what make a 27-item menu readable. */}
-          {g > 0 ? <div role="separator" data-menu-separator="" className="my-1 h-px bg-[#2b3543]" /> : null}
+          {g > 0 ? <div role="separator" data-menu-separator="" className="my-1 h-px bg-[var(--mt5-border)]" /> : null}
           {group.map((item) => (
             item.kind === 'submenu'
               ? (
@@ -3255,7 +3332,7 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
                     aria-expanded={sub?.label === item.label}
                     data-menu-item={item.label}
                     onClick={(e) => (sub?.label === item.label ? setSub(null) : openSub(item.label, e.currentTarget, item.items))}
-                    className="flex w-full items-center gap-4 px-3 py-1.5 text-left text-white transition hover:bg-[#3183ff]"
+                    className="flex w-full items-center gap-4 px-3 py-1.5 text-left text-white transition hover:bg-[var(--mt5-blue)]"
                   >
                     <span className="flex-1">{item.label}</span>
                     <span aria-hidden>▸</span>
@@ -3265,11 +3342,11 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
                       role="menu"
                       aria-label={item.label}
                       style={{ left: sub.x, top: sub.y, minWidth: sub.w, maxHeight: sub.h, width: 'max-content' }}
-                      className="fixed z-[91] overflow-y-auto rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl"
+                      className="fixed z-[91] overflow-y-auto rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 shadow-xl"
                     >
                       {item.items.map((row) => (
                         <div key={row.label} className="contents">
-                          {row.separator ? <div role="separator" className="my-1 h-px bg-[#2b3543]" /> : null}
+                          {row.separator ? <div role="separator" className="my-1 h-px bg-[var(--mt5-border)]" /> : null}
                           <button
                             type="button"
                             role={row.on === undefined ? 'menuitem' : 'menuitemradio'}
@@ -3282,7 +3359,7 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
                               'block w-full px-3 py-1 text-left transition',
                               row.disabled !== undefined
                                 ? 'cursor-not-allowed text-[#55637a]'
-                                : cn('hover:bg-[#3183ff]', row.on ? 'bg-[#2b3543] text-white' : 'text-white'),
+                                : cn('hover:bg-[var(--mt5-blue)]', row.on ? 'bg-[var(--mt5-border)] text-white' : 'text-white'),
                             )}
                           >
                             {row.label}
@@ -3307,18 +3384,18 @@ function MT5ChartMenu({ at, groups, onDismiss }: {
                   className={cn(
                     'flex w-full items-center gap-4 px-3 py-1.5 text-left transition',
                     item.disabled === undefined
-                      ? 'text-white hover:bg-[#3183ff]'
+                      ? 'text-white hover:bg-[var(--mt5-blue)]'
                       : 'cursor-not-allowed text-[#55637a]',
                   )}
                 >
                   {/* The tick column, always reserved: without it the labels of the toggled rows
                       would sit a glyph further right than the rest and the menu would look ragged,
                       which is not what MetaTrader draws. */}
-                  <span className="w-2.5 shrink-0 text-[#3183ff]" aria-hidden>
+                  <span className="w-2.5 shrink-0 text-[var(--mt5-blue)]" aria-hidden>
                     {item.kind !== 'command' && item.on ? (item.kind === 'radio' ? '•' : '✓') : ''}
                   </span>
                   <span className="flex-1">{item.label}</span>
-                  {item.accel ? <span className="shrink-0 text-[#8fa2b8]">{item.accel}</span> : null}
+                  {item.accel ? <span className="shrink-0 text-[var(--mt5-muted)]">{item.accel}</span> : null}
                 </button>
               )
           ))}

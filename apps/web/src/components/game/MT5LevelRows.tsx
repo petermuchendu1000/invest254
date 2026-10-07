@@ -108,8 +108,8 @@ export function MT5LevelRows({ price, digits, continuous }: {
    */
   if (!continuous) return null;
 
-  const rowLabel = 'w-20 shrink-0 text-[12px] text-[#8fa2b8]';
-  const stepBtn = 'h-8 w-8 shrink-0 rounded border border-[#2b3543] bg-[#0f1720] font-mono text-[14px] font-semibold text-[#3183ff] transition hover:border-[#3183ff] disabled:opacity-40';
+  const rowLabel = 'w-20 shrink-0 text-[12px] text-[var(--mt5-muted)]';
+  const stepBtn = 'h-8 w-8 shrink-0 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] font-mono text-[14px] font-semibold text-[var(--mt5-blue)] transition hover:border-[var(--mt5-blue)] disabled:opacity-40';
   const shape = shapeOf(levels);
 
   return (
@@ -125,7 +125,7 @@ export function MT5LevelRows({ price, digits, continuous }: {
         so a screen reader still hears what the three buttons are for.
       */}
       <div className="flex items-center gap-1.5">
-        <div role="group" aria-label="Stop Loss and Take Profit units" className="flex min-w-0 flex-1 overflow-hidden rounded border border-[#2b3543]">
+        <div role="group" aria-label="Stop Loss and Take Profit units" className="flex min-w-0 flex-1 overflow-hidden rounded border border-[var(--mt5-border)]">
           {LEVEL_UNITS.map((u) => (
             <button
               key={u.id}
@@ -134,7 +134,7 @@ export function MT5LevelRows({ price, digits, continuous }: {
               aria-pressed={unit === u.id}
               className={cn(
                 'min-w-0 flex-1 px-2 py-1 text-[11px] font-semibold transition',
-                unit === u.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
+                unit === u.id ? 'bg-[var(--mt5-border)] text-white' : 'text-[var(--mt5-muted)] hover:text-white',
               )}
             >
               {u.label}
@@ -148,7 +148,7 @@ export function MT5LevelRows({ price, digits, continuous }: {
           aria-pressed={locked}
           aria-label="Lock the take profit to stop loss ratio"
           title="Fix the TP:SL ratio: adjust one level and the other follows."
-          className={cn('grid h-8 w-8 shrink-0 place-items-center rounded border border-[#2b3543] transition', locked ? 'bg-[#2b3543] text-[#3183ff]' : 'text-[#8fa2b8] hover:text-white')}
+          className={cn('grid h-8 w-8 shrink-0 place-items-center rounded border border-[var(--mt5-border)] transition', locked ? 'bg-[var(--mt5-border)] text-[var(--mt5-blue)]' : 'text-[var(--mt5-muted)] hover:text-white')}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden>
             <rect x="5" y="11" width="14" height="9" rx="2" />
@@ -175,7 +175,7 @@ export function MT5LevelRows({ price, digits, continuous }: {
                 onChange={(e) => setTyping({ field, text: e.target.value })}
                 onBlur={() => commit(field, typing.text)}
                 onKeyDown={(e) => { if (e.key === 'Enter') commit(field, typing.text); if (e.key === 'Escape') setTyping(null); }}
-                className="h-8 min-w-0 flex-1 rounded border border-[#3183ff] bg-[#0f1720] px-1 text-center font-mono text-[12px] font-semibold text-white tabular-nums outline-none"
+                className="h-8 min-w-0 flex-1 rounded border border-[var(--mt5-blue)] bg-[var(--mt5-surface)] px-1 text-center font-mono text-[12px] font-semibold text-white tabular-nums outline-none"
               />
             ) : (
               /* Tap the value to type it, which is MetaTrader's own affordance on these fields and
@@ -186,8 +186,8 @@ export function MT5LevelRows({ price, digits, continuous }: {
                 onClick={() => setTyping({ field, text: value === 'not set' || value === 'varies' || value === 'waiting' ? '' : value })}
                 aria-label={`${label} ${value}`}
                 className={cn(
-                  'h-8 min-w-0 flex-1 rounded border border-[#2b3543] bg-[#0f1720] px-1 text-center font-mono text-[12px] font-semibold tabular-nums transition hover:border-[#3183ff]',
-                  set ? 'text-white' : 'text-[#8fa2b8]',
+                  'h-8 min-w-0 flex-1 rounded border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-1 text-center font-mono text-[12px] font-semibold tabular-nums transition hover:border-[var(--mt5-blue)]',
+                  set ? 'text-white' : 'text-[var(--mt5-muted)]',
                 )}
               >
                 {value}
@@ -195,7 +195,7 @@ export function MT5LevelRows({ price, digits, continuous }: {
             )}
             <button type="button" onClick={() => step(field, 1)} disabled={!settable} className={stepBtn} aria-label={`Raise ${label}`}>+</button>
             {set ? (
-              <button type="button" data-compact="" onClick={() => edit(field, null)} className="shrink-0 px-0.5 text-[10px] text-[#3183ff]" aria-label={`Clear ${label}`}>clear</button>
+              <button type="button" data-compact="" onClick={() => edit(field, null)} className="shrink-0 px-0.5 text-[10px] text-[var(--mt5-blue)]" aria-label={`Clear ${label}`}>clear</button>
             ) : null}
           </div>
         );
@@ -219,7 +219,7 @@ export function MT5LevelRows({ price, digits, continuous }: {
         */}
 
       {shape === null && (levels.slPoints !== null || levels.tpPoints !== null) ? (
-        <p data-levels-invalid="" className="text-[11px] text-[#f23645]">
+        <p data-levels-invalid="" className="text-[11px] text-[var(--mt5-red)]">
           The stop and the target are on the same side of the price. One has to be above it and one
           below.
         </p>

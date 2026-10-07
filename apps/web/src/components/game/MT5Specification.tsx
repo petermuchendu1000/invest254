@@ -33,26 +33,26 @@ export function MT5Specification({ spec, onDismiss }: { spec: SpecInput; onDismi
       role="dialog"
       aria-modal="true"
       aria-label="Specification"
-      className="fixed inset-0 z-[85] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[85] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-[72vh] sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
-          <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[2px] bg-[#f0b90b] text-[10px] font-black text-[#0f1720]">$</span>
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[72vh] sm:max-w-[420px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
+          <span aria-hidden className="grid h-4 w-4 shrink-0 place-items-center rounded-[2px] bg-[#f0b90b] text-[10px] font-black text-[var(--mt5-surface)]">$</span>
           <span className="flex-1 truncate text-[15px] font-semibold leading-tight">Specification</span>
-          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white">×</button>
+          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[var(--mt5-muted)] transition hover:text-white">×</button>
         </div>
 
         {/* MetaTrader's blue header line: the symbol, then its description. */}
-        <div className="shrink-0 bg-[#3183ff] px-3 py-1.5 text-[12px] font-semibold text-white">
+        <div className="shrink-0 bg-[var(--mt5-blue)] px-3 py-1.5 text-[12px] font-semibold text-white">
           {spec.symbol}, {spec.description}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <dl className="text-[11px]">
             {rows.map((r) => (
-              <div key={r.label} className="flex items-baseline gap-2 border-b border-[#2b3543]/60 px-3 py-1.5">
-                <span aria-hidden className="w-5 shrink-0 font-mono text-[9px] text-[#8fa2b8]">{SPEC_GLYPH[r.kind]}</span>
-                <dt className="min-w-0 flex-1 truncate text-[#8fa2b8]">{r.label}</dt>
+              <div key={r.label} className="flex items-baseline gap-2 border-b border-[var(--mt5-border)]/60 px-3 py-1.5">
+                <span aria-hidden className="w-5 shrink-0 font-mono text-[9px] text-[var(--mt5-muted)]">{SPEC_GLYPH[r.kind]}</span>
+                <dt className="min-w-0 flex-1 truncate text-[var(--mt5-muted)]">{r.label}</dt>
                 <dd className="shrink-0 text-right font-mono tabular-nums text-white">{r.value}</dd>
               </div>
             ))}
@@ -60,30 +60,30 @@ export function MT5Specification({ spec, onDismiss }: { spec: SpecInput; onDismi
 
           {/* MetaTrader's Sessions block: a Quotes column and a Trade column, one row per weekday. */}
           <div className="mt-2 px-3 pb-3">
-            <div className="mb-1 flex gap-2 border-b border-[#2b3543] pb-1 text-[9px] font-semibold uppercase tracking-wider text-[#8fa2b8]">
+            <div className="mb-1 flex gap-2 border-b border-[var(--mt5-border)] pb-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--mt5-muted)]">
               <span className="flex-1">Sessions</span>
               <span className="w-24 text-right">Quotes</span>
               <span className="w-24 text-right">Trade</span>
             </div>
             {SPEC_SESSION_DAYS.map((d) => (
               <div key={d} className="flex gap-2 py-0.5 text-[11px]">
-                <span className="flex-1 text-[#8fa2b8]">{d}</span>
+                <span className="flex-1 text-[var(--mt5-muted)]">{d}</span>
                 <span className="w-24 text-right font-mono tabular-nums">{SPEC_SESSION_SPAN}</span>
                 <span className="w-24 text-right font-mono tabular-nums">{SPEC_SESSION_SPAN}</span>
               </div>
             ))}
-            <p className="mt-2 text-[10px] leading-snug text-[#8fa2b8]">
+            <p className="mt-2 text-[10px] leading-snug text-[var(--mt5-muted)]">
               This market never closes, so quotes and trading run every day.
             </p>
           </div>
         </div>
 
         {/* One button, as MetaTrader has. */}
-        <div className="flex shrink-0 items-center justify-end border-t border-[#2b3543] px-3 py-2.5">
+        <div className="flex shrink-0 items-center justify-end border-t border-[var(--mt5-border)] px-3 py-2.5">
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm bg-[#3183ff] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
+            className="h-8 rounded-sm bg-[var(--mt5-blue)] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
           >
             Close
           </button>
@@ -231,12 +231,12 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
       ref={box}
       role="menu"
       aria-label="Market Watch"
-      className="fixed z-[90] min-w-52 rounded-sm border border-[#2b3543] bg-[#202933] py-1 text-[11px] shadow-xl"
+      className="fixed z-[90] min-w-52 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 text-[11px] shadow-xl"
       style={{ left: at.x, top: at.y }}
     >
       {items.map((it) => (
         <div key={it.label} className={it.submenu ? 'group relative' : undefined}>
-          {it.separatorBefore ? <div className="my-1 h-px bg-[#2b3543]" /> : null}
+          {it.separatorBefore ? <div className="my-1 h-px bg-[var(--mt5-border)]" /> : null}
           <button
             type="button"
             role="menuitem"
@@ -251,13 +251,13 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
             onClick={() => { if (it.submenu) return; it.onPick?.(); onDismiss(); }}
             className={cn(
               'flex w-full items-center gap-2 px-3 py-1.5 text-left transition',
-              it.unavailable ? 'cursor-not-allowed text-[#4a5666]' : 'text-white hover:bg-[#3183ff]',
+              it.unavailable ? 'cursor-not-allowed text-[#4a5666]' : 'text-white hover:bg-[var(--mt5-blue)]',
             )}
           >
-            <span aria-hidden className="w-3 shrink-0 text-[#41be56]">{it.checked ? '✓' : ''}</span>
+            <span aria-hidden className="w-3 shrink-0 text-[var(--mt5-green)]">{it.checked ? '✓' : ''}</span>
             <span className="flex-1">{it.label}</span>
-            {it.shortcut ? <span className="shrink-0 text-[10px] text-[#8fa2b8]">{it.shortcut}</span> : null}
-            {it.submenu ? <span aria-hidden className="shrink-0 text-[10px] text-[#8fa2b8]">▸</span> : null}
+            {it.shortcut ? <span className="shrink-0 text-[10px] text-[var(--mt5-muted)]">{it.shortcut}</span> : null}
+            {it.submenu ? <span aria-hidden className="shrink-0 text-[10px] text-[var(--mt5-muted)]">▸</span> : null}
           </button>
           {it.submenu ? (
             /* MetaTrader's flyout, opening to the RIGHT of its parent row. It is hidden rather than
@@ -268,7 +268,7 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
               role="menu"
               aria-label={it.label}
               data-mw-submenu={it.label}
-              className="absolute left-full top-0 z-[91] hidden min-w-40 rounded-sm border border-[#2b3543] bg-[#202933] py-1 shadow-xl group-hover:block group-focus-within:block"
+              className="absolute left-full top-0 z-[91] hidden min-w-40 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] py-1 shadow-xl group-hover:block group-focus-within:block"
             >
               {it.submenu.map((sub) => (
                 <button
@@ -280,9 +280,9 @@ export function MT5MarketWatchMenu({ at, items, onDismiss }: {
                   // A column toggle does NOT dismiss: MetaTrader's own stays open so several can be
                   // switched in one visit, and the grid behind it updates as each is picked.
                   onClick={() => sub.onPick?.()}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white transition hover:bg-[#3183ff]"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white transition hover:bg-[var(--mt5-blue)]"
                 >
-                  <span aria-hidden className="w-3 shrink-0 text-[#41be56]">{sub.checked ? '✓' : ''}</span>
+                  <span aria-hidden className="w-3 shrink-0 text-[var(--mt5-green)]">{sub.checked ? '✓' : ''}</span>
                   <span className="flex-1">{sub.label}</span>
                 </button>
               ))}

@@ -145,17 +145,17 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
   const { result, report, clear } = useOrderResult({ symbol: settledSymbol, digits, lots, volDigits, priceOf: priceOfRate });
   const send = (dir: 'buy' | 'sell') => report(dir, place(dir));
 
-  if (!ready) return <div className="h-full animate-pulse bg-[#0f1720]" />;
+  if (!ready) return <div className="h-full animate-pulse bg-[var(--mt5-surface)]" />;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-[#0f1720] text-white">
+    <div className="relative flex h-full min-h-0 flex-col bg-[var(--mt5-surface)] text-white">
       {/* 1. Header: back, then the symbol in bold over its description. */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-[#2b3543] px-1 py-2">
+      <div className="flex shrink-0 items-center gap-1 border-b border-[var(--mt5-border)] px-1 py-2">
         <button
           type="button"
           onClick={onBack}
           aria-label="Back"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded text-[#3183ff]"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded text-[var(--mt5-blue)]"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
             <path d="M15 5l-7 7 7 7" />
@@ -164,7 +164,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
         <div className="min-w-0">
           <div className="truncate text-[15px] font-bold leading-tight text-white">{symbol}</div>
           {description === '' ? null : (
-            <div className="truncate text-[11px] leading-tight text-[#8fa2b8]">{description}</div>
+            <div className="truncate text-[11px] leading-tight text-[var(--mt5-muted)]">{description}</div>
           )}
         </div>
         {/* MetaTrader's top-right button on this screen, which "switches to the extended/advanced
@@ -173,7 +173,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           type="button"
           onClick={onAdvanced}
           aria-label="Advanced dialog"
-          className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded text-[#3183ff]"
+          className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded text-[var(--mt5-blue)]"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-5 w-5" aria-hidden>
             <path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0" />
@@ -188,14 +188,19 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           way MetaTrader's fills the middle of this screen: on a tall phone the fields do not reach
           the buttons, and the band grows into the gap rather than leaving it black. On a short one
           the band keeps its floor and the screen scrolls. */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-       <div className="flex min-h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+       {/* `[&>*]:shrink-0` so every fixed row keeps its height and the box GROWS past the scroller
+           instead of squeezing them. With auto-basis children and negative free space, a flex column
+           shrinks its rows rather than overflowing, which clips without producing any scroll at all:
+           the content is simply shorter and some of it is gone. The one row meant to flex is the
+           tick band below, which opts back in with `grow`. */}
+       <div className="flex min-h-full flex-col [&>*]:shrink-0">
         {/* 2. The order type, centred across the width, with MetaTrader's triangle at the edge. */}
         <button
           type="button"
           disabled
           title="Every contract on this platform is market execution. MetaTrader's other four order types are pending orders, and this engine has none."
-          className="relative flex w-full items-center border-b border-[#2b3543] px-3 py-3 text-[14px] text-white disabled:cursor-not-allowed"
+          className="relative flex w-full items-center border-b border-[var(--mt5-border)] px-3 py-3 text-[14px] text-white disabled:cursor-not-allowed"
         >
           <span className="flex-1 text-center">Market Execution</span>
           {/* MetaTrader's affordance on this row is a small triangle tucked into the BOTTOM-RIGHT
@@ -214,7 +219,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
 
         {/* 3. The seven-cell stepper. The three sizes scale with the volume, as MetaTrader's do; the
                rule and the two screenshots it reproduces are in lib/game/volumeSteps. */}
-        <div className="flex items-stretch border-b border-[#2b3543]">
+        <div className="flex items-stretch border-b border-[var(--mt5-border)]">
           {steps.filter((s) => s.delta < 0).map((s) => (
             <StepCell key={s.label} step={s} onPick={() => { setVolClamp(null); bump(s.delta); }} bound={`Minimum volume ${minLots.toFixed(volDigits)} lots.${volNote === null ? '' : ` ${volNote}`}`} />
           ))}
@@ -248,7 +253,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
         </div>
         {/* Both bounds, always: they are the symbol's own limits intersected with the brand's,
             which is the pair MetaTrader's contract specification states. */}
-        <div className="flex items-baseline gap-2 px-3 py-1.5 text-[11px] text-[#8fa2b8]">
+        <div className="flex items-baseline gap-2 px-3 py-1.5 text-[11px] text-[var(--mt5-muted)]">
           <span>= {money.fmt(stakeCents)}</span>
           <span className="ml-auto">
             min {minLots.toFixed(volDigits)} / max {maxLots.toFixed(volDigits)}
@@ -268,7 +273,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           Unset, the cell shows the greyed label `SL` / `TP` rather than a value, exactly as the
           reference does.
         */}
-        <div className="flex items-stretch border-b border-[#2b3543]">
+        <div className="flex items-stretch border-b border-[var(--mt5-border)]">
           <LevelHalf
             label="SL"
             underline="#f23645"
@@ -277,7 +282,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
             onUp={() => bumpSl(1)}
             disabled={anchor === null}
           />
-          <span aria-hidden className="w-px shrink-0 bg-[#2b3543]" />
+          <span aria-hidden className="w-px shrink-0 bg-[var(--mt5-border)]" />
           <LevelHalf
             label="TP"
             underline="#0EB52E"
@@ -317,15 +322,15 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           A brand that publishes none still shows the single centred price it always did.
         */}
         {bidAsk === null ? (
-          <div className="flex items-end justify-center border-b border-[#2b3543] py-3">
-            <MT5Price value={price} digits={digits} className="text-[24px] font-semibold text-[#3183ff]" />
+          <div className="flex items-end justify-center border-b border-[var(--mt5-border)] py-3">
+            <MT5Price value={price} digits={digits} className="text-[24px] font-semibold text-[var(--mt5-blue)]" />
           </div>
         ) : (
-          <div className="flex items-end justify-around border-b border-[#2b3543] py-3">
+          <div className="flex items-end justify-around border-b border-[var(--mt5-border)] py-3">
             {/* Bid on the left under SELL, ask on the right under BUY: a sell is filled at the bid
                 and a buy at the ask, so each side sits over the button that takes it. */}
-            <MT5Price value={bidAsk.bid} digits={digits} className="text-[24px] font-semibold text-[#3183ff]" />
-            <MT5Price value={bidAsk.ask} digits={digits} className="text-[24px] font-semibold text-[#3183ff]" />
+            <MT5Price value={bidAsk.bid} digits={digits} className="text-[24px] font-semibold text-[var(--mt5-blue)]" />
+            <MT5Price value={bidAsk.ask} digits={digits} className="text-[24px] font-semibold text-[var(--mt5-blue)]" />
           </div>
         )}
 
@@ -342,7 +347,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           the first one's name.
         */}
         {tradeDisabled ? null : (
-          <div className="relative min-h-28 flex-1 border-b border-[#2b3543]">
+          <div className="relative min-h-28 flex-1 grow border-b border-[var(--mt5-border)]">
             <MT5TickBand
               getTicks={getTicks}
               priceOfRate={priceOfRate}
@@ -367,7 +372,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
         */}
         {continuous ? null : (
         <div className="flex items-center gap-2 px-3 py-2">
-          <span className="shrink-0 text-[12px] text-[#8fa2b8]">Expiry</span>
+          <span className="shrink-0 text-[12px] text-[var(--mt5-muted)]">Expiry</span>
           <div className="flex flex-1 gap-1">
             {durations.map((d) => (
               <button
@@ -377,7 +382,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
                 aria-pressed={durationS === d}
                 className={cn(
                   'h-9 flex-1 rounded text-[12px] font-semibold transition',
-                  durationS === d ? 'bg-[#3183ff] text-white' : 'bg-[#202933] text-[#8fa2b8]',
+                  durationS === d ? 'bg-[var(--mt5-blue)] text-white' : 'bg-[var(--mt5-raised)] text-[var(--mt5-muted)]',
                 )}
               >
                 {durationLabel(d)}
@@ -397,7 +402,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           would be the same class of error as quoting a price the server never sent, so the mechanism
           is named instead of a counterparty that does not exist.
         */}
-        <p className="px-3 pb-3 pt-2 text-[10px] leading-snug text-[#8fa2b8]">
+        <p className="px-3 pb-3 pt-2 text-[10px] leading-snug text-[var(--mt5-muted)]">
           With Market Execution the price depends on the market situation. The order fills at the
           engine&apos;s next tick, which may differ from the price shown.
         </p>
@@ -411,7 +416,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
             to place an order.
           </p>
         ) : null}
-        {connecting ? <p className="px-3 pb-3 text-center text-[11px] text-[#8fa2b8]">Connecting…</p> : null}
+        {connecting ? <p className="px-3 pb-3 text-center text-[11px] text-[var(--mt5-muted)]">Connecting…</p> : null}
         {overBalance && signedIn ? (
           <p className="px-3 pb-3 text-center text-[11px] text-[#f0b90b]">Not enough free margin: tap a side to top up.</p>
         ) : null}
@@ -420,7 +425,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
 
       {/* 9. The buttons, pinned to the bottom. Text only, two lines each, with a thin divider:
              Android draws no fill behind either of them. */}
-      <div className="flex shrink-0 items-stretch border-t border-[#2b3543] pb-[env(safe-area-inset-bottom)]">
+      <div className="flex shrink-0 items-stretch border-t border-[var(--mt5-border)] pb-[env(safe-area-inset-bottom)]">
         <SideButton
           top="SELL"
           colour="#D00000"
@@ -428,7 +433,7 @@ export function MT5MobileOrder({ onBack, onAdvanced }: {
           onPick={() => send('sell')}
           title={tradeDisabled ? `Trade disabled for ${symbol}.` : undefined}
         />
-        <span aria-hidden className="w-px shrink-0 bg-[#2b3543]" />
+        <span aria-hidden className="w-px shrink-0 bg-[var(--mt5-border)]" />
         <SideButton
           top="BUY"
           colour="#0064F2"
@@ -457,7 +462,7 @@ function StepCell({ step, onPick, bound }: { step: { label: string; delta: numbe
       disabled={!step.enabled}
       title={step.enabled ? undefined : bound}
       aria-label={`${step.delta < 0 ? 'Decrease' : 'Increase'} volume by ${Math.abs(step.delta)}`}
-      className="min-w-0 flex-1 px-0.5 py-3 text-center font-mono text-[12px] font-semibold text-[#3183ff] tabular-nums transition active:bg-[#202933] disabled:text-[#8fa2b8] disabled:opacity-40"
+      className="min-w-0 flex-1 px-0.5 py-3 text-center font-mono text-[12px] font-semibold text-[var(--mt5-blue)] tabular-nums transition active:bg-[var(--mt5-raised)] disabled:text-[var(--mt5-muted)] disabled:opacity-40"
     >
       {step.label}
     </button>
@@ -484,7 +489,7 @@ function LevelHalf({ label, underline, value, onDown, onUp, disabled, title }: {
   disabled: boolean;
   title?: string | undefined;
 }) {
-  const step = 'grid h-10 w-9 shrink-0 place-items-center text-[18px] font-semibold leading-none text-[#3183ff] disabled:opacity-30';
+  const step = 'grid h-10 w-9 shrink-0 place-items-center text-[18px] font-semibold leading-none text-[var(--mt5-blue)] disabled:opacity-30';
   return (
     <div className="min-w-0 flex-1 px-2 pt-1.5" title={title}>
       <div className="flex items-center">
@@ -505,7 +510,7 @@ function LevelHalf({ label, underline, value, onDown, onUp, disabled, title }: {
 function Leader({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-1 px-3 py-2">
-      <span className="shrink-0 text-[12px] text-[#8fa2b8]">{label}</span>
+      <span className="shrink-0 text-[12px] text-[var(--mt5-muted)]">{label}</span>
       <span
         aria-hidden
         className="min-w-4 flex-1 self-center"
@@ -516,7 +521,7 @@ function Leader({ label, value }: { label: string; value: string }) {
           backgroundRepeat: 'repeat-x',
         }}
       />
-      <span className="shrink-0 font-mono text-[12px] text-[#8fa2b8]">{value}</span>
+      <span className="shrink-0 font-mono text-[12px] text-[var(--mt5-muted)]">{value}</span>
     </div>
   );
 }
@@ -542,7 +547,7 @@ function SideButton({ top, colour, disabled, onPick, title }: {
       disabled={disabled}
       title={title}
       aria-label={`${top} by market`}
-      className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 transition active:bg-[#202933] disabled:opacity-40"
+      className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 transition active:bg-[var(--mt5-raised)] disabled:opacity-40"
       style={{ color: colour }}
     >
       <span className="text-[17px] font-bold leading-none tracking-wide">{top}</span>

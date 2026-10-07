@@ -94,7 +94,7 @@ export function BottomNav() {
   return (
     <nav className={cn(
       'pb-safe fixed inset-x-0 bottom-0 z-30 border-t md:hidden',
-      mt5 ? 'border-[#2b3543] bg-[#0f1720]' : 'border-border bg-surface',
+      mt5 ? 'border-[var(--mt5-border)] bg-[var(--mt5-surface)]' : 'border-border bg-surface',
     )}>
       <ul className={cn('mx-auto flex w-full items-stretch px-2 py-1.5', mt5 ? '' : 'max-w-app')}>
         {(isMarketer ? marketerItems : items).map(({ href, label, Icon }) => {
@@ -107,7 +107,7 @@ export function BottomNav() {
                 className={cn(
                   'mx-auto flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-semibold tracking-wide transition',
                   mt5
-                    ? (active ? 'text-[#3183ff]' : 'text-[#8fa2b8] hover:text-[#ffffff]')
+                    ? (active ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-muted)] hover:text-[#ffffff]')
                     : (active ? 'bg-accent text-accent-fg shadow-md shadow-accent/40' : 'text-muted hover:text-fg'),
                 )}
               >
@@ -122,7 +122,7 @@ export function BottomNav() {
           <button type="button" onClick={() => setChat(true)} aria-label={`Chat${unread ? ` (${unread} new)` : ''}`}
             className={cn(
               'relative mx-auto flex w-full flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-semibold tracking-wide transition',
-              mt5 ? 'text-[#8fa2b8] hover:text-[#ffffff]' : 'text-muted hover:text-fg',
+              mt5 ? 'text-[var(--mt5-muted)] hover:text-[#ffffff]' : 'text-muted hover:text-fg',
             )}>
             <DIcon name="chat" className="h-5 w-5" />
             CHAT

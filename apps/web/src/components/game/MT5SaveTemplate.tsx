@@ -70,21 +70,21 @@ export function MT5SaveTemplate({
       className="fixed inset-0 z-[86] flex items-center justify-center bg-black/60 p-4 text-white"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onDismiss(); }}
     >
-      <div className="w-full max-w-[360px] rounded-sm border border-[#2b3543] bg-[#0f1720]">
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+      <div className="w-full max-w-[360px] rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)]">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
           <span className="flex-1 truncate text-[15px] font-semibold leading-tight">Save Template</span>
           <button
             type="button"
             onClick={onDismiss}
             aria-label="Close"
-            className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white"
+            className="shrink-0 px-1 text-[18px] leading-none text-[var(--mt5-muted)] transition hover:text-white"
           >
             ×
           </button>
         </div>
 
         <div className="px-3 py-3">
-          <label className="mb-1.5 block text-[11px] font-semibold text-[#8fa2b8]" htmlFor="tpl-name">
+          <label className="mb-1.5 block text-[11px] font-semibold text-[var(--mt5-muted)]" htmlFor="tpl-name">
             Template name
           </label>
           <input
@@ -94,11 +94,11 @@ export function MT5SaveTemplate({
             onChange={(e) => { setName(e.target.value); setError(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
             data-template-name
-            className="h-8 w-full rounded-sm border border-[#2b3543] bg-[#0f1720] px-2 text-[12px] text-white outline-none focus:border-[#3183ff]"
+            className="h-8 w-full rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-surface)] px-2 text-[12px] text-white outline-none focus:border-[var(--mt5-blue)]"
           />
           {/* What a template carries, stated where it is saved: MetaTrader's rule is settings and
               indicators, never the objects drawn on the chart. */}
-          <p className="mt-2 text-[10.5px] leading-snug text-[#8fa2b8]">
+          <p className="mt-2 text-[10.5px] leading-snug text-[var(--mt5-muted)]">
             Saves this chart&apos;s type, period, properties and indicators. Objects stay on the chart they
             were drawn on.
           </p>
@@ -111,19 +111,19 @@ export function MT5SaveTemplate({
           ) : null}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[#2b3543] px-3 py-2.5">
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--mt5-border)] px-3 py-2.5">
           <button
             type="button"
             onClick={submit}
             data-template-save
-            className="h-8 rounded-sm bg-[#3183ff] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
+            className="h-8 rounded-sm bg-[var(--mt5-blue)] px-6 text-[11px] font-semibold text-white transition hover:brightness-110"
           >
             Save
           </button>
           <button
             type="button"
             onClick={onDismiss}
-            className="h-8 rounded-sm border border-[#2b3543] bg-[#202933] px-5 text-[11px] font-semibold text-white transition hover:bg-[#2b3543]"
+            className="h-8 rounded-sm border border-[var(--mt5-border)] bg-[var(--mt5-raised)] px-5 text-[11px] font-semibold text-white transition hover:bg-[var(--mt5-border)]"
           >
             Cancel
           </button>

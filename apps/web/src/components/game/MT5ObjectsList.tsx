@@ -83,30 +83,30 @@ export function MT5ObjectsList({
       role="dialog"
       aria-modal="true"
       aria-label={`Objects on ${symbol},${timeframe}`}
-      className="fixed inset-0 z-[80] flex flex-col bg-[#0f1720] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
+      className="fixed inset-0 z-[80] flex flex-col bg-[var(--mt5-surface)] text-white sm:items-center sm:justify-center sm:bg-black/60 sm:p-4"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col bg-[#0f1720] sm:h-[70vh] sm:max-w-[600px] sm:flex-none sm:rounded-sm sm:border sm:border-[#2b3543]">
-        <div className="flex items-center gap-2 border-b border-[#2b3543] px-3 py-2.5">
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-[var(--mt5-surface)] sm:h-[70vh] sm:max-w-[600px] sm:flex-none sm:rounded-sm sm:border sm:border-[var(--mt5-border)]">
+        <div className="flex items-center gap-2 border-b border-[var(--mt5-border)] px-3 py-2.5">
           <span className="flex-1 truncate text-[15px] font-semibold leading-tight">
             Objects on {symbol},{timeframe} ({rows.length})
           </span>
-          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[#8fa2b8] transition hover:text-white">×</button>
+          <button type="button" onClick={onDismiss} aria-label="Close" className="shrink-0 px-1 text-[18px] leading-none text-[var(--mt5-muted)] transition hover:text-white">×</button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <table className="w-full table-fixed border-collapse text-[11px]">
-            <thead className="sticky top-0 bg-[#202933] text-[#8fa2b8]">
+            <thead className="sticky top-0 bg-[var(--mt5-raised)] text-[var(--mt5-muted)]">
               <tr>
-                <th scope="col" className="w-[32%] border-b border-[#2b3543] px-2 py-1.5 text-left font-semibold">Object</th>
-                <th scope="col" className="w-[32%] border-b border-[#2b3543] px-2 py-1.5 text-left font-semibold">Name</th>
-                <th scope="col" className="w-[26%] border-b border-[#2b3543] px-2 py-1.5 text-left font-semibold">Description</th>
-                <th scope="col" className="w-[10%] border-b border-[#2b3543] px-2 py-1.5 text-left font-semibold">Window</th>
+                <th scope="col" className="w-[32%] border-b border-[var(--mt5-border)] px-2 py-1.5 text-left font-semibold">Object</th>
+                <th scope="col" className="w-[32%] border-b border-[var(--mt5-border)] px-2 py-1.5 text-left font-semibold">Name</th>
+                <th scope="col" className="w-[26%] border-b border-[var(--mt5-border)] px-2 py-1.5 text-left font-semibold">Description</th>
+                <th scope="col" className="w-[10%] border-b border-[var(--mt5-border)] px-2 py-1.5 text-left font-semibold">Window</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-2 py-6 text-center text-[#8fa2b8]">
+                  <td colSpan={4} className="px-2 py-6 text-center text-[var(--mt5-muted)]">
                     {hidden > 0 ? `No objects shown on ${timeframe}. Click "List all".` : 'No objects on this chart.'}
                   </td>
                 </tr>
@@ -116,8 +116,8 @@ export function MT5ObjectsList({
                   aria-selected={focused === r.id}
                   onClick={() => setFocused(r.id)}
                   className={cn(
-                    'cursor-pointer border-b border-[#2b3543]',
-                    focused === r.id ? 'bg-[#3183ff]/25' : i % 2 === 1 ? 'bg-white/[0.02]' : '',
+                    'cursor-pointer border-b border-[var(--mt5-border)]',
+                    focused === r.id ? 'bg-[var(--mt5-blue)]/25' : i % 2 === 1 ? 'bg-white/[0.02]' : '',
                   )}
                 >
                   <td className="truncate px-2 py-1.5">
@@ -127,21 +127,21 @@ export function MT5ObjectsList({
                         aria-label={`Select ${r.name} on the chart`}
                         checked={selected === r.id}
                         onChange={(e) => { setFocused(r.id); onSelect(e.target.checked ? r.id : null); }}
-                        className="h-3 w-3 shrink-0 accent-[#3183ff]"
+                        className="h-3 w-3 shrink-0 accent-[var(--mt5-blue)]"
                       />
                       <span className="truncate">{r.object}</span>
                     </label>
                   </td>
-                  <td className="truncate px-2 py-1.5 font-mono text-[#8fa2b8]">{r.name}</td>
+                  <td className="truncate px-2 py-1.5 font-mono text-[var(--mt5-muted)]">{r.name}</td>
                   <td className="truncate px-2 py-1.5">{r.description}</td>
-                  <td className="truncate px-2 py-1.5 text-[#8fa2b8]">0</td>
+                  <td className="truncate px-2 py-1.5 text-[var(--mt5-muted)]">0</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-t border-[#2b3543] px-3 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-t border-[var(--mt5-border)] px-3 py-2.5">
           <Btn label="Show" disabled={!focused} onClick={() => act(onShow)} />
           <Btn label="Properties" disabled={!focused} onClick={() => act(onProperties)} />
           <Btn label="Delete" disabled={!focused} onClick={() => act((id) => { onDelete(id); setFocused(null); })} />
@@ -176,10 +176,10 @@ function Btn({ label, disabled, onClick, title, pressed }: {
       className={cn(
         'h-8 flex-1 rounded-sm border px-1 text-[11px] font-semibold transition',
         disabled
-          ? 'cursor-not-allowed border-[#2b3543] bg-[#202933] text-[#2b3543]'
+          ? 'cursor-not-allowed border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-[var(--mt5-border)]'
           : pressed
-            ? 'border-[#3183ff] bg-[#3183ff]/20 text-white'
-            : 'border-[#2b3543] bg-[#202933] text-white hover:border-[#3183ff] hover:bg-[#2b3543]',
+            ? 'border-[var(--mt5-blue)] bg-[var(--mt5-blue)]/20 text-white'
+            : 'border-[var(--mt5-border)] bg-[var(--mt5-raised)] text-white hover:border-[var(--mt5-blue)] hover:bg-[var(--mt5-border)]',
       )}
     >
       {label}

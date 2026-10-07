@@ -14,7 +14,7 @@ import { useOutcomeFx } from '@/lib/game/outcomeFx';
 import type { ActivePosition } from '@/lib/game/betting';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { cn } from '@/lib/cn';
-import { useChartSymbolStore, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
+import { useChartSymbolStore, chartOverride, CHART_SYMBOL_DND } from '@/lib/game/chartSymbol';
 import { useChartOrders } from '@/lib/game/chartOrders';
 import type { Timeframe } from '@invest254/shared/candles';
 import type { Tick } from '@/lib/game/types';
@@ -65,15 +65,23 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
   /** Called with false to give the chrome back, which is iOS's full-screen/normal toggle. */
   onFullScreen?: ((full: boolean) => void) | undefined;
 } = {}) {
-  const { getTicks, getLastTick, requestCandles, getSymbolQuote, getMarket } = useGameSocketApi();
+  const { getTicks, getLastTick, requestCandles, getSymbolQuote, getMarket, getSettledSymbol } = useGameSocketApi();
   /**
    * The symbol the chart is on. Null means the brand's own — the one it settles — so the default
    * path is byte-for-byte what it was before symbol switching existed.
    */
-  const charted = useChartSymbolStore((s) => s.symbol);
+  const stored = useChartSymbolStore((s) => s.symbol);
   const setCharted = useChartSymbolStore((s) => s.set);
-  /** The symbol this brand settles, which is what a drop of it means "back to the default". */
-  const defaultSymbol = getMarket()?.instrument.symbol ?? null;
+  /**
+   * The symbol this brand settles, which is what a drop of it means "back to the default".
+   *
+   * The engine's own answer first (`getSettledSymbol`), then the market axis. The axis alone is
+   * null until the first candles reply, and during that window a drop of the brand's OWN symbol
+   * used to be stored as if it were another instrument.
+   */
+  const defaultSymbol = getSettledSymbol() ?? getMarket()?.instrument.symbol ?? null;
+  /** What the chart is drawing when that is NOT the settled symbol. See `chartOverride`. */
+  const charted = chartOverride(stored, defaultSymbol);
   const symbol = charted ?? undefined;
   // Volume to the SYMBOL's own volume digits, which is the figure the ticket offers and the Trade
   // grid prints (docs/mt5/09-toolbox.md 300, rows at 313-318).
@@ -164,10 +172,10 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
         setCharted(dropped === defaultSymbol ? null : dropped);
       }}
       className={cn(
-        'relative h-full min-h-0 w-full overflow-hidden bg-[#0f1720]',
+        'relative h-full min-h-0 w-full overflow-hidden bg-[var(--mt5-surface)]',
         // On a phone the chart IS the screen, the way MetaTrader's Charts tab is: a card border and
         // rounded corners around a full-bleed view would only take pixels off the plot.
-        phone ? '' : 'rounded-sm border border-[#2b3543]',
+        phone ? '' : 'rounded-sm border border-[var(--mt5-border)]',
       )}
     >
       {/* Candlestick/OHLC brands render the TradingView view; line brands render the wave. The wave's
@@ -195,6 +203,9 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
           onTakeProfit={chartOrders.onTakeProfit}
           onNewOrder={chartOrders.onNewOrder}
           pendingLevels={pendingLevels}
+          /* The chart's own way back when it is on another instrument. See CandleChart. */
+          {...(charted === null ? {} : { onChartSettled: () => setCharted(null) })}
+          settledSymbol={defaultSymbol}
         />
       ) : (
         <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} />
