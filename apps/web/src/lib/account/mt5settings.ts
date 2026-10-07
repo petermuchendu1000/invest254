@@ -5,6 +5,9 @@
  * they are here as pure functions with tests rather than as conditions buried in JSX.
  */
 
+import { riskAnchor } from '../legal/legalPage.js';
+import type { Register } from '../ui/register.js';
+
 /** A row in the About group. */
 export interface AboutRow {
   id: string;
@@ -18,23 +21,28 @@ export interface AboutRow {
   gambling: boolean;
 }
 
-export const ABOUT_ROWS: readonly AboutRow[] = [
-  { id: 'terms', label: 'Terms of service', sub: 'The agreement you trade under', href: '/legal#terms', gambling: false },
-  { id: 'privacy', label: 'Privacy policy', sub: 'What we store and why', href: '/legal#privacy', gambling: false },
-  { id: 'responsible', label: 'Responsible gaming', sub: 'Limits, self-exclusion and support', href: '/legal#responsible-gaming', gambling: true },
-  { id: 'licence', label: 'Licence', sub: 'Who this service is operated by', href: '/legal#licence', gambling: true },
-];
-
 /**
- * The About rows for this screen.
+ * The About group, in the register this brand belongs to.
  *
- * A marketer screen is recorded and posted, and the whole point of the marketer skin is that a
- * recording carries no sign of a gambling product — which is exactly what a licence line, a
- * responsible-gaming page or a problem-gambling helpline is. The footer already drops them for the
- * same reason; this keeps the two in step. Terms and Privacy stay, because every app has those.
+ * The third row is the one that differs. A gaming brand owes a responsible-gaming page with limits
+ * and self-exclusion on it; a broker owes a risk disclosure, and `riskAnchor` decides which of the
+ * two the link reaches so this screen cannot send a trader to the other product's page. Both are
+ * `gambling: true` only in the sense that marketer mode drops them, which is about what a recording
+ * may show rather than about which product it is.
  */
-export function aboutRows(isMarketer: boolean): AboutRow[] {
-  return ABOUT_ROWS.filter((r) => !(isMarketer && r.gambling));
+export function aboutRows(isMarketer: boolean, register: Register = 'gaming'): AboutRow[] {
+  const rows: readonly AboutRow[] = [
+    { id: 'terms', label: 'Terms of service', sub: 'The agreement you trade under', href: '/legal#terms', gambling: false },
+    { id: 'privacy', label: 'Privacy policy', sub: 'What we store and why', href: '/legal#privacy', gambling: false },
+    register === 'trading'
+      ? { id: 'responsible', label: 'Risk disclosure', sub: 'What you are taking on, and how to pause the account', href: `/legal#${riskAnchor('trading')}`, gambling: true }
+      : { id: 'responsible', label: 'Responsible gaming', sub: 'Limits, self-exclusion and support', href: `/legal#${riskAnchor('gaming')}`, gambling: true },
+    { id: 'licence', label: 'Licence', sub: 'Who this service is operated by', href: '/legal#licence', gambling: true },
+  ];
+  // A marketer screen is recorded and posted, and the whole point of the marketer skin is that a
+  // recording carries no sign of a real-money gambling product. The footer already drops these for
+  // the same reason; this keeps the two in step. Terms and Privacy stay: every app has those.
+  return rows.filter((r) => !(isMarketer && r.gambling));
 }
 
 /** The sub-label under Identity verification, from the KYC status the API reports. */
