@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { valueOfRate } from '@invest254/shared/candles';
 import { accountSummary, accountStripFields, mtAmount, lotsOfStake } from '@invest254/shared/account';
 import { useGameSocket, useGameSocketApi, type NewsItemDto, type DayAnchor } from '@/lib/game/GameSocketProvider';
-import { useWallet, useTransactions } from '@/lib/wallet/hooks';
+import { useWallet, useWalletFigures, useTransactions } from '@/lib/wallet/hooks';
 import { useDisplayMoney } from '@/lib/money';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useSession } from '@/lib/auth/session';
@@ -13,6 +13,7 @@ import { useJournal, useExperts, logJournal, type JournalEntry } from '@/lib/gam
 import { ARTICLES, ARTICLE_CATEGORIES, articlesNewestFirst, type Article, type ArticleCategory } from '@/lib/terminal/articles';
 import { markArticleRead, useReadArticles } from '@/lib/terminal/articlesRead';
 import { companyPage } from '@/lib/terminal/company';
+import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { GROUP_LABELS, INDICATOR_GROUPS, MT5_INDICATOR_COUNT, VOLUME_GROUP_NOTE, type IndicatorGroup } from '@/lib/chart/indicatorCatalog';
 import { toggleIndicator, useEnabledIndicators } from '@/lib/chart/indicatorsStore';
 import {
@@ -92,7 +93,10 @@ export function MT5Toolbox() {
    * by the broker." A brand with no licence line and no support channel publishes nothing, so it
    * gets eleven tabs; one that does gets twelve.
    */
-  const company = useMemo(() => companyPage(brand), [brand]);
+  // MetaTrader's own server string, the same one the account strip and the Funds screen print.
+  const figures = useWalletFigures();
+  const server = mt5ServerName(brand, figures.demo ? 'demo' : 'real');
+  const company = useMemo(() => companyPage(brand, { server }), [brand, server]);
   /** The Articles tab's own count, which MetaTrader draws as a subscript on the tab. */
   const readArticles = useReadArticles();
   const unreadArticles = ARTICLES.length - readArticles.size;

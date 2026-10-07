@@ -59,7 +59,15 @@ export interface CompanyPage {
  */
 const waDigits = (n: string): string => n.replace(/\D+/g, '');
 
-export function companyPage(brand: CompanyBrand): CompanyPage {
+export function companyPage(
+  brand: CompanyBrand,
+  /**
+   * The trade server this account is on, as `mt5ServerName` builds it (`MuchWins-Live09`). It is
+   * passed in rather than derived here because it depends on the ACCOUNT's mode, not the brand:
+   * the same brand prints `-Demo` for a demo account and `-LiveNN` for a real one.
+   */
+  opts: { server?: string | null } = {},
+): CompanyPage {
   const licence = brand.licenceLine?.trim() ? brand.licenceLine.trim() : null;
   const email = brand.supportEmail?.trim() ? brand.supportEmail.trim() : null;
   const wa = brand.supportWhatsapp?.trim() ? waDigits(brand.supportWhatsapp) : '';
@@ -99,10 +107,13 @@ export function companyPage(brand: CompanyBrand): CompanyPage {
     licence,
     fields: [
       { label: 'Trading name', value: brand.name },
+      // The server the account strip and the Funds screen already name, so the Company page agrees
+      // with them rather than being a second, separate account of who you are connected to.
+      ...(opts.server ? [{ label: 'Trade server', value: opts.server }] : []),
       { label: 'Deposit currency', value: brand.currency },
       { label: 'Region', value: brand.locale },
-      // The one server fact this platform genuinely publishes. Every grid in the terminal stamps
-      // UTC, so a trader reconciling a fill against a release does not have to convert anything.
+      // Every grid in the terminal stamps UTC, so a trader reconciling a fill against a release
+      // does not have to convert anything. Saying so is part of knowing who you are trading with.
       { label: 'Server time', value: 'UTC' },
     ],
     support,

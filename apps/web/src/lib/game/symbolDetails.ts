@@ -10,11 +10,15 @@
  *
  * MetaTrader's own list for a futures contract runs to thirty rows. Most of them describe things
  * this instrument does not have, and a row with nothing behind it would be a worse answer than no
- * row: the whole set of `Bid`/`Ask` rows (one price, no spread — the same reasoning the Specification
- * dialog prints a spread of `0` for), the exchange-model margins and limits, and every order-flow
- * figure (`Volume`, `Deals`, `Turnover`, `Open Interest`, `Buy Orders`, `Sell Volume` and the rest),
- * because contracts here are struck against the brand rather than matched against other orders, so
- * there is no book to count.
+ * row: the exchange-model margins and limits, and every order-flow figure (`Volume`, `Deals`,
+ * `Turnover`, `Open Interest`, `Buy Orders`, `Sell Volume` and the rest), because contracts here are
+ * struck against the brand rather than matched against other orders, so there is no book to count.
+ *
+ * `Bid` and `Ask` ARE here, and used not to be. They were cut on the grounds that this platform
+ * quotes one price with no spread; the engine now publishes the spread it has always charged, so
+ * both sides are real figures derived from one quote. Their HIGH and LOW counterparts are still
+ * absent: MetaTrader uses the `Last` trio when a symbol's chart is built on Last prices, which is
+ * what this one's Chart mode says, and the session's extremes are that trio's.
  *
  * What is left is real, and is given in MetaTrader's own order and under its own labels. `Last High`
  * and `Last Low` rather than `Bid High`/`Bid Low` because MetaTrader uses the Last pair when a
@@ -64,6 +68,11 @@ export interface DetailInput {
   faceValue: string;
   /** The live price, or null before a quote has landed. */
   last: number | null;
+  /**
+   * MetaTrader's two sides, around `last`, by the spread the engine charges. Null on a brand that
+   * publishes none, and then the two rows are omitted rather than printed as the same number twice.
+   */
+  sides: { bid: number; ask: number } | null;
   /** The session's own bar: its open, high and low. Null when the day's bar has not arrived. */
   session: { open: number; high: number; low: number } | null;
   /**
@@ -86,6 +95,11 @@ export function detailRows(i: DetailInput): DetailRow[] {
     // MetaTrader's order puts Tick Value between these two. It is absent, and the header note says
     // why: the gain it follows from is per-direction and server-side, so no single figure is true.
     { label: 'Face Value', value: i.faceValue, live: false },
+    // MetaTrader's order puts the two sides ahead of Last, and they tick with it.
+    ...(i.sides === null ? [] : [
+      { label: 'Bid', value: fixed(i.sides.bid, i.digits), live: true },
+      { label: 'Ask', value: fixed(i.sides.ask, i.digits), live: true },
+    ]),
     { label: 'Last', value: fixed(i.last, i.digits), live: true },
     { label: 'Last High', value: fixed(i.session?.high ?? null, i.digits), live: false },
     { label: 'Last Low', value: fixed(i.session?.low ?? null, i.digits), live: false },

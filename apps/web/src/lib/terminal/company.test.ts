@@ -49,6 +49,18 @@ test('a WhatsApp link is built from digits, because wa.me accepts nothing else',
   assert.equal(wa.label, '+254711000000', 'but the display keeps the plus');
 });
 
+test('the trade server is carried when the account has one, and never invented', () => {
+  // The same string the account strip and the Funds screen print, so the three cannot disagree.
+  const withServer = companyPage(BRAND, { server: 'MuchWins-Live09' });
+  assert.ok(withServer.fields.some((f) => f.label === 'Trade server' && f.value === 'MuchWins-Live09'));
+  // Without one the row is absent rather than blank or guessed at.
+  assert.ok(!companyPage(BRAND).fields.some((f) => f.label === 'Trade server'));
+  assert.ok(!companyPage(BRAND, { server: null }).fields.some((f) => f.label === 'Trade server'));
+  // It sits directly under the trading name, where MetaTrader puts the server on an account.
+  const labels = withServer.fields.map((f) => f.label);
+  assert.equal(labels[1], 'Trade server');
+});
+
 test('the page carries the brand own figures, not a fixed set', () => {
   const other = companyPage({ ...BRAND, name: 'Brand B', currency: 'USD', locale: 'en-US' });
   assert.ok(other.fields.some((f) => f.label === 'Deposit currency' && f.value === 'USD'));

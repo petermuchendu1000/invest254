@@ -24,7 +24,12 @@ import {
   MT5SwipeRow, SwipePlusIcon, SwipeChartIcon, type SwipeCommand,
 } from '@/components/game/mobile/MT5SwipeRow';
 import { useQuotesViewStore, useRestoreQuotesView } from '@/lib/game/quotesView';
+import {
+  QUOTE_COLUMNS, spreadPoints, useQuoteColumnsStore, useRestoreQuoteColumns,
+} from '@/lib/game/quoteColumns';
 import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
+import { MT5OneClickTrading } from '@/components/game/MT5OneClickTrading';
+import { MT5TicksChart } from '@/components/game/MT5TicksChart';
 import { cn } from '@/lib/cn';
 
 /**
@@ -35,10 +40,14 @@ import { cn } from '@/lib/cn';
  * (Ctrl+U) and the context menu's Hide / Hide All / Show All. The set is stored per device; see
  * lib/game/symbolSet.
  *
- * MetaTrader quotes BID and ASK here. This product has neither: a contract settles on one seeded
- * price with no spread, so printing a bid and an ask would say the player buys at one and sells at
- * the other, which is not what happens. The column is Last, and the detail carries the session's
- * real open/high/low/close from the same candle feed the chart draws.
+ * MetaTrader quotes BID and ASK here, and so does this window. It did not use to: this panel
+ * printed one `Last` price under a comment saying a bid and an ask around a non-existent spread
+ * would claim a trader buys at one and sells at the other when they do not. The engine now
+ * publishes the spread it has always charged (`gameConfig.spread`), so the two sides are the
+ * honest rendering and the single price is the one that would mislead. Both are derived from the
+ * same quote by the same arithmetic the order ticket uses, so no surface can disagree with
+ * another. The detail tab carries the session's real open/high/low/close from the same candle feed
+ * the chart draws.
  *
  * Hidden below `lg`, where there is no room for it — the phone layout puts the quote in the price
  * strip above the chart instead, which is what MetaTrader's own mobile app does.
@@ -50,19 +59,11 @@ import { cn } from '@/lib/cn';
  */
 type Tab = 'symbols' | 'details' | 'trading' | 'ticks';
 
-const TABS: ReadonlyArray<{ id: Tab; label: string; unavailable?: string }> = [
+const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
   { id: 'symbols', label: 'Symbols' },
   { id: 'details', label: 'Details' },
-  {
-    id: 'trading',
-    label: 'Trading',
-    unavailable: 'MetaTrader’s Trading tab is its one-click Buy and Sell pair per symbol. The order ticket here is always on screen, and it is the same two buttons.',
-  },
-  {
-    id: 'ticks',
-    label: 'Ticks',
-    unavailable: 'A tick chart. This feed is served as bars from M1 up, so there is no tick series to draw.',
-  },
+  { id: 'trading', label: 'Trading' },
+  { id: 'ticks', label: 'Ticks' },
 ];
 
 export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
@@ -73,8 +74,8 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
   /** Phone only: open the New Order screen, which is where `New order` goes. */
   onNewOrder?: (() => void) | undefined;
 }) {
-  const { getMarket, requestCandles, requestSymbols, getSymbolQuote } = useGameSocketApi();
-  const { status } = useGameSocket();
+  const { getMarket, requestCandles, requestSymbols, getSymbolQuote, getSymbolTicks } = useGameSocketApi();
+  const { status, spread } = useGameSocket();
   const money = useDisplayMoney();
   const [tab, setTab] = useState<Tab>('symbols');
   /** MetaTrader reaches the Specification dialog from the Market Watch context menu. */
@@ -138,6 +139,10 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
   const view = useQuotesViewStore((st) => st.view);
   const toggleView = useQuotesViewStore((st) => st.toggle);
   useRestoreQuotesView();
+  /** Which of MetaTrader's optional columns this device draws. See lib/game/quoteColumns. */
+  useRestoreQuoteColumns();
+  const columns = useQuoteColumnsStore((st) => st.on);
+  const toggleColumn = useQuoteColumnsStore((st) => st.toggle);
   const active = selected !== null && visible.includes(selected)
     ? selected
     : visible.includes(defaultSymbol ?? '') ? defaultSymbol! : visible[0] ?? defaultSymbol ?? 'XAUUSD';
@@ -244,6 +249,17 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
     // stakes. Bare, like every other figure in the list (docs/mt5/09-toolbox.md 429).
     faceValue: money.mt(LOT_STAKE_CENTS),
     last: activeQuote?.price ?? null,
+    /**
+     * The two sides of the selected symbol, by the brand's published spread. The same arithmetic
+     * the rows above, the One Click panels and the order ticket use, so the Details tab cannot
+     * quote a Bid the grid disagrees with.
+     */
+    sides: activeQuote && activeQuote.price !== null && spread
+      ? {
+          bid: activeQuote.price - spread.sell * activeQuote.instrument.scale,
+          ask: activeQuote.price + spread.buy * activeQuote.instrument.scale,
+        }
+      : null,
     session: activeHours && activeQuote
       ? sessionSoFar(activeHours, activeQuote.anchor.tradeDate, activeQuote.price)
       : null,
@@ -279,6 +295,14 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
       ? { onShowAll: () => showAll(catalogue.slice(0, MAX_WATCHED).map((r) => r.symbol)) }
       : {}),
     grid: { on: grid, toggle: () => setGrid((g) => !g) },
+    ...(tab === 'ticks' ? {} : { onTickChart: () => setTab('ticks') }),
+    columns: {
+      items: QUOTE_COLUMNS.map((c) => ({
+        label: c.label,
+        on: columns.includes(c.id),
+        toggle: () => toggleColumn(c.id),
+      })),
+    },
   });
 
   return (
@@ -379,6 +403,21 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                 const points = price !== null && open !== null
                   ? Math.round((price - open) * 10 ** digits)
                   : null;
+                /**
+                 * MetaTrader's two sides, around the quote, by the spread the engine charges.
+                 *
+                 * Identical arithmetic to the order ticket's (`useOrderEntry.bidAsk`) and the One
+                 * Click panel's: a price is `base + scale * value` and the cost is in curve-value
+                 * units, so the offset in price terms is `cost * scale`. Null where the brand
+                 * publishes no spread, which is what a line brand does; then the grid is the single
+                 * price it always was.
+                 */
+                const scale = q?.instrument.scale ?? null;
+                const sides = price !== null && spread !== null && scale !== null
+                  ? { bid: price - spread.sell * scale, ask: price + spread.buy * scale }
+                  : price === null ? null : { bid: price, ask: price };
+                /** The spread MetaTrader's own column prints: the gap in the symbol's points. */
+                const points_ = spreadPoints(sides?.bid ?? null, sides?.ask ?? null, digits);
                 const changePct = price !== null && open
                   ? (points === 0 ? 0 : ((price - open) / open) * 100)
                   : null;
@@ -464,24 +503,32 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                       'w-full text-left transition hover:bg-[#202933]',
                       phone
                         ? (view === 'simple' ? 'flex items-center gap-2 px-3 py-3' : 'flex items-start gap-2 px-3 py-2')
-                        : 'flex items-center gap-2 px-2 py-1.5',
+                        // Tighter than the phone row's: six columns share a docked panel that is
+                        // 286px wide at 1440, and the two price columns are the ones that must not
+                        // be squeezed. MetaTrader drops columns off the right edge at this width;
+                        // the breakpoints below do the same, deliberately rather than by clipping.
+                        : 'flex items-center gap-1.5 px-2 py-1.5',
                       grid ? 'border-b border-[#2b3543]/60' : '',
                       symbol === active ? 'bg-[#202933]' : '',
                     )}
                   >
                     {phone && view === 'simple' ? (
-                      /* MetaTrader Android's reduced row: "In the simple view mode only the Bid and
-                         Ask prices are shown." One price here, for the reason the panel's header
-                         comment gives, so the row is the symbol and that price. */
+                      /* MetaTrader Android's reduced row, verbatim: "In the simple view mode only
+                         the Bid and Ask prices are shown." Which is now literally what it shows. */
                       <>
                         <span aria-hidden className="w-3 shrink-0 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
                           {GUTTER_GLYPH[glyph]}
                         </span>
                         <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-white">{symbol}</span>
-                        <span className="shrink-0 text-right">
-                          {price === null
-                            ? <span className="font-mono text-[11px] text-[#4a5666]">waiting</span>
-                            : <MT5Price value={price} digits={digits} className="text-[13px]" style={{ color: colour }} />}
+                        <span className="flex shrink-0 items-baseline gap-2 text-right">
+                          {sides === null ? (
+                            <span className="font-mono text-[11px] text-[#4a5666]">waiting</span>
+                          ) : (
+                            <>
+                              <MT5Price value={sides.bid} digits={digits} className="text-[13px]" style={{ color: colour }} />
+                              <MT5Price value={sides.ask} digits={digits} className="text-[13px]" style={{ color: colour }} />
+                            </>
+                          )}
                         </span>
                       </>
                     ) : phone ? (
@@ -501,14 +548,14 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                        * is the last quote's time, then the I-beam spread glyph and the spread.
                        *
                        * ON THE RIGHT MetaTrader prints Bid and Ask side by side with `L:` and `H:`
-                       * beneath them. There is one price here and no spread, for the reason the
-                       * panel's own header comment gives, so the right column carries that one price
-                       * and the spread reads 0 rather than an invented figure.
+                       * beneath them, and so does this. Both sides come from one quote and the
+                       * brand's published spread, by the same arithmetic the order ticket uses, and
+                       * the spread on line 3 is that gap in the symbol's own points rather than the
+                       * `0` this row used to print.
                        *
-                       * `L:`/`H:` are ABSENT, and that is a gap rather than a decision: the quote
-                       * the engine fans out carries no day range, and fetching a day of bars per
-                       * watched symbol from a phone to derive one would be the wrong way to get it.
-                       * The engine already holds the day, so the range belongs on the quote.
+                       * `L:`/`H:` ride the quote, because the engine is the only side that can know
+                       * them: it holds the day, and a phone deriving them would have to fetch a day
+                       * of bars per watched symbol to print two numbers each.
                        */
                       <>
                         <span aria-hidden className="w-3 shrink-0 pt-1 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
@@ -532,14 +579,17 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                             <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="h-2.5 w-2.5" aria-hidden>
                               <path d="M3 2h6M3 10h6M6 2v8" />
                             </svg>
-                            <span>0</span>
+                            <span>{points_ === null ? '' : points_}</span>
                           </span>
                         </span>
                         <span className="shrink-0 pt-0.5 text-right">
-                          {price === null ? (
+                          {sides === null ? (
                             <span className="font-mono text-[11px] text-[#4a5666]">waiting</span>
                           ) : (
-                            <MT5Price value={price} digits={digits} className="text-[13px]" style={{ color: colour }} />
+                            <span className="flex items-baseline justify-end gap-2">
+                              <MT5Price value={sides.bid} digits={digits} className="text-[13px]" style={{ color: colour }} />
+                              <MT5Price value={sides.ask} digits={digits} className="text-[13px]" style={{ color: colour }} />
+                            </span>
                           )}
                           {/* MetaTrader's second right-hand line: `L: <day low>` under the Bid and
                               `H: <day high>` under the Ask. There is one price here rather than two,
@@ -572,29 +622,62 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
                     <span aria-hidden className="w-3 shrink-0 text-center text-[10px] leading-none" style={{ color: GUTTER_COLOUR[glyph] }}>
                       {GUTTER_GLYPH[glyph]}
                     </span>
-                    <span className="w-[62px] shrink-0 truncate text-[11px] font-bold text-white">{symbol}</span>
-                    {price === null ? (
-                      /* Not a dash: the row is subscribed and its first quote is on its way. A
-                         symbol's price chain takes a moment to build the first time it is asked for. */
-                      <span className="flex-1 text-right font-mono text-[10px] text-[#4a5666]">waiting</span>
-                    ) : (
-                      <span className="flex-1 text-right">
-                        <MT5Price value={price} digits={digits} className="text-[11px]" style={{ color: colour }} />
+                    <span className="w-[50px] shrink-0 truncate text-[11px] font-bold text-white">{symbol}</span>
+                    {/* MetaTrader's own column order: Bid, Ask, Spread, Time, Daily Change. Which
+                        of them are drawn is the context menu's `Columns` submenu, and `Symbol` is
+                        not among them because MetaTrader offers no way to hide it.
+
+                        The breakpoints are MEASURED, not chosen: this panel is 240px at `lg` and
+                        288px at `xl`, which leaves 222px and 270px inside its padding. Symbol, Bid
+                        and Ask need 188px of that, so they are always drawn; Spread and Daily
+                        Change bring it to 268px and appear at `xl`; Time brings it to 320px and
+                        needs the 344px panel that arrives at `2xl`. MetaTrader drops a column off
+                        the right edge of a narrow window rather than cutting one in half, and that
+                        is what these are. Every column is a FIXED width for the same reason: a
+                        flex-shared price column pushes the row past the panel instead of letting a
+                        later column drop.
+
+                        A price that has not landed reads "waiting" rather than a dash: the row is
+                        subscribed and its first quote is on its way, because a symbol's price chain
+                        takes a moment to build the first time it is asked for. */}
+                    {columns.includes('bid') ? (
+                      <span className="w-[58px] shrink-0 text-right">
+                        {sides === null
+                          ? <span className="font-mono text-[10px] text-[#4a5666]">waiting</span>
+                          : <MT5Price value={sides.bid} digits={digits} className="text-[11px]" style={{ color: colour }} />}
                       </span>
-                    )}
+                    ) : null}
+                    {columns.includes('ask') ? (
+                      <span className="w-[58px] shrink-0 text-right">
+                        {sides === null
+                          ? <span className="font-mono text-[10px] text-[#4a5666]">waiting</span>
+                          : <MT5Price value={sides.ask} digits={digits} className="text-[11px]" style={{ color: colour }} />}
+                      </span>
+                    ) : null}
+                    {/* Spread in the symbol's own POINTS, which is the unit MetaTrader's column
+                        uses: its EURUSD row reads `0`, not `0.00001`. */}
+                    {columns.includes('spread') ? (
+                      <span className="hidden w-[26px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] xl:inline">
+                        {points_ === null ? '' : points_}
+                      </span>
+                    ) : null}
                     {/* Time: "the last quote arrival time", in MetaTrader's own column order, which
-                        puts it after the prices and before Daily Change. MetaTrader drops both off
-                        the right edge when the window is narrow; this panel does the same with a
-                        breakpoint rather than by clipping. */}
-                    <span className="hidden w-[52px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] xl:inline">
-                      {q?.t ? clockOf(q.t) : ''}
-                    </span>
+                        puts it after the prices and before Daily Change. MetaTrader drops columns
+                        off the right edge when the window is narrow; this panel does the same with
+                        a breakpoint rather than by clipping. */}
+                    {columns.includes('time') ? (
+                      <span className="hidden w-[46px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] 2xl:inline">
+                        {q?.t ? clockOf(q.t) : ''}
+                      </span>
+                    ) : null}
                     {/* Daily Change, last, as a signed percentage with NO space before the sign.
                         The account summary strip writes "1 076.68 %" WITH a space; MetaQuotes is
                         inconsistent between the two panels and both are copied as found. */}
-                    <span className="w-[46px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8]">
-                      {changePct === null ? '' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
-                    </span>
+                    {columns.includes('change') ? (
+                      <span className="hidden w-[42px] shrink-0 text-right font-mono text-[10px] tabular-nums text-[#8fa2b8] xl:inline">
+                        {changePct === null ? '' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
+                      </span>
+                    ) : null}
                     </>
                     )}
                   </button>
@@ -629,9 +712,26 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
               )}
             </div>
           )
-        ) : tab === 'trading' || tab === 'ticks' ? (
-          <div className="px-3 py-4 text-center text-[11px] leading-snug text-[#8fa2b8]">
-            {TABS.find((t) => t.id === tab)?.unavailable}
+        ) : tab === 'trading' ? (
+          /* MetaTrader's One Click Trading, one panel per symbol in the Symbols tab's own list. */
+          <MT5OneClickTrading
+            symbols={visible}
+            quoteOf={quoteOf}
+            digitsOf={digitsOf}
+            settledSymbol={market?.instrument.symbol ?? null}
+          />
+        ) : tab === 'ticks' ? (
+          /* MetaTrader draws the tick chart of the symbol SELECTED in the Symbols tab. The tick
+             series this terminal has is the charted symbol's, which selecting a row sets, so the
+             two are the same symbol by construction. */
+          <div className="h-full min-h-[200px] w-full">
+            <MT5TicksChart
+              symbol={active}
+              getTicks={() => getSymbolTicks(active)}
+              digits={activeDigits}
+              spread={spread}
+              scale={activeQuote?.instrument.scale ?? market?.instrument.scale ?? null}
+            />
           </div>
         ) : (
           <div className="text-[11px]">
@@ -781,11 +881,9 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
             type="button"
             onClick={() => setTab(t.id)}
             aria-pressed={tab === t.id}
-            title={t.unavailable}
             className={cn(
               'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold transition',
               tab === t.id ? 'bg-[#2b3543] text-white' : 'text-[#8fa2b8] hover:text-white',
-              t.unavailable ? 'opacity-55' : '',
             )}
           >
             {t.label}
