@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/cn';
 import { DepositForm } from '@/components/wallet/DepositForm';
 import { PayBillDeposit } from '@/components/wallet/PayBillDeposit';
-import { LipwaDeposit } from '@/components/wallet/LipwaDeposit';
+import { HostedCheckoutDeposit, LipwaDeposit } from '@/components/wallet/LipwaDeposit';
 import { useDepositProviders } from '@/lib/wallet/hooks';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import type { DepositMethodDto, DepositProviderDto } from '@/lib/api/types';
@@ -96,6 +96,7 @@ export function DepositPanel() {
       ) : null}
       {activeMethod?.channel === 'lipwa' ? <LipwaDeposit key={activeMethod.id} /> : null}
       {activeMethod?.channel === 'paybill' ? <PayBillDeposit key={activeMethod.id} /> : null}
+      {activeMethod?.channel === 'checkout' ? <HostedCheckoutDeposit key={activeMethod.id} rail="paynicorn" /> : null}
     </div>
   );
 }

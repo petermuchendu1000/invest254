@@ -7,7 +7,7 @@ import { MIN_DEPOSIT_CENTS } from '@invest254/shared/payments';
 import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { Button } from '@/components/ui/Button';
 import { api } from '@/lib/api/endpoints';
-import { useDepositLipwa } from '@/lib/wallet/hooks';
+import { useDepositLipwa, useDepositPaynicorn } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useSession } from '@/lib/auth/session';
@@ -24,12 +24,24 @@ const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
  * reconcile credits the wallet and this sheet — which polls THIS deposit's status — flips to a tick.
  */
 export function LipwaDeposit() {
+  return <HostedCheckoutDeposit rail="lipwa" />;
+}
+
+/**
+ * The amount form shared by the hosted-checkout rails. `lipwa` opens PayHero's page in the in-app modal
+ * below; `paynicorn` sends the browser to Paynicorn's cashier, which returns the player to /wallet
+ * (cpFrontPage) — the documented flow, and it never depends on the cashier allowing an iframe.
+ */
+export function HostedCheckoutDeposit({ rail }: { rail: 'lipwa' | 'paynicorn' }) {
   const close = useDepositUi((s) => s.close);
   const prefillAmountCents = useDepositUi((s) => s.prefillAmountCents);
   const deferToAuth = useDepositUi((s) => s.deferToAuth);
   const openAuth = useAuthUi((s) => s.openAuth);
   const token = useSession((s) => s.token);
   const lipwa = useDepositLipwa();
+  const paynicorn = useDepositPaynicorn();
+  const [redirecting, setRedirecting] = useState(false);
+  const busy = rail === 'lipwa' ? lipwa.isPending : paynicorn.isPending || redirecting;
   const brand = useBrand();
 
   const { data: config } = useQuery({
@@ -96,6 +108,13 @@ export function LipwaDeposit() {
     setAmountError(null);
     if (!token) { deferToAuth(amountKesCents); openAuth('register'); return; }
     try {
+      if (rail === 'paynicorn') {
+        // Paynicorn takes whole shillings only; round a converted foreign amount UP so the floor still holds.
+        const res = await paynicorn.mutateAsync({ amount: Math.ceil(amountKesCents / 100) * 100 });
+        setRedirecting(true);
+        window.location.assign(res.checkoutUrl);
+        return;
+      }
       const res = await lipwa.mutateAsync({ amount: amountKesCents });
       setCheckout({ url: res.lipwaUrl, txId: res.transactionId });
     } catch (err) {
@@ -154,13 +173,17 @@ export function LipwaDeposit() {
 
       <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-2.5">
         <ShieldIcon />
-        <p className="text-xs text-muted">Pay by <span className="font-medium text-fg">card, bank or mobile money</span>, securely, without leaving the app.</p>
+        {rail === 'paynicorn' ? (
+          <p className="text-xs text-muted">You’ll finish paying on a <span className="font-medium text-fg">secure checkout page</span>, then come straight back to your wallet.</p>
+        ) : (
+          <p className="text-xs text-muted">Pay by <span className="font-medium text-fg">card, bank or mobile money</span>, securely, without leaving the app.</p>
+        )}
       </div>
 
       {serverError ? <p className="rounded-xl border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">{serverError}</p> : null}
 
-      <Button type="submit" size="lg" fullWidth disabled={lipwa.isPending}>
-        {!token ? 'Sign up to deposit' : lipwa.isPending ? 'Opening secure checkout…' : 'Continue to Pay'}
+      <Button type="submit" size="lg" fullWidth disabled={busy}>
+        {!token ? 'Sign up to deposit' : busy ? 'Opening secure checkout…' : 'Continue to Pay'}
       </Button>
     </form>
   );

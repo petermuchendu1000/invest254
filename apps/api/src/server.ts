@@ -9,6 +9,7 @@ import {
   makeMegaPayClient,
   ConfiguredMegaPayClient,
   ConfiguredPayHeroClient,
+  ConfiguredPaynicornClient,
   PaymentScopeService, PgPaymentScopeRepository, loadDarajaConfigFromDb, type GlobalCallbacks,
   C2bConfigService, PgC2bConfigRepository, systemDarajaCredentials, PoolOpsService, PgPoolOpsRepository, BillingService, PgBillingRepository,
   verifyPassword,
@@ -212,6 +213,20 @@ async function buildDeps(): Promise<ApiDeps> {
     return over;
   });
   log.info("payhero client ready", { dbConfigLayered: true });
+
+  // Paynicorn hosted-cashier client. Same layering: encrypted DB config (Gateway configuration) over env
+  // (PAYNICORN_APP_KEY / PAYNICORN_MERCHANT_SECRET); neither => fail-loud in production, so it stays dormant.
+  const paynicorn = new ConfiguredPaynicornClient(async () => {
+    const c = await platform.resolveDecryptedConfig("paynicorn", null);
+    if (!c) return null;
+    const over: { baseUrl?: string; appKey?: string; merchantSecret?: string; frontPage?: string } = {};
+    if (c.settings.app_key) over.appKey = c.settings.app_key;
+    if (c.secrets.merchant_secret) over.merchantSecret = c.secrets.merchant_secret;
+    if (c.settings.base_url) over.baseUrl = c.settings.base_url;
+    if (c.settings.front_page) over.frontPage = c.settings.front_page;
+    return over;
+  });
+  log.info("paynicorn client ready", { dbConfigLayered: true });
 
   // PAY-1 (docs/43): per-platform / per-brand payment accounts. Scoped clients are built ONLY from their
   // own scope's encrypted config (never env, never the System's accounts); they reuse the System's own
@@ -627,6 +642,7 @@ async function buildDeps(): Promise<ApiDeps> {
     // forged Mega Pay callbacks can't mint balance either.
     megapay,
     payhero,
+    paynicorn,
     // PAY-1: every money flow of a brand uses its payment OWNER's accounts (docs/43).
     gateways: paymentScopes,
     // Site-aware STK AccountReference (multi-tenant): "Account no. <Brand>" per depositing brand.
@@ -1159,6 +1175,15 @@ if (Number.isFinite(RECONCILE_MS) && RECONCILE_MS > 0) {
       .catch((err: unknown) => recLog.error("payhero reconcile sweep failed", err as Error));
   }, RECONCILE_MS);
   payheroTimer.unref();
+
+  // Paynicorn rail: settles deposits whose postback never arrived, via the signed status query.
+  const paynicornTimer = setInterval(() => {
+    void deps.payments
+      .reconcilePaynicornDeposits()
+      .then((r) => { if (r.settled || r.errors) recLog.info("paynicorn reconcile sweep", { provider: "paynicorn", ...r }); })
+      .catch((err: unknown) => recLog.error("paynicorn reconcile sweep failed", err as Error));
+  }, RECONCILE_MS);
+  paynicornTimer.unref();
 
   // PayHero LEDGER sweep — settlement for Lipwa (card/bank/multi-country) and manual paybill C2B.
   // Reads PayHero's authoritative account ledger once (one shared account) and either auto-credits a

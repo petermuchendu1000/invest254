@@ -158,6 +158,18 @@ export function useDepositLipwa() {
   });
 }
 
+/** Paynicorn hosted-cashier deposit. Returns the cashier URL; settlement is by the verified postback. */
+export function useDepositPaynicorn() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { amount: number }) => api.createPaynicornDeposit(token as string, vars),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+}
+
 /**
  * The deposit CHANNELS the server says this player can actually complete (plus the raw gateway list).
  * The sheet renders `methods` verbatim — see DepositMethodDto. Older API builds omit `methods`; the

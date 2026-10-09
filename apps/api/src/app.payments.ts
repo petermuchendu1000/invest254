@@ -60,7 +60,7 @@ const DOMAIN_STATUS: Readonly<Record<string, number>> = {
  *  (e.g. "merchant has insufficient balance"), account state, stack detail, etc. These are sanitized
  *  to friendly copy for the player; the FULL detail is logged for operators (system_logs → the
  *  superadmin-only /admin/logs). */
-const TECH_ERROR_RE = /_REJECTED|NOT_CONFIGURED|^PAYHERO_|^DARAJA_/;
+const TECH_ERROR_RE = /_REJECTED|NOT_CONFIGURED|^PAYHERO_|^PAYNICORN_|^DARAJA_/;
 
 /** Run a domain call, translating service errors to controlled, CLIENT-SAFE ApiErrors.
  *  Pass `ctx` on client-facing money routes so provider detail is logged for operators. */
@@ -314,6 +314,22 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     return { status: 202, body: { transactionId: out.txId, reference: out.reference, lipwaUrl: out.lipwaUrl } };
   });
 
+  // Paynicorn — hosted cashier. We mint a pending tx and hand back Paynicorn's cashier URL; the player pays
+  // there and is sent back to their brand's wallet (the request Origin, when it is one of our brands, else
+  // the configured return page). Crediting happens only via the verified postback / reconcile sweep.
+  router.post(`${BASE}/deposits/paynicorn`, auth, site, depositLimit, async (ctx: Ctx) => {
+    if (deps.platformGate && !(await deps.platformGate.allows("deposits")))
+      throw new ApiError("SYSTEM_DISABLED", "Deposits are temporarily disabled by the platform.", 403);
+    if (!(await deps.payments.listDepositProviders(ctx.siteId)).some((p) => p.code === "paynicorn"))
+      throw new ApiError("PROVIDER_DISABLED", "Online checkout is not available.", 403);
+    const body = asObject(ctx.body);
+    const amount = requireIntAmount(body);
+    const origin = String(ctx.req.headers.origin ?? "").replace(/\/+$/, "");
+    const frontPage = /^https:\/\/[^/\s]+$/.test(origin) && deps.corsAllowOrigin?.(origin) ? `${origin}/wallet` : undefined;
+    const out = await domain(() => deps.payments.initiatePaynicornDeposit(ctx.claims!.userId, amount, ctx.siteId, frontPage ? { frontPage } : {}), ctx);
+    return { status: 202, body: { transactionId: out.txId, checkoutUrl: out.checkoutUrl } };
+  });
+
   // PayHero manual Pay Bill — the player paid the PayHero paybill directly, then submits the M-PESA code.
   // The ledger reconcile ingests that payment into c2b_payments; claim credits the Safaricom-recorded
   // amount once through the SAME fraud-safe fn_claim_c2b_deposit as the Daraja paybill.
@@ -415,6 +431,35 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
   };
   router.post(`${BASE}/withdrawals/payhero/result`, payheroOnly, payheroWithdrawCallback);
   router.post(`${BASE}/s/:slug/withdrawals/payhero/result`, payheroOnly, resolveSlug, payheroWithdrawCallback);
+
+  // ── Paynicorn postback ──
+  // Paynicorn POSTs {content, sign} here (the app's "Callback address"). The signature must verify with OUR
+  // merchant secret, and the handler re-queries Paynicorn before crediting, so a forged POST can't mint
+  // balance. Paynicorn needs HTTP 200 + the plain text `success_{txnId}`, else it retries (up to 7 times).
+  // Read as raw bytes so a JSON or form-encoded body both parse. GET answers the console's address check.
+  const paynicornOnly = restrictToCidrs("PAYNICORN_CALLBACK_ALLOWED_CIDRS");
+  const paynicornCallback = async (ctx: Ctx) => {
+    try {
+      const r = await deps.payments.handlePaynicornCallback(ctx.body);
+      if (r.settled) ctx.log?.info("paynicorn postback settled", { txnId: r.txnId });
+      return { raw: Buffer.from(`success_${r.txnId}`), contentType: "text/plain; charset=utf-8" };
+    } catch (err) {
+      // Never echo provider detail; a non-200 makes Paynicorn retry, and the reconcile sweep backs it up.
+      const code = (err instanceof Error ? err.message : String(err)).split(":")[0]!.trim();
+      ctx.log?.warn("paynicorn postback not accepted", {
+        code, contentType: String(ctx.req.headers["content-type"] ?? ""), bytes: Buffer.isBuffer(ctx.body) ? ctx.body.length : 0,
+      });
+      if (code === "PAYNICORN_BAD_SIGNATURE") throw new ApiError("BAD_SIGNATURE", "signature did not verify", 401);
+      if (code === "PAYNICORN_AMOUNT_MISMATCH") throw new ApiError("AMOUNT_MISMATCH", "amount does not match the order", 409);
+      if (code === "PAYNICORN_NOT_CONFIGURED") throw new ApiError("PROVIDER_UNAVAILABLE", "not configured", 503);
+      throw new ApiError("CALLBACK_FAILED", "postback not processed, retry later", 500);
+    }
+  };
+  const paynicornAddressCheck = async () => ({ ok: true, provider: "paynicorn" });
+  router.upload(`${BASE}/deposits/paynicorn/callback`, 64 * 1024, paynicornOnly, paynicornCallback);
+  router.upload(`${BASE}/s/:slug/deposits/paynicorn/callback`, 64 * 1024, paynicornOnly, resolveSlug, paynicornCallback);
+  router.get(`${BASE}/deposits/paynicorn/callback`, paynicornOnly, paynicornAddressCheck);
+  router.get(`${BASE}/s/:slug/deposits/paynicorn/callback`, paynicornOnly, resolveSlug, paynicornAddressCheck);
 
   // ── Pay Bill (C2B) — auto-verified manual deposits (migration 0115) ──
   // Public C2B endpoints Safaricom calls for every payment to our Pay Bill. Network-allowlisted to

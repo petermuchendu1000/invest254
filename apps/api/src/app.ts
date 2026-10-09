@@ -271,6 +271,7 @@ export interface ApiDeps {
     | "initiateMegaPayDeposit" | "handleMegaPayCallback" | "reconcileMegaPayDeposits"
     | "initiatePayHeroDeposit" | "initiateLipwaDeposit" | "handlePayHeroCallback" | "reconcilePayHeroDeposits" | "reconcilePayHeroLedger" | "listDepositProviders"
     | "handlePayHeroWithdrawResult"
+    | "initiatePaynicornDeposit" | "handlePaynicornCallback" | "reconcilePaynicornDeposits"
     | "listDepositMethods">;
   /** Resolve a player's display handle (falls back to a guest handle). */
   resolveHandle(userId: string): Promise<string>;

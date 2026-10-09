@@ -61,10 +61,10 @@ export interface DepositProvider { code: string; displayName: string; }
 export interface DepositMethod {
   /** Stable id the client keys its body off, e.g. `payhero-stk`, `payhero-lipwa`, `mpesa-paybill`. */
   id: string;
-  /** The gateway serving this channel (`mpesa` | `megapay` | `payhero`) — internal, never displayed. */
+  /** The gateway serving this channel (`mpesa` | `megapay` | `payhero` | `paynicorn`) — internal, never displayed. */
   provider: string;
   /** Which rail of that gateway this is. */
-  channel: "stk" | "lipwa" | "paybill";
+  channel: "stk" | "lipwa" | "paybill" | "checkout";
   /** What the player sees, e.g. "M-Pesa", "Card & Bank", "Pay Bill". */
   label: string;
 }

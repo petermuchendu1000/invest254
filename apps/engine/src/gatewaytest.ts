@@ -6,6 +6,7 @@
  *   • Mega Pay  — POST /transactionstatus with a sentinel id (status query only; host follows env).
  *   • Paystack  — GET  /balance                (read-only; validates the secret key).
  *   • PayHero   — GET  /payment_channels        (read-only; validates the Basic token).
+ *   • Paynicorn — POST /trade/v3/transaction/query for a sentinel order (signed; validates appKey + secret).
  *   • Binance   — POST /binancepay/openapi/v2/order/query with a sentinel id (query only; the HMAC
  *                 signature is what we're really validating — an unknown order is not an error we mind).
  *
@@ -16,6 +17,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { getSchema } from "./gatewayschema";
 import { normalizeMegapayBase } from "./megapay";
+import { PAYNICORN_DEFAULT_BASE, PAYNICORN_OK, encodeContent, paynicornSign } from "./paynicorn";
 
 export type ConnStatus = "valid" | "invalid" | "unreachable" | "not_configured";
 export interface ConnResult { ok: boolean; status: ConnStatus; detail: string }
@@ -102,6 +104,32 @@ async function testPayhero(cfg: Record<string, string>, f: Fetch): Promise<ConnR
   } catch (e) { return { ok: false, status: "unreachable", detail: `PayHero unreachable: ${String((e as Error).message).slice(0, 120)}` }; }
 }
 
+/**
+ * Paynicorn: a signed status query for a sentinel order (never moves money). The envelope's responseCode
+ * says whether the signature verified: 000000 = appKey + secret accepted (the unknown order is reported
+ * inside the content), 204005/204004 = bad secret, 204002 = missing appKey.
+ */
+async function testPaynicorn(cfg: Record<string, string>, f: Fetch): Promise<ConnResult> {
+  const need = ["app_key", "merchant_secret"].filter((k) => !cfg[k]);
+  if (need.length) return missing(need);
+  const base = stripSlash(cfg.base_url || PAYNICORN_DEFAULT_BASE);
+  const content = encodeContent({ orderId: "connectivity-probe", txnType: "payment" });
+  try {
+    const res = await f(`${base}/trade/v3/transaction/query`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, sign: paynicornSign(content, cfg.merchant_secret as string), appKey: cfg.app_key }),
+    });
+    const j = await safeJson(res);
+    const code = String(j.responseCode ?? "");
+    if (code === PAYNICORN_OK) return { ok: true, status: "valid", detail: "Paynicorn accepted the app key and merchant secret." };
+    if (code === "204004" || code === "204005") return { ok: false, status: "invalid", detail: "Paynicorn rejected the signature — check the merchant secret." };
+    if (code === "204002" || code === "204003") return { ok: false, status: "invalid", detail: "Paynicorn did not recognise the app key." };
+    if (code === "204006") return { ok: false, status: "invalid", detail: "The Paynicorn app used up its test-mode requests — reset them in the Paynicorn console." };
+    if (!res.ok) return { ok: false, status: "unreachable", detail: `Paynicorn HTTP ${res.status}` };
+    return { ok: false, status: "invalid", detail: `Paynicorn answered ${code || "an unexpected response"}.` };
+  } catch (e) { return { ok: false, status: "unreachable", detail: `Paynicorn unreachable: ${String((e as Error).message).slice(0, 120)}` }; }
+}
+
 /** Binance Pay: HMAC-SHA512 signed query of a sentinel order. Signature errors ⇒ invalid creds. */
 export function binancePaySignature(secret: string, timestamp: string, nonce: string, body: string): string {
   const payload = `${timestamp}\n${nonce}\n${body}\n`;
@@ -141,7 +169,7 @@ async function testBinance(cfg: Record<string, string>, f: Fetch): Promise<ConnR
 }
 
 const PROBES: Record<string, (cfg: Record<string, string>, f: Fetch) => Promise<ConnResult>> = {
-  megapay: testMegapay, paystack: testPaystack, payhero: testPayhero, binance: testBinance,
+  megapay: testMegapay, paystack: testPaystack, payhero: testPayhero, binance: testBinance, paynicorn: testPaynicorn,
 };
 
 /** Run the safe probe for a provider using the merged (settings + decrypted secrets) config. */
