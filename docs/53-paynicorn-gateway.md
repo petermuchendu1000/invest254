@@ -1,4 +1,6 @@
-# 53 — Paynicorn deposit rail (hosted cashier)
+# 53 — PayX (Paynicorn) deposit rail (hosted cashier)
+
+Admins see this gateway as **PayX** (migration 0187); its provider code stays `paynicorn`.
 
 **Migration:** `0186_paynicorn_provider.sql` · **Client:** `apps/engine/src/paynicorn.ts`
 
@@ -44,7 +46,7 @@ Optional `PAYNICORN_CALLBACK_ALLOWED_CIDRS` locks the callback to Paynicorn's IP
 
 ## Turning it on
 1. Deploy (migration 0186 registers `paynicorn` OFF for every brand, unbilled).
-2. `/platform/payments` → Gateway configuration → **Paynicorn**: App key (APIKEY), Merchant secret,
+2. `/platform/payments` → Gateway configuration → **PayX**: App key (APIKEY), Merchant secret,
    optional Return page → Save → **Test connection** (a signed query; moves no money).
 3. Entitle the brand to the `paynicorn` add-on and switch the gateway on for it. The player's deposit
    sheet then shows an **Online checkout** tab (the gateway brand is never named, docs/35).

@@ -121,13 +121,13 @@ async function testPaynicorn(cfg: Record<string, string>, f: Fetch): Promise<Con
     });
     const j = await safeJson(res);
     const code = String(j.responseCode ?? "");
-    if (code === PAYNICORN_OK) return { ok: true, status: "valid", detail: "Paynicorn accepted the app key and merchant secret." };
-    if (code === "204004" || code === "204005") return { ok: false, status: "invalid", detail: "Paynicorn rejected the signature — check the merchant secret." };
-    if (code === "204002" || code === "204003") return { ok: false, status: "invalid", detail: "Paynicorn did not recognise the app key." };
-    if (code === "204006") return { ok: false, status: "invalid", detail: "The Paynicorn app used up its test-mode requests — reset them in the Paynicorn console." };
-    if (!res.ok) return { ok: false, status: "unreachable", detail: `Paynicorn HTTP ${res.status}` };
-    return { ok: false, status: "invalid", detail: `Paynicorn answered ${code || "an unexpected response"}.` };
-  } catch (e) { return { ok: false, status: "unreachable", detail: `Paynicorn unreachable: ${String((e as Error).message).slice(0, 120)}` }; }
+    if (code === PAYNICORN_OK) return { ok: true, status: "valid", detail: "PayX accepted the app key and merchant secret." };
+    if (code === "204004" || code === "204005") return { ok: false, status: "invalid", detail: "PayX rejected the signature — check the merchant secret." };
+    if (code === "204002" || code === "204003") return { ok: false, status: "invalid", detail: "PayX did not recognise the app key." };
+    if (code === "204006") return { ok: false, status: "invalid", detail: "The PayX app used up its test-mode requests — reset them in the PayX console." };
+    if (!res.ok) return { ok: false, status: "unreachable", detail: `PayX HTTP ${res.status}` };
+    return { ok: false, status: "invalid", detail: `PayX answered ${code || "an unexpected response"}.` };
+  } catch (e) { return { ok: false, status: "unreachable", detail: `PayX unreachable: ${String((e as Error).message).slice(0, 120)}` }; }
 }
 
 /** Binance Pay: HMAC-SHA512 signed query of a sentinel order. Signature errors ⇒ invalid creds. */
