@@ -3,7 +3,7 @@ import type { PaymentRepository, CompleteResult, CreateWithdrawalResult, Withdra
 import type { DarajaClient } from "./daraja.js";
 import type { MegaPayClient } from "./megapay.js";
 import type { PayHeroClient } from "./payhero.js";
-import type { PaynicornClient } from "./paynicorn.js";
+import { toPaynicornPhone, type PaynicornClient } from "./paynicorn.js";
 import { PLAYER_DEPOSIT_RAILS } from "./gatewayschema.js";
 import { parseScope, type GatewayRouter, type OwnerScope, type PaymentScopeRef } from "./paymentscopes.js";
 
@@ -418,14 +418,15 @@ export class PaymentService {
     return { settled: status.settled + ledger.settled };
   }
 
-  // ── Deposit (Paynicorn hosted cashier) ──
+  // ── Deposit (Paynicorn / "PayX" M-Pesa push) ──
   /**
-   * Initiate a Paynicorn deposit. Same validation/limits as every other rail, plus whole shillings (KES has
-   * no decimals on Paynicorn). Mints a pending 'paynicorn' tx, asks Paynicorn for a cashier page with our
-   * txId as the `orderId`, and stores that txId as checkout_request_id so the postback, the query and the
-   * reconcile sweep all key on it. The player pays on Paynicorn's page; nothing is credited here.
+   * Initiate a Paynicorn deposit as a plain M-Pesa prompt: the order names the method and the payer's
+   * phone, so Paynicorn pushes the STK itself and no Paynicorn page is ever shown. Same validation and
+   * limits as every other rail, plus whole shillings (KES has no decimals on Paynicorn). Our txId is the
+   * Paynicorn `orderId` and the checkout_request_id, so the postback, the query and the reconcile sweep
+   * all key on it. Nothing is credited here; the player's sheet polls this tx until it settles.
    */
-  async initiatePaynicornDeposit(userId: string, amountCents: number, siteId?: string, opts: { frontPage?: string } = {}): Promise<{ txId: string; checkoutUrl: string }> {
+  async initiatePaynicornDeposit(userId: string, amountCents: number, phoneRaw: string, siteId?: string): Promise<{ txId: string; checkoutRequestId: string }> {
     const owner = await this.ownerOf(siteId);
     if (owner.scope === "global" && !this.paynicorn) throw new Error("PAYNICORN_NOT_CONFIGURED");
     if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents % 100 !== 0) throw new Error("INVALID_AMOUNT");
@@ -433,18 +434,19 @@ export class PaymentService {
     if (amountCents < minDep) throw new Error("BELOW_MIN");
     const maxDep = await this.currentMaxDeposit();
     if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
+    const msisdn = normalizeMsisdn(phoneRaw);
     // Brands on their own payment accounts have no Paynicorn account: refused, never routed to the System's.
     await this.assertRail(owner, "paynicorn");
     const client = this.paynicornClient();
     await this.guardInitiate(userId, "paynicorn", owner.scope);
-    const txId = await this.repo.createDepositProvider(userId, amountCents, "", "paynicorn", siteId);
+    const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn, "paynicorn", siteId);
     await this.stamp(txId, owner.scope);
     const description = `Deposit ${await this.resolveAccountRef(siteId)}`;
     const res = await this.withAbandonOnReject(txId, userId, "paynicorn", () => client.pay({
-      amountCents, orderId: txId, description, ...(opts.frontPage ? { frontPage: opts.frontPage } : {}),
+      amountCents, orderId: txId, description, payMethod: "MPESA", phone: toPaynicornPhone(msisdn),
     }));
     await this.repo.attachStk(txId, res.txnId || `paynicorn:${txId}`, txId);
-    return { txId, checkoutUrl: res.webUrl };
+    return { txId, checkoutRequestId: txId };
   }
 
   /**
@@ -616,8 +618,9 @@ export class PaymentService {
     const enabled = new Set(providers.map((p) => p.code));
     const methods: DepositMethod[] = [];
 
-    // Paynicorn has no STK rail — it is a hosted cashier, offered as its own channel below.
-    const stkProviders = providers.filter((p) => p.code !== "paynicorn");
+    // Paynicorn is an STK rail like the others (a direct M-Pesa push), offered only when its client exists.
+    const payxReady = await this.paynicornAvailable(siteId);
+    const stkProviders = providers.filter((p) => p.code !== "paynicorn" || payxReady);
     stkProviders.forEach((p, i) => {
       methods.push({
         id: `${p.code}-stk`,
@@ -626,10 +629,6 @@ export class PaymentService {
         label: stkProviders.length > 1 ? `M-Pesa (${i + 1})` : "M-Pesa",
       });
     });
-
-    if (enabled.has("paynicorn") && (await this.paynicornAvailable(siteId))) {
-      methods.push({ id: "paynicorn-checkout", provider: "paynicorn", channel: "checkout", label: "Online checkout" });
-    }
 
     if (enabled.has("payhero") && (await this.lipwaAvailable(siteId))) {
       methods.push({ id: "payhero-lipwa", provider: "payhero", channel: "lipwa", label: "Card & Bank" });

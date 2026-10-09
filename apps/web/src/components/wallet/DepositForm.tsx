@@ -12,7 +12,7 @@ import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { api } from '@/lib/api/endpoints';
-import { useDeposit, useDepositMegapay, useDepositPayhero } from '@/lib/wallet/hooks';
+import { useDeposit, useDepositMegapay, useDepositPayhero, useDepositPayx } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useAuthUi } from '@/lib/auth/ui';
@@ -32,7 +32,7 @@ const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
  * The gateway is intentionally NOT surfaced to players — the flow is a simple amount + phone +
  * "Continue to Pay"; only the API mutation differs by provider.
  */
-export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'megapay' | 'payhero' } = {}) {
+export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'megapay' | 'payhero' | 'payx' } = {}) {
   const close = useDepositUi((s) => s.close);
   const prefillAmountCents = useDepositUi((s) => s.prefillAmountCents);
   const pending = useDepositUi((s) => s.pending);
@@ -44,7 +44,8 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
   const mpesaDeposit = useDeposit();
   const megaDeposit = useDepositMegapay();
   const payheroDeposit = useDepositPayhero();
-  const deposit = provider === 'megapay' ? megaDeposit : provider === 'payhero' ? payheroDeposit : mpesaDeposit;
+  const payxDeposit = useDepositPayx();
+  const deposit = provider === 'megapay' ? megaDeposit : provider === 'payhero' ? payheroDeposit : provider === 'payx' ? payxDeposit : mpesaDeposit;
   // Live economy from the SAME endpoint the engine/PaymentService enforce, so the deposit floor/cap
   // the browser validates against is the effective global/brand economy — never a hardcoded constant.
   const brand = useBrand();
@@ -165,7 +166,9 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
     // and a second prompt cannot help a player who is still looking at the first one.
     setCooldown(COOLDOWN_S);
     try {
-      const res = await deposit.mutateAsync({ amount: amountKesCents, phone: effectivePhone });
+      // PayX settles whole shillings only: a converted foreign amount rounds UP, so the floor still holds.
+      const amount = provider === 'payx' ? Math.ceil(amountKesCents / 100) * 100 : amountKesCents;
+      const res = await deposit.mutateAsync({ amount, phone: effectivePhone });
       setTxId(res.transactionId);
       setDone(true);
     } catch (err) {

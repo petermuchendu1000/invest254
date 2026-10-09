@@ -64,7 +64,7 @@ export interface DepositMethod {
   /** The gateway serving this channel (`mpesa` | `megapay` | `payhero` | `paynicorn`) — internal, never displayed. */
   provider: string;
   /** Which rail of that gateway this is. */
-  channel: "stk" | "lipwa" | "paybill" | "checkout";
+  channel: "stk" | "lipwa" | "paybill";
   /** What the player sees, e.g. "M-Pesa", "Card & Bank", "Pay Bill". */
   label: string;
 }
@@ -378,7 +378,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     const page = pageFrom(rows, limit, (t) => String(t.seq));
     return {
       items: page.items.map((t) => ({
-        id: t.id, kind: t.kind, amountCents: t.amount, status: t.status, provider: "mpesa",
+        id: t.id, kind: t.kind, amountCents: t.amount, status: t.status, provider: t.provider ?? "mpesa",
         phone: t.phone, mpesaReceipt: t.receipt, createdAtMs: t.createdAtMs,
       })),
       nextCursor: page.nextCursor,

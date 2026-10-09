@@ -4,7 +4,7 @@ import type { Cents } from "@invest254/shared";
 import {
   HttpPaynicornClient, StubPaynicornClient, UnconfiguredPaynicornClient, ConfiguredPaynicornClient, STUB_PAYNICORN_SECRET,
   paynicornSign, encodeContent, decodeContent, signMatches, centsToPaynicornAmount, mapPaynicornStatus, readPostbackEnvelope,
-  missingPaynicornCredentials, resolvePaynicornConfig,
+  missingPaynicornCredentials, resolvePaynicornConfig, toPaynicornPhone,
 } from "./paynicorn.js";
 import { testConnection } from "./gatewaytest.js";
 import { GATEWAY_SCHEMAS, PLAYER_DEPOSIT_RAILS, splitSubmission, validateConfig } from "./gatewayschema.js";
@@ -76,6 +76,22 @@ test("paynicorn http: pay sends a signed KE/KES order and returns the cashier UR
   assert.equal(f.calls[0]!.url, "https://api.paynicorn.test/trade/v3/transaction/pay");
   assert.equal(f.calls[0]!.body.appKey, "7971321");
   assert.deepEqual(f.calls[0]!.biz, { amount: "500", countryCode: "KE", currency: "KES", orderId: "tx-1", orderDescription: "Deposit", cpFrontPage: "https://cpfmarket.com/wallet" });
+});
+
+test("paynicorn http: method + phone is a direct push — no page, no cpFrontPage, null webUrl accepted", async () => {
+  const f = fakePaynicorn(() => ({ code: "0000", message: "success", txnId: "PN2", status: "-1", webUrl: null }));
+  const c = new HttpPaynicornClient({ ...CFG, frontPage: "https://default/wallet" }, f.impl);
+  const out = await c.pay({ amountCents: cents(13_000), orderId: "tx-2", description: "Deposit", payMethod: "MPESA", phone: "798661061" });
+  assert.deepEqual(out, { txnId: "PN2", webUrl: "", status: "-1" });
+  assert.deepEqual(f.calls[0]!.biz, { amount: "130", countryCode: "KE", currency: "KES", orderId: "tx-2", orderDescription: "Deposit", payMethod: "MPESA", phone: "798661061" });
+  const refused = new HttpPaynicornClient(CFG, fakePaynicorn(() => ({ code: "101002", message: "bad", status: "0", webUrl: null })).impl);
+  await assert.rejects(refused.pay({ amountCents: cents(13_000), orderId: "o", description: "d", payMethod: "MPESA", phone: "798661061" }), /PAY_REFUSED:101002/);
+});
+
+test("paynicorn phone: 9 local digits, whatever form the MSISDN arrives in", () => {
+  for (const p of ["0798661061", "254798661061", "+254 798 661 061", "798661061"]) assert.equal(toPaynicornPhone(p), "798661061");
+  assert.equal(toPaynicornPhone("0112345678"), "112345678");
+  assert.throws(() => toPaynicornPhone("12345"), /INVALID_PHONE/);
 });
 
 test("paynicorn http: pay refuses a failed order, an envelope error, and an unsigned response", async () => {

@@ -1161,6 +1161,12 @@ if (Number.isFinite(RECONCILE_MS) && RECONCILE_MS > 0) {
         .reconcileMegaPayDeposits({ olderThanMs: FAST_RECONCILE_MIN_AGE_MS, limit: 25 })
         .then((r) => { if (r.settled || r.errors) recLog.info("megapay fast re-verify", { provider: "megapay", fast: true, ...r }); })
         .catch((err: unknown) => recLog.error("megapay fast re-verify failed", err as Error));
+      // PayX (Paynicorn) too: a player watching "check your phone" sees the credit within seconds even
+      // when the postback is late, because the sheet only ever turns green on the settled transaction.
+      void deps.payments
+        .reconcilePaynicornDeposits({ olderThanMs: FAST_RECONCILE_MIN_AGE_MS, limit: 25 })
+        .then((r) => { if (r.settled || r.errors) recLog.info("paynicorn fast re-verify", { provider: "paynicorn", fast: true, ...r }); })
+        .catch((err: unknown) => recLog.error("paynicorn fast re-verify failed", err as Error));
     }, FAST_RECONCILE_MS);
     fastTimer.unref();
     log.info("fast deposit re-verify armed", { everySeconds: Math.round(FAST_RECONCILE_MS / 1000), minAgeMs: FAST_RECONCILE_MIN_AGE_MS });
