@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chartOverride } from './chartSymbol.js';
+import { chartOverride } from './chartOverride.js';
 
 /**
  * The rule that stops the terminal refusing to trade the symbol it is already drawing.
