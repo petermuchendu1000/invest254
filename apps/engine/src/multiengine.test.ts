@@ -174,8 +174,10 @@ test("multiplex: resolveSite may be async — a brand resolved LIVE (onboarded a
   // Capture the close code from construction time — the server rejects the unknown brand within
   // ~5ms, so the listener must be attached before that (not after the known-brand assertions).
   const unknown = new Client(`ws://127.0.0.1:${port}/?site=${SITE_B}`);
-  let unknownCloseCode = -1;
-  unknown.ws.on("close", (code: number) => { unknownCloseCode = code; });
+  // A promise, not a variable read at a fixed moment: on a loaded runner, building brand A's runtime
+  // can hold the event loop past the known client's hello + 300ms, so the close may not have been
+  // handled yet when the assertion runs (it read the initial -1 in CI).
+  const unknownClosed = new Promise<number>((resolve) => unknown.ws.on("close", (code: number) => resolve(code)));
   unknown.ws.on("error", () => { /* expected: connection rejected */ });
   try {
     await known.open();
@@ -187,6 +189,7 @@ test("multiplex: resolveSite may be async — a brand resolved LIVE (onboarded a
 
     // an unresolved brand is cleanly rejected (async throw → close 1008), not left hanging
     assert.equal(unknown.of("hello").length, 0, "unknown brand never gets a hello");
+    const unknownCloseCode = await Promise.race([unknownClosed, sleep(5_000).then(() => -1)]);
     assert.equal(unknownCloseCode, 1008, "unknown brand connection is closed with 1008");
   } finally { known.close(); unknown.close(); await handle.close(); }
 });
