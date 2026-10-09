@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api/client';
 import { env } from '@/lib/env';
 import { useSession } from '@/lib/auth/session';
+import { kycLabelSuffix } from './kycLabel';
 
 /** ACCT-1: which account dialog is open (Two-factor, Verify identity). */
 export const useAccountUi = create<{ dialog: null | 'twofactor' | 'verify'; open: (d: 'twofactor' | 'verify') => void; close: () => void }>((set) => ({
@@ -22,19 +23,7 @@ export interface KycStaffRow {
 /** Player two-factor (authenticator app) is switched off until SMS codes via Africa's Talking are ready.
  *  Staff two-factor is unaffected. The sign-in code step stays, so nobody already enrolled is locked out. */
 export const PLAYER_TWO_FACTOR = false;
-/**
- * What a "Verify Identity" entry says about the state behind it.
- *
- * One function, because the phone drawer and the desktop avatar menu are the two ways to the same
- * dialog and they were wording it differently: the desktop appended `· in review`, the phone said
- * nothing at all. On a phone the drawer is the ONLY route, so that is the entry a trader whose
- * documents were already under review read as an invitation to send them again.
- */
-export const kycLabelSuffix = (status: KycMine['status'] | undefined): string =>
-  status === 'approved' ? ' \u00b7 verified'
-  : status === 'pending' ? ' \u00b7 in review'
-  : status === 'rejected' ? ' \u00b7 not approved'
-  : '';
+export { kycLabelSuffix };
 
 export const DOC_LABEL: Record<string, string> = { national_id: 'National ID', passport: 'Passport', driving_licence: 'Driving licence' };
 

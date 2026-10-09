@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { kycLabelSuffix } from './accountUi.js';
+import { kycLabelSuffix } from './kycLabel.js';
 
 /**
  * The menu entry that leads to the verification dialog has to say what state the account is in.
