@@ -3,7 +3,7 @@ import { InMemoryKycStore } from "./app.kyc.js";
 import type { AddressInfo } from "node:net";
 import { DEFAULT_CONFIG, normalizeHost, type Cents } from "@invest254/shared";
 import {
-  InMemoryEngagementRepository, InMemoryPaymentRepository, InMemoryGameRepository, StubDarajaClient, StubMegaPayClient, StubPayHeroClient,
+  InMemoryEngagementRepository, InMemoryPaymentRepository, InMemoryGameRepository, StubDarajaClient, StubMegaPayClient, StubPayHeroClient, StubPaynicornClient,
   InMemoryIdentityRepository, PaymentService, AuthService, AffiliateService, AdminService, InMemoryAdminRepository, PlatformService, InMemoryPlatformRepository, maskHandle,
   SubscriptionService, InMemorySubscriptionRepository, TicketService, InMemoryTicketRepository,
   NotificationService, InMemoryNotificationRepository,
@@ -484,6 +484,7 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
   const payments = new PaymentService(payRepo, daraja, {
     megapay: new StubMegaPayClient(), // Mega Pay rail (0116): deterministic offline client for route tests
     payhero: new StubPayHeroClient(), // PayHero rail: deterministic offline client for route tests
+    paynicorn: new StubPaynicornClient(), // Paynicorn rail: offline client; postbacks sign with STUB_PAYNICORN_SECRET
     withdrawalsEnabledForSite: async (siteId) =>
       adminRepoRef ? adminRepoRef.getWithdrawalsEnabled(siteId ?? TU_DEFAULT_SITE_ID) : true,
     events: {

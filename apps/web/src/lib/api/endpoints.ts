@@ -172,6 +172,9 @@ export const api = {
   // PayHero Lipwa hosted checkout (card / bank / mobile money / cross-border) — opened in an in-app modal.
   createPayheroLipwaDeposit: (token: string, body: { amount: number }) =>
     apiFetch<{ transactionId: string; reference: string; lipwaUrl: string }>('/deposits/payhero/lipwa', { method: 'POST', token, body }),
+  // Paynicorn hosted cashier — the player is sent to checkoutUrl and returns to /wallet when done.
+  createPaynicornDeposit: (token: string, body: { amount: number }) =>
+    apiFetch<{ transactionId: string; checkoutUrl: string }>('/deposits/paynicorn', { method: 'POST', token, body }),
   // PayHero manual Pay Bill: claim a payment made to the PayHero paybill by its M-PESA code.
   claimPayheroPaybill: (token: string, body: { code: string }) =>
     apiFetch<PaybillClaimDto>('/deposits/payhero/paybill/claim', { method: 'POST', token, body }),

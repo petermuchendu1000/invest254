@@ -994,12 +994,13 @@ export class InMemoryPlatformRepository implements PlatformRepository {
 
   // ── Payment-gateway provider switches (migration 0116) — in-memory double ──
   private providersReg: PaymentProviderRow[] = [
-    // Mirrors the DB registry seed (migrations 0116 + 0130): existing rails + the new configurable gateways.
+    // Mirrors the DB registry seed (migrations 0116 + 0130 + 0186): existing rails + the new configurable gateways.
     { code: "mpesa", displayName: "M-Pesa", enabledGlobal: true, sortOrder: 10 },
     { code: "megapay", displayName: "Mega Pay", enabledGlobal: false, sortOrder: 20 },
     { code: "paystack", displayName: "Paystack", enabledGlobal: false, sortOrder: 30 },
     { code: "binance", displayName: "Binance Pay", enabledGlobal: false, sortOrder: 40 },
     { code: "payhero", displayName: "PayHero", enabledGlobal: false, sortOrder: 50 },
+    { code: "paynicorn", displayName: "Paynicorn", enabledGlobal: false, sortOrder: 60 },
   ];
   private providerOverrides = new Map<string, boolean>(); // key `${siteId}:${code}`
   async listPaymentProviders(actorRole: string): Promise<PaymentProvidersView> {

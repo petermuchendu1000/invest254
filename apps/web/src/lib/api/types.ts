@@ -253,7 +253,7 @@ export interface DepositProviderDto {
 export interface DepositMethodDto {
   id: string;
   provider: string;
-  channel: 'stk' | 'lipwa' | 'paybill';
+  channel: 'stk' | 'lipwa' | 'paybill' | 'checkout';
   label: string;
 }
 

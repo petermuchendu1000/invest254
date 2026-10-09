@@ -3,6 +3,7 @@ import type { PaymentRepository, CompleteResult, CreateWithdrawalResult, Withdra
 import type { DarajaClient } from "./daraja.js";
 import type { MegaPayClient } from "./megapay.js";
 import type { PayHeroClient } from "./payhero.js";
+import type { PaynicornClient } from "./paynicorn.js";
 import { PLAYER_DEPOSIT_RAILS } from "./gatewayschema.js";
 import { parseScope, type GatewayRouter, type OwnerScope, type PaymentScopeRef } from "./paymentscopes.js";
 
@@ -117,6 +118,11 @@ export interface PaymentServiceOptions {
   /** PayHero (Lipwa) provider client — the third deposit rail. Absent => PayHero deposits refuse loudly. */
   payhero?: PayHeroClient;
   /**
+   * Paynicorn hosted-cashier client — a System-owner (global scope) rail only: a brand on its own payment
+   * accounts never routes here (assertRail refuses it). Absent => Paynicorn deposits refuse loudly.
+   */
+  paynicorn?: PaynicornClient;
+  /**
    * PAY-1 (docs/43): per-platform / per-brand payment accounts. When present, every money flow of a brand
    * uses its payment OWNER's accounts (site > platform > global), transactions are stamped with the scope,
    * and verification/reconcile use the INITIATING scope. Absent => the global clients only (legacy).
@@ -125,6 +131,8 @@ export interface PaymentServiceOptions {
   events?: PaymentEvents;
   verifyStkCallbacks?: boolean;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class PaymentService {
   private readonly minDeposit: Cents;
@@ -143,6 +151,7 @@ export class PaymentService {
   private readonly entitledGatewaysForSite?: (siteId: string | undefined) => Promise<string[] | null>;
   private readonly megapay?: MegaPayClient;
   private readonly payhero?: PayHeroClient;
+  private readonly paynicorn?: PaynicornClient;
   private readonly gateways?: GatewayRouter;
   private readonly events: PaymentEvents;
   private readonly verifyStk: boolean;
@@ -163,6 +172,7 @@ export class PaymentService {
     if (opts.entitledGatewaysForSite) this.entitledGatewaysForSite = opts.entitledGatewaysForSite;
     if (opts.megapay) this.megapay = opts.megapay;
     if (opts.payhero) this.payhero = opts.payhero;
+    if (opts.paynicorn) this.paynicorn = opts.paynicorn;
     if (opts.gateways) this.gateways = opts.gateways;
     this.events = opts.events ?? {};
     // Secure by default: a client can POST to the public STK callback URL, so a raw
@@ -408,6 +418,82 @@ export class PaymentService {
     return { settled: status.settled + ledger.settled };
   }
 
+  // ── Deposit (Paynicorn hosted cashier) ──
+  /**
+   * Initiate a Paynicorn deposit. Same validation/limits as every other rail, plus whole shillings (KES has
+   * no decimals on Paynicorn). Mints a pending 'paynicorn' tx, asks Paynicorn for a cashier page with our
+   * txId as the `orderId`, and stores that txId as checkout_request_id so the postback, the query and the
+   * reconcile sweep all key on it. The player pays on Paynicorn's page; nothing is credited here.
+   */
+  async initiatePaynicornDeposit(userId: string, amountCents: number, siteId?: string, opts: { frontPage?: string } = {}): Promise<{ txId: string; checkoutUrl: string }> {
+    const owner = await this.ownerOf(siteId);
+    if (owner.scope === "global" && !this.paynicorn) throw new Error("PAYNICORN_NOT_CONFIGURED");
+    if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents % 100 !== 0) throw new Error("INVALID_AMOUNT");
+    const minDep = await this.currentMinDeposit(siteId);
+    if (amountCents < minDep) throw new Error("BELOW_MIN");
+    const maxDep = await this.currentMaxDeposit();
+    if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
+    // Brands on their own payment accounts have no Paynicorn account: refused, never routed to the System's.
+    await this.assertRail(owner, "paynicorn");
+    const client = this.paynicornClient();
+    await this.guardInitiate(userId, "paynicorn", owner.scope);
+    const txId = await this.repo.createDepositProvider(userId, amountCents, "", "paynicorn", siteId);
+    await this.stamp(txId, owner.scope);
+    const description = `Deposit ${await this.resolveAccountRef(siteId)}`;
+    const res = await this.withAbandonOnReject(txId, userId, "paynicorn", () => client.pay({
+      amountCents, orderId: txId, description, ...(opts.frontPage ? { frontPage: opts.frontPage } : {}),
+    }));
+    await this.repo.attachStk(txId, res.txnId || `paynicorn:${txId}`, txId);
+    return { txId, checkoutUrl: res.webUrl };
+  }
+
+  /**
+   * Paynicorn postback. The signature (md5 with OUR merchant secret) must verify, and even then the body's
+   * status is NOT what credits: we re-query Paynicorn by orderId and settle on that authoritative answer.
+   * Returns Paynicorn's txnId so the route can answer `success_{txnId}`; `settled` says whether this call
+   * moved money. An order we don't hold (e.g. a console address check) is acknowledged and ignored.
+   */
+  async handlePaynicornCallback(raw: unknown): Promise<{ txnId: string; settled: boolean }> {
+    const client = this.paynicornClient();
+    const pb = await client.verifyPostback(raw);
+    if (!pb) throw new Error("PAYNICORN_BAD_SIGNATURE");
+    // Our orderIds are transaction uuids; anything else is not ours (and would make Postgres throw).
+    const tx = UUID_RE.test(pb.orderId) ? await this.repo.getTransaction(pb.orderId) : null;
+    if (!tx || tx.kind !== "deposit" || (tx.provider != null && tx.provider !== "paynicorn")) return { txnId: pb.txnId, settled: false };
+    // A signed amount that disagrees with the order we created is never credited (left for review).
+    const kes = Number(pb.amount);
+    if (pb.amount !== "" && Number.isFinite(kes) && Math.round(kes * 100) !== tx.amountCents) throw new Error("PAYNICORN_AMOUNT_MISMATCH");
+    const q = await client.queryPayment(pb.orderId);
+    if (q.processing || q.resultCode == null) return { txnId: pb.txnId, settled: false };
+    const res = await this.repo.completeDeposit(pb.orderId, q.resultCode, q.resultCode === 0 ? "verified:paynicorn" : `verified:paynicorn:${q.resultCode}`,
+      q.txnId ?? (pb.txnId || null), { provider: "paynicorn", postback: { txnId: pb.txnId, status: pb.status, code: pb.code }, at: new Date().toISOString() });
+    return { txnId: pb.txnId, settled: res.applied };
+  }
+
+  /** Reconcile sweep for 'paynicorn' deposits whose postback never arrived — the same authoritative query. */
+  async reconcilePaynicornDeposits(opts: { olderThanMs?: number; limit?: number } = {}): Promise<{ scanned: number; settled: number; stillPending: number; errors: number }> {
+    if (!this.paynicorn) return { scanned: 0, settled: 0, stillPending: 0, errors: 0 };
+    const rows = await this.repo.listUnsettledDeposits(opts.olderThanMs ?? 120_000, opts.limit ?? 25, "paynicorn");
+    let settled = 0, stillPending = 0, errors = 0;
+    for (const d of rows) {
+      try {
+        const q = await this.paynicorn.queryPayment(d.checkoutRequestId);
+        if (q.processing || q.resultCode == null) { stillPending += 1; continue; }
+        const res = await this.repo.completeDeposit(d.checkoutRequestId, q.resultCode, `reconciled:paynicorn:${q.resultCode}`, q.txnId, { reconciled: true, provider: "paynicorn", at: new Date().toISOString() });
+        if (res.applied) settled += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(`[payments] Paynicorn reconcile failed for ${d.checkoutRequestId}: ${(err as Error).message}`);
+      }
+    }
+    return { scanned: rows.length, settled, stillPending, errors };
+  }
+
+  private paynicornClient(): PaynicornClient {
+    if (!this.paynicorn) throw new Error("PAYNICORN_NOT_CONFIGURED");
+    return this.paynicorn;
+  }
+
   /**
    * Reconciliation sweep for the PayHero rail — mirrors the Mega Pay sweep, scoped to provider 'payhero'
    * and using PayHero's authoritative transaction-status query. Settles deposits whose callback never
@@ -530,14 +616,20 @@ export class PaymentService {
     const enabled = new Set(providers.map((p) => p.code));
     const methods: DepositMethod[] = [];
 
-    providers.forEach((p, i) => {
+    // Paynicorn has no STK rail — it is a hosted cashier, offered as its own channel below.
+    const stkProviders = providers.filter((p) => p.code !== "paynicorn");
+    stkProviders.forEach((p, i) => {
       methods.push({
         id: `${p.code}-stk`,
         provider: p.code,
         channel: "stk",
-        label: providers.length > 1 ? `M-Pesa (${i + 1})` : "M-Pesa",
+        label: stkProviders.length > 1 ? `M-Pesa (${i + 1})` : "M-Pesa",
       });
     });
+
+    if (enabled.has("paynicorn") && (await this.paynicornAvailable(siteId))) {
+      methods.push({ id: "paynicorn-checkout", provider: "paynicorn", channel: "checkout", label: "Online checkout" });
+    }
 
     if (enabled.has("payhero") && (await this.lipwaAvailable(siteId))) {
       methods.push({ id: "payhero-lipwa", provider: "payhero", channel: "lipwa", label: "Card & Bank" });
@@ -565,6 +657,16 @@ export class PaymentService {
       if (owner.scope === "global" && !this.payhero) return false;
       const client = await this.payheroForScope(owner.scope);
       return Boolean(await client.lipwaLink({ reference: "probe" }));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Mirrors initiatePaynicornDeposit's preconditions: the System owner's client exists and the brand is on it. */
+  private async paynicornAvailable(siteId?: string): Promise<boolean> {
+    try {
+      const owner = await this.ownerOf(siteId);
+      return owner.scope === "global" && !!this.paynicorn;
     } catch {
       return false;
     }
