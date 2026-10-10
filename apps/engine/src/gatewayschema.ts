@@ -125,13 +125,13 @@ export const GATEWAY_SCHEMAS: Record<string, GatewaySchema> = {
   },
   paynicorn: {
     code: "paynicorn",
-    displayName: "Paynicorn",
+    displayName: "PayX",
     docsUrl: "https://www.paynicorn.com/docs/overview/authorization",
     playerAvailable: true,
-    blurb: "Hosted checkout via Paynicorn: the player pays on Paynicorn's cashier page and returns to the wallet. Every request is signed md5(content + merchant secret); the app's Test/Production status is set in the Paynicorn console, not here.",
+    blurb: "Hosted checkout via PayX (Paynicorn): the player pays on the PayX cashier page and returns to the wallet. Every request is signed md5(content + merchant secret); the app's Test/Production status is set in the PayX console (console.paynicorn.com), not here.",
     fields: [
-      { key: "app_key", label: "App key (APIKEY)", kind: "text", secret: false, required: true, placeholder: "e.g. 7971321", help: "Paynicorn console → App → Apps → APIKEY column." },
-      { key: "merchant_secret", label: "Merchant secret", kind: "secret", secret: true, required: true, placeholder: "32-character secret", help: "Paynicorn console → Developer. Signs every request and verifies every callback. Stored encrypted; only the last 4 are ever shown." },
+      { key: "app_key", label: "App key (APIKEY)", kind: "text", secret: false, required: true, placeholder: "e.g. 7971321", help: "PayX console (console.paynicorn.com) → App → Apps → APIKEY column." },
+      { key: "merchant_secret", label: "Merchant secret", kind: "secret", secret: true, required: true, placeholder: "32-character secret", help: "PayX console (console.paynicorn.com) → Developer. Signs every request and verifies every callback. Stored encrypted; only the last 4 are ever shown." },
       { key: "front_page", label: "Return page", kind: "url", secret: false, required: false, placeholder: "https://yourbrand.com/wallet", help: "Where the cashier sends the player after paying. Leave blank to return each player to their own brand's /wallet." },
       { key: "base_url", label: "API base URL", kind: "url", secret: false, required: false, default: "https://api.paynicorn.com", help: "Keep the default. Test and Production apps use the same host." },
     ],

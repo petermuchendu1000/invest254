@@ -7,7 +7,6 @@ export const GATEWAY_COPY: Readonly<Record<string, GatewayCopy>> = {
   mpesa: { summary: 'Players approve a prompt on their phone to deposit; withdrawals are paid straight to M-Pesa.', offers: ['Deposits', 'Payouts'] },
   megapay: { summary: 'M-Pesa deposits collected through your Mega Pay account.', offers: ['Deposits'] },
   payhero: { summary: 'M-Pesa deposits collected through your PayHero (Lipwa) account.', offers: ['Deposits'] },
-  paynicorn: { summary: 'Players pay on Paynicorn’s secure checkout page and come straight back to their wallet.', offers: ['Deposits'] },
   paystack: { summary: 'Cards, bank transfers and mobile money. Save your keys now; players get it when it is switched on in the app.', offers: [], comingSoon: true },
   binance: { summary: 'Crypto payments with Binance Pay. Save your keys now; players get it when it is switched on in the app.', offers: [], comingSoon: true },
   stripe: { summary: 'International cards. Save your keys now; players get it when it is switched on in the app.', offers: [], comingSoon: true },

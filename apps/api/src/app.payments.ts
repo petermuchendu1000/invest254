@@ -3,6 +3,7 @@ import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSi
 import { assertSiteTarget } from "./scope.js";
 import type { ApiDeps } from "./app.js";
 import { requireApprovalPassword } from "./approvalgate.js";
+import { publicProvider, publicProviderCode } from "./publicProvider.js";
 
 /**
  * Protected + callback routes (Issue E2): player wallet/chat/payments, the public Daraja
@@ -267,7 +268,11 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     const providers = await deps.payments.listDepositProviders(ctx.siteId);
     const depositsOn = deps.platformGate ? await deps.platformGate.allows("deposits") : true;
     const methods = depositsOn ? await deps.payments.listDepositMethods(ctx.siteId) : [];
-    return { providers, methods };
+    // Player-facing: confidential suppliers appear only under their public code (publicProvider.ts).
+    return {
+      providers: providers.map((p) => ({ ...p, code: publicProviderCode(p.code), displayName: p.code === "paynicorn" ? "M-Pesa" : p.displayName })),
+      methods: methods.map(publicProvider),
+    };
   });
 
   // Mega Pay STK deposit (migration 0116). Mirrors /deposits but routes through the Mega Pay rail.
@@ -314,20 +319,19 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
     return { status: 202, body: { transactionId: out.txId, reference: out.reference, lipwaUrl: out.lipwaUrl } };
   });
 
-  // Paynicorn — hosted cashier. We mint a pending tx and hand back Paynicorn's cashier URL; the player pays
-  // there and is sent back to their brand's wallet (the request Origin, when it is one of our brands, else
-  // the configured return page). Crediting happens only via the verified postback / reconcile sweep.
-  router.post(`${BASE}/deposits/paynicorn`, auth, site, depositLimit, async (ctx: Ctx) => {
+  // PayX (Paynicorn) STK deposit. Public path and name are `payx` only — the supplier is confidential
+  // (publicProvider.ts). Paynicorn pushes the M-Pesa prompt itself (method + phone, no cashier page), and
+  // crediting happens only via the verified postback / reconcile sweep, like every other STK rail.
+  router.post(`${BASE}/deposits/payx`, auth, site, depositLimit, async (ctx: Ctx) => {
     if (deps.platformGate && !(await deps.platformGate.allows("deposits")))
       throw new ApiError("SYSTEM_DISABLED", "Deposits are temporarily disabled by the platform.", 403);
     if (!(await deps.payments.listDepositProviders(ctx.siteId)).some((p) => p.code === "paynicorn"))
-      throw new ApiError("PROVIDER_DISABLED", "Online checkout is not available.", 403);
+      throw new ApiError("PROVIDER_DISABLED", "This payment method is not available.", 403);
     const body = asObject(ctx.body);
     const amount = requireIntAmount(body);
-    const origin = String(ctx.req.headers.origin ?? "").replace(/\/+$/, "");
-    const frontPage = /^https:\/\/[^/\s]+$/.test(origin) && deps.corsAllowOrigin?.(origin) ? `${origin}/wallet` : undefined;
-    const out = await domain(() => deps.payments.initiatePaynicornDeposit(ctx.claims!.userId, amount, ctx.siteId, frontPage ? { frontPage } : {}), ctx);
-    return { status: 202, body: { transactionId: out.txId, checkoutUrl: out.checkoutUrl } };
+    const phone = requirePhone(body);
+    const out = await domain(() => deps.payments.initiatePaynicornDeposit(ctx.claims!.userId, amount, phone, ctx.siteId), ctx);
+    return { status: 202, body: { transactionId: out.txId, checkoutRequestId: out.checkoutRequestId } };
   });
 
   // PayHero manual Pay Bill — the player paid the PayHero paybill directly, then submits the M-PESA code.

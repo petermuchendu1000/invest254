@@ -13,8 +13,11 @@ import type { Cents } from "@invest254/shared";
  *     { content: base64(JSON(bizReq)), sign: md5(content + merchantSecret), appKey }
  *   and answers { responseCode:"000000", responseMessage, content, sign } (failures carry only the code).
  *   The response `sign` is verified the same way before `content` is decoded (docs/overview/authorization).
- *   pay   {amount, countryCode:"KE", currency:"KES", orderId, orderDescription, cpFrontPage?}
- *         -> {code, message, txnId, status:"1"|"-1"|"0", webUrl}   (webUrl = the hosted cashier)
+ *   pay   {amount, countryCode:"KE", currency:"KES", orderId, orderDescription, payMethod:"MPESA", phone}
+ *         -> {code, message, txnId, status:"1"|"-1"|"0", webUrl:null}
+ *         Naming the method AND the payer's phone skips Paynicorn's cashier page entirely: Paynicorn
+ *         sends the M-Pesa prompt itself and webUrl comes back null (verified live, 2026-10-09). Players
+ *         therefore never load a Paynicorn page — the gateway stays invisible to them (docs/53).
  *   query {orderId, txnType:"payment"} -> {code, message, txnId, status, completeTime?}
  *   Postback: Paynicorn POSTs {content, sign} (same signature) to the app's callback address and needs
  *   HTTP 200 with the body `success_{txnId}`; anything else is retried up to 7 times.
@@ -30,7 +33,11 @@ export interface PaynicornPayArgs {
   amountCents: Cents;
   orderId: string;
   description: string;
-  /** Where the cashier sends the browser after payment. */
+  /** Payment method code, e.g. "MPESA". With `phone` it skips the cashier and pushes the prompt directly. */
+  payMethod?: string;
+  /** Payer's phone WITHOUT the country code (Kenya: 9 digits, e.g. "712345678"). */
+  phone?: string;
+  /** Where a cashier page (when one is used) sends the browser after payment. */
   frontPage?: string;
 }
 export interface PaynicornPayResult { txnId: string; webUrl: string; status: string }
@@ -72,6 +79,14 @@ export function decodeContent(contentBase64: string): Record<string, unknown> {
 export function centsToPaynicornAmount(c: Cents): string {
   if (!Number.isInteger(c) || c <= 0 || c % 100 !== 0) throw new Error("PAYNICORN_AMOUNT_NOT_WHOLE_KES");
   return String(c / 100);
+}
+
+/** Paynicorn wants the payer's phone without the country code: a Kenyan MSISDN as its 9 local digits. */
+export function toPaynicornPhone(msisdn: string): string {
+  const d = String(msisdn ?? "").replace(/\D/g, "");
+  const local = d.startsWith("254") ? d.slice(3) : d.startsWith("0") ? d.slice(1) : d;
+  if (!/^[17]\d{8}$/.test(local)) throw new Error("INVALID_PHONE");
+  return local;
 }
 
 /** Map Paynicorn's "1" / "-1" / "0" order status to the shared {resultCode, processing}. */
@@ -121,7 +136,9 @@ export class StubPaynicornClient implements PaynicornClient {
   constructor(public queryStatus: "1" | "-1" | "0" = "1") {}
   async pay(a: PaynicornPayArgs): Promise<PaynicornPayResult> {
     const i = ++this.n;
-    return { txnId: `stub-pn-${i}`, webUrl: `https://cashier.paynicorn.stub/pay?order=${encodeURIComponent(a.orderId)}`, status: "-1" };
+    // Direct push (method + phone) has no page to open, exactly like the live API.
+    const webUrl = a.payMethod && a.phone ? "" : `https://cashier.paynicorn.stub/pay?order=${encodeURIComponent(a.orderId)}`;
+    return { txnId: `stub-pn-${i}`, webUrl, status: "-1" };
   }
   async queryPayment(orderId: string): Promise<PaynicornStatusResult> {
     return mapPaynicornStatus(this.queryStatus, `stub-pn-${orderId}`);
@@ -168,12 +185,16 @@ export class HttpPaynicornClient implements PaynicornClient {
       orderId: a.orderId,
       orderDescription: a.description,
     };
+    const direct = Boolean(a.payMethod && a.phone);
+    if (a.payMethod) req.payMethod = a.payMethod;
+    if (a.phone) req.phone = a.phone;
     const front = a.frontPage ?? this.cfg.frontPage;
-    if (front) req.cpFrontPage = front;
+    if (front && !direct) req.cpFrontPage = front;
     const out = await this.call("pay", req);
     const status = String(out.status ?? "");
     const webUrl = out.webUrl == null ? "" : String(out.webUrl);
-    if (status === "0" || !webUrl) {
+    // A direct push has no page; a cashier order without one cannot be completed.
+    if (status === "0" || (!direct && !webUrl)) {
       throw new Error(`PAYNICORN_PAY_REFUSED:${String(out.code ?? "")}:${String(out.message ?? "").slice(0, 120)}`);
     }
     return { txnId: String(out.txnId ?? ""), webUrl, status };

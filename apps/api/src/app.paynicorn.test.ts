@@ -19,35 +19,55 @@ function signed(fields: Record<string, string>, secret = STUB_PAYNICORN_SECRET) 
   return { content, sign: paynicornSign(content, secret) };
 }
 
-test("paynicorn: offered as an Online checkout method when enabled", async () => {
+test("payx: players see only a plain M-Pesa tab under the public code — the supplier's name never leaves the API", async () => {
   const api = await startTestApi();
   try {
-    api.payRepo.setProviders([{ code: "mpesa", displayName: "M-Pesa" }, { code: "paynicorn", displayName: "Paynicorn" }]);
-    const body = await json(await req(api, "GET", "/api/v1/deposits/providers", { token: PLAYER }));
-    assert.ok(body.methods.some((m: any) => m.id === "paynicorn-checkout" && m.channel === "checkout"));
-    assert.ok(!body.methods.some((m: any) => m.id === "paynicorn-stk"));
+    api.payRepo.setProviders([{ code: "paynicorn", displayName: "PayX" }]);
+    const res = await req(api, "GET", "/api/v1/deposits/providers", { token: PLAYER });
+    const text = await res.text();
+    assert.ok(!/paynicorn/i.test(text), `supplier name leaked: ${text}`);
+    const body = JSON.parse(text);
+    assert.deepEqual(body.methods.map((m: any) => [m.id, m.provider, m.channel, m.label]), [["payx-stk", "payx", "stk", "M-Pesa"]]);
+    assert.deepEqual(body.providers.map((p: any) => [p.code, p.displayName]), [["payx", "M-Pesa"]]);
   } finally { await api.close(); }
 });
 
-test("paynicorn deposit: 202 + cashier URL; signed postback credits once and answers success_{txnId}", async () => {
+test("payx deposit: 202 with no page to open; signed postback credits once; history never names the supplier", async () => {
   const api = await startTestApi({ startingBalanceCents: 100_000 });
   try {
-    api.payRepo.setProviders([{ code: "paynicorn", displayName: "Paynicorn" }]);
-    const dep = await req(api, "POST", "/api/v1/deposits/paynicorn", { token: PLAYER, body: { amount: 50_000 } });
+    api.payRepo.setProviders([{ code: "paynicorn", displayName: "PayX" }]);
+    const dep = await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 50_000, phone: "0798661061" } });
     assert.equal(dep.status, 202);
-    const { transactionId, checkoutUrl } = await json(dep);
-    assert.match(checkoutUrl, /^https:\/\//);
+    const depText = await dep.text();
+    assert.ok(!/paynicorn|https?:/i.test(depText), `initiate leaked a page or the supplier: ${depText}`);
+    const { transactionId, checkoutRequestId } = JSON.parse(depText);
+    assert.equal(checkoutRequestId, transactionId);
+
+    const pending = await (await req(api, "GET", "/api/v1/transactions?kind=deposit", { token: PLAYER })).json() as any;
+    assert.notEqual(pending.items.find((t: any) => t.id === transactionId).status, "success", "nothing is success before the callback");
 
     const cb = await req(api, "POST", "/api/v1/deposits/paynicorn/callback", { raw: JSON.stringify(signed({ orderId: transactionId })) });
     assert.equal(cb.status, 200);
     assert.match(cb.headers.get("content-type") ?? "", /^text\/plain/);
     assert.equal(await cb.text(), "success_PN77");
-    // Paynicorn retries are acknowledged without a second credit.
     const again = await req(api, "POST", "/api/v1/deposits/paynicorn/callback", { raw: JSON.stringify(signed({ orderId: transactionId })) });
     assert.equal(await again.text(), "success_PN77");
 
     const bal = await json(await req(api, "GET", "/api/v1/wallet", { token: PLAYER }));
     assert.equal(bal.real, 150_000);
+    const histText = await (await req(api, "GET", "/api/v1/transactions?kind=deposit", { token: PLAYER })).text();
+    assert.ok(!/paynicorn/i.test(histText), `history leaked the supplier: ${histText}`);
+    const tx = JSON.parse(histText).items.find((t: any) => t.id === transactionId);
+    assert.equal(tx.status, "success");
+    assert.equal(tx.provider, "payx");
+  } finally { await api.close(); }
+});
+
+test("payx: the supplier-named deposit route does not exist", async () => {
+  const api = await startTestApi();
+  try {
+    api.payRepo.setProviders([{ code: "paynicorn", displayName: "PayX" }]);
+    assert.equal((await req(api, "POST", "/api/v1/deposits/paynicorn", { token: PLAYER, body: { amount: 50_000, phone: "0798661061" } })).status, 404);
   } finally { await api.close(); }
 });
 
@@ -55,7 +75,7 @@ test("paynicorn callback: form-encoded body works; a forged signature is 401 and
   const api = await startTestApi({ startingBalanceCents: 0 });
   try {
     api.payRepo.setProviders([{ code: "paynicorn", displayName: "Paynicorn" }]);
-    const { transactionId } = await json(await req(api, "POST", "/api/v1/deposits/paynicorn", { token: PLAYER, body: { amount: 50_000 } }));
+    const { transactionId } = await json(await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 50_000, phone: "0798661061" } }));
     const forged = signed({ orderId: transactionId }, "attacker");
     const bad = await req(api, "POST", "/api/v1/deposits/paynicorn/callback", { raw: JSON.stringify(forged) });
     assert.equal(bad.status, 401);
@@ -79,16 +99,19 @@ test("paynicorn callback: address check (GET) and unknown signed orders answer 2
   } finally { await api.close(); }
 });
 
-test("paynicorn deposit: refused when switched off, below the floor, or not whole shillings", async () => {
+test("payx deposit: refused when switched off, below the floor, not whole shillings, or without a valid phone", async () => {
   const api = await startTestApi();
   try {
     api.payRepo.setProviders([{ code: "mpesa", displayName: "M-Pesa" }]);
-    const off = await req(api, "POST", "/api/v1/deposits/paynicorn", { token: PLAYER, body: { amount: 50_000 } });
+    const off = await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 50_000, phone: "0798661061" } });
     assert.equal(off.status, 403);
-    assert.equal((await json(off)).error.code, "PROVIDER_DISABLED");
-    api.payRepo.setProviders([{ code: "paynicorn", displayName: "Paynicorn" }]);
-    assert.equal((await req(api, "POST", "/api/v1/deposits/paynicorn", { token: PLAYER, body: { amount: 9_900 } })).status, 400);
-    assert.equal((await req(api, "POST", "/api/v1/deposits/paynicorn", { token: PLAYER, body: { amount: 50_050 } })).status, 400);
-    assert.equal((await req(api, "POST", "/api/v1/deposits/paynicorn", { body: { amount: 50_000 } })).status, 401);
+    const offText = await off.text();
+    assert.equal(JSON.parse(offText).error.code, "PROVIDER_DISABLED");
+    assert.ok(!/paynicorn/i.test(offText));
+    api.payRepo.setProviders([{ code: "paynicorn", displayName: "PayX" }]);
+    assert.equal((await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 9_900, phone: "0798661061" } })).status, 400);
+    assert.equal((await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 50_050, phone: "0798661061" } })).status, 400);
+    assert.equal((await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 50_000, phone: "nope" } })).status, 400);
+    assert.equal((await req(api, "POST", "/api/v1/deposits/payx", { body: { amount: 50_000, phone: "0798661061" } })).status, 401);
   } finally { await api.close(); }
 });

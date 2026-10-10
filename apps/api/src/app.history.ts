@@ -1,6 +1,7 @@
 import type { LedgerEntry, PositionRecord, PositionDetail, DigitHistoryRow, TransactionRecord, FairnessRecord } from "@invest254/engine";
 import { Router, ApiError, requireAuth, requireSite, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
+import { publicProviderCode } from "./publicProvider.js";
 
 /**
  * Player history reads (Issue F2): wallet ledger, position history + single position
@@ -63,7 +64,7 @@ const digitHistoryDto = (d: DigitHistoryRow) => ({
 
 const transactionDto = (t: TransactionRecord) => ({
   id: t.id, kind: t.kind, amountCents: t.amountCents, status: t.status,
-  provider: t.provider, phone: t.phone, mpesaReceipt: t.mpesaReceipt, ts: t.createdAtMs,
+  provider: publicProviderCode(t.provider), phone: t.phone, mpesaReceipt: t.mpesaReceipt, ts: t.createdAtMs,
 });
 
 // ─────────────────────────── routes ───────────────────────────
