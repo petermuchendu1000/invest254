@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import type { Cents } from "@invest254/shared";
 import {
   HttpPaynicornClient, StubPaynicornClient, UnconfiguredPaynicornClient, ConfiguredPaynicornClient, STUB_PAYNICORN_SECRET,
-  paynicornSign, encodeContent, decodeContent, signMatches, centsToPaynicornAmount, mapPaynicornStatus, readPostbackEnvelope,
-  missingPaynicornCredentials, resolvePaynicornConfig, toPaynicornPhone,
+  paynicornSign, encodeContent, decodeContent, signMatches, mapPaynicornStatus, readPostbackEnvelope,
+  missingPaynicornCredentials, resolvePaynicornConfig, toPaynicornPhone, toPaynicornMethod, methodIsDirect,
 } from "./paynicorn.js";
+import { PAYNICORN_COUNTRIES, paynicornCountry, formatPaynicornAmount } from "./paynicorncountries.js";
 import { testConnection } from "./gatewaytest.js";
 import { GATEWAY_SCHEMAS, PLAYER_DEPOSIT_RAILS, splitSubmission, validateConfig } from "./gatewayschema.js";
 
@@ -26,10 +27,38 @@ test("paynicorn content: base64(JSON) round-trips, including non-ASCII", () => {
   assert.deepEqual(decodeContent(c), { orderId: "a-1", orderDescription: "Dépôt — KES" });
 });
 
-test("paynicorn amount: whole KES on the wire, partial shillings refused", () => {
-  assert.equal(centsToPaynicornAmount(cents(20_000)), "200");
-  assert.throws(() => centsToPaynicornAmount(cents(20_050)), /NOT_WHOLE_KES/);
-  assert.throws(() => centsToPaynicornAmount(cents(0)), /NOT_WHOLE_KES/);
+test("paynicorn amount: formatted to each country's own decimals", () => {
+  assert.equal(formatPaynicornAmount(200, 0), "200");        // KES — no decimals
+  assert.equal(formatPaynicornAmount(200.456, 2), "200.46"); // NGN — two
+  assert.equal(formatPaynicornAmount(200.44, 1), "200.4");   // AED — one
+  assert.equal(formatPaynicornAmount(1234.6, 0), "1235");    // a converted amount rounds to the unit
+  assert.throws(() => formatPaynicornAmount(0, 0), /AMOUNT_INVALID/);
+  assert.throws(() => formatPaynicornAmount(-5, 2), /AMOUNT_INVALID/);
+});
+
+test("paynicorn countries: every country Paynicorn publishes, with its currency and decimals", () => {
+  assert.equal(PAYNICORN_COUNTRIES.length, 32, "all 32 published countries are supported");
+  assert.deepEqual(paynicornCountry("ke"), { code: "KE", name: "Kenya", currency: "KES", decimals: 0 });
+  assert.equal(paynicornCountry("NG")?.currency, "NGN");
+  assert.equal(paynicornCountry("NG")?.decimals, 2);
+  assert.equal(paynicornCountry("AE")?.decimals, 1, "Gulf currencies take one decimal");
+  assert.equal(paynicornCountry("ZZ"), null);
+  // every code is unique and every currency/decimal pair is stated, never defaulted
+  assert.equal(new Set(PAYNICORN_COUNTRIES.map((c) => c.code)).size, PAYNICORN_COUNTRIES.length);
+  for (const c of PAYNICORN_COUNTRIES) assert.ok(/^[A-Z]{2}$/.test(c.code) && /^[A-Z]{3}$/.test(c.currency));
+});
+
+test("paynicorn methods: normalised from the live shape; direct only when phone/email is all it needs", () => {
+  const mpesa = toPaynicornMethod({ code: "MPESA", name: "M-Pesa", methodType: "WALLET", icon: "https://cdn.example/x.png", minAmount: 1, maxAmount: null, inputs: [{ name: "Phone_KE", type: "Phone", reg: "^[0]?\\d{9}$" }] })!;
+  assert.deepEqual(mpesa.inputs, [{ name: "Phone_KE", type: "Phone", pattern: "^[0]?\\d{9}$" }]);
+  assert.equal(mpesa.iconUrl, "https://cdn.example/x.png");
+  assert.equal(methodIsDirect(mpesa), true);
+  const card = toPaynicornMethod({ code: "CARD", methodType: "CARD", inputs: [{ name: "CardNo", type: "Text" }] })!;
+  assert.equal(card.name, "CARD", "a method with no name falls back to its code");
+  assert.equal(methodIsDirect(card), false, "a field we cannot supply means the hosted page");
+  const bank = toPaynicornMethod({ code: "BANK", methodType: "BANK", inputs: [] })!;
+  assert.equal(methodIsDirect(bank), true, "no inputs at all is still directly initiable");
+  assert.equal(toPaynicornMethod({ name: "no code" }), null);
 });
 
 test("paynicorn status: 1 paid, 0 failed, -1/unknown processing", () => {
@@ -71,7 +100,7 @@ const CFG = { baseUrl: "https://api.paynicorn.test/", appKey: "7971321", merchan
 test("paynicorn http: pay sends a signed KE/KES order and returns the cashier URL", async () => {
   const f = fakePaynicorn(() => ({ code: "0000", message: "ok", txnId: "PN1", status: "-1", webUrl: "https://cashier/x" }));
   const c = new HttpPaynicornClient({ ...CFG, frontPage: "https://default/wallet" }, f.impl);
-  const out = await c.pay({ amountCents: cents(50_000), orderId: "tx-1", description: "Deposit", frontPage: "https://cpfmarket.com/wallet" });
+  const out = await c.pay({ amount: "500", countryCode: "KE", currency: "KES", orderId: "tx-1", description: "Deposit", frontPage: "https://cpfmarket.com/wallet" });
   assert.deepEqual(out, { txnId: "PN1", webUrl: "https://cashier/x", status: "-1" });
   assert.equal(f.calls[0]!.url, "https://api.paynicorn.test/trade/v3/transaction/pay");
   assert.equal(f.calls[0]!.body.appKey, "7971321");
@@ -81,11 +110,11 @@ test("paynicorn http: pay sends a signed KE/KES order and returns the cashier UR
 test("paynicorn http: method + phone is a direct push — no page, no cpFrontPage, null webUrl accepted", async () => {
   const f = fakePaynicorn(() => ({ code: "0000", message: "success", txnId: "PN2", status: "-1", webUrl: null }));
   const c = new HttpPaynicornClient({ ...CFG, frontPage: "https://default/wallet" }, f.impl);
-  const out = await c.pay({ amountCents: cents(13_000), orderId: "tx-2", description: "Deposit", payMethod: "MPESA", phone: "798661061" });
+  const out = await c.pay({ amount: "130", countryCode: "KE", currency: "KES", orderId: "tx-2", description: "Deposit", payMethod: "MPESA", phone: "798661061" });
   assert.deepEqual(out, { txnId: "PN2", webUrl: "", status: "-1" });
   assert.deepEqual(f.calls[0]!.biz, { amount: "130", countryCode: "KE", currency: "KES", orderId: "tx-2", orderDescription: "Deposit", payMethod: "MPESA", phone: "798661061" });
   const refused = new HttpPaynicornClient(CFG, fakePaynicorn(() => ({ code: "101002", message: "bad", status: "0", webUrl: null })).impl);
-  await assert.rejects(refused.pay({ amountCents: cents(13_000), orderId: "o", description: "d", payMethod: "MPESA", phone: "798661061" }), /PAY_REFUSED:101002/);
+  await assert.rejects(refused.pay({ amount: "130", countryCode: "KE", currency: "KES", orderId: "o", description: "d", payMethod: "MPESA", phone: "798661061" }), /PAY_REFUSED:101002/);
 });
 
 test("paynicorn phone: 9 local digits, whatever form the MSISDN arrives in", () => {
@@ -96,11 +125,43 @@ test("paynicorn phone: 9 local digits, whatever form the MSISDN arrives in", () 
 
 test("paynicorn http: pay refuses a failed order, an envelope error, and an unsigned response", async () => {
   const failed = new HttpPaynicornClient(CFG, fakePaynicorn(() => ({ code: "1001", message: "bad", status: "0", webUrl: "" })).impl);
-  await assert.rejects(failed.pay({ amountCents: cents(20_000), orderId: "o", description: "d" }), /PAYNICORN_PAY_REFUSED/);
+  await assert.rejects(failed.pay({ amount: "200", countryCode: "KE", currency: "KES", orderId: "o", description: "d" }), /PAYNICORN_PAY_REFUSED/);
   const authFail = new HttpPaynicornClient(CFG, fakePaynicorn(() => ({}), { responseCode: "204005" }).impl);
-  await assert.rejects(authFail.pay({ amountCents: cents(20_000), orderId: "o", description: "d" }), /REJECTED_200:204005/);
+  await assert.rejects(authFail.pay({ amount: "200", countryCode: "KE", currency: "KES", orderId: "o", description: "d" }), /REJECTED_200:204005/);
   const forged = new HttpPaynicornClient(CFG, fakePaynicorn(() => ({ status: "-1", webUrl: "https://evil" }), { tamper: true }).impl);
-  await assert.rejects(forged.pay({ amountCents: cents(20_000), orderId: "o", description: "d" }), /BAD_SIGNATURE/);
+  await assert.rejects(forged.pay({ amount: "200", countryCode: "KE", currency: "KES", orderId: "o", description: "d" }), /BAD_SIGNATURE/);
+});
+
+test("paynicorn http: listMethods parses the live shape; an out-of-scope country is simply empty", async () => {
+  const f = fakePaynicorn(() => ({ code: "0000", message: "success", methodInfo: [
+    { code: "MPESA", name: "M-Pesa", methodType: "WALLET", icon: "https://cdn/x.png", minAmount: 1, inputs: [{ name: "Phone_KE", type: "Phone", reg: "^[0]?\\d{9}$" }] },
+    { code: "CARD", name: "Card", methodType: "CARD", inputs: [{ name: "CardNo", type: "Text" }] },
+    { name: "junk with no code" },
+  ] }));
+  const c = new HttpPaynicornClient(CFG, f.impl);
+  const got = await c.listMethods("NG", "NGN");
+  assert.deepEqual(got.map((m) => [m.code, m.name, m.methodType]), [["MPESA", "M-Pesa", "WALLET"], ["CARD", "Card", "CARD"]]);
+  assert.deepEqual(f.calls[0]!.biz, { countryCode: "NG", currency: "NGN", txnType: "payment" });
+  // 101016: the country is not in the merchant's console scope — an empty list, not an error.
+  const none = new HttpPaynicornClient(CFG, fakePaynicorn(() => ({ code: "101016", message: "not open", methodInfo: [] })).impl);
+  assert.deepEqual(await none.listMethods("GH", "GHS"), []);
+});
+
+test("paynicorn http: pay carries whatever country, currency and amount it is given", async () => {
+  const f = fakePaynicorn(() => ({ code: "0000", txnId: "PN3", status: "-1", webUrl: "https://cashier/ng" }));
+  const c = new HttpPaynicornClient(CFG, f.impl);
+  const out = await c.pay({ amount: "1500.75", countryCode: "NG", currency: "NGN", orderId: "tx-ng", description: "Deposit", payMethod: "CARD", frontPage: "https://brand/wallet" });
+  assert.equal(out.webUrl, "https://cashier/ng", "a hosted method hands back its page");
+  assert.deepEqual(f.calls[0]!.biz, { amount: "1500.75", countryCode: "NG", currency: "NGN", orderId: "tx-ng", orderDescription: "Deposit", payMethod: "CARD", cpFrontPage: "https://brand/wallet" });
+});
+
+test("paynicorn http: an email-only method is pushed directly, with no page", async () => {
+  const f = fakePaynicorn(() => ({ code: "0000", txnId: "PN4", status: "-1", webUrl: null }));
+  const c = new HttpPaynicornClient(CFG, f.impl);
+  const out = await c.pay({ amount: "10.00", countryCode: "US", currency: "USD", orderId: "tx-us", description: "D", payMethod: "WALLETX", email: "a@b.com" });
+  assert.equal(out.webUrl, "");
+  assert.equal(f.calls[0]!.biz.email, "a@b.com");
+  assert.equal(f.calls[0]!.biz.cpFrontPage, undefined, "a direct push needs no return page");
 });
 
 test("paynicorn http: query maps status; a transport/signature failure is 'processing', never paid", async () => {
@@ -124,11 +185,11 @@ test("paynicorn http: postbacks verify only with our secret", async () => {
 
 test("paynicorn stub + unconfigured clients", async () => {
   const s = new StubPaynicornClient();
-  assert.match((await s.pay({ amountCents: cents(20_000), orderId: "o1", description: "d" })).webUrl, /order=o1/);
+  assert.match((await s.pay({ amount: "200", countryCode: "KE", currency: "KES", orderId: "o1", description: "d" })).webUrl, /order=o1/);
   const content = encodeContent({ txnId: "t", orderId: "o1", status: "1" });
   assert.equal((await s.verifyPostback({ content, sign: paynicornSign(content, STUB_PAYNICORN_SECRET) }))?.orderId, "o1");
   const u = new UnconfiguredPaynicornClient(["merchant_secret"]);
-  await assert.rejects(u.pay({ amountCents: cents(20_000), orderId: "o", description: "d" }), /PAYNICORN_NOT_CONFIGURED:merchant_secret/);
+  await assert.rejects(u.pay({ amount: "200", countryCode: "KE", currency: "KES", orderId: "o", description: "d" }), /PAYNICORN_NOT_CONFIGURED:merchant_secret/);
   await assert.rejects(u.queryPayment("o"), /PAYNICORN_NOT_CONFIGURED/);
   assert.equal(await u.verifyPostback({ content, sign: "x" }), null);
 });
@@ -138,7 +199,7 @@ test("paynicorn config: env fallback, DB override, and production refuses the st
   const env = { PAYNICORN_APP_KEY: "k", PAYNICORN_MERCHANT_SECRET: SECRET, NODE_ENV: "production" } as NodeJS.ProcessEnv;
   assert.equal(resolvePaynicornConfig({}, env).baseUrl, "https://api.paynicorn.com");
   const prodEmpty = new ConfiguredPaynicornClient(async () => null, { NODE_ENV: "production" } as NodeJS.ProcessEnv);
-  await assert.rejects(prodEmpty.pay({ amountCents: cents(20_000), orderId: "o", description: "d" }), /PAYNICORN_NOT_CONFIGURED/);
+  await assert.rejects(prodEmpty.pay({ amount: "200", countryCode: "KE", currency: "KES", orderId: "o", description: "d" }), /PAYNICORN_NOT_CONFIGURED/);
   const dbWins = new ConfiguredPaynicornClient(async () => ({ appKey: "db", merchantSecret: "dbsecret" }), env);
   const content = encodeContent({ orderId: "o" });
   assert.ok(await dbWins.verifyPostback({ content, sign: paynicornSign(content, "dbsecret") }), "DB secret is the one in force");

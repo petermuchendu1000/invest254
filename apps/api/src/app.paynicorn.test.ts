@@ -27,8 +27,12 @@ test("payx: players see only a plain M-Pesa tab under the public code — the su
     const text = await res.text();
     assert.ok(!/paynicorn/i.test(text), `supplier name leaked: ${text}`);
     const body = JSON.parse(text);
-    assert.deepEqual(body.methods.map((m: any) => [m.id, m.provider, m.channel, m.label]), [["payx-stk", "payx", "stk", "M-Pesa"]]);
+    assert.deepEqual(body.methods.map((m: any) => [m.id, m.provider, m.channel, m.label]), [["payx-mpesa", "payx", "stk", "M-Pesa"]]);
     assert.deepEqual(body.providers.map((p: any) => [p.code, p.displayName]), [["payx", "M-Pesa"]]);
+    // The gateway publishes its method icons on its OWN cdn: that URL must never reach the browser.
+    assert.ok(!/cdn\.paynicorn|paynicorn\.com/i.test(text), `supplier host leaked: ${text}`);
+    assert.equal(body.methods[0].iconUrl, undefined, "no supplier-hosted icon is passed through");
+    assert.equal(body.methods[0].methodCode, "MPESA", "the method code is generic and does travel");
   } finally { await api.close(); }
 });
 
@@ -36,7 +40,7 @@ test("payx deposit: 202 with no page to open; signed postback credits once; hist
   const api = await startTestApi({ startingBalanceCents: 100_000 });
   try {
     api.payRepo.setProviders([{ code: "paynicorn", displayName: "PayX" }]);
-    const dep = await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 50_000, phone: "0798661061" } });
+    const dep = await req(api, "POST", "/api/v1/deposits/payx", { token: PLAYER, body: { amount: 50_000, phone: "0798661061", method: "MPESA" } });
     assert.equal(dep.status, 202);
     const depText = await dep.text();
     assert.ok(!/paynicorn|https?:/i.test(depText), `initiate leaked a page or the supplier: ${depText}`);

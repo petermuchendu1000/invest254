@@ -253,7 +253,11 @@ export interface DepositProviderDto {
 export interface DepositMethodDto {
   id: string;
   provider: string;
-  channel: 'stk' | 'lipwa' | 'paybill';
+  channel: 'stk' | 'lipwa' | 'paybill' | 'checkout';
+  /** PayX only: the method code to send back on initiate (e.g. 'MPESA', 'CARD'). */
+  methodCode?: string;
+  /** PayX only: the fields this method needs from the player. Absent/empty => nothing to collect. */
+  fields?: Array<{ name: string; type: string; pattern?: string }>;
   label: string;
 }
 

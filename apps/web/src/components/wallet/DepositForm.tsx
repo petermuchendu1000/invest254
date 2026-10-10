@@ -32,7 +32,7 @@ const grouped = (s: string) => (s ? Number(s).toLocaleString('en-KE') : '');
  * The gateway is intentionally NOT surfaced to players — the flow is a simple amount + phone +
  * "Continue to Pay"; only the API mutation differs by provider.
  */
-export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'megapay' | 'payhero' | 'payx' } = {}) {
+export function DepositForm({ provider = 'mpesa', methodCode }: { provider?: 'mpesa' | 'megapay' | 'payhero' | 'payx'; methodCode?: string } = {}) {
   const close = useDepositUi((s) => s.close);
   const prefillAmountCents = useDepositUi((s) => s.prefillAmountCents);
   const pending = useDepositUi((s) => s.pending);
@@ -168,7 +168,7 @@ export function DepositForm({ provider = 'mpesa' }: { provider?: 'mpesa' | 'mega
     try {
       // PayX settles whole shillings only: a converted foreign amount rounds UP, so the floor still holds.
       const amount = provider === 'payx' ? Math.ceil(amountKesCents / 100) * 100 : amountKesCents;
-      const res = await deposit.mutateAsync({ amount, phone: effectivePhone });
+      const res = await deposit.mutateAsync({ amount, phone: effectivePhone, ...(provider === 'payx' && methodCode ? { method: methodCode } : {}) });
       setTxId(res.transactionId);
       setDone(true);
     } catch (err) {

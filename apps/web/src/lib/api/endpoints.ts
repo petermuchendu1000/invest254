@@ -173,8 +173,8 @@ export const api = {
   createPayheroLipwaDeposit: (token: string, body: { amount: number }) =>
     apiFetch<{ transactionId: string; reference: string; lipwaUrl: string }>('/deposits/payhero/lipwa', { method: 'POST', token, body }),
   // PayX M-Pesa push — same contract as the other STK rails; the sheet polls the transaction until it settles.
-  createPayxDeposit: (token: string, body: { amount: number; phone: string }) =>
-    apiFetch<{ transactionId: string; checkoutRequestId: string }>('/deposits/payx', { method: 'POST', token, body }),
+  createPayxDeposit: (token: string, body: { amount: number; method?: string; phone?: string; email?: string }) =>
+    apiFetch<{ transactionId: string; checkoutRequestId: string; checkoutUrl?: string }>('/deposits/payx', { method: 'POST', token, body }),
   // PayHero manual Pay Bill: claim a payment made to the PayHero paybill by its M-PESA code.
   claimPayheroPaybill: (token: string, body: { code: string }) =>
     apiFetch<PaybillClaimDto>('/deposits/payhero/paybill/claim', { method: 'POST', token, body }),

@@ -3,7 +3,9 @@ import type { PaymentRepository, CompleteResult, CreateWithdrawalResult, Withdra
 import type { DarajaClient } from "./daraja.js";
 import type { MegaPayClient } from "./megapay.js";
 import type { PayHeroClient } from "./payhero.js";
-import { toPaynicornPhone, type PaynicornClient } from "./paynicorn.js";
+import { toPaynicornPhone, methodIsDirect, type PaynicornClient, type PaynicornMethod } from "./paynicorn.js";
+import { paynicornCountry, formatPaynicornAmount } from "./paynicorncountries.js";
+import { kesToCurrencyRate } from "@invest254/shared/fx";
 import { PLAYER_DEPOSIT_RAILS } from "./gatewayschema.js";
 import { parseScope, type GatewayRouter, type OwnerScope, type PaymentScopeRef } from "./paymentscopes.js";
 
@@ -122,6 +124,10 @@ export interface PaymentServiceOptions {
    * accounts never routes here (assertRail refuses it). Absent => Paynicorn deposits refuse loudly.
    */
   paynicorn?: PaynicornClient;
+  /** The ISO-2 country a brand collects in (PayX). Absent/unknown => Kenya, which is how it shipped. */
+  countryForSite?: (siteId: string | undefined) => Promise<string | null>;
+  /** KES -> local-currency multiplier. Absent => the shared live FX table. */
+  fxRateFor?: (currency: string) => Promise<number>;
   /**
    * PAY-1 (docs/43): per-platform / per-brand payment accounts. When present, every money flow of a brand
    * uses its payment OWNER's accounts (site > platform > global), transactions are stamped with the scope,
@@ -152,6 +158,10 @@ export class PaymentService {
   private readonly megapay?: MegaPayClient;
   private readonly payhero?: PayHeroClient;
   private readonly paynicorn?: PaynicornClient;
+  private readonly countryForSite?: (siteId: string | undefined) => Promise<string | null>;
+  private readonly fxRateFor: (currency: string) => Promise<number>;
+  /** Short-lived cache of the live method list, keyed by country+currency. */
+  private readonly methodCache = new Map<string, { at: number; methods: PaynicornMethod[] }>();
   private readonly gateways?: GatewayRouter;
   private readonly events: PaymentEvents;
   private readonly verifyStk: boolean;
@@ -173,6 +183,8 @@ export class PaymentService {
     if (opts.megapay) this.megapay = opts.megapay;
     if (opts.payhero) this.payhero = opts.payhero;
     if (opts.paynicorn) this.paynicorn = opts.paynicorn;
+    if (opts.countryForSite) this.countryForSite = opts.countryForSite;
+    this.fxRateFor = opts.fxRateFor ?? ((c) => kesToCurrencyRate(c));
     if (opts.gateways) this.gateways = opts.gateways;
     this.events = opts.events ?? {};
     // Secure by default: a client can POST to the public STK callback URL, so a raw
@@ -426,27 +438,92 @@ export class PaymentService {
    * Paynicorn `orderId` and the checkout_request_id, so the postback, the query and the reconcile sweep
    * all key on it. Nothing is credited here; the player's sheet polls this tx until it settles.
    */
-  async initiatePaynicornDeposit(userId: string, amountCents: number, phoneRaw: string, siteId?: string): Promise<{ txId: string; checkoutRequestId: string }> {
+  async initiatePaynicornDeposit(
+    userId: string,
+    amountCents: number,
+    siteId?: string,
+    opts: { method?: string; phone?: string; email?: string; frontPage?: string } = {},
+  ): Promise<{ txId: string; checkoutRequestId: string; checkoutUrl?: string }> {
     const owner = await this.ownerOf(siteId);
     if (owner.scope === "global" && !this.paynicorn) throw new Error("PAYNICORN_NOT_CONFIGURED");
-    if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents % 100 !== 0) throw new Error("INVALID_AMOUNT");
+    if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
     const minDep = await this.currentMinDeposit(siteId);
     if (amountCents < minDep) throw new Error("BELOW_MIN");
     const maxDep = await this.currentMaxDeposit();
     if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
-    const msisdn = normalizeMsisdn(phoneRaw);
-    // Brands on their own payment accounts have no Paynicorn account: refused, never routed to the System's.
+
+    const ctx = await this.paynicornContext(siteId);
+    // Collecting in the platform's own currency means the player typed this amount: it must be a whole
+    // unit, as it always has been. A converted amount rounds to the local currency's precision instead.
+    if (ctx.currency === "KES" && amountCents % 100 !== 0) throw new Error("INVALID_AMOUNT");
+
+    // The method must be one this country actually offers, so a client cannot name an arbitrary code.
+    const methods = await this.listPaynicornMethods(siteId);
+    if (!methods.length) throw new Error("PAYNICORN_NO_METHODS");
+    const chosen = opts.method
+      ? methods.find((m) => m.code.toUpperCase() === opts.method!.toUpperCase())
+      : methods[0];
+    if (!chosen) throw new Error("PAYNICORN_METHOD_UNAVAILABLE");
+
+    // Only a phone and an email can ever be supplied to the collection API, so a method needing
+    // anything else must finish on the gateway's own page (docs/53).
+    const direct = methodIsDirect(chosen);
+    const msisdn = opts.phone ? normalizeMsisdn(opts.phone) : null;
+    const wantsPhone = chosen.inputs.some((i) => /phone/i.test(i.type));
+    const wantsEmail = chosen.inputs.some((i) => /email/i.test(i.type));
+    if (direct && wantsPhone && !msisdn) throw new Error("INVALID_PHONE");
+    if (direct && wantsEmail && !opts.email) throw new Error("EMAIL_REQUIRED");
+
     await this.assertRail(owner, "paynicorn");
     const client = this.paynicornClient();
     await this.guardInitiate(userId, "paynicorn", owner.scope);
-    const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn, "paynicorn", siteId);
+    const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn ?? "", "paynicorn", siteId);
     await this.stamp(txId, owner.scope);
+
+    const amount = formatPaynicornAmount((amountCents / 100) * ctx.rate, ctx.decimals);
     const description = `Deposit ${await this.resolveAccountRef(siteId)}`;
     const res = await this.withAbandonOnReject(txId, userId, "paynicorn", () => client.pay({
-      amountCents, orderId: txId, description, payMethod: "MPESA", phone: toPaynicornPhone(msisdn),
+      amount, countryCode: ctx.country, currency: ctx.currency, orderId: txId, description,
+      payMethod: chosen.code,
+      ...(direct && wantsPhone && msisdn ? { phone: toPaynicornPhone(msisdn) } : {}),
+      ...(direct && wantsEmail && opts.email ? { email: opts.email } : {}),
+      ...(opts.frontPage ? { frontPage: opts.frontPage } : {}),
     }));
     await this.repo.attachStk(txId, res.txnId || `paynicorn:${txId}`, txId);
-    return { txId, checkoutRequestId: txId };
+    // A hosted method hands back the page to open; a direct push has none and never leaves our app.
+    return { txId, checkoutRequestId: txId, ...(res.webUrl ? { checkoutUrl: res.webUrl } : {}) };
+  }
+
+  /** The country, local currency, decimals and live KES->local rate a brand collects with. */
+  private async paynicornContext(siteId?: string): Promise<{ country: string; currency: string; decimals: 0 | 1 | 2; rate: number }> {
+    let code: string | null = null;
+    if (this.countryForSite) { try { code = await this.countryForSite(siteId); } catch { code = null; } }
+    const c = paynicornCountry(code) ?? paynicornCountry("KE")!;
+    const rate = c.currency === "KES" ? 1 : await this.fxRateFor(c.currency);
+    if (!(rate > 0)) throw new Error("FX_UNAVAILABLE");
+    return { country: c.code, currency: c.currency, decimals: c.decimals, rate };
+  }
+
+  /**
+   * The methods Paynicorn will actually accept for this brand's country, cached briefly so the deposit
+   * sheet does not call out on every render. A country outside the merchant's console scope returns an
+   * empty list, which simply means PayX offers nothing there.
+   */
+  async listPaynicornMethods(siteId?: string): Promise<PaynicornMethod[]> {
+    if (!this.paynicorn) return [];
+    let ctx: { country: string; currency: string };
+    try { ctx = await this.paynicornContext(siteId); } catch { return []; }
+    const key = `${ctx.country}:${ctx.currency}`;
+    const hit = this.methodCache.get(key);
+    if (hit && Date.now() - hit.at < 60_000) return hit.methods;
+    try {
+      const methods = await this.paynicorn.listMethods(ctx.country, ctx.currency);
+      this.methodCache.set(key, { at: Date.now(), methods });
+      return methods;
+    } catch (err) {
+      console.warn(`[payments] PayX method list failed for ${key}: ${(err as Error).message}`);
+      return hit?.methods ?? [];
+    }
   }
 
   /**
@@ -462,9 +539,13 @@ export class PaymentService {
     // Our orderIds are transaction uuids; anything else is not ours (and would make Postgres throw).
     const tx = UUID_RE.test(pb.orderId) ? await this.repo.getTransaction(pb.orderId) : null;
     if (!tx || tx.kind !== "deposit" || (tx.provider != null && tx.provider !== "paynicorn")) return { txnId: pb.txnId, settled: false };
-    // A signed amount that disagrees with the order we created is never credited (left for review).
-    const kes = Number(pb.amount);
-    if (pb.amount !== "" && Number.isFinite(kes) && Math.round(kes * 100) !== tx.amountCents) throw new Error("PAYNICORN_AMOUNT_MISMATCH");
+    // A signed amount that disagrees with the order is never credited (left for review). Only checkable
+    // when the collection currency IS our own: a converted amount was rounded to the local currency and
+    // the rate has moved since. The authoritative query below is what actually decides either way.
+    const paid = Number(pb.amount);
+    if (pb.currency === "KES" && pb.amount !== "" && Number.isFinite(paid) && Math.round(paid * 100) !== tx.amountCents) {
+      throw new Error("PAYNICORN_AMOUNT_MISMATCH");
+    }
     const q = await client.queryPayment(pb.orderId);
     if (q.processing || q.resultCode == null) return { txnId: pb.txnId, settled: false };
     const res = await this.repo.completeDeposit(pb.orderId, q.resultCode, q.resultCode === 0 ? "verified:paynicorn" : `verified:paynicorn:${q.resultCode}`,
@@ -618,9 +699,9 @@ export class PaymentService {
     const enabled = new Set(providers.map((p) => p.code));
     const methods: DepositMethod[] = [];
 
-    // Paynicorn is an STK rail like the others (a direct M-Pesa push), offered only when its client exists.
-    const payxReady = await this.paynicornAvailable(siteId);
-    const stkProviders = providers.filter((p) => p.code !== "paynicorn" || payxReady);
+    // Every gateway except PayX exposes exactly one STK rail, labelled "M-Pesa" (the gateway brand is
+    // never shown, docs/35).
+    const stkProviders = providers.filter((p) => p.code !== "paynicorn");
     stkProviders.forEach((p, i) => {
       methods.push({
         id: `${p.code}-stk`,
@@ -629,6 +710,24 @@ export class PaymentService {
         label: stkProviders.length > 1 ? `M-Pesa (${i + 1})` : "M-Pesa",
       });
     });
+
+    // PayX is per-COUNTRY: whatever Paynicorn says this brand's country can pay with, each as its own
+    // tab. A country offering only cards shows only a card tab; one offering three shows three. A method
+    // we can collect the inputs for runs in our own form (channel "stk"); anything else has to finish on
+    // the gateway's page (channel "checkout"), because the collection API takes no other input. docs/53.
+    if (enabled.has("paynicorn") && (await this.paynicornAvailable(siteId))) {
+      for (const m of await this.listPaynicornMethods(siteId)) {
+        methods.push({
+          id: `paynicorn-${m.code.toLowerCase()}`,
+          provider: "paynicorn",
+          channel: methodIsDirect(m) ? "stk" : "checkout",
+          label: m.name,
+          methodCode: m.code,
+          fields: m.inputs.map((i) => ({ name: i.name, type: i.type, ...(i.pattern ? { pattern: i.pattern } : {}) })),
+          ...(m.iconUrl ? { iconUrl: m.iconUrl } : {}),
+        });
+      }
+    }
 
     if (enabled.has("payhero") && (await this.lipwaAvailable(siteId))) {
       methods.push({ id: "payhero-lipwa", provider: "payhero", channel: "lipwa", label: "Card & Bank" });
