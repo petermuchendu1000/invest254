@@ -427,6 +427,54 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   // Marketer's own transaction feed (newest-first), each with a ready-to-render M-PESA
   // confirmation. The app polls this to raise "money received" notifications when a game
   // withdrawal lands in the wallet. The token subject IS the marketer id (see requireMarketer).
+  // ── LIVE SESSIONS (0191). Reporting only: attribution is unchanged, these just mark the window
+  //    and report what this marketer already earned inside it. ─────────────────────────────────
+  const liveSite = (ctx: Ctx): string => marketerCtx.get(ctx)!.site_id ?? DEFAULT_SITE_ID;
+  const liveStore = () => {
+    if (!deps.liveSessions) throw new ApiError("LIVE_UNAVAILABLE", "live sessions are not configured", 503);
+    return deps.liveSessions;
+  };
+  /** A refusal the marketer can act on, rather than a 500. */
+  const liveError = (e: unknown): never => {
+    const m = e instanceof Error ? e.message : "";
+    if (m === "LIVE_DISABLED") throw new ApiError("LIVE_DISABLED", "live sessions are off for this brand", 409);
+    if (m === "ALREADY_LIVE") throw new ApiError("ALREADY_LIVE", "a session is already running", 409);
+    if (m === "DAILY_LIMIT_REACHED") throw new ApiError("DAILY_LIMIT_REACHED", "no sessions left today", 409);
+    throw e;
+  };
+
+  /** The marketer's own view: the running session (if any), the brand's rules, and recent history. */
+  router.get(`${BASE}/marketers/me/live`, auth, marketer, async (ctx: Ctx) => {
+    const site = liveSite(ctx);
+    const store = liveStore();
+    const [settings, current, history] = await Promise.all([
+      store.settings(site),
+      store.current(site, ctx.claims!.userId),
+      store.history(site, ctx.claims!.userId, 20),
+    ]);
+    return { settings, current, history };
+  });
+
+  router.post(`${BASE}/marketers/me/live/start`, auth, marketer, async (ctx: Ctx) => {
+    const raw = bodyObj(ctx).streamUrl;
+    const url = typeof raw === "string" ? raw : null;
+    try {
+      return await liveStore().start(liveSite(ctx), ctx.claims!.userId, url);
+    } catch (e) { return liveError(e); }
+  });
+
+  router.post(`${BASE}/marketers/me/live/end`, auth, marketer, async (ctx: Ctx) => {
+    const ended = await liveStore().end(liveSite(ctx), ctx.claims!.userId);
+    if (!ended) throw new ApiError("NOT_LIVE", "no session to end", 409);
+    return ended;
+  });
+
+  router.post(`${BASE}/marketers/me/live/extend`, auth, marketer, async (ctx: Ctx) => {
+    const extended = await liveStore().extend(liveSite(ctx), ctx.claims!.userId);
+    if (!extended) throw new ApiError("NOT_LIVE", "no session to extend", 409);
+    return extended;
+  });
+
   router.get(`${BASE}/marketers/me/transactions`, auth, marketer, async (ctx: Ctx) => {
     // The marketer's brand (loaded by the `marketer` gate) becomes the M-PESA sender on
     // game-withdrawal confirmations, so each white-label client reads its own name (0096).

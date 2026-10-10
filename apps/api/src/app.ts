@@ -261,6 +261,11 @@ export interface ApiDeps {
    */
   brandActivity?: import("./activity.pg.js").BrandActivityStore | undefined;
   /**
+   * Marketer live sessions (0191). Optional: without it the marketer's live routes answer 503
+   * rather than pretending, and no other route changes. REPORTING ONLY — see livesessions.pg.ts.
+   */
+  liveSessions?: import("./livesessions.pg.js").LiveSessionStore | undefined;
+  /**
    * Optional multi-tenant CORS allowance (docs/22, GAP 3): given a request `Origin`, return true if
    * it belongs to an ACTIVE brand domain. Consulted only when `CORS_ALLOWED_ORIGINS` is restricted
    * (not `*`); wired in server.ts to a cached, periodically-refreshed view of `sites`, so every
