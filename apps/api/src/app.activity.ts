@@ -1,6 +1,6 @@
 import { Router, ApiError, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
-import type { BrandActivityItem } from "./activity.pg.js";
+import type { BrandActivityItem, LeaderboardPeriod } from "./activity.pg.js";
 
 const BASE = "/api/v1";
 /** The feed is a glance, not a ledger: a screenful, and never enough to mine. */
@@ -34,5 +34,28 @@ export function registerActivityRoutes(router: Router, deps: ApiDeps): void {
     const limit = Number.isFinite(raw) && raw > 0 ? Math.min(raw, MAX) : DEFAULT;
 
     return { items: await deps.brandActivity.recent(brand.siteId, limit) };
+  });
+
+  /**
+   * `GET /site/leaderboard?host=&period=today|yesterday|week|month` (public) — the Top tab.
+   *
+   * Ranked by NET profit over the window. Ranking by winnings alone would put whoever staked most
+   * at the top whether or not they are up, and a board calling a losing player a top trader is
+   * worse than no board. An unknown period is read as `today` rather than refused: it reaches this
+   * from a tab, and a bad tab should show a board, not an error.
+   */
+  router.get(`${BASE}/site/leaderboard`, async (ctx: Ctx) => {
+    if (!deps.brandActivity) return { items: [] };
+
+    const host = ctx.query.get("host")?.trim().toLowerCase();
+    if (!host) throw new ApiError("VALIDATION", "host query parameter is required", 400);
+    const brand = await deps.brandByHost(host);
+    if (!brand) throw new ApiError("SITE_NOT_FOUND", `no active brand for host '${host}'`, 404);
+
+    const raw = (ctx.query.get("period") ?? "today").toLowerCase();
+    const period: LeaderboardPeriod =
+      raw === "yesterday" || raw === "week" || raw === "month" ? raw : "today";
+
+    return { period, items: await deps.brandActivity.leaderboard(brand.siteId, period, 10) };
   });
 }

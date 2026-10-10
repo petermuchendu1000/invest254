@@ -462,3 +462,11 @@ export interface BrandActivityDto {
   amountCents: number;
   agoSeconds: number;
 }
+
+/** One trader on the Top tab's board (docs/54). Ranked by net profit, name-masked like the feed. */
+export interface LeaderboardRowDto {
+  rank: number;
+  name: string;
+  trades: number;
+  profitCents: number;
+}

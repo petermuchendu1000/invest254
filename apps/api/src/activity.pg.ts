@@ -27,9 +27,29 @@ export interface BrandActivityItem {
   agoSeconds: number;
 }
 
+/** One trader on the board, as the Top tab lists them. */
+export interface LeaderboardRow {
+  rank: number;
+  name: string;
+  trades: number;
+  profitCents: number;
+}
+
+/** The windows the mock's four chips select. */
+export type LeaderboardPeriod = 'today' | 'yesterday' | 'week' | 'month';
+
 export interface BrandActivityStore {
   recent(siteId: string, limit: number): Promise<BrandActivityItem[]>;
+  leaderboard(siteId: string, period: LeaderboardPeriod, limit: number): Promise<LeaderboardRow[]>;
 }
+
+/** Each chip's window, as SQL the query can drop in. Closed at both ends so a day means that day. */
+const WINDOW: Record<LeaderboardPeriod, string> = {
+  today: "o.settled_at >= date_trunc('day', now())",
+  yesterday: "o.settled_at >= date_trunc('day', now()) - interval '1 day' and o.settled_at < date_trunc('day', now())",
+  week: "o.settled_at >= date_trunc('week', now())",
+  month: "o.settled_at >= date_trunc('month', now())",
+};
 
 /**
  * Shorten a username for public display: the first word, capped, with nothing revealing kept.
@@ -90,6 +110,37 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
         name: publicName(x.username as string | null),
         amountCents: Math.max(0, Math.round(Number(x.amount_cents ?? 0))),
         agoSeconds: Math.max(0, Math.round(Number(x.ago_seconds ?? 0))),
+      }));
+    },
+
+    async leaderboard(siteId, period, limit) {
+      /**
+       * Ranked by NET profit over the window, which is the only ranking that is not misleading.
+       *
+       * Ranking by winnings alone would put whoever staked most at the top regardless of whether
+       * they are up or down, and a board that calls a losing player a top trader is worse than no
+       * board. `pnl` is what settlement already wrote per position, so this sums rows rather than
+       * recomputing anything — there is no second opinion about money here.
+       *
+       * Demo and practice are excluded for the same reason they are excluded from the feed.
+       */
+      const r = await q.query(
+        `select p.username, count(*)::int as trades, sum(o.pnl)::bigint as profit_cents
+           from positions o join profiles p on p.id = o.user_id
+          where o.site_id = $1 and o.status = 'settled' and o.settled_at is not null
+            and coalesce(o.demo, false) = false and coalesce(o.practice, false) = false
+            and ${WINDOW[period] ?? WINDOW.today}
+          group by p.username
+         having sum(o.pnl) > 0
+          order by sum(o.pnl) desc
+          limit $2`,
+        [siteId, limit],
+      );
+      return r.rows.map((x, i) => ({
+        rank: i + 1,
+        name: publicName(x.username as string | null),
+        trades: Math.max(0, Math.round(Number(x.trades ?? 0))),
+        profitCents: Math.max(0, Math.round(Number(x.profit_cents ?? 0))),
       }));
     },
   };
