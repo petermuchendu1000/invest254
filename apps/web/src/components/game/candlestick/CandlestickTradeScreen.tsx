@@ -13,6 +13,7 @@ import { ChatPane } from '@/components/game/candlestick/ChatPane';
 import { TopTradersPane } from '@/components/game/candlestick/TopTradersPane';
 import { TournamentsPane } from '@/components/game/candlestick/TournamentsPane';
 import { useLivePrice } from '@/components/game/candlestick/useLivePrice';
+import { CIcon } from '@/components/game/candlestick/icons';
 
 /** The rail's three tabs, and the phone's fourth. */
 type RailTab = 'chat' | 'top' | 'tours';
@@ -63,6 +64,7 @@ export function CandlestickTradeScreen() {
                 phoneTab === t ? 'border-t-2 border-[#22c55e] text-[#22c55e]' : 'text-gray-500',
               )}
             >
+              <CIcon name={t} className="h-[18px] w-[18px]" />
               {t}
             </button>
           ))}
@@ -95,6 +97,7 @@ export function CandlestickTradeScreen() {
                     railTab === t ? 'border-b-2 border-[#22c55e] text-[#22c55e]' : 'text-gray-500 hover:text-white',
                   )}
                 >
+                  <CIcon name={t} className="h-3.5 w-3.5" />
                   {t}
                 </button>
               ))}

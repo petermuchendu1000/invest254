@@ -90,8 +90,8 @@ export interface Brand {
   themeTokens?: Record<string, string> | null;
   /** Per-brand price chart system (0111/0147, ADDON-1): line (free default), area, candlestick, bars, baseline. Presentation only. */
   chartStyle?: import("@invest254/shared").ChartStyle;
-  /** Per-brand trade UI layout (migration 0112): 'classic' (default) or 'digits'. Presentation only. */
-  tradeUi?: "classic" | "digits";
+  /** Per-brand trade UI layout (0112 + 0189): classic (free default), digits, broker, candlestick. Presentation only. */
+  tradeUi?: import("@invest254/shared").TradeUi;
   /**
    * Live display-currency units per 1 KES (KES→currency), e.g. USD≈0.0077. 1 for KES brands.
    * The money of record is ALWAYS KES cents; this only drives how amounts are RENDERED. Resolved

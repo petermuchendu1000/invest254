@@ -11,6 +11,7 @@ import { useWallet } from '@/lib/wallet/hooks';
 import { useNavDrawer } from '@/lib/ui/drawer';
 import { useDisplayMoney } from '@/lib/money';
 import { useCandlestickUi } from '@/components/game/candlestick/ui';
+import { CIcon } from '@/components/game/candlestick/icons';
 
 /**
  * The candlestick screen's header, as the mock draws it: the wordmark and a mode badge on the left
@@ -61,6 +62,7 @@ export function CandlestickTopBar() {
             onClick={toggleDrawer}
             className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 transition-colors hover:bg-amber-400/10 hover:text-amber-400"
           >
+            <CIcon name="top" className="h-3.5 w-3.5" />
             Top Traders
           </button>
           <button
@@ -68,6 +70,7 @@ export function CandlestickTopBar() {
             onClick={toggleDrawer}
             className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 transition-colors hover:bg-[#22c55e]/10 hover:text-[#22c55e]"
           >
+            <CIcon name="tours" className="h-3.5 w-3.5" />
             Tournaments
           </button>
         </nav>

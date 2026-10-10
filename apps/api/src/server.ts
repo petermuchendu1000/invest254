@@ -21,7 +21,7 @@ import { makePgStakeNativeStore } from "./stakelimits.js";
 import { makePgLiveChatStore } from "./livechat.pg.js";
 import { makePgKycStore } from "./kyc.pg.js";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
-import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, MIN_DEPOSIT_CENTS, type VersionedGameConfig, type Cents } from "@invest254/shared";
+import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, tradeUiOf, MIN_DEPOSIT_CENTS, type VersionedGameConfig, type Cents } from "@invest254/shared";
 import { BrandOriginAllowlist } from "./cors.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgReferralRepo } from "./referral.pg.js";
@@ -1037,7 +1037,7 @@ async function buildDeps(): Promise<ApiDeps> {
         theme: String(x.theme) as "dark" | "light" | "auto",
         currency, locale: String(x.locale),
         chartStyle: chartStyleOf(x.chart_style),   // ADDON-1: area / bars / baseline reach players (were coerced to "line")
-        tradeUi: (x.trade_ui === "digits" ? "digits" : "classic"),
+        tradeUi: tradeUiOf(x.trade_ui),
         fxRateFromKes,
         licenceLine: (x.licence_line as string | null) ?? null,
         supportEmail: (x.support_email as string | null) ?? null,
