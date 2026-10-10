@@ -1828,8 +1828,9 @@ export class InMemoryAdminRepository implements AdminRepository {
       if (all.some((x) => x.userId !== targetId && (x.siteId ?? ADMIN_DEFAULT_SITE) === site && x.phone === newPhone)) throw new Error("PHONE_TAKEN");
     }
     if (newName != null) {
+      // Length only. Two players may share a display name (migration 0190) — the phone checked
+      // above is the identity, and an admin renaming someone must not be blocked by a namesake.
       if (newName.length < 2 || newName.length > 40) throw new Error("INVALID_USERNAME");
-      if (all.some((x) => x.userId !== targetId && (x.siteId ?? ADMIN_DEFAULT_SITE) === site && x.username.toLowerCase() === newName.toLowerCase())) throw new Error("USERNAME_TAKEN");
     }
     this.identity.adminSetContact(targetId, newPhone, newName);
     const after = this.identity.adminUser(targetId)!;
