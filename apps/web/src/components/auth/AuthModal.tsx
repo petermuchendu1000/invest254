@@ -451,7 +451,7 @@ export function AuthModal() {
             type={showPw ? 'text' : 'password'}
             autoComplete={isRegister || isReset ? 'new-password' : 'current-password'}
             required
-            placeholder={isRegister || isReset ? 'At least 8 characters' : '••••••••'}
+            placeholder={isRegister || isReset ? 'At least 4 characters' : '••••'}
             leading={<LockIcon />}
             trailing={
               <button
