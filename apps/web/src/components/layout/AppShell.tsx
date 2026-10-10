@@ -21,9 +21,12 @@ import { NotificationBanners } from '@/components/notifications/NotificationBann
 import { RegisterSW } from '@/components/RegisterSW';
 import { MarketerHUD } from '@/components/marketer/MarketerHUD';
 import { MT5Drawer } from '@/components/layout/MT5Drawer';
+import { CandlestickTopBar } from '@/components/layout/CandlestickTopBar';
+import { HowToModal } from '@/components/game/candlestick/HowToModal';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
-import { isTerminalScreen, isTerminalRoute, terminalScreenTitle } from '@/lib/ui/terminalScreen';
+import { isTerminalScreen, isTerminalRoute, terminalScreenTitle, isBrokerTerminalBrand } from '@/lib/ui/terminalScreen';
+import { resolveTradeUi, useTradeUiOverride } from '@/lib/ui/tradeUi';
 import { MT5Screen } from '@/components/mt5/kit';
 import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
 
@@ -31,6 +34,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
+  /** The same answer the screen resolves, from the same place — see lib/ui/tradeUi. */
+  const tradeUi = resolveTradeUi(useTradeUiOverride(), brand.tradeUi);
 
   // The admin console + platform console provide their own chrome (sidebar). Suppress the player
   // top bar / bottom nav / footer there, but keep session bootstrap + SW.
@@ -53,7 +58,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Digits-brand trade surface (trade_ui = 'digits'): the mock's app-like shell — a digits top bar
   // (hamburger nav drawer + wordmark + balance + Deposit) and a Live Chat / AI / Positions bottom
   // nav. Scoped to digits brands only; every other brand keeps the standard TopBar/BottomNav below.
-  if (isTrade && brand.tradeUi === 'digits') {
+  /**
+   * Candlestick-brand trade surface (trade_ui = 'candlestick'): the mock's shell — its own header
+   * and nothing else around the screen. The screen itself carries the rail and, on a phone, the tab
+   * bar, so there is no bottom nav here: a second row of tabs under the mock's own four would be
+   * two navigations stacked.
+   *
+   * Everything a control in that header opens is mounted here, exactly as the digits shell mounts
+   * its own: the deposit and withdraw sheets (WalletModal), the auth modal, the nav drawer and the
+   * account dialogs. The How to sheet is this screen's own.
+   */
+  if (isTrade && tradeUi === 'candlestick') {
+    return (
+      <div className="flex h-dvh flex-col overflow-hidden bg-[#0a0f1c]">
+        <CandlestickTopBar />
+        <NotificationBanners />
+        <main className="relative flex w-full min-h-0 flex-1 flex-col">{children}</main>
+        <HowToModal />
+        <AccountDialogs />
+        <SessionBootstrap />
+        <AuthModal />
+        <WalletModal />
+        <RegisterSW />
+        <MarketerHUD />
+        <MT5Drawer />
+      </div>
+    );
+  }
+
+  if (isTrade && tradeUi === 'digits') {
     return (
       <div className="flex h-dvh flex-col overflow-hidden">
         <DigitsTopBar />
@@ -84,7 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     // A candlestick brand is a TERMINAL: on a wide screen it fills the viewport the way MetaTrader
     // does, rather than sitting in the centred reading column the rest of the site uses. Below `lg`
     // both are the same single mobile-first column.
-    const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
+    const terminal = isBrokerTerminalBrand(tradeUi, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
     return (
       <div className="flex h-dvh flex-col overflow-hidden">
         {/**

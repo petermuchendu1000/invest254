@@ -31,11 +31,13 @@ export interface Brand {
   /** Per-brand price chart system (0111/0147, ADDON-1): line (default), area, candlestick, bars, baseline. */
   chartStyle?: "line" | "area" | "candlestick" | "bars" | "baseline";
   /**
-   * Per-brand trade UI layout: 'classic' (default rise/fall curve terminal) or 'digits' (the
-   * Deriv-style binary/digits broker interface). Presentation/product-shell only; the money of
+   * Per-brand trade UI layout (0112/0189): 'classic' (default rise/fall curve terminal), 'digits'
+   * (the Deriv-style binary/digits broker interface), 'broker' (the MetaTrader-style terminal,
+   * which a candlestick chart_style also selects) or 'candlestick' (the single-screen chart +
+   * trading panel + chat/top/tournaments rail). Presentation/product-shell only; the money of
    * record stays KES cents. Mirrors the chartStyle toggle pattern.
    */
-  tradeUi?: "classic" | "digits";
+  tradeUi?: "classic" | "digits" | "broker" | "candlestick";
   /**
    * Display-currency units per 1 KES (KES→currency), resolved live by the API. 1 for KES brands.
    * The money of record is ALWAYS KES cents; this only drives how amounts are RENDERED. When it is
