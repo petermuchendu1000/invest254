@@ -14,6 +14,7 @@ import { Router, ApiError, serverFrom, type Ctx } from "./http.js";
 import { registerProtectedRoutes } from "./app.payments.js";
 import { registerHistoryRoutes } from "./app.history.js";
 import { registerSiteRoutes } from "./app.site.js";
+import { registerActivityRoutes } from "./app.activity.js";
 import { registerAuthRoutes } from "./app.auth.js";
 import { registerAffiliateRoutes } from "./app.affiliate.js";
 import { registerAdminRoutes } from "./app.admin.js";
@@ -254,6 +255,12 @@ export interface ApiDeps {
   /** Public brand resolution (docs/22 Task E): host (or slug) → the `sites` brand DTO, or null. */
   brandByHost(host: string): Promise<Brand | null>;
   /**
+   * The brand's real recent activity, for the candlestick screen's feed. Optional: absent (as in
+   * every in-memory test app) the route answers with an empty list rather than 404, because an
+   * empty feed is a true statement about a brand nothing has happened on yet.
+   */
+  brandActivity?: import("./activity.pg.js").BrandActivityStore | undefined;
+  /**
    * Optional multi-tenant CORS allowance (docs/22, GAP 3): given a request `Origin`, return true if
    * it belongs to an ACTIVE brand domain. Consulted only when `CORS_ALLOWED_ORIGINS` is restricted
    * (not `*`); wired in server.ts to a cached, periodically-refreshed view of `sites`, so every
@@ -431,6 +438,7 @@ export function createRouter(deps: ApiDeps): Router {
   });
   registerPublicRoutes(router, deps);
   registerSiteRoutes(router, deps);
+  registerActivityRoutes(router, deps);
   registerAuthRoutes(router, deps);
   registerAffiliateRoutes(router, deps);
   registerReferralRoutes(router, deps);

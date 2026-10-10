@@ -19,6 +19,7 @@ import {
 import { makeWalletModeDeps } from "./demo.pg.js";
 import { makePgStakeNativeStore } from "./stakelimits.js";
 import { makePgLiveChatStore } from "./livechat.pg.js";
+import { makePgBrandActivity } from "./activity.pg.js";
 import { makePgKycStore } from "./kyc.pg.js";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
 import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, tradeUiOf, MIN_DEPOSIT_CENTS, type VersionedGameConfig, type Cents } from "@invest254/shared";
@@ -1102,6 +1103,9 @@ async function buildDeps(): Promise<ApiDeps> {
       store: makePgLiveChatStore(q),
       mediaSecret: chatMediaSecret,
     },
+    // The candlestick screen's feed (docs/54): real settled deposits, paid withdrawals and winning
+    // trades for the brand. Read-only, name-masked, and public like /site/brand beside it.
+    brandActivity: makePgBrandActivity(q),
     platformOnboard,
     registrarConfig,
     paymentScopes,

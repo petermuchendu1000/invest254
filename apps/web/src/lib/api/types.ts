@@ -449,3 +449,16 @@ export interface PaybillClaimDto {
   newBalance: number | null;
   txId: string | null;
 }
+
+/**
+ * One real thing that happened on this brand, for the candlestick screen's feed (docs/54).
+ *
+ * Deliberately thin: a first name, an amount and a coarse age. No id, no receipt, no wall-clock
+ * time — the server will not send them, because this is a public endpoint about real people's money.
+ */
+export interface BrandActivityDto {
+  kind: 'deposit' | 'withdrawal' | 'win';
+  name: string;
+  amountCents: number;
+  agoSeconds: number;
+}
