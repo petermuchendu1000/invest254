@@ -42,7 +42,10 @@ export function ChatPane() {
    */
   const { data: activity } = useQuery({
     queryKey: ['siteActivity', brand.slug],
-    queryFn: () => api.siteActivity(brand.slug, 25),
+    // The server caps at 40 and the query has no time filter, so asking for the cap is simply "as
+    // full as this brand's real history allows". On a quiet brand that is still the honest answer:
+    // a short list of things that really happened, rather than a long list of things that did not.
+    queryFn: () => api.siteActivity(brand.slug, 40),
     refetchInterval: 20_000,
     staleTime: 15_000,
   });

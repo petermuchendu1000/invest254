@@ -1,6 +1,7 @@
 import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, rateLimit, adminScopeSite, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import { assertSiteTarget } from "./scope.js";
 import type { ApiDeps } from "./app.js";
+import type { LiveSession } from "./livesessions.pg.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
 
 /**
@@ -458,9 +459,36 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   router.post(`${BASE}/marketers/me/live/start`, auth, marketer, async (ctx: Ctx) => {
     const raw = bodyObj(ctx).streamUrl;
     const url = typeof raw === "string" ? raw : null;
+    const site = liveSite(ctx);
+    let session: LiveSession;
     try {
-      return await liveStore().start(liveSite(ctx), ctx.claims!.userId, url);
+      session = await liveStore().start(site, ctx.claims!.userId, url);
     } catch (e) { return liveError(e); }
+
+    /**
+     * Going live tells the brand's players, in the app.
+     *
+     * This runs AFTER the session exists and never fails the request: a marketer who is about to
+     * stream must not be told "you are not live" because a notification fan-out had a bad minute.
+     * A session with no announcement is a working session; a refused Start Live is not.
+     */
+    try {
+      const brandName = marketerCtx.get(ctx)?.brand_name ?? "We";
+      if (deps.community) await deps.community.announceLive(site, ctx.claims!.userId, session.streamUrl, brandName);
+      if (deps.notifications) {
+        const { title, body } = liveAnnouncement(brandName, session.streamUrl);
+        await deps.notifications.broadcast(
+          ctx.claims!.userId, ctx.claims!.role ?? "marketer", "brand_live",
+          // Every account on THIS brand, players only. The audience is brand-scoped inside
+          // fn_broadcast_notification too, which is what stops one brand reaching another's people.
+          { sites: [site], roles: ["player"] },
+          { title, body },
+        );
+      }
+    } catch {
+      /* announced or not, the session is live — see the note above */
+    }
+    return session;
   });
 
   router.post(`${BASE}/marketers/me/live/end`, auth, marketer, async (ctx: Ctx) => {
@@ -544,4 +572,24 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const okCount = results.filter((r) => r.ok).length;
     return { action, total: ids.length, okCount, failCount: results.length - okCount, results };
   });
+}
+
+/**
+ * The broadcast copy for a live session.
+ *
+ * Persuasive and true: it names the brand, says what is happening, and invites people in. It does
+ * NOT promise a win, imply the session pays better, invent a countdown, or claim others are winning
+ * right now — the lines that turn marketing into misrepresentation on a real-money product.
+ *
+ * The PER-PLAYER version (which also states that player's own balance) is `liveMessage` in
+ * community.pg.ts. This one is the single text a broadcast sends to everyone, so it carries no
+ * figure that would be wrong for anybody.
+ */
+function liveAnnouncement(brandName: string, streamUrl: string | null): { title: string; body: string } {
+  return {
+    title: `${brandName} is live now`,
+    body: streamUrl
+      ? `We are trading live right now. Come and trade along with us: ${streamUrl}`
+      : `We are trading live right now. Come and trade along with us.`,
+  };
 }

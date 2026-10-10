@@ -15,6 +15,7 @@ import { registerProtectedRoutes } from "./app.payments.js";
 import { registerHistoryRoutes } from "./app.history.js";
 import { registerSiteRoutes } from "./app.site.js";
 import { registerActivityRoutes } from "./app.activity.js";
+import { registerCommunityRoutes } from "./app.community.js";
 import { registerAuthRoutes } from "./app.auth.js";
 import { registerAffiliateRoutes } from "./app.affiliate.js";
 import { registerAdminRoutes } from "./app.admin.js";
@@ -265,6 +266,8 @@ export interface ApiDeps {
    * rather than pretending, and no other route changes. REPORTING ONLY — see livesessions.pg.ts.
    */
   liveSessions?: import("./livesessions.pg.js").LiveSessionStore | undefined;
+  /** The per-brand community channel (0192). Absent -> the /community routes answer 501. */
+  community?: import("./community.pg.js").CommunityStore | undefined;
   /**
    * Optional multi-tenant CORS allowance (docs/22, GAP 3): given a request `Origin`, return true if
    * it belongs to an ACTIVE brand domain. Consulted only when `CORS_ALLOWED_ORIGINS` is restricted
@@ -444,6 +447,7 @@ export function createRouter(deps: ApiDeps): Router {
   registerPublicRoutes(router, deps);
   registerSiteRoutes(router, deps);
   registerActivityRoutes(router, deps);
+  registerCommunityRoutes(router, deps);
   registerAuthRoutes(router, deps);
   registerAffiliateRoutes(router, deps);
   registerReferralRoutes(router, deps);
