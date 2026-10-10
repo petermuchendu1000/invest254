@@ -14,6 +14,7 @@ import { Router, ApiError, serverFrom, type Ctx } from "./http.js";
 import { registerProtectedRoutes } from "./app.payments.js";
 import { registerHistoryRoutes } from "./app.history.js";
 import { registerSiteRoutes } from "./app.site.js";
+import { registerActivityRoutes } from "./app.activity.js";
 import { registerAuthRoutes } from "./app.auth.js";
 import { registerAffiliateRoutes } from "./app.affiliate.js";
 import { registerAdminRoutes } from "./app.admin.js";
@@ -90,8 +91,8 @@ export interface Brand {
   themeTokens?: Record<string, string> | null;
   /** Per-brand price chart system (0111/0147, ADDON-1): line (free default), area, candlestick, bars, baseline. Presentation only. */
   chartStyle?: import("@invest254/shared").ChartStyle;
-  /** Per-brand trade UI layout (migration 0112): 'classic' (default) or 'digits'. Presentation only. */
-  tradeUi?: "classic" | "digits";
+  /** Per-brand trade UI layout (0112 + 0189): classic (free default), digits, broker, candlestick. Presentation only. */
+  tradeUi?: import("@invest254/shared").TradeUi;
   /**
    * Live display-currency units per 1 KES (KES→currency), e.g. USD≈0.0077. 1 for KES brands.
    * The money of record is ALWAYS KES cents; this only drives how amounts are RENDERED. Resolved
@@ -253,6 +254,12 @@ export interface ApiDeps {
   fairnessById(gameDayId: number): Promise<FairnessRecord | null>;
   /** Public brand resolution (docs/22 Task E): host (or slug) → the `sites` brand DTO, or null. */
   brandByHost(host: string): Promise<Brand | null>;
+  /**
+   * The brand's real recent activity, for the candlestick screen's feed. Optional: absent (as in
+   * every in-memory test app) the route answers with an empty list rather than 404, because an
+   * empty feed is a true statement about a brand nothing has happened on yet.
+   */
+  brandActivity?: import("./activity.pg.js").BrandActivityStore | undefined;
   /**
    * Optional multi-tenant CORS allowance (docs/22, GAP 3): given a request `Origin`, return true if
    * it belongs to an ACTIVE brand domain. Consulted only when `CORS_ALLOWED_ORIGINS` is restricted
@@ -431,6 +438,7 @@ export function createRouter(deps: ApiDeps): Router {
   });
   registerPublicRoutes(router, deps);
   registerSiteRoutes(router, deps);
+  registerActivityRoutes(router, deps);
   registerAuthRoutes(router, deps);
   registerAffiliateRoutes(router, deps);
   registerReferralRoutes(router, deps);

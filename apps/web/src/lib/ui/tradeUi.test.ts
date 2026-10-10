@@ -27,3 +27,17 @@ test('isTradeUi accepts exactly the four layouts that exist', () => {
   for (const v of TRADE_UIS) assert.equal(isTradeUi(v), true);
   for (const v of [null, undefined, 1, 'Classic', 'mt5']) assert.equal(isTradeUi(v), false);
 });
+
+test('the layout list is the shared one, so the API and the screen cannot disagree', async () => {
+  // The regression this guards: the API mapped trade_ui with its own ternary and served `classic`
+  // for every value added after `digits`, so a brand set to `candlestick` rendered the old screen.
+  const shared = await import('@invest254/shared/chart');
+  assert.deepEqual([...TRADE_UIS], [...shared.TRADE_UIS]);
+  assert.equal(shared.tradeUiOf('candlestick'), 'candlestick');
+  assert.equal(shared.tradeUiOf('broker'), 'broker');
+  assert.equal(shared.tradeUiOf('digits'), 'digits');
+  // Unknown values fall back to the FREE default, never to a paid layout.
+  assert.equal(shared.tradeUiOf('mt5'), 'classic');
+  assert.equal(shared.tradeUiOf(null), 'classic');
+  assert.equal(shared.tradeUiOf(undefined), 'classic');
+});

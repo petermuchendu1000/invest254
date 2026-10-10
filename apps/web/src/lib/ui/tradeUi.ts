@@ -1,13 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { TRADE_UIS, type TradeUi } from '@invest254/shared/chart';
 
-/** Every trade-screen layout a brand can wear (migrations 0112, 0189). */
-export const TRADE_UIS = ['classic', 'digits', 'broker', 'candlestick'] as const;
-export type TradeUi = (typeof TRADE_UIS)[number];
+/**
+ * Every trade-screen layout a brand can wear, from the ONE list (packages/shared/chart).
+ *
+ * It was a second copy here. The API kept a third, as a ternary that collapsed anything newer than
+ * `digits` to `classic`, so a brand set to `candlestick` in the database was served `classic` — the
+ * reason this is now imported rather than written out again.
+ */
+export { TRADE_UIS, type TradeUi } from '@invest254/shared/chart';
 
 /** Is this one of the layouts we actually have? Guards a query param and a database value alike. */
-export const isTradeUi = (v: unknown): v is TradeUi => TRADE_UIS.includes(v as TradeUi);
+export const isTradeUi = (v: unknown): v is TradeUi => (TRADE_UIS as readonly unknown[]).includes(v);
 
 /**
  * The layout to render: the preview override if there is a valid one, else the brand's own, else

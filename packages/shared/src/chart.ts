@@ -145,6 +145,25 @@ export type ChartStyle = (typeof CHART_STYLES)[number];
 export function chartStyleOf(v: unknown): ChartStyle {
   return (CHART_STYLES as readonly unknown[]).includes(v) ? (v as ChartStyle) : "line";
 }
+/**
+ * The trade-screen layouts a brand can wear (sites.trade_ui, 0112 + 0189).
+ *
+ * One list, because three places read the same column and they must agree: the API's brand DTO, the
+ * trade screen, and the shell around it. It lived as a hard-coded ternary in the API
+ * (`x.trade_ui === "digits" ? "digits" : "classic"`), which silently collapsed every value added
+ * after it to `classic` — a brand set to `candlestick` in the database was served `classic` and
+ * rendered the old screen.
+ *
+ * Unknown values fall back to `classic`, the free default, never to a paid layout: the column is
+ * CHECK-constrained, but a row written before a value was removed, or a hand-edited one, must not
+ * hand a brand a layout it is not entitled to.
+ */
+export const TRADE_UIS = ["classic", "digits", "broker", "candlestick"] as const;
+export type TradeUi = (typeof TRADE_UIS)[number];
+export function tradeUiOf(v: unknown): TradeUi {
+  return (TRADE_UIS as readonly unknown[]).includes(v) ? (v as TradeUi) : "classic";
+}
+
 /** The TradingView series a chart system opens with (null = the canvas line curve). */
 export function tradingViewTypeOf(style: ChartStyle): "candles" | "bars" | "area" | "baseline" | null {
   return style === "candlestick" ? "candles" : style === "line" ? null : style;

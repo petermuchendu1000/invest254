@@ -1,5 +1,7 @@
 import { apiFetch } from '@/lib/api/client';
 import type {
+  BrandActivityDto,
+  LeaderboardRowDto,
   MarketerProfileDto,
   AffiliateEnrollment,
   AffiliateSummary,
@@ -70,6 +72,15 @@ export const api = {
   // ITS live economy (site_game_config) — the same limits/cap the engine enforces. Omitting it
   // falls back to the default brand server-side.
   gameConfig: (site?: string) => apiFetch<GameConfigDto>('/game/config', site ? { query: { site } } : {}),
+  /**
+   * The brand's real recent activity (docs/54): settled deposits, paid withdrawals, winning trades.
+   * Public — the candlestick screen shows it before login, which is when it matters most.
+   */
+  siteActivity: (host: string, limit?: number) =>
+    apiFetch<{ items: BrandActivityDto[] }>('/site/activity', { query: limit ? { host, limit: String(limit) } : { host } }),
+  /** The Top tab's board: real traders ranked by net profit over the chosen window (docs/54). */
+  siteLeaderboard: (host: string, period: string) =>
+    apiFetch<{ period: string; items: LeaderboardRowDto[] }>('/site/leaderboard', { query: { host, period } }),
 
 
   // Auth & profile
