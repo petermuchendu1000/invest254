@@ -82,3 +82,23 @@ export function terminalScreenTitle(pathname: string | null | undefined): string
   const parent = OWN_TITLE_BAR.find((p) => underPrefix(path, p));
   return parent === undefined ? null : parent.slice(1).replace(/^./, (c) => c.toUpperCase());
 }
+
+/**
+ * Does this brand wear the BROKER terminal (MetaTrader chrome, Market Watch, order ticket)?
+ *
+ * Two independent routes reach it, and both have to be read the same way in the two places that
+ * decide — the screen (`TradeSurface`) and the shell around it (`AppShell`):
+ *
+ *  - `trade_ui = 'broker'` names it outright (migration 0189);
+ *  - a TradingView `chart_style` selects it too, which is the ONLY way it could be reached before
+ *    0189 gave it a name. Every candlestick brand live today arrives this way, so dropping that
+ *    route would silently move them to another screen.
+ *
+ * Pure, and takes the chart answer already computed rather than the raw style, so it can be tested
+ * without a brand, a provider or the charting library. `trade_ui = 'candlestick'` is NOT this: that
+ * is the single-screen layout, which has no MetaTrader chrome at all.
+ */
+export const isBrokerTerminalBrand = (
+  tradeUi: string | null | undefined,
+  chartIsTradingView: boolean,
+): boolean => tradeUi === 'broker' || (tradeUi !== 'candlestick' && tradeUi !== 'digits' && chartIsTradingView);

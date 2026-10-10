@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isTerminalRoute, isTerminalScreen, TERMINAL_ROUTES } from './terminalScreen.js';
+import { isTerminalRoute, isTerminalScreen, isBrokerTerminalBrand, TERMINAL_ROUTES } from './terminalScreen.js';
 
 /**
  * Which routes wear MetaTrader's chrome.
@@ -56,4 +56,25 @@ test('the brand half is unchanged: a candlestick brand, and never a Basic skin',
   assert.equal(isTerminalScreen(true, false), true);
   assert.equal(isTerminalScreen(true, true), false, 'MetaTrader chrome is the opposite of what Basic is for');
   assert.equal(isTerminalScreen(false, false), false);
+});
+
+test('isBrokerTerminalBrand: named outright, or reached by a TradingView chart as it always was', () => {
+  // The name selects the terminal whatever the chart is — that is the point of giving it one.
+  assert.equal(isBrokerTerminalBrand('broker', false), true);
+  assert.equal(isBrokerTerminalBrand('broker', true), true);
+
+  // The route every candlestick brand live today arrives by: no trade_ui set, a TradingView chart.
+  assert.equal(isBrokerTerminalBrand(undefined, true), true);
+  assert.equal(isBrokerTerminalBrand(null, true), true);
+  assert.equal(isBrokerTerminalBrand('classic', true), true);
+
+  // A line brand is not a terminal, however it is asked.
+  assert.equal(isBrokerTerminalBrand('classic', false), false);
+  assert.equal(isBrokerTerminalBrand(undefined, false), false);
+
+  // The two screens that are emphatically NOT the terminal keep their own layout even on a
+  // candlestick chart — which is exactly the case the new screen runs in, and the regression that
+  // would otherwise hand it MetaTrader's chrome.
+  assert.equal(isBrokerTerminalBrand('candlestick', true), false);
+  assert.equal(isBrokerTerminalBrand('digits', true), false);
 });

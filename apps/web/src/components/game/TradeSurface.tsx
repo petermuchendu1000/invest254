@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { PriceHeader } from '@/components/game/PriceHeader';
@@ -13,7 +12,10 @@ import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
 import { MT5Chrome } from '@/components/game/MT5Chrome';
 import { cn } from '@/lib/cn';
 import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
+import { CandlestickTradeScreen } from '@/components/game/candlestick/CandlestickTradeScreen';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
+import { isBrokerTerminalBrand } from '@/lib/ui/terminalScreen';
+import { resolveTradeUi, useTradeUiOverride } from '@/lib/ui/tradeUi';
 import { useRestoreSymbolSet } from '@/lib/game/symbolSet';
 import { useRestoreChartSymbol, useQuoteSubscription } from '@/lib/game/chartSymbol';
 import { MT5MobileShell } from '@/components/game/mobile/MT5MobileShell';
@@ -25,6 +27,10 @@ import { useGameSocket } from '@/lib/game/GameSocketProvider';
  * Chooses the trade layout for the current brand:
  *  - 'classic' (default): the rise/fall curve terminal (PriceHeader + ticker + chart + BetPanel).
  *  - 'digits': the Deriv-style binary/digits broker screen.
+ *  - 'broker': the MetaTrader-style terminal. A TradingView chart_style selects it too, which is how
+ *    it was reached before it had a name of its own; naming it lets a brand wear the terminal
+ *    without that being a side effect of which chart it bought.
+ *  - 'candlestick': the single-screen layout — chart, trading panel, and a chat/top/tours rail.
  *
  * The brand value (`brand.tradeUi`) is the source of truth once the per-client toggle is wired in
  * the platform console. A `?ui=digits` / `?ui=classic` query param (persisted to localStorage) is a
@@ -33,23 +39,15 @@ import { useGameSocket } from '@/lib/game/GameSocketProvider';
 export function TradeSurface() {
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
-  const [override, setOverride] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const q = new URLSearchParams(window.location.search).get('ui');
-      if (q) window.localStorage.setItem('pp:tradeUi', q);
-      setOverride(q ?? window.localStorage.getItem('pp:tradeUi'));
-    } catch {
-      /* SSR / no window — fall back to the brand value */
-    }
-  }, []);
-
-  const ui = override ?? brand.tradeUi ?? 'classic';
+  /**
+   * The override is read in ONE place now (lib/ui/tradeUi) because the shell has to resolve the same
+   * answer: it was read here only, so `?ui=candlestick` drew the new screen inside the old header.
+   */
+  const ui = resolveTradeUi(useTradeUiOverride(), brand.tradeUi);
   // The interface gear lives inside the chart on BOTH shells now — the candlestick toolbar
   // (CandleChart) and the wave's top-right corner (GameCurve) — so this screen no longer spends a
   // row of a viewport-locked phone layout on it.
-  const isTerminalBrand = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
+  const isTerminalBrand = isBrokerTerminalBrand(ui, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
 
   /**
    * The symbol preferences, restored and subscribed in ONE place for the whole screen.
@@ -94,6 +92,7 @@ export function TradeSurface() {
   useQuoteSubscription(isTerminalBrand && !isMarketer);
 
   if (ui === 'digits') return <DigitsTradeScreen />;
+  if (ui === 'candlestick') return <CandlestickTradeScreen />;
 
   const terminal = isTerminalBrand && !isMarketer;
 
