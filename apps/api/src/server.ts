@@ -643,6 +643,13 @@ async function buildDeps(): Promise<ApiDeps> {
     megapay,
     payhero,
     paynicorn,
+    // PayX is per-country: the brand's collection country decides its methods, currency and decimals
+    // (migration 0188). Unset/unknown => Kenya, which is how every brand collected before this.
+    countryForSite: async (siteId) => {
+      if (!siteId) return null;
+      const r = await q.query("select country from sites where id = $1", [siteId]);
+      return (r.rows[0]?.country as string | null) ?? null;
+    },
     // PAY-1: every money flow of a brand uses its payment OWNER's accounts (docs/43).
     gateways: paymentScopes,
     // Site-aware STK AccountReference (multi-tenant): "Account no. <Brand>" per depositing brand.

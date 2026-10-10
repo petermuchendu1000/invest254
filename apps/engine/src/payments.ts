@@ -64,9 +64,18 @@ export interface DepositMethod {
   /** The gateway serving this channel (`mpesa` | `megapay` | `payhero` | `paynicorn`) — internal, never displayed. */
   provider: string;
   /** Which rail of that gateway this is. */
-  channel: "stk" | "lipwa" | "paybill";
+  channel: "stk" | "lipwa" | "paybill" | "checkout";
   /** What the player sees, e.g. "M-Pesa", "Card & Bank", "Pay Bill". */
   label: string;
+  /**
+   * Gateway-side method code to send back on initiate (PayX only). Generic by nature — "MPESA",
+   * "CARD" — so it names a payment method, never the supplier behind it.
+   */
+  methodCode?: string;
+  /** Fields this method needs from the player. Empty/absent => nothing to collect in our own form. */
+  fields?: Array<{ name: string; type: string; pattern?: string }>;
+  /** Method logo the gateway publishes, for the tab. */
+  iconUrl?: string;
 }
 
 export interface PaymentRepository {

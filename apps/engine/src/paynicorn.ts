@@ -13,7 +13,11 @@ import type { Cents } from "@invest254/shared";
  *     { content: base64(JSON(bizReq)), sign: md5(content + merchantSecret), appKey }
  *   and answers { responseCode:"000000", responseMessage, content, sign } (failures carry only the code).
  *   The response `sign` is verified the same way before `content` is decoded (docs/overview/authorization).
- *   pay   {amount, countryCode:"KE", currency:"KES", orderId, orderDescription, payMethod:"MPESA", phone}
+ *   method {countryCode, currency, txnType:"payment"} -> methodInfo[] — the methods this merchant may
+ *         collect with in that country, each carrying the `inputs` it needs (name/type/regex). This is
+ *         the ONLY source of truth: the published method appendix is empty, and a country outside the
+ *         merchant's console country scope answers with an empty list (code 101016).
+ *   pay   {amount, countryCode, currency, orderId, orderDescription, payMethod?, phone?, email?}
  *         -> {code, message, txnId, status:"1"|"-1"|"0", webUrl:null}
  *         Naming the method AND the payer's phone skips Paynicorn's cashier page entirely: Paynicorn
  *         sends the M-Pesa prompt itself and webUrl comes back null (verified live, 2026-10-09). Players
@@ -30,15 +34,45 @@ export const PAYNICORN_DEFAULT_BASE = "https://api.paynicorn.com";
 export const PAYNICORN_OK = "000000";
 
 export interface PaynicornPayArgs {
-  amountCents: Cents;
+  /** Local-currency MAJOR amount, already formatted to the country's decimals (formatPaynicornAmount). */
+  amount: string;
+  /** ISO-2 country the collection happens in. */
+  countryCode: string;
+  /** That country's local currency. */
+  currency: string;
   orderId: string;
   description: string;
-  /** Payment method code, e.g. "MPESA". With `phone` it skips the cashier and pushes the prompt directly. */
+  /** Payment method code, e.g. "MPESA". Set it to skip Paynicorn's method-selection page. */
   payMethod?: string;
-  /** Payer's phone WITHOUT the country code (Kenya: 9 digits, e.g. "712345678"). */
+  /** Payer's phone WITHOUT the country code. Supplying it skips the cashier's phone page. */
   phone?: string;
-  /** Where a cashier page (when one is used) sends the browser after payment. */
+  /** Payer's email. Supplying it skips the cashier's email page. */
+  email?: string;
+  /** Where the cashier (when one is used) sends the browser after payment. */
   frontPage?: string;
+}
+
+/** One field a method needs from the payer, as Paynicorn's own cashier would collect it. */
+export interface PaynicornMethodInput {
+  /** Field key, e.g. "Phone_KE". */
+  name: string;
+  /** Field kind, e.g. "Phone", "Email". Drives which control we render. */
+  type: string;
+  /** Validation regex Paynicorn supplies for this field, when it supplies one. */
+  pattern?: string;
+}
+
+/** A payment method available for one country+currency, as the live `method` endpoint reports it. */
+export interface PaynicornMethod {
+  code: string;
+  name: string;
+  /** WALLET | BANK | CARD | OTHERS … */
+  methodType: string;
+  iconUrl?: string;
+  /** Local-currency MAJOR bounds, when Paynicorn states them. */
+  minAmount?: number | null;
+  maxAmount?: number | null;
+  inputs: PaynicornMethodInput[];
 }
 export interface PaynicornPayResult { txnId: string; webUrl: string; status: string }
 /** Normalised status: resultCode 0 when paid, non-zero when failed, null while still processing. */
@@ -50,6 +84,8 @@ export interface PaynicornPostback {
 }
 
 export interface PaynicornClient {
+  /** The methods this merchant may collect with in a country. Empty = country not in scope / none open. */
+  listMethods(countryCode: string, currency: string): Promise<PaynicornMethod[]>;
   pay(a: PaynicornPayArgs): Promise<PaynicornPayResult>;
   /** Authoritative server-to-server status check — used to verify postbacks and to reconcile. */
   queryPayment(orderId: string): Promise<PaynicornStatusResult>;
@@ -79,6 +115,39 @@ export function decodeContent(contentBase64: string): Record<string, unknown> {
 export function centsToPaynicornAmount(c: Cents): string {
   if (!Number.isInteger(c) || c <= 0 || c % 100 !== 0) throw new Error("PAYNICORN_AMOUNT_NOT_WHOLE_KES");
   return String(c / 100);
+}
+
+/** Map one raw `methodInfo` entry onto our shape, dropping anything unusable. */
+export function toPaynicornMethod(row: any): PaynicornMethod | null {
+  const code = row?.code == null ? "" : String(row.code).trim();
+  if (!code) return null;
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const inputs: PaynicornMethodInput[] = Array.isArray(row.inputs)
+    ? row.inputs.flatMap((i: any) => {
+        const name = i?.name == null ? "" : String(i.name).trim();
+        if (!name) return [];
+        const pattern = i?.reg == null || String(i.reg) === "" ? undefined : String(i.reg);
+        return [{ name, type: String(i?.type ?? "Text"), ...(pattern ? { pattern } : {}) }];
+      })
+    : [];
+  return {
+    code,
+    name: row.name == null || String(row.name).trim() === "" ? code : String(row.name).trim(),
+    methodType: String(row.methodType ?? "OTHERS"),
+    ...(row.icon ? { iconUrl: String(row.icon) } : {}),
+    minAmount: num(row.minAmount),
+    maxAmount: num(row.maxAmount),
+    inputs,
+  };
+}
+
+/**
+ * True when every field this method needs is something our own form can collect (a phone and/or an
+ * email). Those are the ONLY two payer inputs the collection API accepts, so any other field — a bank
+ * account, a card — can only be entered on Paynicorn's hosted cashier. docs/53.
+ */
+export function methodIsDirect(m: PaynicornMethod): boolean {
+  return m.inputs.every((i) => /phone/i.test(i.type) || /email/i.test(i.type));
 }
 
 /** Paynicorn wants the payer's phone without the country code: a Kenyan MSISDN as its 9 local digits. */
@@ -134,10 +203,19 @@ export class StubPaynicornClient implements PaynicornClient {
   private n = 0;
   /** Status the stub reports for every query ("1" paid by default). */
   constructor(public queryStatus: "1" | "-1" | "0" = "1") {}
+  /** Methods the stub reports. Tests overwrite it to model any country. */
+  methods: PaynicornMethod[] = [
+    { code: "MPESA", name: "M-Pesa", methodType: "WALLET", minAmount: 1, maxAmount: null,
+      inputs: [{ name: "Phone_KE", type: "Phone", pattern: "^[0]?\\d{9}$" }] },
+  ];
+  async listMethods(_countryCode: string, _currency: string): Promise<PaynicornMethod[]> {
+    return this.methods.map((m) => ({ ...m, inputs: [...m.inputs] }));
+  }
   async pay(a: PaynicornPayArgs): Promise<PaynicornPayResult> {
     const i = ++this.n;
-    // Direct push (method + phone) has no page to open, exactly like the live API.
-    const webUrl = a.payMethod && a.phone ? "" : `https://cashier.paynicorn.stub/pay?order=${encodeURIComponent(a.orderId)}`;
+    // A direct push (method + the inputs it needs) has no page to open, exactly like the live API.
+    const direct = Boolean(a.payMethod && (a.phone || a.email));
+    const webUrl = direct ? "" : `https://cashier.paynicorn.stub/pay?order=${encodeURIComponent(a.orderId)}`;
     return { txnId: `stub-pn-${i}`, webUrl, status: "-1" };
   }
   async queryPayment(orderId: string): Promise<PaynicornStatusResult> {
@@ -177,17 +255,30 @@ export class HttpPaynicornClient implements PaynicornClient {
     return decodeContent(j.content);
   }
 
+  /**
+   * The methods open to this merchant in a country. A country outside the console's country scope
+   * answers 000000 with an empty list (business code 101016), which we surface as [] rather than an
+   * error: "no methods here" is a normal answer the deposit sheet handles by offering nothing.
+   */
+  async listMethods(countryCode: string, currency: string): Promise<PaynicornMethod[]> {
+    const out = await this.call("method", { countryCode, currency, txnType: "payment" });
+    const rows: any[] = Array.isArray(out.methodInfo) ? out.methodInfo : [];
+    return rows.map(toPaynicornMethod).filter((m): m is PaynicornMethod => m !== null);
+  }
+
   async pay(a: PaynicornPayArgs): Promise<PaynicornPayResult> {
     const req: Record<string, unknown> = {
-      amount: centsToPaynicornAmount(a.amountCents),
-      countryCode: "KE",
-      currency: "KES",
+      amount: a.amount,
+      countryCode: a.countryCode,
+      currency: a.currency,
       orderId: a.orderId,
       orderDescription: a.description,
     };
-    const direct = Boolean(a.payMethod && a.phone);
+    // Direct = we supplied the method AND an input that lets Paynicorn skip its own page.
+    const direct = Boolean(a.payMethod && (a.phone || a.email));
     if (a.payMethod) req.payMethod = a.payMethod;
     if (a.phone) req.phone = a.phone;
+    if (a.email) req.email = a.email;
     const front = a.frontPage ?? this.cfg.frontPage;
     if (front && !direct) req.cpFrontPage = front;
     const out = await this.call("pay", req);
@@ -221,6 +312,8 @@ export class HttpPaynicornClient implements PaynicornClient {
 export class UnconfiguredPaynicornClient implements PaynicornClient {
   constructor(private readonly missing: readonly string[] = []) {}
   private fail(): never { throw new Error(`PAYNICORN_NOT_CONFIGURED${this.missing.length ? `:${this.missing.join(",")}` : ""}`); }
+  /** Nothing configured => no methods anywhere; the sheet simply offers none (never throws). */
+  async listMethods(): Promise<PaynicornMethod[]> { return []; }
   async pay(_a: PaynicornPayArgs): Promise<PaynicornPayResult> { return this.fail(); }
   async queryPayment(_o: string): Promise<PaynicornStatusResult> { return this.fail(); }
   async verifyPostback(_b: unknown): Promise<PaynicornPostback | null> { return null; }
@@ -281,6 +374,7 @@ export class ConfiguredPaynicornClient implements PaynicornClient {
     if (!this.cache || this.cache.fp !== fp) this.cache = { fp, client: makePaynicornClientFromConfig(clean, this.env) };
     return this.cache.client;
   }
+  async listMethods(countryCode: string, currency: string): Promise<PaynicornMethod[]> { return (await this.pick()).listMethods(countryCode, currency); }
   async pay(a: PaynicornPayArgs): Promise<PaynicornPayResult> { return (await this.pick()).pay(a); }
   async queryPayment(orderId: string): Promise<PaynicornStatusResult> { return (await this.pick()).queryPayment(orderId); }
   async verifyPostback(body: unknown): Promise<PaynicornPostback | null> { return (await this.pick()).verifyPostback(body); }

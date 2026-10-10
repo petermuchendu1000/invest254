@@ -92,9 +92,17 @@ export function DepositPanel() {
         </div>
       ) : null}
       {activeMethod?.channel === 'stk' ? (
-        <DepositForm key={activeMethod.id} provider={activeMethod.provider as 'mpesa' | 'megapay' | 'payhero' | 'payx'} />
+        <DepositForm
+          key={activeMethod.id}
+          provider={activeMethod.provider as 'mpesa' | 'megapay' | 'payhero' | 'payx'}
+          {...(activeMethod.methodCode ? { methodCode: activeMethod.methodCode } : {})}
+        />
       ) : null}
       {activeMethod?.channel === 'lipwa' ? <LipwaDeposit key={activeMethod.id} /> : null}
+      {/* A method the server says it cannot push directly finishes on an embedded checkout. */}
+      {activeMethod?.channel === 'checkout' ? (
+        <LipwaDeposit key={activeMethod.id} rail="payx" {...(activeMethod.methodCode ? { methodCode: activeMethod.methodCode } : {})} />
+      ) : null}
       {activeMethod?.channel === 'paybill' ? <PayBillDeposit key={activeMethod.id} /> : null}
     </div>
   );

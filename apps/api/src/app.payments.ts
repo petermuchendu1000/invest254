@@ -329,9 +329,17 @@ export function registerProtectedRoutes(router: Router, deps: ApiDeps): void {
       throw new ApiError("PROVIDER_DISABLED", "This payment method is not available.", 403);
     const body = asObject(ctx.body);
     const amount = requireIntAmount(body);
-    const phone = requirePhone(body);
-    const out = await domain(() => deps.payments.initiatePaynicornDeposit(ctx.claims!.userId, amount, phone, ctx.siteId), ctx);
-    return { status: 202, body: { transactionId: out.txId, checkoutRequestId: out.checkoutRequestId } };
+    // `method` names one of the methods this brand's country offers; the service refuses any other.
+    // A method we can collect for takes the phone/email here; one that cannot hands back a checkout URL.
+    const method = typeof body.method === "string" && body.method.trim() !== "" ? body.method.trim() : undefined;
+    const phone = typeof body.phone === "string" && body.phone.trim() !== "" ? requirePhone(body) : undefined;
+    const email = typeof body.email === "string" && body.email.trim() !== "" ? body.email.trim() : undefined;
+    const origin = String(ctx.req.headers.origin ?? "").replace(/\/+$/, "");
+    const frontPage = /^https:\/\/[^/\s]+$/.test(origin) && deps.corsAllowOrigin?.(origin) ? `${origin}/wallet` : undefined;
+    const out = await domain(() => deps.payments.initiatePaynicornDeposit(ctx.claims!.userId, amount, ctx.siteId, {
+      ...(method ? { method } : {}), ...(phone ? { phone } : {}), ...(email ? { email } : {}), ...(frontPage ? { frontPage } : {}),
+    }), ctx);
+    return { status: 202, body: { transactionId: out.txId, checkoutRequestId: out.checkoutRequestId, ...(out.checkoutUrl ? { checkoutUrl: out.checkoutUrl } : {}) } };
   });
 
   // PayHero manual Pay Bill — the player paid the PayHero paybill directly, then submits the M-PESA code.
