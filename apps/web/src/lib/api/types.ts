@@ -470,3 +470,29 @@ export interface LeaderboardRowDto {
   trades: number;
   profitCents: number;
 }
+
+/** One live session and what it earned (docs/55). Earnings are a REPORT over existing attribution. */
+export interface LiveSessionDto {
+  id: string;
+  startedAt: string;
+  endsAt: string;
+  endedAt: string | null;
+  streamUrl: string | null;
+  marginMinutes: number;
+  live: boolean;
+  earnedCents: number;
+  deposits: number;
+}
+
+/** The brand's live rules, the running session (if any), and recent history. */
+export interface MarketerLiveDto {
+  settings: {
+    enabled: boolean;
+    sessionMinutes: number;
+    marginMinutes: number;
+    extendMinutes: number;
+    maxSessionsDaily: number;
+  };
+  current: LiveSessionDto | null;
+  history: LiveSessionDto[];
+}

@@ -571,6 +571,41 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return { currency: cur, min: nat?.min ?? null, max: nat?.max ?? null,
       minStakeCents: cfg?.minStakeCents ?? null, maxStakeCents: cfg?.maxStakeCents ?? null };
   };
+  // ── Live sessions (0191): the rules a marketer's Start Live obeys. Platform admin owns them;
+  //    the marketer only starts and stops. Reporting only — none of this moves money. ──────────
+  router.get(`${BASE}/platform/sites/:id/live-settings`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    if (!deps.liveSessions) throw new ApiError("NOT_AVAILABLE", "live sessions are not available", 501);
+    return deps.liveSessions.settings(ctx.params.id!);
+  });
+
+  router.put(`${BASE}/platform/sites/:id/live-settings`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    if (!deps.liveSessions) throw new ApiError("NOT_AVAILABLE", "live sessions are not available", 501);
+    const b = asObject(ctx.body);
+    /**
+     * Each bound matches the CHECK constraint in 0191, so a value the database would refuse is
+     * refused here with a message an operator can read instead of a 500 from a constraint.
+     */
+    const num = (key: string, lo: number, hi: number): number | undefined => {
+      if (!(key in b)) return undefined;
+      const n = Number(b[key]);
+      if (!Number.isInteger(n) || n < lo || n > hi) {
+        throw new ApiError("VALIDATION", `${key} must be a whole number between ${lo} and ${hi}`, 400);
+      }
+      return n;
+    };
+    const patch = {
+      ...("enabled" in b ? { enabled: b.enabled === true } : {}),
+      ...(num("sessionMinutes", 5, 1440) !== undefined ? { sessionMinutes: num("sessionMinutes", 5, 1440)! } : {}),
+      ...(num("marginMinutes", 0, 240) !== undefined ? { marginMinutes: num("marginMinutes", 0, 240)! } : {}),
+      ...(num("extendMinutes", 5, 240) !== undefined ? { extendMinutes: num("extendMinutes", 5, 240)! } : {}),
+      ...(num("maxSessionsDaily", 0, 100) !== undefined ? { maxSessionsDaily: num("maxSessionsDaily", 0, 100)! } : {}),
+    };
+    const next = await deps.liveSessions.saveSettings(ctx.params.id!, patch);
+    await deps.admin.recordAction(ctx.claims!.userId, ctx.claims!.role ?? "platform_admin",
+      "platform.site.live_settings", "site", ctx.params.id!, { patch });
+    return next;
+  });
+
   router.get(`${BASE}/platform/sites/:id/stake-limits`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     if (!deps.stakeNative) throw new ApiError("NOT_AVAILABLE", "stake limits are not available", 501);
     return stakeLimitsView(ctx.params.id!);

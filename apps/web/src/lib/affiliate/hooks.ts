@@ -180,3 +180,38 @@ export function useRequestCommissionPayout() {
     },
   });
 }
+
+// ── Live sessions (docs/55) ─────────────────────────────────────────────────────────────────────
+// A marketer marks when they go live; the earnings shown are a REPORT over commissions already
+// attributed to them, so nothing here moves money.
+
+/**
+ * The brand's live rules, the running session, and recent history.
+ *
+ * Polled while a session is RUNNING, because the figure it shows is what the session has earned so
+ * far and a marketer watching their own stream is watching this number. Idle otherwise — a marketer
+ * who is not live has nothing changing.
+ */
+export function useMarketerLive(enabled: boolean) {
+  const token = useSession((s) => s.token);
+  return useQuery({
+    queryKey: ['marketer', 'live'],
+    queryFn: () => api.marketerLive(token as string),
+    enabled: !!token && enabled,
+    retry: false,
+    refetchInterval: (q) => (q.state.data?.current?.live ? 15_000 : false),
+    refetchIntervalInBackground: false,
+  });
+}
+
+/** Start / end / extend. Each settles by refetching the one query above, so the UI has one truth. */
+export function useLiveSessionActions() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  const settle = { onSettled: () => void qc.invalidateQueries({ queryKey: ['marketer', 'live'] }) };
+  return {
+    start: useMutation({ mutationFn: (streamUrl?: string) => api.marketerLiveStart(token as string, streamUrl), ...settle }),
+    end: useMutation({ mutationFn: () => api.marketerLiveEnd(token as string), ...settle }),
+    extend: useMutation({ mutationFn: () => api.marketerLiveExtend(token as string), ...settle }),
+  };
+}

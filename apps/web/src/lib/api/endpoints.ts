@@ -1,6 +1,8 @@
 import { apiFetch } from '@/lib/api/client';
 import type {
   BrandActivityDto,
+  MarketerLiveDto,
+  LiveSessionDto,
   LeaderboardRowDto,
   MarketerProfileDto,
   AffiliateEnrollment,
@@ -203,6 +205,12 @@ export const api = {
   // Marketer self-service (funny-money demo wallet). marketerMe returns the simulated wallet balance;
   // marketerDemoTopup tops it up to the policy cap (no real cash — migration 0102).
   marketerMe: (token: string) => apiFetch<MarketerProfileDto>('/marketers/me', { token }),
+  // ── Live sessions (docs/55). Reporting only: starting one changes no attribution. ──
+  marketerLive: (token: string) => apiFetch<MarketerLiveDto>('/marketers/me/live', { token }),
+  marketerLiveStart: (token: string, streamUrl?: string) =>
+    apiFetch<LiveSessionDto>('/marketers/me/live/start', { method: 'POST', token, body: streamUrl ? { streamUrl } : {} }),
+  marketerLiveEnd: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/end', { method: 'POST', token }),
+  marketerLiveExtend: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/extend', { method: 'POST', token }),
   marketerDemoTopup: (token: string) =>
     apiFetch<{ balanceCents: number; capCents: number }>('/marketers/me/demo-topup', { method: 'POST', token }),
   // Public: record a referral-link click from the /r/<code> landing page (fire-and-forget, no auth).

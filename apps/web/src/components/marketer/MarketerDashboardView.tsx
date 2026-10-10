@@ -18,6 +18,7 @@ import {
   useRequestAdvance,
   useCancelAdvance,
 } from '@/lib/affiliate/hooks';
+import { LiveSessionPanel } from '@/components/marketer/LiveSessionPanel';
 
 /**
  * Full-page marketer dashboard (rendered at /dashboard). Extracted from the old covert modal so
@@ -187,6 +188,10 @@ export function MarketerDashboardView() {
           ← Back
         </Link>
       </header>
+
+      {/* Going live, and what the session has earned (docs/55). Renders nothing on a brand that
+          has not enabled live sessions, so a marketer never sees a control that would refuse. */}
+      <LiveSessionPanel />
 
       {q.isLoading && !s ? (
         <div className="h-64 animate-pulse rounded-2xl bg-surface-2" />
