@@ -215,3 +215,53 @@ export function useLiveSessionActions() {
     extend: useMutation({ mutationFn: () => api.marketerLiveExtend(token as string), ...settle }),
   };
 }
+
+// ── Community channel (docs/56) ─────────────────────────────────────────────────────────────────
+
+/** The brand's channel. Polled gently: a channel changes when an operator posts, not every second. */
+export function useCommunity(enabled: boolean) {
+  const token = useSession((s) => s.token);
+  return useQuery({
+    queryKey: ['community'],
+    queryFn: () => api.community(token as string, 30),
+    enabled: !!token && enabled,
+    refetchInterval: enabled ? 60_000 : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Vote on a poll.
+ *
+ * The server returns the whole post with fresh counts, so the cache is written from the SERVER's
+ * answer rather than guessed locally — a poll's numbers are the one thing on this screen that
+ * several people are changing at once.
+ */
+export function useCommunityVote() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { postId: string; optionId: string }) => api.communityVote(token as string, v.postId, v.optionId),
+    onSuccess: (updated) => {
+      qc.setQueryData<{ items: import('@/lib/api/types').CommunityPostDto[] }>(['community'], (old) =>
+        old ? { items: old.items.map((p) => (p.id === updated.id ? updated : p)) } : old);
+    },
+  });
+}
+
+/** Admin writes. Each settles by refetching the channel, so the list has one source of truth. */
+export function useCommunityAdmin() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  const settle = { onSettled: () => void qc.invalidateQueries({ queryKey: ['community'] }) };
+  return {
+    post: useMutation({
+      mutationFn: (v: { kind?: 'post' | 'poll'; title?: string | null; body: string; options?: string[]; pinned?: boolean }) =>
+        api.communityPost(token as string, v),
+      ...settle,
+    }),
+    pin: useMutation({ mutationFn: (v: { id: string; pinned: boolean }) => api.communityPin(token as string, v.id, v.pinned), ...settle }),
+    close: useMutation({ mutationFn: (v: { id: string; closed: boolean }) => api.communityClose(token as string, v.id, v.closed), ...settle }),
+    remove: useMutation({ mutationFn: (id: string) => api.communityDelete(token as string, id), ...settle }),
+  };
+}

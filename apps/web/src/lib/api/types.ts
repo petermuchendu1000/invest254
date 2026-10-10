@@ -496,3 +496,23 @@ export interface MarketerLiveDto {
   current: LiveSessionDto | null;
   history: LiveSessionDto[];
 }
+
+/** One choice on a community poll, with how many PEOPLE picked it (one vote per player). */
+export interface CommunityPollOptionDto { id: string; label: string; votes: number }
+
+/** A post in the brand's community channel (docs/56). Admins write; players read and vote. */
+export interface CommunityPostDto {
+  id: string;
+  kind: 'post' | 'poll' | 'live';
+  title: string | null;
+  body: string;
+  streamUrl: string | null;
+  pinned: boolean;
+  closed: boolean;
+  createdAt: string;
+  author: string;
+  options: CommunityPollOptionDto[];
+  /** The option this reader chose, so their own vote is shown back to them. */
+  myVote: string | null;
+  totalVotes: number;
+}
