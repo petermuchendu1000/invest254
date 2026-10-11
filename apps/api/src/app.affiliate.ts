@@ -3,6 +3,7 @@ import { assertUserTarget, assertSiteTarget } from "./scope.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 import type { LiveSession } from "./livesessions.pg.js";
+import type { MarketerMoneyRepo, MoneyRangeBounds } from "./referral.pg.js";
 import { parseB2cResult } from "./app.payments.js";
 import { requireApprovalPassword } from "./approvalgate.js";
 
@@ -46,6 +47,72 @@ const AFFILIATE_STATUS: Readonly<Record<string, number>> = {
 function pageQuery(ctx: Ctx): PageQuery {
   const limitRaw = ctx.query.get("limit");
   return { limit: limitRaw === null ? undefined : Number(limitRaw), cursor: ctx.query.get("cursor") };
+}
+
+// ── The marketer money table's range filter ─────────────────────────────────────────────────────
+//
+// CONVENTION REUSED (quoted so the next reader does not have to go looking). The bounds this enum
+// resolves to are the admin money-report convention, `reportRange` in app.admin.ts:112-126 and
+// `PgAdminRepo.reportDaily` in apps/engine/src/admin.ts:1104-1138:
+//
+//     and ($1::date is null or (created_at at time zone 'Africa/Nairobi')::date >= $1::date)
+//     and ($2::date is null or (created_at at time zone 'Africa/Nairobi')::date <= $2::date)
+//
+// i.e. inclusive `YYYY-MM-DD` bounds [from, to] (NOT half-open), `null` meaning unbounded on that
+// side, and the day boundary taken in EAT — the brand's own day. "Today (EAT)" is spelled exactly
+// as the admin day explorer spells it (app.admin.ts:625):
+//     new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Nairobi" })
+// The response ECHOES the resolved window (`{ range, from, to }`), following
+// `GET /platform/performance` (app.platform.ts:480-495) and `GET /site/leaderboard`
+// (app.activity.ts:55-60) — a UI showing a windowed figure must be able to label what it is showing.
+//
+// The trailing-window lengths match the client-side period resolver the app already ships,
+// `periodRange` in apps/web/src/lib/history/mt5history.ts:66-140 (`week: today - 6 * DAY_MS`,
+// `month: today - 29 * DAY_MS`, `quarter: today - 89 * DAY_MS`): N days ENDING TODAY, inclusive.
+// They are named `7d`/`30d`/`90d`/`180d` rather than `week`/`month` on purpose — the leaderboard's
+// `week`/`month` (activity.pg.ts:62-68) are calendar-TO-DATE (`date_trunc('week', now())`), which is
+// a different window, and reusing those names for a trailing one would be a trap.
+//
+// DEPARTURE, deliberate: the leaderboard reads an unknown `period` as `today` rather than refusing,
+// because "it reaches this from a tab, and a bad tab should show a board, not an error"
+// (app.activity.ts:44-45). This is a money statement, not a board: a range we did not understand
+// must not be silently answered with a different range's figures, so an unknown value is a 400 in
+// the style of the report parser's own `INVALID_DATE`/`INVALID_RANGE` refusals (app.admin.ts:131-137).
+export const MONEY_RANGES = ["today", "yesterday", "7d", "30d", "90d", "180d", "all"] as const;
+export type MoneyRangeKey = (typeof MONEY_RANGES)[number];
+
+/** Trailing window length in days, INCLUDING today (so `7d` is today and the six days before it). */
+const TRAILING_DAYS: Readonly<Record<string, number>> = { "7d": 7, "30d": 30, "90d": 90, "180d": 180 };
+
+/** The EAT (Africa/Nairobi, UTC+3, no DST) calendar date for an instant — the brand's own day key. */
+function eatDay(nowMs: number): string {
+  return new Date(nowMs).toLocaleDateString("en-CA", { timeZone: "Africa/Nairobi" });
+}
+
+/** Shift a `YYYY-MM-DD` calendar date by whole days (date arithmetic only — no clock, no zone). */
+function shiftDay(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y as number, (m as number) - 1, (d as number) + days)).toISOString().slice(0, 10);
+}
+
+/** Resolve a range key to inclusive EAT date bounds; `all` is unbounded on both sides. */
+export function resolveMoneyRange(key: MoneyRangeKey, nowMs: number): MoneyRangeBounds {
+  if (key === "all") return { from: null, to: null };
+  const today = eatDay(nowMs);
+  if (key === "today") return { from: today, to: today };
+  if (key === "yesterday") { const y = shiftDay(today, -1); return { from: y, to: y }; }
+  return { from: shiftDay(today, -(TRAILING_DAYS[key] as number) + 1), to: today };
+}
+
+/** Parse `?range=` as a CLOSED enum. Absent means today; anything unrecognised is refused (400). */
+export function moneyRangeOf(ctx: Ctx): MoneyRangeKey {
+  const raw = ctx.query.get("range");
+  if (raw === null || raw.trim() === "") return "today";
+  const key = raw.trim().toLowerCase();
+  if (!(MONEY_RANGES as readonly string[]).includes(key)) {
+    throw new ApiError("INVALID_RANGE", `range must be one of ${MONEY_RANGES.join("|")}`, 400);
+  }
+  return key as MoneyRangeKey;
 }
 
 /** Run an AffiliateService call, translating thrown domain error codes into controlled ApiErrors. */
@@ -133,6 +200,48 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
       deps.marketerExpenses.total(ctx.claims!.userId),
     ]));
     return { items, totalCents };
+  });
+
+  /**
+   * ── The marketer's money, as a range-filterable statement (the /dashboard money table) ────────
+   *
+   * IDENTITY: gated `auth, site, marketer` — the same gate as every other route on this dashboard —
+   * so `ctx.claims!.userId` is the AFFILIATE marketer's `profiles.id`, which is the key on
+   * `deposit_commissions.beneficiary_user`, `marketer_expenses.marketer_user_id`,
+   * `marketer_advance_requests.marketer_user_id` and `commission_payouts.beneficiary_user` (see the
+   * identity note above and the schema citations in referral.pg.ts). It is NOT the `public.marketers`
+   * till-app id; gating this on `requireMarketer` would 403 the dashboard's own marketer.
+   *
+   * LIFETIME vs WINDOWED. The response carries BOTH, separately named, and never mixes them:
+   *   - `lifetime` is the authoritative ladder behind the hero: earned − expenses − paid − held,
+   *     floored at 0 by fn_commission_balance, over ALL time. fn_commission_balance takes only
+   *     (p_user uuid); there is no ranged variant and this route does not invent one, because
+   *     "Available to withdraw" is a lifetime balance and a windowed "available" would be a
+   *     different, unpayable number.
+   *   - `window` is what happened inside [from, to]. Its own figures reconcile among themselves, and
+   *     the response echoes `{ range, from, to }` so the client can label every windowed figure as
+   *     windowed. The two are never added together.
+   *
+   * BUGLOG #23: `commissions`/`expenses`/`advances` are limit-capped display PAGES; every total in
+   * `window` and `lifetime` is an independent SQL aggregate over the full range. No total is derived
+   * from a page.
+   */
+  const moneyRepo = (): MarketerMoneyRepo => {
+    // The Postgres referral repo (makePgReferralRepo) implements this; an in-memory fake that does
+    // not gets a refusal it can act on rather than a 500.
+    const r = deps.referral as Partial<MarketerMoneyRepo>;
+    if (typeof r.marketerMoney !== "function") {
+      throw new ApiError("MONEY_UNAVAILABLE", "the ranged money statement is not configured", 503);
+    }
+    return r as MarketerMoneyRepo;
+  };
+  router.get(`${BASE}/affiliate/money`, auth, site, marketer, async (ctx: Ctx) => {
+    const range = moneyRangeOf(ctx);                      // closed enum, parsed here; bad value -> 400
+    const bounds = resolveMoneyRange(range, Date.now());
+    const raw = Number(ctx.query.get("limit"));
+    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 200) : 50;
+    const statement = await domain(() => moneyRepo().marketerMoney(ctx.claims!.userId, bounds, limit));
+    return { range, from: bounds.from, to: bounds.to, limit, ...statement };
   });
 
   /**

@@ -2,7 +2,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/endpoints';
-import type { CommissionRecord, Paginated, ReferralRecord } from '@/lib/api/types';
+import type { CommissionRecord, MarketerMoneyRange, Paginated, ReferralRecord } from '@/lib/api/types';
 import { useSession } from '@/lib/auth/session';
 
 /** Marketer dashboard summary. Enabled only when the caller is an enrolled marketer. */
@@ -113,6 +113,29 @@ export function useAffiliateExpenses(enabled: boolean) {
   });
 }
 
+/**
+ * The marketer's money statement for one time range (the /dashboard money table).
+ *
+ * The RANGE IS PART OF THE QUERY KEY. Two filter states must not share one cache entry: without the
+ * key, switching to "This month" would render today's figures with a month's label until the refetch
+ * landed, and a money figure under the wrong label is worse than a spinner. This is the same reason
+ * the Top Traders pane keys on its period (`['siteLeaderboard', brand.slug, period.key]`,
+ * components/game/candlestick/TopTradersPane.tsx:36).
+ *
+ * Polled on the dashboard's 15s cadence (like expenses/advances) so an admin-logged expense or an
+ * approved advance shows up without a reload.
+ */
+export function useMarketerMoney(range: MarketerMoneyRange, enabled: boolean) {
+  const token = useSession((s) => s.token);
+  return useQuery({
+    queryKey: ['affiliate', 'money', range],
+    queryFn: () => api.affiliateMoney(token as string, range),
+    enabled: !!token && enabled,
+    retry: false,
+    refetchInterval: enabled ? 15000 : false,
+  });
+}
+
 /** The marketer's own advance requests (newest first) — polled so admin decisions surface live. */
 export function useMyAdvances(enabled: boolean) {
   const token = useSession((s) => s.token);
@@ -131,7 +154,11 @@ export function useRequestAdvance() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { amountCents: number; reason?: string }) => api.requestAdvance(token as string, body),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['affiliate', 'advances'] }); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['affiliate', 'advances'] });
+      // The money table counts advances, so it must refetch too (every range, hence the prefix key).
+      void qc.invalidateQueries({ queryKey: ['affiliate', 'money'] });
+    },
   });
 }
 
@@ -141,7 +168,10 @@ export function useCancelAdvance() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.cancelAdvance(token as string, id),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['affiliate', 'advances'] }); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['affiliate', 'advances'] });
+      void qc.invalidateQueries({ queryKey: ['affiliate', 'money'] });
+    },
   });
 }
 
@@ -177,6 +207,9 @@ export function useRequestCommissionPayout() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['referral', 'me'] });
       qc.invalidateQueries({ queryKey: ['referral', 'commissions'] });
+      // A payout request moves money into `held`, which both the lifetime ladder and the windowed
+      // "pending" figure in the money table report.
+      qc.invalidateQueries({ queryKey: ['affiliate', 'money'] });
     },
   });
 }

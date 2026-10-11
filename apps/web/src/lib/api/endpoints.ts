@@ -26,6 +26,8 @@ import type {
   CommissionLineDto,
   CommissionPayoutDto,
   MarketerExpensesResponse,
+  MarketerMoneyDto,
+  MarketerMoneyRange,
   PositionDetailDto,
   PositionDto,
   ReferralRecord,
@@ -254,6 +256,16 @@ export const api = {
     apiFetch<{ items: CommissionPayoutDto[] }>('/me/referral/payouts', { token }),
   affiliateExpenses: (token: string) =>
     apiFetch<MarketerExpensesResponse>('/affiliate/expenses', { token }),
+  /**
+   * The marketer's money statement for one time range (the /dashboard money table).
+   *
+   * `range` is a closed server-side enum — an unrecognised value is refused with 400 INVALID_RANGE
+   * rather than quietly answered with a different window's figures. The reply echoes the resolved
+   * inclusive EAT bounds (`from`/`to`) and carries the LIFETIME ladder alongside the windowed
+   * figures, so the UI can say which is which.
+   */
+  affiliateMoney: (token: string, range: MarketerMoneyRange) =>
+    apiFetch<MarketerMoneyDto>('/affiliate/money', { token, query: { range } }),
 
   // Marketer advance requests (0122): request a cash advance, list own requests, cancel a pending one.
   affiliateAdvances: (token: string) =>
