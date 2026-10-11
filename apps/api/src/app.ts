@@ -10,7 +10,7 @@ import type {
   SubscriptionService, TicketService,
   Page, PageQuery, LedgerEntry, PositionRecord, PositionDetail, PositionListQuery, DigitHistoryRow, TransactionRecord, TxListQuery,
 } from "@invest254/engine";
-import { Router, ApiError, serverFrom, type Ctx } from "./http.js";
+import { Router, ApiError, serverFrom, type Ctx, type Middleware } from "./http.js";
 import { registerProtectedRoutes } from "./app.payments.js";
 import { registerHistoryRoutes } from "./app.history.js";
 import { registerSiteRoutes } from "./app.site.js";
@@ -159,7 +159,38 @@ export interface ApiDeps {
   auth: Pick<AuthService, "register" | "login" | "me" | "issueToken" | "issueSessionToken"
     | "beginMfaEnrolment" | "confirmMfa" | "disableMfa" | "mfaStatus"
     | "changePassword" | "resetPassword"
-    | "setSecurityAnswers" | "securitySetupRequired" | "getResetQuestionKeys" | "assertSessionValid">;
+    | "setSecurityAnswers" | "securitySetupRequired" | "getResetQuestionKeys" | "assertSessionValid"
+    | "verifyStepUp">;
+  /**
+   * Per-session operator state behind the step-up 2FA gate and the idle timeout (0196).
+   *
+   * A narrow port rather than the whole IdentityRepository, for the same reason `auth` above is a
+   * `Pick`: these four calls are all the auth routes and the gate need, and keeping the surface
+   * small is what lets a test supply an in-memory double in three lines instead of standing up a
+   * repository.
+   */
+  /**
+   * The step-up 2FA middleware (apps/api/src/stepup.ts). When present the Router splices it into
+   * every authenticated mutating route; when absent there is no gate at all.
+   *
+   * Optional ON PURPOSE, and worth being explicit about since "optional security" is usually a
+   * smell: the ~2100-test suite builds its own deps and would otherwise have to satisfy a second
+   * factor on every write it makes, which would say nothing about the routes under test. Production
+   * supplies it in server.ts; a `stepup.gate.e2e.test.ts` supplies it deliberately and asserts the
+   * splice actually happens, so "production forgot to pass it" is itself a test failure rather than
+   * something nobody would notice.
+   */
+  stepUp?: Middleware;
+  privilegedSessions: {
+    /** Session state for (user, token iat). `null` is meaningful — see stepup.ts on fail-closed. */
+    getSession(userId: string, tokenIatSeconds: number): Promise<{ lastSeenAtMs: number; stepUpAtMs: number | null } | null>;
+    /** Stamp that a second factor was proven on this session, by this method. */
+    recordStepUp(userId: string, tokenIatSeconds: number, method: string): Promise<void>;
+    /** Forget every session record for this user (half of a real logout). */
+    endSessions(userId: string): Promise<void>;
+    /** Stamp the 0097 force-logout epoch, which is what actually kills the stateless JWT. */
+    forceLogout(userId: string): Promise<void>;
+  };
   /** Marketer enrollment, commission accrual, dashboard reads (I1/I2/I3) + payouts (I4). */
   affiliate: Pick<AffiliateService,
     "enroll" | "accrueDaily" | "summary" | "listReferrals" | "listCommissions"
@@ -460,6 +491,10 @@ export function createRouter(deps: ApiDeps): Router {
   const router = new Router({
     ...(deps.corsAllowOrigin ? { corsAllowOrigin: deps.corsAllowOrigin } : {}),
     ...(deps.logger ? { logger: deps.logger } : {}),
+    // Step-up 2FA, spliced into every authenticated mutating route as it is registered — which is
+    // why it is passed to the constructor and not to the register* calls below. Omitted (tests,
+    // the mirror) = no gate, behaviour exactly as before.
+    ...(deps.stepUp ? { stepUp: deps.stepUp } : {}),
   });
   registerPublicRoutes(router, deps);
   registerSiteRoutes(router, deps);

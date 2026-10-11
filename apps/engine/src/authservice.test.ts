@@ -277,7 +277,7 @@ test("resetPassword: refused unless unverified reset is explicitly enabled", asy
   const repo = new InMemoryIdentityRepository();
   const auth = new AuthService(repo, { jwtSecret: SECRET, jwtTtlSeconds: 3600 });
   await auth.register({ phone: PHONE, username: "operator", password: PASS });
-  await assert.rejects(() => auth.resetPassword(PHONE, "Brand3wPass"), /RESET_DISABLED/);
+  await assert.rejects(() => auth.resetPassword(PHONE, "Brand3wPass"), /RESET_UNAVAILABLE/);
   // the old password still works — nothing was changed
   assert.ok((await auth.login({ phone: PHONE, password: PASS })).token);
 });

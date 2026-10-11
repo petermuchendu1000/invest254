@@ -704,6 +704,19 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
     // Silent logger in tests: exercises the request-logging path without spamming test output.
     logger: createLogger({ level: "error", sink: () => {} }),
     auth,
+    // The 0196 per-session port, backed by the same in-memory identity repo the rest of this
+    // harness uses, so the step-up and logout ROUTES are exercised for real.
+    //
+    // `stepUp` is deliberately NOT set here: the gate is off by default in tests. Turning it on
+    // globally would make every one of the ~2100 tests present a second factor before any write,
+    // which tests the gate over and over and the routes not at all. The gate has its own
+    // end-to-end test that switches it on explicitly and asserts the splice happens.
+    privilegedSessions: {
+      getSession: (userId, iat) => identity.getPrivilegedSession(userId, iat),
+      recordStepUp: (userId, iat, method) => identity.recordStepUp(userId, iat, method),
+      endSessions: (userId) => identity.endPrivilegedSessions(userId),
+      forceLogout: (userId) => identity.stampForceLogout(userId),
+    },
     affiliate,
     admin,
     platform,

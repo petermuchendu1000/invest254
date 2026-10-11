@@ -40,6 +40,15 @@ export interface Ctx {
   requestId?: string;
   /** Request-scoped logger pre-bound with { requestId, method, path } — use it in handlers/services. */
   log?: Logger;
+  /**
+   * The route PATTERN this request matched (`/api/v1/admin/wallets/:id/adjust`), as registered —
+   * not `path`, which carries the concrete ids. Set by the dispatcher on every matched request.
+   *
+   * It exists because a gate that classifies routes has to name them stably. `path` cannot do that:
+   * classifying on it would mean matching ids with a regex at request time, and the one thing worse
+   * than an unprotected critical route is a gate that thinks it is protecting one and is not.
+   */
+  routePath?: string;
 }
 
 export interface HandlerResult { status?: number; body: unknown; }
@@ -240,22 +249,60 @@ export interface RouterOptions {
   corsAllowOrigin?: (origin: string) => boolean;
   /** Base logger; each request logs through a child bound with { requestId, method, path }. */
   logger?: Logger;
+  /**
+   * Step-up second-factor gate, spliced automatically into every AUTHENTICATED MUTATING route
+   * (POST/PUT/PATCH/DELETE that carries a `requireAuth`), immediately after authentication.
+   *
+   * Default-deny by construction. The alternative — naming each route that needs a second factor —
+   * was measured against the real surface: ~120 privileged routes move money, change credentials or
+   * roles, rewrite payout and fairness parameters, or reconfigure the payment rails. Listing them
+   * is a list that is wrong the moment someone adds the 121st, and wrong silently, in the direction
+   * of an unprotected critical route. Spliced here, a new route is covered the day it is written
+   * and someone must deliberately exempt it to make it otherwise.
+   *
+   * The gate itself decides who it applies to (privileged roles only) and what is routine, reading
+   * `ctx.routePath`; see apps/api/src/stepup.ts. Unset (tests, mirrors) = no gate, unchanged behaviour.
+   */
+  stepUp?: Middleware;
 }
 
 export class Router {
   private readonly routes: Route[] = [];
   private readonly corsAllowOrigin?: (origin: string) => boolean;
   private readonly log: Logger;
+  private readonly stepUp?: Middleware;
 
   constructor(opts: RouterOptions = {}) {
     if (opts.corsAllowOrigin) this.corsAllowOrigin = opts.corsAllowOrigin;
     this.log = (opts.logger ?? createLogger()).child({ module: "http" });
+    if (opts.stepUp) this.stepUp = opts.stepUp;
   }
+
+  /** Methods that change state, and so may need a fresh second factor. GET/HEAD never do. */
+  private static readonly MUTATING: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
   private add(method: string, path: string, chain: Array<Middleware | Handler>, rawMax?: number): this {
     const { regex, keys } = compile(path);
-    this.routes.push({ method, path, regex, keys, chain, ...(rawMax ? { rawMax } : {}) });
+    this.routes.push({ method, path, regex, keys, chain: this.withStepUp(method, chain), ...(rawMax ? { rawMax } : {}) });
     return this;
+  }
+
+  /**
+   * Splice the step-up gate in directly after the LAST authentication middleware in the chain.
+   *
+   * After the last one, not the first, because a chain may legitimately carry more than one (and
+   * because inserting before a later auth step would run the gate with no claims). Before any role
+   * or scope middleware, so the challenge is raised ahead of the tenant fences rather than after
+   * them — a caller who will be refused anyway should not learn whether the target exists.
+   *
+   * No auth step in the chain → no principal to challenge → chain returned untouched.
+   */
+  private withStepUp(method: string, chain: Array<Middleware | Handler>): Array<Middleware | Handler> {
+    if (!this.stepUp || !Router.MUTATING.has(method)) return chain;
+    let last = -1;
+    chain.forEach((step, i) => { if (isAuthStep(step)) last = i; });
+    if (last < 0) return chain;
+    return [...chain.slice(0, last + 1), this.stepUp, ...chain.slice(last + 1)];
   }
 
   /** CHAT-1: a POST whose body is raw bytes (ctx.body is a Buffer), capped at `maxBytes`. */
@@ -311,6 +358,7 @@ export class Router {
         route.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]!); });
         ctx = {
           req, res, method, path, params, query: url.searchParams, requestId,
+          routePath: route.path,
           log: this.log.child({ requestId, method, path }),
           body: method === "GET" || method === "HEAD" ? null : route.rawMax ? await readRaw(req, route.rawMax) : await readJson(req),
         };
@@ -428,8 +476,24 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
  * configured the token is cryptographically verified (Supabase JWT). When it is null the
  * service runs in DEV mode and trusts `X-User-Id`/`X-User-Role` headers — never for prod.
  */
+/**
+ * Marks the middleware that establishes `ctx.claims`, so the Router can find it in a chain.
+ *
+ * The step-up gate has to run AFTER authentication (it needs the principal) and BEFORE the
+ * handler, on every authenticated mutating route. Identifying the auth step by a marker rather
+ * than by position lets the Router splice the gate in at registration time, which is the whole
+ * reason ~120 critical routes did not each need editing — and, more importantly, the reason the
+ * NEXT critical route will be covered without anyone remembering to cover it.
+ *
+ * A route with no marked middleware has no principal to challenge (the payment-provider callbacks,
+ * the HMAC magic links), so it is left alone; those are authorised by other means.
+ */
+const AUTH_STEP = Symbol.for("invest254.authMiddleware");
+const isAuthStep = (step: unknown): boolean =>
+  typeof step === "function" && (step as { [AUTH_STEP]?: boolean })[AUTH_STEP] === true;
+
 export function requireAuth(verifier: Verifier | null): Middleware {
-  return async (ctx) => {
+  const mw: Middleware = async (ctx) => {
     const header = ctx.req.headers["authorization"];
     const token = typeof header === "string" && header.startsWith("Bearer ") ? header.slice(7).trim() : "";
     if (verifier) {
@@ -443,6 +507,11 @@ export function requireAuth(verifier: Verifier | null): Middleware {
       ctx.claims = { userId: uid, role: typeof role === "string" ? role : "player", raw: {} };
     }
   };
+  // The dev branch above trusts X-User-Id/X-User-Role headers outright (server.ts refuses to boot
+  // that way with a DATABASE_URL set). Mark it regardless: the step-up gate must sit behind the
+  // dev path too, or a gate tested in dev would be testing nothing.
+  (mw as { [AUTH_STEP]?: boolean })[AUTH_STEP] = true;
+  return mw;
 }
 
 /** Gate a route to callers whose role meets `minRole` in the hierarchy. Run after requireAuth. */

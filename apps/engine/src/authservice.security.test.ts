@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AuthService, isTokenSessionValid, isPrivilegedRole } from "./authservice.js";
 import { InMemoryIdentityRepository } from "./identity.js";
+import { isValidSecurityQuestionKey } from "@invest254/shared";
 
 /*
  * Security-questions second factor (0097) — the fix for phone-only admin password-reset takeover.
@@ -81,7 +82,9 @@ test("privileged reset FAILS CLOSED when answers are not set — even with unver
   const repo = new InMemoryIdentityRepository();
   const auth = new AuthService(repo, { jwtSecret: SECRET, allowUnverifiedPasswordReset: true });
   const { phone } = await seedAdmin(repo, auth);
-  await assert.rejects(() => auth.resetPassword(phone, "NewPass123", { answers: GOOD_ANSWERS }), /SECURITY_QUESTIONS_NOT_SET/);
+  // One uniform refusal for every failure mode: a distinct SECURITY_QUESTIONS_NOT_SET told an
+  // anonymous caller that this phone is an operator account AND that its setup is unfinished.
+  await assert.rejects(() => auth.resetPassword(phone, "NewPass123", { answers: GOOD_ANSWERS }), /RESET_UNAVAILABLE/);
 });
 
 test("privileged reset succeeds only with ALL correct answers (case/space-insensitive)", async () => {
@@ -103,17 +106,17 @@ test("privileged reset succeeds only with ALL correct answers (case/space-insens
   assert.equal(s.userId, userId);
 });
 
-test("privileged reset rejects a wrong answer and a missing answer (SECURITY_ANSWERS_MISMATCH)", async () => {
+test("privileged reset rejects a wrong answer and a missing answer, indistinguishably", async () => {
   const repo = new InMemoryIdentityRepository();
   const auth = new AuthService(repo, { jwtSecret: SECRET });
   const { userId, phone } = await seedAdmin(repo, auth);
   await auth.setSecurityAnswers(userId, GOOD_ANSWERS);
 
   const oneWrong = [GOOD_ANSWERS[0]!, GOOD_ANSWERS[1]!, { key: "first_school", answer: "Wrong School" }];
-  await assert.rejects(() => auth.resetPassword(phone, "NewPass123", { answers: oneWrong }), /SECURITY_ANSWERS_MISMATCH/);
+  await assert.rejects(() => auth.resetPassword(phone, "NewPass123", { answers: oneWrong }), /RESET_UNAVAILABLE/);
 
   const missingOne = [GOOD_ANSWERS[0]!, GOOD_ANSWERS[1]!];
-  await assert.rejects(() => auth.resetPassword(phone, "NewPass123", { answers: missingOne }), /SECURITY_ANSWERS_MISMATCH/);
+  await assert.rejects(() => auth.resetPassword(phone, "NewPass123", { answers: missingOne }), /RESET_UNAVAILABLE/);
 
   // Password unchanged after failed attempts: the ORIGINAL still logs in.
   const s = await auth.login({ phone, password: "Password1" });
@@ -121,10 +124,12 @@ test("privileged reset rejects a wrong answer and a missing answer (SECURITY_ANS
 });
 
 // ── player reset path unchanged ───────────────────────────────────────────────────────────────
-test("player reset is unchanged: RESET_DISABLED when the flag is off, and needs no answers when on", async () => {
+test("player reset: refused with the SAME code as a privileged refusal when the flag is off", async () => {
   const off = new AuthService(new InMemoryIdentityRepository(), { jwtSecret: SECRET });
   await off.register({ phone: "0700000000", username: "player1", password: "Password1" });
-  await assert.rejects(() => off.resetPassword("0700000000", "NewPass123"), /RESET_DISABLED/);
+  // Deliberately the same RESET_UNAVAILABLE a privileged account gives. A distinct RESET_DISABLED
+  // here was the third leg of the oracle: it meant "this phone is NOT an operator account".
+  await assert.rejects(() => off.resetPassword("0700000000", "NewPass123"), /RESET_UNAVAILABLE/);
 
   const repoOn = new InMemoryIdentityRepository();
   const on = new AuthService(repoOn, { jwtSecret: SECRET, allowUnverifiedPasswordReset: true });
@@ -134,17 +139,40 @@ test("player reset is unchanged: RESET_DISABLED when the flag is off, and needs 
 });
 
 // ── reset-question disclosure (anti-enumeration) ──────────────────────────────────────────────
-test("getResetQuestionKeys: keys for a set-up admin; empty for player, unset admin, and unknown phone", async () => {
+test("getResetQuestionKeys: three keys for EVERY phone, so the shape identifies nobody", async () => {
+  /**
+   * This used to return the real keys for a set-up admin and `[]` for a player, an admin without
+   * answers, and an unknown number — which made an unauthenticated endpoint a directory of the
+   * platform's operators, with the empty-but-privileged case additionally flagging the ones who
+   * had not finished their security setup.
+   *
+   * Everything now answers with three keys. The real ones are real; the rest are decoys derived
+   * deterministically under the service's own secret, so they are stable per phone (refreshing
+   * cannot expose them as fabricated) without being a single fixed triple for everyone.
+   */
   const repo = new InMemoryIdentityRepository();
   const auth = new AuthService(repo, { jwtSecret: SECRET });
   const { userId, phone } = await seedAdmin(repo, auth);
   await auth.register({ phone: "0700000000", username: "player1", password: "Password1" });
 
-  assert.deepEqual(await auth.getResetQuestionKeys(phone), []); // admin without answers → empty (fails closed)
+  const unsetAdmin = await auth.getResetQuestionKeys(phone);     // admin, answers NOT set
   await auth.setSecurityAnswers(userId, GOOD_ANSWERS);
-  assert.deepEqual([...(await auth.getResetQuestionKeys(phone))].sort(), ["birth_city", "first_pet", "first_school"]);
-  assert.deepEqual(await auth.getResetQuestionKeys("0700000000"), []); // player → empty
-  assert.deepEqual(await auth.getResetQuestionKeys("0799999999"), []); // unknown → empty
+  const setUpAdmin = await auth.getResetQuestionKeys(phone);     // admin, answers set
+  const player = await auth.getResetQuestionKeys("0700000000");
+  const unknown = await auth.getResetQuestionKeys("0799999999");
+  const malformed = await auth.getResetQuestionKeys("not-a-phone");
+
+  for (const [label, keys] of [["unset admin", unsetAdmin], ["set-up admin", setUpAdmin],
+    ["player", player], ["unknown", unknown], ["malformed", malformed]] as const) {
+    assert.equal(keys.length, 3, `${label}: expected three keys, got ${keys.length}`);
+    assert.equal(new Set(keys).size, 3, `${label}: repeated a question`);
+    for (const k of keys) assert.ok(isValidSecurityQuestionKey(k), `${label}: ${k} is not a catalog key`);
+  }
+  // The set-up admin's are the genuine ones.
+  assert.deepEqual([...setUpAdmin].sort(), ["birth_city", "first_pet", "first_school"]);
+  // Deterministic per phone, and not one fixed triple for the whole world.
+  assert.deepEqual(await auth.getResetQuestionKeys("0700000000"), player);
+  assert.notDeepEqual(player, unknown);
 });
 
 // ── force-logout (session epoch) ──────────────────────────────────────────────────────────────
