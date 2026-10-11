@@ -160,7 +160,7 @@ export interface ApiDeps {
     | "beginMfaEnrolment" | "confirmMfa" | "disableMfa" | "mfaStatus"
     | "changePassword" | "resetPassword"
     | "setSecurityAnswers" | "securitySetupRequired" | "getResetQuestionKeys" | "assertSessionValid"
-    | "verifyStepUp">;
+    | "verifyStepUp" | "myQuestionKeys">;
   /**
    * Per-session operator state behind the step-up 2FA gate and the idle timeout (0196).
    *

@@ -8,6 +8,8 @@ import { WelcomeBonusOverlay } from '@/components/game/WelcomeBonusOverlay';
 import { ReferralCapture } from '@/components/ReferralCapture';
 import { SecurityQuestionsGate } from '@/components/auth/SecurityQuestionsGate';
 import { MfaEnrolmentGate } from '@/components/auth/MfaEnrolmentGate';
+import { StepUpGate } from '@/components/auth/StepUpGate';
+import { OperatorIdleWatch } from '@/components/auth/OperatorIdleWatch';
 import { SessionCacheGuard } from '@/components/auth/SessionCacheGuard';
 import { SoundBootstrap } from '@/components/layout/SoundToggle';
 
@@ -46,6 +48,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
         {/* Mandatory 2FA (TOTP) enrolment for privileged accounts (Issue 2) — shown after the
             security-questions gate so the two overlays never stack. */}
         <MfaEnrolmentGate />
+        {/* Step-up second factor at the moment of the action (0196) — global, because a critical
+            action can be taken from the brand back office, the operator console or an impersonated
+            brand session, and a prompt mounted in one of them would strand the other two. Renders
+            nothing, and registers nothing, for a player or marketer. */}
+        <StepUpGate />
+        {/* The matching idle timeout: the warning before it fires, and the sign-out when it has.
+            Privileged roles only — see the component. */}
+        <OperatorIdleWatch />
       </ToastProvider>
     </QueryClientProvider>
   );

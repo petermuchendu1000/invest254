@@ -643,6 +643,26 @@ export class AuthService {
    * plaintext never touches the database. Allowed for any account (harmless), but only privileged
    * roles are REQUIRED to have them (see securitySetupRequired).
    */
+  /**
+   * Which security questions the CALLER set on their OWN account.
+   *
+   * Not an enumeration risk, and the distinction from `getResetQuestionKeys` is the whole point:
+   * that one answers an UNAUTHENTICATED caller about an ARBITRARY phone number, which is why it
+   * serves decoys. This one answers an authenticated caller about themselves — they have already
+   * proven they are that account, so telling them which three of the ten questions they picked
+   * discloses nothing they do not own.
+   *
+   * It exists because the step-up prompt otherwise has to offer the whole catalog and make an
+   * operator GUESS which three they chose, against a 10/min budget. For the `admin` tier, whose
+   * second factor IS the questions, mis-remembering would mean being locked out of every critical
+   * action on the platform — a self-inflicted outage, and the likeliest support call in this whole
+   * feature. Returns [] when none are set, which the client reads as "finish setup first".
+   */
+  async myQuestionKeys(userId: string): Promise<string[]> {
+    const stored = await this.repo.getSecurityAnswers(userId);
+    return stored.map((s) => s.questionKey);
+  }
+
   async setSecurityAnswers(userId: string, answers: ReadonlyArray<{ key: string; answer: string }>): Promise<{ set: true }> {
     const check = validateSecurityAnswerSet(answers.map((a) => ({ key: a.key, answer: a.answer })));
     if (!check.ok) throw new Error(`SECURITY_ANSWERS_${check.reason}`);

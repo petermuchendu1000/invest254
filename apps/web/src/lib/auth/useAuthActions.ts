@@ -5,6 +5,7 @@ import { api, type RegisterInput } from '@/lib/api/endpoints';
 import { ApiError } from '@/lib/api/client';
 import { useSession } from '@/lib/auth/session';
 import { roleFromToken, actorFromToken } from '@/lib/auth/token';
+import { isPrivilegedRole } from '@/lib/auth/operatorSession';
 import { clearImpersonation } from '@/lib/platform/impersonate';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useWelcomeBonusFx } from '@/lib/game/welcomeBonusFx';
@@ -74,6 +75,17 @@ export function useAuthActions() {
   }
 
   function logout() {
+    // END IT SERVER-SIDE FIRST (0196). Logout here has always been localStorage-only, and the token
+    // is a stateless 7-day JWT: "sign out" left a fully working operator credential in anything that
+    // had captured it — a shared machine, a synced profile, a proxy log. POST /auth/logout forgets
+    // this operator's privileged sessions and stamps the force-logout epoch, which is what actually
+    // stops the JWT verifying. Privileged roles only: a player has no server-side session to end,
+    // and firing this for the majority of traffic would buy nothing.
+    // Read from the store rather than subscribing, so adding this does not re-render every consumer
+    // of useAuthActions on a token change. Fire-and-forget: an operator who cannot reach the API
+    // must still be able to close the console in front of them, so the local clear below always runs.
+    const active = useSession.getState().token;
+    if (active && isPrivilegedRole(roleFromToken(active))) void api.logout(active).catch(() => {});
     // Drop any brand impersonation fence BEFORE clearing the session so a brand-scoped impersonation token
     // can never outlive the logout (the "stale fence after logout" bug). Safe when not impersonating.
     clearImpersonation();

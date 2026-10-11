@@ -60,6 +60,40 @@ export interface SecurityQuestionDto {
   label: string;
 }
 
+/**
+ * GET /auth/step-up (0196) — what this session must prove before a critical action, and whether it
+ * already has.
+ *
+ * `factor` is the server's answer and the ONLY one the client may use. Deriving it from the role
+ * would put the role-to-factor mapping in two places and let them drift, which is precisely what
+ * apps/api/src/stepup.ts warns against. `required: false` (with a null factor) is a non-privileged
+ * account, which never meets the gate at all.
+ */
+export interface StepUpStatusDto {
+  required: boolean;
+  factor: 'totp' | 'security_questions' | null;
+  satisfied: boolean;
+  /** How long a proof authorises further critical actions. Absent for a non-privileged account. */
+  windowSeconds?: number;
+  /**
+   * The caller's OWN three question keys, when the required factor is the security questions.
+   *
+   * Safe to send: the caller has already proven they are this account, so these are their own.
+   * It is the anonymous `/auth/password/reset-questions` that must serve decoys, not this. Without
+   * it the prompt has to offer all ten and make an operator guess which three they chose — and for
+   * the admin tier, whose second factor IS the questions, guessing wrong locks them out of every
+   * critical action. Empty array = they never finished setup.
+   */
+  questionKeys?: string[];
+}
+
+/** POST /auth/step-up (0196) — the proof was accepted, and which factor it proved. */
+export interface StepUpVerifyDto {
+  verified: boolean;
+  method: 'totp' | 'recovery_code' | 'security_questions';
+  windowSeconds: number;
+}
+
 export interface BonusStatusDto {
   bonusId: string;
   amount: Cents;

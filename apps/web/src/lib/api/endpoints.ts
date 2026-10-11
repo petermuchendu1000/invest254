@@ -34,6 +34,8 @@ import type {
   SecurityQuestionDto,
   MfaStatusDto,
   MfaEnrollDto,
+  StepUpStatusDto,
+  StepUpVerifyDto,
   TransactionDto,
   TransactionKind,
   WalletDto,
@@ -139,6 +141,23 @@ export const api = {
   /** Disable 2FA — requires a current TOTP or recovery code as possession proof. */
   mfaDisable: (token: string, code: string) =>
     apiFetch<{ enabled: boolean }>('/auth/mfa/disable', { method: 'POST', token, body: { code } }),
+
+  // ── Step-up second factor + real logout (0196) ──
+  /** Which factor this session must prove, and whether it currently has. Authoritative: never guess. */
+  stepUpStatus: (token: string) => apiFetch<StepUpStatusDto>('/auth/step-up', { token }),
+  /**
+   * Prove the second factor for THIS session: an authenticator code, a single-use recovery code, or
+   * the security answers — whichever `stepUpStatus().factor` asked for.
+   */
+  stepUpVerify: (
+    token: string,
+    proof: { code?: string; recovery_code?: string; answers?: Array<{ key: string; answer: string }> },
+  ) => apiFetch<StepUpVerifyDto>('/auth/step-up', { method: 'POST', token, body: proof }),
+  /**
+   * End this operator's session SERVER-SIDE. Logout used to be localStorage-only, so a captured
+   * operator token kept working for the rest of its 7 days; this is what actually kills it.
+   */
+  logout: (token: string) => apiFetch<{ loggedOut: boolean }>('/auth/logout', { method: 'POST', token }),
 
   // Wallet & history
   wallet: (token: string) => apiFetch<WalletDto>('/wallet', { token }),

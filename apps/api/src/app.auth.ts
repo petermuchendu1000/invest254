@@ -260,13 +260,21 @@ export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
     if (!isGatedRole(role)) return { required: false, factor: null, satisfied: true };
     const iat = tokenIatSeconds(ctx.claims);
     const session = iat === null ? null : await deps.privilegedSessions.getSession(ctx.claims!.userId, iat);
+    const factor = requiredFactor(role);
     return {
       required: true,
       // THE authoritative answer to "which prompt do I show". The client must not re-derive this
       // from the role, or the two mappings drift and the UI asks for the wrong factor.
-      factor: requiredFactor(role),
+      factor,
       satisfied: hasFreshStepUp(session, Date.now()),
       windowSeconds: Math.floor(STEP_UP_WINDOW_MS / 1000),
+      // The caller's OWN three question keys, so the prompt asks the questions they actually chose
+      // instead of offering all ten and making them guess. Safe because this caller has already
+      // proven they are this account -- unlike /auth/password/reset-questions, which answers an
+      // anonymous caller about an arbitrary phone and therefore serves decoys. Empty = setup unfinished.
+      ...(factor === "security_questions"
+        ? { questionKeys: await deps.auth.myQuestionKeys(ctx.claims!.userId) }
+        : {}),
     };
   });
 
