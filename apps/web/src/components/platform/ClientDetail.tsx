@@ -18,6 +18,7 @@ import { ThemeGallery } from '@/components/platform/ThemeGallery';
 import { useGameConfig } from '@/lib/admin/hooks';
 import { formatNumber } from '@/lib/format';
 import { formatKes } from '@invest254/shared/money';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { pillLabel, stakeLadder } from '@/lib/game/stakeLadder';
 import { PageTabs, useTabParam } from '@/components/admin/Tabs';
 
@@ -404,7 +405,7 @@ function PeopleSection({ site }: { site: SiteWithConfig }) {
         <ul className="divide-y divide-border rounded-xl border border-border">
           {adminRows.map((u) => (
             <li key={u.userId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
-              <span><span className="font-medium">@{u.username}</span> <span className="text-muted">{u.phone}</span></span>
+              <span><span className="font-medium">@{u.username}</span> <span className="text-muted">{maskPhoneForDisplay(u.phone)}</span></span>
               <ConfirmButton label="Remove" confirmLabel="Remove admin" variant="outline" busy={action.isPending} onConfirm={() => setRole(u.userId, 'player', `@${u.username} removed`)} />
             </li>
           ))}
@@ -413,7 +414,9 @@ function PeopleSection({ site }: { site: SiteWithConfig }) {
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Person to appoint" value={appoint} onChange={(e) => setAppoint(e.target.value)} className="h-9 min-w-56 rounded-lg border border-border bg-surface-2 px-2 text-sm text-fg">
             <option value="">Appoint someone from this brand…</option>
-            {candidates.map((u) => <option key={u.userId} value={u.userId}>@{u.username} · {u.phone}</option>)}
+            {/* Label only — the option's VALUE is the userId that `setRole` appoints, so masking the
+                number cannot appoint the wrong person. */}
+            {candidates.map((u) => <option key={u.userId} value={u.userId}>@{u.username} · {maskPhoneForDisplay(u.phone)}</option>)}
           </select>
           <Button size="sm" disabled={!appoint || action.isPending} onClick={() => setRole(appoint, 'admin', 'Brand admin appointed')}>Appoint</Button>
           <span className="text-xs text-muted">Search the list below to find someone not shown.</span>
@@ -440,7 +443,9 @@ function PeopleSection({ site }: { site: SiteWithConfig }) {
             <tbody>
               {rows.map((u) => (
                 <tr key={u.userId} onClick={() => setSel(u)} className={`cursor-pointer border-t border-border hover:bg-surface-2 ${sel?.userId === u.userId ? 'bg-surface-2' : ''}`}>
-                  <td className="px-3 py-2"><span className="font-medium text-fg">@{u.username}</span> <span className="text-muted">{u.phone}</span></td>
+                  {/* Masked: the player search above still queries the real column server-side, so
+                      typing a full number finds the row — the row just no longer prints it. */}
+                  <td className="px-3 py-2"><span className="font-medium text-fg">@{u.username}</span> <span className="text-muted">{maskPhoneForDisplay(u.phone)}</span></td>
                   <td className="px-3 py-2 text-muted">{u.role}</td>
                   <td className="px-3 py-2"><span className={pill(u.status)}>{u.status}</span></td>
                   <td className="px-3 py-2 text-right tabular-nums">{kes(u.realBalanceCents)}</td>
@@ -455,7 +460,7 @@ function PeopleSection({ site }: { site: SiteWithConfig }) {
         {sel ? (
           <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface-2 p-3" aria-label={`Player @${sel.username}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-fg">@{sel.username} <span className="font-normal text-muted">{sel.phone}</span></span>
+              <span className="text-sm font-semibold text-fg">@{sel.username} <span className="font-normal text-muted">{maskPhoneForDisplay(sel.phone)}</span></span>
               <div className="flex items-center gap-2">
                 <OpenBrandButton siteId={site.siteId} brandName={site.name} to={`/admin/users/${sel.userId}`} label="Manage in back office" />
                 <button className="text-xs text-muted hover:text-fg" onClick={() => setSel(null)} aria-label="Close player">✕</button>

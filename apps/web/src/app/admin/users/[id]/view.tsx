@@ -17,6 +17,7 @@ import { PageHeader, StatCard, Section, Empty, ConfirmButton, TableWrap, Th, Td,
 import { useUser, useUserActivity, useSetUserStatus, useAdjustBalance, useClearBalance, useResetBalance, useSetCommissionRate, useCommissionRate, useSetUserRole, useDeleteUser, useSetDefaultMarketer, useUpdateUserDetails, useUserNotifications, useSendNotification, useResolveNotification, useUserOverrides } from '@/lib/admin/hooks';
 import type { AdminUserActivityRow, AdminNotificationRow, NotificationLevel } from '@/lib/admin/types';
 import { formatKes } from '@invest254/shared/money';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { useKycList, DOC_LABEL } from '@/lib/account/accountUi';
 
 
@@ -75,7 +76,9 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
           <Section title="Profile">
             <Card className="flex flex-col gap-2 text-sm">
               <Row label="User ID" value={q.data.userId} mono />
-              <Row label="Phone" value={q.data.phone || '-'} />
+              {/* Masked for the profile card. "Edit details" below still prefills the FULL number:
+                  saving the mask would overwrite the login identity and payout destination. */}
+              <Row label="Phone" value={maskPhoneForDisplay(q.data.phone) || '-'} />
               <Row label="Referred by" value={q.data.referredBy ? `${q.data.referredBy.slice(0, 8)}…` : '-'} mono />
               <Row label="Last transaction" value={q.data.lastTxAtMs ? `${q.data.lastTxKind ?? ''} · ${formatDateTime(q.data.lastTxAtMs)}` : '-'} />
               <Row label="Last active" value={q.data.lastActiveAtMs ? formatDateTime(q.data.lastActiveAtMs) : '-'} />
@@ -202,7 +205,9 @@ function ActivityRow({ r }: { r: AdminUserActivityRow }) {
     ? [r.direction?.toUpperCase(), r.multiplier != null ? `×${r.multiplier.toFixed(2)}` : null, r.result]
         .filter(Boolean)
         .join(' · ')
-    : [r.phone, r.mpesaReceipt].filter(Boolean).join(' · ');
+    // The number is only a label on this timeline row; the M-Pesa receipt beside it is what an
+    // operator reconciles against, and that stays whole.
+    : [r.phone ? maskPhoneForDisplay(r.phone) : null, r.mpesaReceipt].filter(Boolean).join(' · ');
 
   return (
     <tr className="border-b border-border last:border-0">
@@ -302,6 +307,9 @@ function EditDetails({ id, phone, username, targetRole }: { id: string; phone: s
   const toast = useToast();
   const canEdit = useCan('backoffice.users.edit_details');
   const canManageAdmins = useCan('backoffice.users.set_role_admin');
+  // NOT masked, deliberately: this field is an editable prefill that is saved back. A masked
+  // prefill would be written to the DB as the player's login identity and payout number, and the
+  // "did it change?" check below compares against the stored value.
   const [ph, setPh] = useState(phone ?? '');
   const [un, setUn] = useState(username ?? '');
 

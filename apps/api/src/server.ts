@@ -26,6 +26,7 @@ import { makePgKycStore } from "./kyc.pg.js";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
 import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, tradeUiOf, MIN_DEPOSIT_CENTS, type VersionedGameConfig, type Cents } from "@invest254/shared";
 import { BrandOriginAllowlist, ExtraOriginAllowlist } from "./cors.js";
+import { makeIdleGate, requireStepUp } from "./stepup.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgReferralRepo } from "./referral.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
@@ -709,6 +710,15 @@ async function buildDeps(): Promise<ApiDeps> {
     throw new Error("AUTH: SUPABASE_JWT_SECRET is required for self-managed register/login (HS256 issuance)");
   }
   const identity = new PgIdentityRepository(q);
+  // The two halves of 0196 share one view of a session, so they are built from one port: the idle
+  // gate (wired into the verifier below, so it sees every request) and the step-up gate (spliced by
+  // the Router into every authenticated mutating route).
+  const sessionPort = {
+    getSession: (userId: string, iat: number) => identity.getPrivilegedSession(userId, iat),
+    touchSession: (userId: string, iat: number) => identity.touchPrivilegedSession(userId, iat),
+  };
+  const idleGate = makeIdleGate(sessionPort);
+  const stepUpGate = requireStepUp(sessionPort);
   const auth = new AuthService(identity, {
     jwtSecret,
     // MFA is mandatory for EVERY privileged tier — including the platform tier (platform_admin and the
@@ -738,6 +748,12 @@ async function buildDeps(): Promise<ApiDeps> {
         await Promise.all([
           auth.assertSessionValid(claims.userId, claims.role, (claims.raw as { iat?: unknown })?.iat),
           auth.assertAccountActive(claims.userId, claims.role),
+          // 0196 idle timeout: five minutes of inactivity ends an operator session, and this is
+          // the only place that sees EVERY authenticated request — reads included. Tracking
+          // activity on mutating routes alone would log out an admin who had spent ten minutes
+          // reading the withdrawals queue, which is working, not idling. Runs alongside the two
+          // gates above and fails CLOSED exactly as they do.
+          idleGate(claims.userId, claims.role, (claims.raw as { iat?: unknown })?.iat),
         ]);
         return claims;
       })
@@ -898,6 +914,16 @@ async function buildDeps(): Promise<ApiDeps> {
   return {
     verifier,
     auth,
+    stepUp: stepUpGate,
+    // Per-session operator state for the step-up gate and the idle timeout (0196). A thin adapter
+    // over the identity repo so the auth routes and the gate depend on four calls rather than on
+    // the whole repository.
+    privilegedSessions: {
+      getSession: (userId, iat) => identity.getPrivilegedSession(userId, iat),
+      recordStepUp: (userId, iat, method) => identity.recordStepUp(userId, iat, method),
+      endSessions: (userId) => identity.endPrivilegedSessions(userId),
+      forceLogout: (userId) => identity.stampForceLogout(userId),
+    },
     affiliate,
     admin,
     platform,

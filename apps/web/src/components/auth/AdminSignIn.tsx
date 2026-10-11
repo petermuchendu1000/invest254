@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { ApiError } from '@/lib/api/client';
+import { useSessionEnd } from '@/lib/auth/operatorSession';
 
 /**
  * Operator sign-in. Deliberately MINIMAL: brand + credentials only. It states nothing about who the
@@ -46,11 +47,17 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   const [showPw, setShowPw] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Why this screen appeared without being asked for (0196): a five-minute idle timeout ended the
+  // session. Said plainly and without alarm, because the operator did nothing wrong — the alternative
+  // is a console that looks like it dropped their work for no reason.
+  const endedReason = useSessionEnd((s) => s.reason);
+  const setEndedReason = useSessionEnd((s) => s.setReason);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
     setError(null);
+    setEndedReason(null);   // they are signing in again: the explanation has served its purpose
     setBusy(true);
     try {
       await adminLogin(phone.trim(), password, needsTotp ? totp.trim() : undefined);
@@ -99,6 +106,11 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
         {/* Card */}
         <div className="rounded-2xl border border-border bg-surface/80 p-7 shadow-2xl shadow-black/40 ring-1 ring-white/5 sm:p-8">
           <h1 className="mb-5 text-[22px] font-semibold tracking-tight text-fg">Sign in</h1>
+          {endedReason === 'idle' ? (
+            <div className="mb-4 rounded-xl border border-border bg-surface-2/70 px-3 py-2.5 text-[13px] leading-relaxed text-muted">
+              You were signed out after 5 minutes without activity. Sign in to pick up where you left off.
+            </div>
+          ) : null}
           <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
             <Field label="Phone number" type="tel" name="phone" inputMode="tel" autoComplete="username" placeholder="07XX XXX XXX" value={phone} onChange={setPhone} required />
             <Field label="Password" type={showPw ? 'text' : 'password'} name="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={setPassword} trailing={eye} required />

@@ -38,7 +38,72 @@ import {
  * Without DATABASE_URL the engine runs fully in-memory for local dev (single default brand).
  */
 const PORT = Number(process.env.PORT ?? 8080);
-const MASTER_SEED = process.env.MASTER_SEED ?? process.env.SERVER_SEED ?? "dev-master-seed-0001";
+
+/**
+ * Local-dev-only master seed, used ONLY when DATABASE_URL is unset (in-memory dev). Named so that
+ * if it ever shows up in a reveal/commitment audit it is self-evidently not a production secret.
+ */
+const DEV_ONLY_MASTER_SEED = "INSECURE-LOCAL-DEV-ONLY-MASTER-SEED-NOT-PRODUCTION-SAFE";
+/** The seed literal that used to be the committed fallback here — anyone with the repo knows it. */
+const LEAKED_MASTER_SEED = "dev-master-seed-0001";
+/**
+ * Minimum accepted master-seed length. `openssl rand -hex 32` (the documented generator, see
+ * .env.example) emits 64 hex chars; 32 chars is the floor at which a hex or base64 secret still
+ * carries roughly 128 bits, i.e. is beyond offline search. Anything shorter is a placeholder or a
+ * passphrase, and the master seed is not a password: it is the HMAC key behind EVERY brand's daily
+ * seed (packages/shared/src/seed.ts, packages/shared/src/site.ts), so guessing it yields every
+ * future trade outcome and lets any published fairness commitment be forged after the fact.
+ */
+const MIN_MASTER_SEED_LENGTH = 32;
+
+/**
+ * Resolve the platform master seed, failing CLOSED on a real deployment.
+ *
+ * The previous committed fallback meant a deployment that forgot MASTER_SEED/SERVER_SEED silently
+ * derived every daily seed from a value published in this repository — predictable outcomes and
+ * forgeable commitments, with nothing in the logs to say so. DATABASE_URL is the same "this is a
+ * real deployment" signal already used for the JWT verifier a few lines below, so the two
+ * fail-closed checks agree.
+ *
+ * NEVER log the seed, a prefix of it, or its length: the error names the variable only, because a
+ * boot error is the one message that reliably reaches shared logs, dashboards and support threads.
+ */
+function resolveMasterSeed(): string {
+  const configured = process.env.MASTER_SEED ?? process.env.SERVER_SEED;
+  // In-memory dev (no DATABASE_URL): no real money, no published commitments — keep booting.
+  if (!process.env.DATABASE_URL) return configured ?? DEV_ONLY_MASTER_SEED;
+  const hint = "Generate one with `openssl rand -hex 32` and set MASTER_SEED (SERVER_SEED is the legacy fallback).";
+  const why = "It is the HMAC key for every brand's daily seed, so it determines every trade outcome and every published fairness commitment: a known or guessable value makes outcomes predictable and commitments forgeable.";
+  if (!configured) {
+    throw new Error(`SEED: MASTER_SEED is required when DATABASE_URL is set. ${hint} ${why}`);
+  }
+  const value = configured.trim();
+  if (value === LEAKED_MASTER_SEED || value === DEV_ONLY_MASTER_SEED) {
+    throw new Error(`SEED: MASTER_SEED is set to a development placeholder that is committed to this repository, so it is public. ${hint} ${why}`);
+  }
+  if (value.length < MIN_MASTER_SEED_LENGTH) {
+    throw new Error(`SEED: MASTER_SEED is too short to be a secret (minimum ${MIN_MASTER_SEED_LENGTH} characters). ${hint} ${why}`);
+  }
+  return configured;
+}
+
+const MASTER_SEED = resolveMasterSeed();
+
+/**
+ * The PREVIOUS master seed, if the platform has rotated. Used only to reveal days committed under
+ * it — see SeedManagerOptions.legacyMasterSeed for why rotation is otherwise a one-way door that
+ * permanently orphans every open day.
+ *
+ * Deliberately NOT subjected to the fail-closed checks above. The leaked literal is a legitimate
+ * value here: it is precisely what the already-committed days were derived from, and the whole
+ * point is to be able to open them. It can never produce a new commitment, so a public value in
+ * this variable cannot make any future outcome predictable.
+ */
+const LEGACY_MASTER_SEED = process.env.MASTER_SEED_LEGACY ?? process.env.SERVER_SEED_LEGACY;
+if (LEGACY_MASTER_SEED) {
+  console.log("[engine] legacy master seed configured: days committed before the rotation remain revealable");
+}
+
 const ONLINE_FLOOR = Number(process.env.ONLINE_FLOOR ?? 0);
 const DEFAULT_SITE = process.env.DEFAULT_SITE_ID ?? "00000000-0000-0000-0000-000000000001";
 
@@ -225,6 +290,9 @@ const registry = new SiteRegistry({
   masterSeed: MASTER_SEED,
   repo,
   configFor,
+  // Rotation support: days committed under the previous master stay revealable. Only ever read on
+  // a reveal whose primary-seed attempt was refused by the stored commitment.
+  ...(LEGACY_MASTER_SEED ? { seedManagerOpts: { legacyMasterSeed: LEGACY_MASTER_SEED } } : {}),
   ...(masterSeedFor ? { masterSeedFor } : {}),
   ...(curveProfileFor ? { curveProfileFor } : {}),
   // loadOverride: per-user overrides, COMPOSED with the platform-global cohort economy (0099) when the

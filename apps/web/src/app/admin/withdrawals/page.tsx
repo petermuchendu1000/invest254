@@ -11,6 +11,7 @@ import { StatusBadge } from '@/components/ui/Badge';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { formatExact, formatAgo } from '@/lib/format';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { PageHeader, TableWrap, Th, Td, Empty, Toolbar, FilterSelect, ConfirmButton, PasswordConfirmButton } from '@/components/admin/ui';
 import { useRowSelection, SelectAllCheckbox, RowCheckbox, BulkBar, downloadCsv, copyText } from '@/components/admin/BulkSelect';
 import { useWithdrawals, useWithdrawalAction, useWithdrawalsEnabled, useSetWithdrawalsEnabled, useBulkWithdrawals } from '@/lib/admin/hooks';
@@ -122,6 +123,8 @@ export default function WithdrawalsPage() {
     );
   }
 
+  // NOT masked, deliberately: the clipboard and the CSV are paste-into-M-Pesa paths. A masked
+  // number here poisons a payout silently — the row looks right and the money never arrives.
   async function copyPhones() {
     const ok = await copyText(sel.selectedRows.map((r) => r.phone).join('\n'));
     toast.push({ tone: ok ? 'success' : 'error', title: ok ? 'Phone numbers copied' : 'Copy failed', description: `${sel.count} number(s)` });
@@ -177,7 +180,7 @@ export default function WithdrawalsPage() {
                 </p>
                 <p className="text-muted">
                   {deepRow
-                    ? <>@{deepRow.username} · <Money cents={deepRow.amountCents} /> · {deepRow.phone}{ACTIONABLE.has(deepRow.status.toLowerCase()) ? '' : ` · already ${deepRow.status}`}</>
+                    ? <>@{deepRow.username} · <Money cents={deepRow.amountCents} /> · {maskPhoneForDisplay(deepRow.phone)}{ACTIONABLE.has(deepRow.status.toLowerCase()) ? '' : ` · already ${deepRow.status}`}</>
                     : 'You opened this from an alert. The request is highlighted below when it is on this page.'}
                   {deepIntent === 'approve' ? ' Approving pays out real money and needs the system owner password.' : ' Rejecting returns the held funds to the player.'}
                 </p>
@@ -346,7 +349,9 @@ function PlayerCell({ r }: { r: AdminWithdrawalRow }) {
   return (
     <span className="flex flex-col leading-tight">
       <UserCell userId={r.userId} username={r.username} />
-      <span className="mt-0.5 text-xs tabular-nums text-muted">{r.phone}</span>
+      {/* Masked on screen. "Copy phones" and "Export CSV" above deliberately copy the FULL
+          numbers — that is how the operator actually pays these people. */}
+      <span className="mt-0.5 text-xs tabular-nums text-muted">{maskPhoneForDisplay(r.phone)}</span>
       {r.mpesaReceipt ? <span className="font-mono text-[10px] text-muted">{r.mpesaReceipt}</span> : null}
     </span>
   );

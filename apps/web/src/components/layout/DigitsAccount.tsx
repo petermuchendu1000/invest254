@@ -7,6 +7,7 @@ import { api } from '@/lib/api/endpoints';
 import { ApiError } from '@/lib/api/client';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useSession } from '@/lib/auth/session';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { useWallet, useSetAccountMode, useTopupDemo } from '@/lib/wallet/hooks';
 // aliased: this file already exports its own `AccountMenu` (the avatar menu).
@@ -137,12 +138,6 @@ export function AccountPill({ compact = false }: { compact?: boolean }) {
   );
 }
 
-/** Mask everything but the first two and last four characters ("25*****5678"). */
-function mask(v: string): string {
-  if (v.length <= 6) return v;
-  return `${v.slice(0, 2)}${'*'.repeat(Math.max(3, v.length - 6))}${v.slice(-4)}`;
-}
-
 /**
  * Avatar menu (digits broker mock): who is signed in, then Profile, Change password, Referrals,
  * support and Sign out. Only items the platform actually supports are listed.
@@ -179,7 +174,9 @@ export function AccountMenu() {
         <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-64 rounded-xl border border-border bg-surface p-1.5 shadow-2xl" role="menu">
           <div className="border-b border-border px-3 pb-3 pt-2">
             <div className="truncate text-[14px] font-semibold text-fg">@{user.username}</div>
-            {user.phone ? <div className="font-mono text-[11px] text-muted">{mask(user.phone)}</div> : null}
+            {/* The file-local mask here rendered "25*****5678" while the wallet rendered
+                "0712 •••678" for the same number. One helper now, so the player sees one shape. */}
+            {user.phone ? <div className="font-mono text-[11px] text-muted">{maskPhoneForDisplay(user.phone)}</div> : null}
           </div>
           <div className="py-1">
             <Item icon="user" label="Profile" href="/account" />

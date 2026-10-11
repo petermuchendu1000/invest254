@@ -4,6 +4,7 @@ import { useFailToast } from '@/lib/toast/useFailToast';
 import { PageTabs, useTabParam } from '@/components/admin/Tabs';
 import { useEffect, useState } from 'react';
 import { formatKes, kesToCents } from '@invest254/shared/money';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { PageHeader, Section, TableWrap, Th, Td, Toolbar, FilterSelect, Empty, PasswordConfirmButton } from '@/components/admin/ui';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -145,7 +146,9 @@ function ReferralPayouts() {
           {rows.map((r) => (
             <tr key={r.id} className="border-t border-border">
               <Td><span className="font-medium text-fg">{r.username ?? r.beneficiaryUser.slice(0, 8)}</span></Td>
-              <Td className="text-muted">{r.phone ?? '-'}</Td>
+              {/* Masked: the payout is dispatched server-side from the stored number, so nothing
+                  here needs the digits — the operator only has to recognise the row. */}
+              <Td className="text-muted">{maskPhoneForDisplay(r.phone) || '-'}</Td>
               <Td className="text-right"><Money cents={r.amountCents} /></Td>
               <Td><StatusPill status={r.status} /></Td>
               <Td className="text-muted">{fmtDate(r.requestedAtMs)}</Td>
@@ -228,9 +231,11 @@ function Expenses() {
           <span>Marketer</span>
           <select value={marketerId} onChange={(e) => setMarketerId(e.target.value)} className="h-9 rounded-lg border border-border bg-surface-2 px-2 text-sm text-fg outline-none focus:border-accent">
             <option value="">Select a marketer…</option>
+            {/* The number is masked in the option LABEL only — the option's value is the user id,
+                so masking it cannot change which marketer an expense is logged against. */}
             {marketers.map((m) => (
               <option key={m.id} value={m.affiliate_user_id ?? ''} disabled={!m.affiliate_user_id}>
-                {m.name} · {m.phone}{m.affiliate_user_id ? '' : ' (no website account)'}
+                {m.name} · {maskPhoneForDisplay(m.phone)}{m.affiliate_user_id ? '' : ' (no website account)'}
               </option>
             ))}
           </select>
@@ -328,7 +333,7 @@ function Advances() {
           {rows.map((r) => (
             <tr key={r.id} className="border-t border-border">
               <Td><span className="font-medium text-fg">{r.username ?? r.marketerUserId.slice(0, 8)}</span></Td>
-              <Td className="text-muted">{r.phone ?? '-'}</Td>
+              <Td className="text-muted">{maskPhoneForDisplay(r.phone) || '-'}</Td>
               <Td className="text-right"><Money cents={r.amountCents} /></Td>
               <Td className="text-muted">{r.reason ?? '-'}</Td>
               <Td><StatusPill status={r.status} /></Td>

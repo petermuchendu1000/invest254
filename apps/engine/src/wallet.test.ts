@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { commitment } from "@invest254/shared";
 import { InMemoryGameRepository, PgGameRepository, type Querier } from "./wallet.js";
 
 test("InMemory repo: open debits, settle credits once (idempotent), loss credits nothing", async () => {
@@ -61,21 +62,30 @@ test("Pg repo: calls the RPCs with correct params and parses bigint strings", as
 
 test("InMemory repo: game-day commit is idempotent; reveal once; fairness hides seed pre-reveal", async () => {
   const r = new InMemoryGameRepository();
-  const id1 = await r.ensureGameDay("2026-06-17", "hash17");
-  const id2 = await r.ensureGameDay("2026-06-17", "hash17"); // idempotent — same id, hash unchanged
+  // A REAL (seed, commitment) pair. This test used to commit "hash17" and reveal "seed17", which
+  // the mirror accepted and fn_reveal_game_day (0048) would have refused outright — it updates only
+  // `where server_seed_hash = encode(digest(p_seed,'sha256'),'hex')`. The mirror now enforces that
+  // same equality, so the fixture has to be a pair that actually hashes.
+  const SEED = "seed17";
+  const HASH = commitment(SEED);
+  const id1 = await r.ensureGameDay("2026-06-17", HASH);
+  const id2 = await r.ensureGameDay("2026-06-17", HASH); // idempotent — same id, hash unchanged
   assert.equal(id1, id2);
 
   // before reveal: commitment present, seed hidden
   const pre = await r.getFairness("2026-06-17");
-  assert.ok(pre && pre.serverSeedHash === "hash17" && pre.serverSeed === null && pre.revealedAt === null);
+  assert.ok(pre && pre.serverSeedHash === HASH && pre.serverSeed === null && pre.revealedAt === null);
 
-  assert.equal(await r.revealSeed("2026-06-17", "seed17"), true);
-  assert.equal(await r.revealSeed("2026-06-17", "seed17"), false); // already revealed -> no-op
-  assert.equal(await r.revealSeed("2099-01-01", "x"), false);      // unknown day -> no-op
+  // A seed that does NOT match the published commitment is refused — the property that makes the
+  // commitment worth publishing at all.
+  assert.equal(await r.revealSeed("2026-06-17", "not-the-committed-seed"), false);
+  assert.equal(await r.revealSeed("2026-06-17", SEED), true);
+  assert.equal(await r.revealSeed("2026-06-17", SEED), false); // already revealed -> no-op
+  assert.equal(await r.revealSeed("2099-01-01", "x"), false);  // unknown day -> no-op
 
   // after reveal: seed exposed
   const post = await r.getFairness("2026-06-17");
-  assert.ok(post && post.serverSeed === "seed17" && post.revealedAt !== null);
+  assert.ok(post && post.serverSeed === SEED && post.revealedAt !== null);
   assert.equal(await r.getFairness("2050-01-01"), null);           // unknown day
 });
 

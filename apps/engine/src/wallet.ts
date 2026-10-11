@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type Cents, assertCents, lastDigit, priceAtRate } from "@invest254/shared";
+import { type Cents, assertCents, lastDigit, priceAtRate, commitment } from "@invest254/shared";
 import type { Direction, PriceAxis } from "@invest254/shared";
 import {
   type Page, type PageQuery, clampLimit, decodeCursor, decodeKeyset, pageFrom,
@@ -161,6 +161,17 @@ export interface GameRepository {
   listOpenPositions(): Promise<OpenPositionRow[]>;
   /** Public fairness record for a day, or null if the day is unknown. */
   getFairness(tradeDate: string): Promise<FairnessRecord | null>;
+  /**
+   * The commitment ALREADY stored for (day, brand), or null when the day has no row yet.
+   *
+   * Deliberately separate from `getFairness`, and deliberately site-scoped: `getFairness` queries
+   * `v_fairness where trade_date = $1` with no brand filter and takes `rows[0]`, so on this
+   * multi-tenant platform (18 brands, each with a row per trade date) it returns an arbitrary
+   * brand's record. That is fine for the player-facing read it was written for and completely wrong
+   * for this, where the question is "what did THIS brand publish for this day" and a wrong answer
+   * would have the engine price a day against another brand's curve.
+   */
+  getCommittedSeedHash(tradeDate: string, siteId?: string): Promise<string | null>;
   /** A player's wallet ledger, newest-first, cursor-paginated. `siteId` scopes it per brand. */
   listLedger(userId: string, q: PageQuery, siteId?: string): Promise<Page<LedgerEntry>>;
   /** A player's position history (optional status filter), newest-first, cursor-paginated. `siteId` scopes it per brand. */
@@ -370,9 +381,30 @@ export class InMemoryGameRepository implements GameRepository {
     return day.id;
   }
 
+  async getCommittedSeedHash(tradeDate: string, siteId?: string): Promise<string | null> {
+    return this.days.get(dayKey(tradeDate, siteId))?.serverSeedHash ?? null;
+  }
+
   async revealSeed(tradeDate: string, serverSeed: string, siteId?: string): Promise<boolean> {
     const day = this.days.get(dayKey(tradeDate, siteId));
     if (!day || day.revealedAt !== null) return false; // unknown or already revealed -> no-op
+    /**
+     * The revealed seed MUST hash to the commitment that was published for this day.
+     *
+     * This mirror used to accept any seed at all, which made it strictly more permissive than
+     * production on the one check the whole provable-fairness mechanism rests on:
+     * `fn_reveal_game_day` (0048) applies its update only
+     * `where server_seed_hash = encode(digest(p_seed,'sha256'),'hex')`. Every test exercising a
+     * reveal was therefore passing for free, and a bug that revealed a day under the WRONG seed —
+     * the exact failure a master-seed rotation causes — was invisible here while being permanent in
+     * production. A mirror that is laxer than the real thing is worse than no mirror: it reports
+     * success for code that cannot work.
+     *
+     * (The RPC additionally requires `p_date < current_date`. That is deliberately NOT mirrored:
+     * these tests drive a synthetic clock, so a real-calendar comparison would make them depend on
+     * the day they are run.)
+     */
+    if (commitment(serverSeed) !== day.serverSeedHash) return false;
     day.serverSeed = serverSeed;
     day.revealedAt = new Date().toISOString();
     return true;
@@ -662,6 +694,17 @@ export class PgGameRepository implements GameRepository {
       ticket: x.ticket === null || x.ticket === undefined ? null : Number(x.ticket),
     }));
   }
+  async getCommittedSeedHash(tradeDate: string, siteId?: string): Promise<string | null> {
+    // Scoped to the brand, unlike getFairness below — see the interface comment for why that
+    // distinction is load-bearing rather than stylistic.
+    const r = await this.q.query(
+      `select server_seed_hash from game_days
+        where trade_date = $1 and ($2::uuid is null or site_id = $2)
+        limit 1`, [tradeDate, siteId ?? null]);
+    const v = r.rows[0]?.server_seed_hash;
+    return v == null ? null : String(v);
+  }
+
   async getFairness(tradeDate: string): Promise<FairnessRecord | null> {
     const r = await this.q.query("select id, trade_date, server_seed_hash, server_seed, revealed_at from v_fairness where trade_date = $1", [tradeDate]);
     if (!r.rows.length) return null;

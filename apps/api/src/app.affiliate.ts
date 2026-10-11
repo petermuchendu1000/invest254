@@ -1,4 +1,4 @@
-import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSite, requireEarningRole, adminScopeSite, adminListSite, rateLimit, DEFAULT_SITE_ID, type Ctx } from "./http.js";
+import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSite, requireEarningRole, adminScopeSite, adminListSite, rateLimit, restrictToCidrs, DEFAULT_SITE_ID, type Ctx } from "./http.js";
 import { assertUserTarget, assertSiteTarget } from "./scope.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
@@ -144,10 +144,15 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
   // F-44: tier-aware, fail-closed target scope for marketer-addressed admin routes (scope.ts).
   const scope = { siteOfUser: (id: string) => deps.admin.siteOfUser(id), platformOfSite: (s: string) => deps.platform.platformOfSite(s) };
   const strictScope = scope;
+  // Lock the public Daraja B2C payout-result callback to Safaricom's source IPs when
+  // MPESA_CALLBACK_ALLOWED_CIDRS is set — the same guard, the same env var and the same
+  // fail-open-when-unset semantics as the payment callbacks in app.payments.ts.
+  const darajaOnly = restrictToCidrs("MPESA_CALLBACK_ALLOWED_CIDRS");
 
   // Public referral-link click tracking (funnel stage 0, docs/19). Fire-and-forget from the
   // /r/<code> landing page BEFORE signup, so no auth. Tolerant: an unknown/inactive code is a
-  // silent no-op (recorded:false) and never errors. IP rate-limited to blunt click-spam.
+  // silent no-op and never errors — and the response does not say which (see below). IP
+  // rate-limited to blunt click-spam.
   const clickLimit = rateLimit({ name: "aff-click", by: "ip", limit: Number(process.env.RATE_LIMIT_AFF_CLICK_PER_MIN) || 60, windowMs: 60_000 });
   router.post(`${BASE}/affiliate/click`, clickLimit, async (ctx: Ctx) => {
     const b = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
@@ -157,8 +162,14 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     let siteId: string | undefined;
     const ref = typeof b.site === "string" && b.site.trim() ? b.site.trim() : undefined;
     if (ref) siteId = /^[0-9a-f-]{36}$/i.test(ref) ? ref : (await deps.brandByHost(ref.toLowerCase()))?.siteId;
-    const recorded = await domain(() => deps.affiliate.recordClick(code.trim(), siteId));
-    return { recorded };
+    // Record only real codes (unchanged server-side), but NEVER tell the caller which it was: the
+    // old `recorded:false` made this unauthenticated endpoint a free oracle for enumerating the
+    // live referral-code space across every brand — the input to commission fraud (seed a funnel
+    // with harvested codes) and a privacy leak about which marketers exist. The response is
+    // deliberately uninformative and constant; the real outcome is in the funnel data, which only
+    // the owning marketer can read via /affiliate/summary.
+    await domain(() => deps.affiliate.recordClick(code.trim(), siteId));
+    return { recorded: true };
   });
 
   router.post(`${BASE}/affiliate/enroll`, auth, earner, site, async (ctx: Ctx) => {
@@ -408,7 +419,10 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
   });
 
   // Public: Daraja B2C result for a payout (network-allowlisted at the edge). Always acks.
-  router.post(`${BASE}/affiliate/payouts/mpesa/result/:payoutId`, async (ctx: Ctx) => {
+  // Same source lock as every other Daraja callback (app.payments.ts): this route COMPLETES a real
+  // commission payout from its body alone, so without the allowlist anyone who can guess a payout
+  // id can forge a success/failure result. Unset MPESA_CALLBACK_ALLOWED_CIDRS = disabled (fail-open).
+  router.post(`${BASE}/affiliate/payouts/mpesa/result/:payoutId`, darajaOnly, async (ctx: Ctx) => {
     const r = parseB2cResult(ctx.body);
     await domain(() => deps.affiliate.completePayout(ctx.params.payoutId!, r.resultCode, r.conversationId, r.receipt, null, ctx.body));
     return DARAJA_ACK;

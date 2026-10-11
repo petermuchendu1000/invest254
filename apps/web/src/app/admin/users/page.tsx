@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Money } from '@/components/ui/Money';
 import { StatusBadge } from '@/components/ui/Badge';
 import { formatExact, formatAgo, formatNumber } from '@/lib/format';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { ApiError } from '@/lib/api/client';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { PageHeader, TableWrap, Th, Td, Empty, Toolbar, FilterSelect, ConfirmButton, SearchInput } from '@/components/admin/ui';
@@ -139,6 +140,8 @@ export default function UsersPage() {
       </div>
 
       <Toolbar>
+        {/* NOT masked, deliberately: the operator types a real number here and the query runs
+            server-side against the real column — masking the input would match nothing. */}
         <SearchInput value={search} onChange={setSearch} placeholder="Search username or phone…" className="sm:w-72" />
         <FilterSelect value={role} onChange={setRole} options={ROLE_OPTS} />
         <Button variant="outline" size="sm" onClick={() => setShowAdv((v) => !v)}>
@@ -372,7 +375,9 @@ function UserRow({ r, selected, onToggle }: { r: AdminUserRow; selected: boolean
             {r.role !== 'player' ? <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">{ROLE_LABEL[r.role] ?? r.role}</span> : null}
           </span>
           {r.phone ? (
-            <span className="text-[11px] tabular-nums text-muted">{r.phone}</span>
+            // Masked: the list renders every player's number at once, which is the single richest
+            // harvest on the back office. The search box above still queries the real column.
+            <span className="text-[11px] tabular-nums text-muted">{maskPhoneForDisplay(r.phone)}</span>
           ) : (
             <span className="font-mono text-[10px] text-muted">{r.userId.slice(0, 8)}…</span>
           )}
