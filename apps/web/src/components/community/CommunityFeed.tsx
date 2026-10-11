@@ -30,7 +30,7 @@ export function CommunityFeed() {
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 px-4 py-5">
       <header>
-        <h1 className="text-xl font-semibold tracking-tight text-fg">{brand.name} community</h1>
+        <h1 className="break-words text-xl font-semibold tracking-tight text-fg">{brand.name} community</h1>
         <p className="mt-0.5 text-xs text-muted">Announcements, questions and live sessions from the team.</p>
       </header>
 
@@ -57,16 +57,19 @@ function Post({ post, isAdmin }: { post: CommunityPostDto; isAdmin: boolean }) {
 
   return (
     <li className={cn('rounded-xl border bg-surface p-4', post.pinned ? 'border-accent/50' : 'border-border')}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[11px] text-muted">
-          {post.pinned ? <span className="rounded bg-accent/15 px-1.5 py-0.5 font-semibold text-accent">Pinned</span> : null}
-          {post.kind === 'live' ? <span className="rounded bg-down/15 px-1.5 py-0.5 font-semibold text-down">Live</span> : null}
-          <span>{post.author}</span>
-          <span>·</span>
-          <time dateTime={post.createdAt}>{new Date(post.createdAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}</time>
+      {/* Badges, author and date wrap among themselves, and the admin row takes a line of its own
+          until there is width for it: on a 320px phone the three actions and a long author name
+          cannot share one line without one of them being pushed out of the card. */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+          {post.pinned ? <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 font-semibold text-accent">Pinned</span> : null}
+          {post.kind === 'live' ? <span className="shrink-0 rounded bg-down/15 px-1.5 py-0.5 font-semibold text-down">Live</span> : null}
+          <span className="min-w-0 max-w-full truncate">{post.author}</span>
+          <span className="shrink-0" aria-hidden>·</span>
+          <time className="shrink-0 whitespace-nowrap" dateTime={post.createdAt}>{new Date(post.createdAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}</time>
         </div>
         {isAdmin ? (
-          <div className="flex shrink-0 gap-1 text-[11px]">
+          <div className="-my-1 flex w-full shrink-0 items-center justify-end gap-1 text-[11px] xs:w-auto">
             <AdminAction onClick={() => admin.pin.mutate({ id: post.id, pinned: !post.pinned })}>{post.pinned ? 'Unpin' : 'Pin'}</AdminAction>
             {post.kind === 'poll' ? (
               <AdminAction onClick={() => admin.close.mutate({ id: post.id, closed: !post.closed })}>{post.closed ? 'Reopen' : 'Close'}</AdminAction>
@@ -76,15 +79,17 @@ function Post({ post, isAdmin }: { post: CommunityPostDto; isAdmin: boolean }) {
         ) : null}
       </div>
 
-      {post.title ? <h2 className="mb-1 text-sm font-semibold text-fg">{post.title}</h2> : null}
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg/90">{post.body}</p>
+      {/* A pasted link or an unspaced run of characters has nowhere to wrap, so it would otherwise
+          stretch the card past the viewport. */}
+      {post.title ? <h2 className="mb-1 break-words text-sm font-semibold text-fg">{post.title}</h2> : null}
+      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-fg/90">{post.body}</p>
 
       {post.streamUrl ? (
         <a
           href={post.streamUrl}
           target="_blank"
           rel="noopener noreferrer nofollow"
-          className="mt-3 inline-flex h-9 items-center rounded-lg bg-accent px-4 text-sm font-semibold text-accent-fg"
+          className="mt-3 inline-flex h-11 items-center justify-center rounded-lg bg-accent px-4 text-sm font-semibold text-accent-fg"
         >
           Watch the live
         </a>
@@ -102,16 +107,19 @@ function Post({ post, isAdmin }: { post: CommunityPostDto; isAdmin: boolean }) {
                 disabled={post.closed || vote.isPending}
                 onClick={() => vote.mutate({ postId: post.id, optionId: o.id })}
                 className={cn(
-                  'relative w-full overflow-hidden rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed',
+                  'relative flex min-h-11 w-full items-center overflow-hidden rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed',
                   mine ? 'border-accent text-fg' : 'border-border text-fg/90 hover:border-accent/50',
                 )}
               >
                 {/* The bar is the result, drawn behind the label rather than beside it, so a long
                     option name never squeezes the number off the row. */}
                 <span className="absolute inset-y-0 left-0 bg-accent/15" style={{ width: `${pct}%` }} aria-hidden="true" />
-                <span className="relative flex items-center justify-between gap-3">
-                  <span className="truncate">{mine ? '✓ ' : ''}{o.label}</span>
-                  <span className="shrink-0 text-xs text-muted">{pct}%</span>
+                <span className="relative flex w-full min-w-0 items-center gap-2">
+                  {/* The tick is a sibling of the label, not part of it: inside the truncating span a
+                      long option name would shorten away the one mark that says how you voted. */}
+                  {mine ? <span className="shrink-0" aria-hidden>✓</span> : null}
+                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted">{pct}%</span>
                 </span>
               </button>
             );
@@ -145,13 +153,15 @@ function Composer() {
 
   return (
     <section className="rounded-xl border border-border bg-surface p-4">
+      {/* Each toggle takes half the row on a phone so both are a full finger wide; from 360px up
+          they shrink back to the width of their own label. */}
       <div className="mb-2 flex gap-1">
         {(['post', 'poll'] as const).map((k) => (
           <button
             key={k}
             type="button"
             onClick={() => setKind(k)}
-            className={cn('rounded-lg px-3 py-1 text-xs font-semibold',
+            className={cn('flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 text-xs font-semibold xs:flex-none',
               kind === k ? 'bg-accent text-accent-fg' : 'border border-border text-muted')}
           >
             {k === 'post' ? 'Announcement' : 'Question'}
@@ -164,7 +174,9 @@ function Composer() {
         onChange={(e) => setBody(e.target.value)}
         rows={3}
         placeholder={kind === 'poll' ? 'Ask your question — e.g. Do we go live at 10am?' : 'Write to your players…'}
-        className="w-full rounded-lg border border-border bg-bg p-3 text-sm text-fg outline-none focus:border-accent"
+        /* A textarea carries an intrinsic `cols` width that beats a narrow parent, so it needs both
+           block layout and a floor of zero before `w-full` can hold it inside the card. */
+        className="block w-full min-w-0 resize-y rounded-lg border border-border bg-bg p-3 text-base text-fg outline-none focus:border-accent sm:text-sm"
       />
 
       {kind === 'poll' ? (
@@ -173,7 +185,7 @@ function Composer() {
           onChange={(e) => setOptions(e.target.value)}
           rows={3}
           placeholder={'One choice per line\n10am\n2pm\n8pm'}
-          className="mt-2 w-full rounded-lg border border-border bg-bg p-3 text-sm text-fg outline-none focus:border-accent"
+          className="mt-2 block w-full min-w-0 resize-y rounded-lg border border-border bg-bg p-3 text-base text-fg outline-none focus:border-accent sm:text-sm"
         />
       ) : null}
 
@@ -183,7 +195,7 @@ function Composer() {
         type="button"
         disabled={!body.trim() || admin.post.isPending}
         onClick={send}
-        className="mt-2 h-9 w-full rounded-lg bg-accent text-sm font-semibold text-accent-fg disabled:opacity-50"
+        className="mt-2 h-11 w-full rounded-lg bg-accent text-sm font-semibold text-accent-fg disabled:opacity-50"
       >
         {admin.post.isPending ? 'Posting…' : kind === 'poll' ? 'Ask' : 'Post'}
       </button>
@@ -193,7 +205,15 @@ function Composer() {
 
 function AdminAction({ children, onClick, tone }: { children: React.ReactNode; onClick: () => void; tone?: 'down' }) {
   return (
-    <button type="button" onClick={onClick} className={cn('rounded px-1.5 py-0.5 hover:bg-border/50', tone === 'down' ? 'text-down' : 'text-muted')}>
+    // The hit area is a finger, not the 11px label: the visual weight stays small, the target does not.
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center whitespace-nowrap rounded px-2 hover:bg-border/50',
+        tone === 'down' ? 'text-down' : 'text-muted',
+      )}
+    >
       {children}
     </button>
   );

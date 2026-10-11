@@ -17,6 +17,7 @@ import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { isContinuousBrand } from '@/lib/game/levelWatch';
 import { LivePnl } from '@/components/game/LivePnl';
 import { useLivePrice } from '@/components/game/candlestick/useLivePrice';
+import { useCandlestickUi } from '@/components/game/candlestick/ui';
 
 /**
  * The candlestick screen's order entry, laid out exactly as the mock lays it out: the two sides,
@@ -47,6 +48,17 @@ export function TradingPanel({ className }: { className?: string }) {
     queryFn: () => api.gameConfig(brand.slug),
     staleTime: 5 * 60_000,
   });
+
+  /**
+   * Tell the header whether a contract is in flight, so its Real/Demo switch can refuse mid-trade
+   * with a reason rather than letting the player try and get a generic failure. The header sits
+   * outside GameSocketProvider and cannot see this itself — see the note in ui.ts.
+   */
+  const setTradeOpen = useCandlestickUi((s) => s.setTradeOpen);
+  useEffect(() => {
+    setTradeOpen(!!activePosition);
+    return () => setTradeOpen(false);
+  }, [activePosition, setTradeOpen]);
 
   const [stake, setStake] = useState('');
   const [stopLoss, setStopLoss] = useState('');
@@ -115,10 +127,10 @@ export function TradingPanel({ className }: { className?: string }) {
   const money = (cents: number) => (isForeign ? `${symbol} ${toDisplay(cents).toFixed(2)}` : `KSh ${centsToKes(cents).toFixed(2)}`);
 
   return (
-    <div className={cn('flex h-full w-full flex-col bg-[#111827] p-4', className)}>
-      <div className="mb-4 hidden items-center justify-start text-sm font-bold text-white sm:flex">
+    <div className={cn('flex h-full w-full min-w-0 flex-col bg-[#111827] p-3 sm:p-4', className)}>
+      <div className="mb-4 hidden min-w-0 items-center justify-start text-sm font-bold text-white sm:flex">
         Trading Panel
-        <span className="mx-1 text-xs font-normal text-gray-400">({(brand.currency ?? 'KES').toUpperCase()})</span>
+        <span className="mx-1 truncate text-xs font-normal text-gray-400">({(brand.currency ?? 'KES').toUpperCase()})</span>
       </div>
 
       {/* The two sides. Disabled while a contract is in flight: this brand opens one at a time. */}
@@ -127,7 +139,7 @@ export function TradingPanel({ className }: { className?: string }) {
           type="button"
           disabled={connecting || !!activePosition}
           onClick={() => place('buy')}
-          className="h-11 flex-1 rounded-lg bg-[#16a34a] text-sm font-bold tracking-wide text-white transition-colors hover:bg-[#15803d] disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-0 flex-1 rounded-lg bg-[#16a34a] text-sm font-bold tracking-wide text-white transition-colors hover:bg-[#15803d] disabled:cursor-not-allowed disabled:opacity-50"
         >
           BUY
         </button>
@@ -135,32 +147,39 @@ export function TradingPanel({ className }: { className?: string }) {
           type="button"
           disabled={connecting || !!activePosition}
           onClick={() => place('sell')}
-          className="h-11 flex-1 rounded-lg bg-[#7f2d2d] text-sm font-bold tracking-wide text-white transition-colors hover:bg-[#991b1b] disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-0 flex-1 rounded-lg bg-[#7f2d2d] text-sm font-bold tracking-wide text-white transition-colors hover:bg-[#991b1b] disabled:cursor-not-allowed disabled:opacity-50"
         >
           SELL
         </button>
       </div>
 
-      <div className="mb-1 grid grid-cols-2 gap-3">
-        <div>
-          <span className="mb-2 block text-xs uppercase tracking-wider text-gray-400">Trade Amount</span>
+      {/*
+        Two fields across, as the mock has them. The panel is only ~288px wide at 320px and 320px
+        wide in the desktop rail, so each field gets ~140px: the prefix is sized to the tightest of
+        those and the input's left padding clears it by a few pixels, where `pl-12` against a 16px
+        prefix left almost nothing for a six-digit stake. `min-w-0` on the cells because a grid
+        item's `auto` minimum would otherwise let a long value push the column past the rail.
+      */}
+      <div className="mb-1 grid grid-cols-2 gap-2 sm:gap-3">
+        <div className="min-w-0">
+          <span className="mb-2 block truncate text-xs uppercase tracking-wider text-gray-400">Trade Amount</span>
           <div className="relative">
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-gray-400">{isForeign ? symbol : 'KSh'}</div>
+            <div className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">{isForeign ? symbol : 'KSh'}</div>
             <input
               inputMode="decimal"
               value={stake}
               onChange={(e) => setStake(e.target.value.replace(/[^\d.]/g, ''))}
               className={cn(
-                'h-11 w-full rounded-lg border bg-[#0a0f1c] pl-12 pr-3 text-sm font-bold text-white outline-none',
+                'h-11 w-full min-w-0 rounded-lg border bg-[#0a0f1c] pl-10 pr-2.5 text-base font-bold tabular-nums text-white outline-none sm:text-sm',
                 refusal ? 'border-red-500' : 'border-[#374151] focus:border-[#22c55e]',
               )}
             />
           </div>
         </div>
-        <div>
-          <span className="mb-2 block text-xs uppercase tracking-wider text-gray-400">Stop Loss</span>
+        <div className="min-w-0">
+          <span className="mb-2 block truncate text-xs uppercase tracking-wider text-gray-400">Stop Loss</span>
           <div className="relative">
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-gray-400">{isForeign ? symbol : 'KSh'}</div>
+            <div className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">{isForeign ? symbol : 'KSh'}</div>
             <input
               inputMode="decimal"
               value={stopLoss}
@@ -168,19 +187,36 @@ export function TradingPanel({ className }: { className?: string }) {
               title={stopSupported ? undefined : 'This contract settles at expiry, so a stop has nothing to close early.'}
               onChange={(e) => setStopLoss(e.target.value.replace(/[^\d.]/g, ''))}
               placeholder="Optional"
-              className="h-11 w-full rounded-lg border border-[#374151] bg-[#0a0f1c] pl-12 pr-3 text-sm font-bold text-white outline-none placeholder:font-normal placeholder:text-gray-500 focus:border-[#22c55e] disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-11 w-full min-w-0 rounded-lg border border-[#374151] bg-[#0a0f1c] pl-10 pr-2.5 text-base font-bold tabular-nums text-white outline-none placeholder:font-normal placeholder:text-gray-500 focus:border-[#22c55e] disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm"
             />
           </div>
         </div>
       </div>
 
-      {/* The brand's own range, under the fields, exactly where the mock puts it. */}
-      <div className="mb-4 text-xs text-gray-500">
-        {limits.ready ? `${money(minCents)} – ${maxCents !== undefined ? money(maxCents) : '∞'}` : ' '}
+      {/*
+        The brand's own range, under the fields, exactly where the mock puts it. A brand whose
+        ceiling runs to seven digits makes this string longer than the 288px panel, so it is allowed
+        to wrap BETWEEN the two figures and never inside one, and it reserves its line height so the
+        ladder below it does not jump when the limits land.
+      */}
+      <div className="mb-4 flex min-h-4 flex-wrap items-center gap-x-1.5 text-xs text-gray-500">
+        {limits.ready ? (
+          <>
+            <span className="whitespace-nowrap tabular-nums">{money(minCents)}</span>
+            <span aria-hidden="true">–</span>
+            <span className="whitespace-nowrap tabular-nums">{maxCents !== undefined ? money(maxCents) : '∞'}</span>
+          </>
+        ) : null}
       </div>
 
-      {/* Four quick stakes off the brand's ladder — the mock's four columns. */}
-      <div className="mb-5 grid grid-cols-4 gap-1">
+      {/*
+        Four quick stakes off the brand's ladder — the mock's four columns.
+        The figures are the brand's own and run to five or six digits, which does not fit four
+        across a 288–320px panel WITH a currency prefix on each. So the narrowest phones get a 2x2
+        grid that keeps the prefix, and from 360px up it is the mock's four columns carrying the bare
+        figure — the currency is named by the panel heading, which appears at those same widths.
+      */}
+      <div className="mb-5 grid grid-cols-2 gap-1 xs:grid-cols-4">
         {chips.map((v) => {
           const active = Number.parseFloat(stake) === v;
           return (
@@ -189,13 +225,14 @@ export function TradingPanel({ className }: { className?: string }) {
               type="button"
               onClick={() => setStake(String(v))}
               className={cn(
-                'h-9 rounded-lg border text-sm font-medium transition-colors',
+                'flex h-10 min-w-0 items-center justify-center gap-1 rounded-lg border px-0.5 text-sm font-medium tracking-tight transition-colors xs:text-xs',
                 active
                   ? 'border-[#22c55e] bg-[#22c55e] text-black'
                   : 'border-[#374151] bg-[#1f2937] text-white hover:border-[#4b5563]',
               )}
             >
-              {isForeign ? symbol : 'KSh'} {v.toLocaleString()}
+              <span className="xs:hidden">{isForeign ? symbol : 'KSh'}</span>
+              <span className="truncate tabular-nums">{v.toLocaleString()}</span>
             </button>
           );
         })}
@@ -206,7 +243,7 @@ export function TradingPanel({ className }: { className?: string }) {
         contract is in flight it carries that contract instead: the mock has no in-flight state, and
         inventing a second surface for it would hide the one thing a trader is watching.
       */}
-      <div className="mt-auto space-y-2 rounded-lg bg-[#1f2937] p-4">
+      <div className="mt-auto min-w-0 space-y-2 rounded-lg bg-[#1f2937] p-3 sm:p-4">
         {activePosition ? (
           <>
             <LivePnl pos={activePosition} />
@@ -215,7 +252,7 @@ export function TradingPanel({ className }: { className?: string }) {
                 type="button"
                 disabled={!(activePosition.phase === 'open' && activePosition.sellable && activePosition.positionId)}
                 onClick={() => sell()}
-                className="h-10 w-full rounded-lg bg-[#374151] text-sm font-bold text-white transition-colors hover:bg-[#4b5563] disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-11 w-full rounded-lg bg-[#374151] text-sm font-bold text-white transition-colors hover:bg-[#4b5563] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {activePosition.phase === 'settling' ? 'Closing…' : 'Close Trade'}
               </button>
@@ -223,13 +260,15 @@ export function TradingPanel({ className }: { className?: string }) {
           </>
         ) : (
           <>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Live Price</span>
+            {/* Label fixed, figure allowed to shrink: a six-figure stake is the long half of the
+                row, and without `min-w-0` + `truncate` it widened the whole panel instead. */}
+            <div className="flex items-baseline justify-between gap-2 text-sm">
+              <span className="shrink-0 text-gray-400">Live Price</span>
               <LivePriceReadout />
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-400">Stake</span>
-              <span className="font-bold text-white">{Number.isFinite(stakeCents) ? money(stakeCents) : '—'}</span>
+            <div className="flex items-baseline justify-between gap-2 text-sm">
+              <span className="shrink-0 text-gray-400">Stake</span>
+              <span className="min-w-0 truncate font-bold tabular-nums text-white">{Number.isFinite(stakeCents) ? money(stakeCents) : '—'}</span>
             </div>
           </>
         )}
@@ -253,5 +292,5 @@ export function TradingPanel({ className }: { className?: string }) {
 function LivePriceReadout() {
   const { tick, priceOfRate, digits } = useLivePrice();
   const price = priceOfRate(tick?.rate);
-  return <span className="font-mono text-[#22c55e]">{price === null ? '—' : price.toFixed(digits)}</span>;
+  return <span className="min-w-0 truncate font-mono text-[#22c55e]">{price === null ? '—' : price.toFixed(digits)}</span>;
 }

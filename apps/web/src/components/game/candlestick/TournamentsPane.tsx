@@ -11,15 +11,15 @@ export function TournamentsPane() {
   const tournaments: { id: string; name: string; prize: string; ends: string }[] = [];
 
   return (
-    <div className="flex h-full flex-col space-y-3 bg-[#080d18] p-4">
-      <div className="shrink-0 text-xs font-bold uppercase tracking-widest text-white">Tournaments</div>
+    <div className="flex h-full w-full min-w-0 flex-col space-y-3 overflow-y-auto bg-[#080d18] p-3 sm:p-4">
+      <div className="shrink-0 truncate text-xs font-bold uppercase tracking-widest text-white">Tournaments</div>
       {tournaments.length === 0 ? (
         <p className="px-2 py-8 text-center text-xs italic text-gray-500">No tournaments running right now.</p>
       ) : (
         tournaments.map((t) => (
-          <div key={t.id} className="rounded-xl bg-[#0d1525] p-4">
-            <div className="text-sm font-bold text-white">{t.name}</div>
-            <div className="mt-1 text-xs text-gray-400">Prize {t.prize} · ends {t.ends}</div>
+          <div key={t.id} className="min-w-0 rounded-xl bg-[#0d1525] p-3 sm:p-4">
+            <div className="truncate text-sm font-bold text-white">{t.name}</div>
+            <div className="mt-1 break-words text-xs text-gray-400">Prize {t.prize} · ends {t.ends}</div>
           </div>
         ))
       )}

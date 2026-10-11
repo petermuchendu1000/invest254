@@ -14,6 +14,7 @@ import { MK } from '@/lib/marketer/labels';
 // header gets the same card rather than a second one, so the three shells can never disagree about
 // what switching accounts offers (top-up on demo, no Withdraw on demo — DEMO-3).
 import { AccountMenu } from '@/components/wallet/AccountMenu';
+import { useCandlestickUi } from '@/components/game/candlestick/ui';
 
 /**
  * The candlestick header's mode badge, now the screen's account switch.
@@ -37,6 +38,7 @@ export function CandlestickModeBadge() {
   const { data: wallet } = useWallet();
   const { fmt } = useDisplayMoney();
   const setMode = useSetAccountMode();
+  const tradeOpen = useCandlestickUi((st) => st.tradeOpen);
   const topup = useTopupDemo();
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
@@ -68,6 +70,19 @@ export function CandlestickModeBadge() {
 
   const switchTo = (mode: 'real' | 'demo') => {
     if (mode === active || setMode.isPending) return;
+    /**
+     * Refuse while a contract is in flight, and SAY SO.
+     *
+     * The server refuses this too, so money was never at risk — but its refusal arrives as a
+     * generic failure. The trade screen publishes `tradeOpen` precisely so the player is told the
+     * actual reason. See the note in game/candlestick/ui.ts for why the header cannot read the
+     * socket itself.
+     */
+    if (tradeOpen) {
+      setOpen(false);
+      toast.push({ tone: 'error', title: 'Trade open', description: 'Close your trade before switching account.' });
+      return;
+    }
     setMode.mutate(mode, {
       onSuccess: (r) => {
         setOpen(false);
