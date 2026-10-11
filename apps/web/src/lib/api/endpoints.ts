@@ -207,11 +207,11 @@ export const api = {
   // marketerDemoTopup tops it up to the policy cap (no real cash — migration 0102).
   marketerMe: (token: string) => apiFetch<MarketerProfileDto>('/marketers/me', { token }),
   // ── Live sessions (docs/55). Reporting only: starting one changes no attribution. ──
-  marketerLive: (token: string) => apiFetch<MarketerLiveDto>('/marketers/me/live', { token }),
+  marketerLive: (token: string) => apiFetch<MarketerLiveDto>('/affiliate/live', { token }),
   marketerLiveStart: (token: string, streamUrl?: string) =>
-    apiFetch<LiveSessionDto>('/marketers/me/live/start', { method: 'POST', token, body: streamUrl ? { streamUrl } : {} }),
-  marketerLiveEnd: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/end', { method: 'POST', token }),
-  marketerLiveExtend: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/extend', { method: 'POST', token }),
+    apiFetch<LiveSessionDto>('/affiliate/live/start', { method: 'POST', token, body: streamUrl ? { streamUrl } : {} }),
+  marketerLiveEnd: (token: string) => apiFetch<LiveSessionDto>('/affiliate/live/end', { method: 'POST', token }),
+  marketerLiveExtend: (token: string) => apiFetch<LiveSessionDto>('/affiliate/live/extend', { method: 'POST', token }),
 
   // ── Community channel (docs/56). Read for players, write for admins. ──
   community: (token: string, limit?: number) =>

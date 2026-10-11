@@ -2,6 +2,7 @@ import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, requireSi
 import { assertUserTarget, assertSiteTarget } from "./scope.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
+import type { LiveSession } from "./livesessions.pg.js";
 import { parseB2cResult } from "./app.payments.js";
 import { requireApprovalPassword } from "./approvalgate.js";
 
@@ -132,6 +133,104 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
       deps.marketerExpenses.total(ctx.claims!.userId),
     ]));
     return { items, totalCents };
+  });
+
+  /**
+   * ── LIVE SESSIONS (0191). A marketer marks when they are live; the window reports what they
+   *    already earned inside it. Reporting only — attribution is unchanged. ──────────────────
+   *
+   * These live HERE, under the affiliate gate, and not beside the `public.marketers` routes, which
+   * is where they were first written and where they could never have worked. The two "marketers"
+   * in this codebase are different entities:
+   *
+   *   - `public.marketers` — the field-agent till app, its own table, its own PIN login, whose
+   *     token subject is a `marketers.id` and whose money lives in `marketer_wallets`.
+   *   - a `profiles` row with role='marketer' — the affiliate who earns `deposit_commissions` and
+   *     reads the /dashboard this panel is mounted on. Its token subject is a `profiles.id`.
+   *
+   * Everything a live session touches is keyed to the SECOND one: `marketer_live_sessions
+   * .marketer_id` and `community_posts.author_id` both reference `profiles(id)`, and
+   * `deposit_commissions.beneficiary_user` — the column the earnings join matches on — is a
+   * `profiles.id` too. Gated by `requireMarketer` (the till app) the dashboard's own marketer got
+   * 403 NOT_MARKETER, so the panel rendered nothing and Start Live never appeared; a till-app token
+   * that did reach it would have failed the foreign key with a 500. Same gate as every other route
+   * on this dashboard now, so the id the store receives is the id the schema expects.
+   */
+  const liveStore = () => {
+    if (!deps.liveSessions) throw new ApiError("LIVE_UNAVAILABLE", "live sessions are not configured", 503);
+    return deps.liveSessions;
+  };
+  /** A refusal the marketer can act on, rather than a 500. */
+  const liveError = (e: unknown): never => {
+    const m = e instanceof Error ? e.message : "";
+    if (m === "LIVE_DISABLED") throw new ApiError("LIVE_DISABLED", "live sessions are off for this brand", 409);
+    if (m === "ALREADY_LIVE") throw new ApiError("ALREADY_LIVE", "a session is already running", 409);
+    if (m === "DAILY_LIMIT_REACHED") throw new ApiError("DAILY_LIMIT_REACHED", "no sessions left today", 409);
+    throw e;
+  };
+  // requireSite has already rejected a token naming another brand, so ctx.siteId IS this marketer's
+  // brand. DEFAULT_SITE_ID only covers a single-brand deployment that sends no site at all.
+  const liveSiteId = (ctx: Ctx): string => ctx.siteId ?? DEFAULT_SITE_ID;
+
+  /** The marketer's own view: the running session (if any), the brand's rules, and recent history. */
+  router.get(`${BASE}/affiliate/live`, auth, site, marketer, async (ctx: Ctx) => {
+    const siteId = liveSiteId(ctx);
+    const store = liveStore();
+    const [settings, current, history] = await Promise.all([
+      store.settings(siteId),
+      store.current(siteId, ctx.claims!.userId),
+      store.history(siteId, ctx.claims!.userId, 20),
+    ]);
+    return { settings, current, history };
+  });
+
+  router.post(`${BASE}/affiliate/live/start`, auth, site, marketer, async (ctx: Ctx) => {
+    const body = ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
+    const url = typeof body.streamUrl === "string" ? body.streamUrl : null;
+    const siteId = liveSiteId(ctx);
+    let session: LiveSession;
+    try {
+      session = await liveStore().start(siteId, ctx.claims!.userId, url);
+    } catch (e) { return liveError(e); }
+
+    /**
+     * Going live tells the brand's players, in the app.
+     *
+     * This runs AFTER the session exists and never fails the request: a marketer who is about to
+     * stream must not be told "you are not live" because a notification fan-out had a bad minute.
+     * A session with no announcement is a working session; a refused Start Live is not.
+     */
+    try {
+      // scopeNames is optional on ApiDeps; without it the copy stays brand-neutral rather than
+      // naming the wrong brand, and the session is unaffected either way.
+      const brandName = (deps.scopeNames ? (await deps.scopeNames(siteId, null)).siteName : null) ?? "We";
+      if (deps.community) await deps.community.announceLive(siteId, ctx.claims!.userId, session.streamUrl, brandName);
+      if (deps.notifications) {
+        const { title, body: text } = liveAnnouncement(brandName, session.streamUrl);
+        await deps.notifications.broadcast(
+          ctx.claims!.userId, ctx.claims!.role ?? "marketer", "brand_live",
+          // Every account on THIS brand, players only. The audience is brand-scoped inside
+          // fn_broadcast_notification too, which is what stops one brand reaching another's people.
+          { sites: [siteId], roles: ["player"] },
+          { title, body: text },
+        );
+      }
+    } catch {
+      /* announced or not, the session is live — see the note above */
+    }
+    return session;
+  });
+
+  router.post(`${BASE}/affiliate/live/end`, auth, site, marketer, async (ctx: Ctx) => {
+    const ended = await liveStore().end(liveSiteId(ctx), ctx.claims!.userId);
+    if (!ended) throw new ApiError("NOT_LIVE", "no session to end", 409);
+    return ended;
+  });
+
+  router.post(`${BASE}/affiliate/live/extend`, auth, site, marketer, async (ctx: Ctx) => {
+    const extended = await liveStore().extend(liveSiteId(ctx), ctx.claims!.userId);
+    if (!extended) throw new ApiError("NOT_LIVE", "no session to extend", 409);
+    return extended;
   });
 
   // ── Payouts (I4): marketer request → admin approve/reject → M-Pesa B2C result ──
@@ -307,4 +406,24 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     const r = await domain(() => deps.affiliate.accrueDaily(period, site));
     return { period, site: site ?? null, buckets: r.buckets, totalCommissionCents: r.totalCommissionCents };
   });
+}
+
+/**
+ * The broadcast copy for a live session.
+ *
+ * Persuasive and true: it names the brand, says what is happening, and invites people in. It does
+ * NOT promise a win, imply the session pays better, invent a countdown, or claim others are winning
+ * right now — the lines that turn marketing into misrepresentation on a real-money product.
+ *
+ * The PER-PLAYER version (which also states that player's own balance) is `liveMessage` in
+ * community.pg.ts. This one is the single text a broadcast sends to everyone, so it carries no
+ * figure that would be wrong for anybody.
+ */
+function liveAnnouncement(brandName: string, streamUrl: string | null): { title: string; body: string } {
+  return {
+    title: `${brandName} is live now`,
+    body: streamUrl
+      ? `We are trading live right now. Come and trade along with us: ${streamUrl}`
+      : `We are trading live right now. Come and trade along with us.`,
+  };
 }
