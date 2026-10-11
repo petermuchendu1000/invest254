@@ -73,6 +73,20 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
         with:
           version: ${{ env.FLYCTL_VERSION }}
+      # The installer is checked SEPARATELY from the token, because conflating them sent a real
+      # deploy to the wrong conclusion. On 2026-10-11 setup-flyctl ran for three minutes, reported
+      # SUCCESS, and left no binary; the token check below then ran `flyctl status`, got
+      # "flyctl: command not found" on stderr, and reported `FLY_API_TOKEN rejected` — telling an
+      # operator to rotate a token that was perfectly good, while the actual fault was a transient
+      # failure inside the install action. A re-run fixed it. The misdiagnosis was the expensive
+      # part, so the two failures now have two messages.
+      - name: Check flyctl is actually installed
+        run: |
+          if ! command -v flyctl >/dev/null 2>&1; then
+            echo "::error title=flyctl missing::setup-flyctl completed but left no flyctl binary — a transient failure inside that action, NOT a problem with FLY_API_TOKEN. Do not rotate the token. Re-run this workflow; if it recurs, pin or bump FLYCTL_VERSION (currently ${FLYCTL_VERSION})."
+            exit 1
+          fi
+          flyctl version
       - name: Check FLY_API_TOKEN reaches invest254-api and invest254-engine-pm
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -83,7 +97,7 @@ jobs:
           fi
           for app in invest254-api invest254-engine-pm; do
             if ! flyctl status -a "$app" >/dev/null 2>err.txt; then
-              echo "::error title=FLY_API_TOKEN rejected for $app::Fly refused the token ($(head -c 200 err.txt | tr '\n' ' ')). It is expired, revoked or not scoped to $app. Create a new one (fly tokens create org -n github-deploy) and update the FLY_API_TOKEN secret, then re-run this workflow. See HOSTING.md §2.6.1."
+              echo "::error title=FLY_API_TOKEN rejected for $app::Fly refused the token ($(head -c 200 err.txt | tr '\n' ' ')). flyctl IS installed (checked in the previous step), so this is the token: expired, revoked or not scoped to $app. Create a new one (fly tokens create org -n github-deploy) and update the FLY_API_TOKEN secret, then re-run this workflow. See HOSTING.md §2.6.1."
               exit 1
             fi
           done
