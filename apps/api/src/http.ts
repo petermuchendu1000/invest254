@@ -53,6 +53,30 @@ export interface RawResult { raw: Buffer; contentType: string; cacheSeconds?: nu
 const isRaw = (r: unknown): r is RawResult => !!r && typeof r === "object" && Buffer.isBuffer((r as RawResult).raw);
 
 /**
+ * Is this a `{ status?, body }` ENVELOPE, or a domain object that merely happens to have a field
+ * called `body`?
+ *
+ * The test used to be `"body" in result` alone, and that silently broke every route whose DTO owns
+ * a `body` field. `CommunityPost` does (`community.pg.ts`), so `POST /community` and
+ * `POST /community/:id/vote` returned a bare JSON string — the post's own body text — instead of
+ * the post: no id, no options, no counts, so a client could not render the new tally after a vote.
+ * A DTO with a field called `status` would have hijacked the HTTP status the same way.
+ *
+ * HandlerResult has exactly two keys, so an envelope is an object carrying `body` and NOTHING but
+ * `body` and `status`. Every one of the ~30 envelope returns in this app is literally `{ status,
+ * body }` or `{ body }`, so this is strictly narrower with no change for any of them; what it
+ * changes is precisely the broken case, where the object has other fields of its own. An object
+ * whose `body` is inherited rather than its own keeps the old treatment, which is what the `in`
+ * test is still there for.
+ */
+const ENVELOPE_KEYS = new Set(["body", "status"]);
+function isEnvelope(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  if (!("body" in (result as HandlerResult))) return false;
+  return Object.keys(result).every((k) => ENVELOPE_KEYS.has(k));
+}
+
+/**
  * Role hierarchy — higher rank satisfies any lower minimum (see docs/05 §7, docs/38). Five tiers:
  *   player < marketer (also a player) < admin (SITE, day-to-day ops)
  *         < platform_admin (PLATFORM — a set of brands) < platform_superadmin (SYSTEM — global).
@@ -372,7 +396,7 @@ function writeResult(res: ServerResponse, result: unknown): number {
     res.end(result.raw);
     return 200;
   }
-  if (result && typeof result === "object" && "body" in (result as HandlerResult)) {
+  if (isEnvelope(result)) {
     const r = result as HandlerResult;
     const status = r.status ?? 200;
     sendJson(res, status, r.body);
