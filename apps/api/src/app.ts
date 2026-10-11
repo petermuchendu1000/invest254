@@ -405,7 +405,24 @@ function parseLimit(ctx: Ctx, def: number, max = 100): number {
 
 /** Register the public (unauthenticated) routes — the E1 surface. */
 export function registerPublicRoutes(router: Router, deps: ApiDeps): void {
-  router.get(`${BASE}/health`, () => ({ status: "ok", time: new Date().toISOString() }));
+  /**
+   * Liveness, plus WHICH BUILD is answering.
+   *
+   * `commit` is the GIT_SHA baked into the image at build time (Dockerfile ARG, passed by the
+   * deploy workflow alongside the `git-<sha>` image label it already sets). It reads "unknown" for
+   * a local or hand-built image, which is the honest answer there.
+   *
+   * It exists because "is my change live?" had no answer over HTTP: this route returned only
+   * {status,time}, so telling a deployed fix from an undeployed one required flyctl and Fly
+   * credentials. A commit here makes that a curl. It is public on purpose and safe to be: a commit
+   * hash of a private repo identifies a build without revealing its contents, and operators,
+   * uptime checks and anyone debugging a stale page all need it.
+   */
+  router.get(`${BASE}/health`, () => ({
+    status: "ok",
+    time: new Date().toISOString(),
+    commit: process.env.GIT_SHA || "unknown",
+  }));
 
   // Brand-aware config: many brand domains share ONE API, so the public config must reflect the
   // caller's brand (its `site_game_config`, what the engine prices from), not a global singleton.

@@ -136,7 +136,7 @@ jobs:
       - name: fly deploy (${{ matrix.app }})
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --config ${{ matrix.config }} --remote-only --image-label "git-${GITHUB_SHA}" --wait-timeout 5m
+        run: flyctl deploy --config ${{ matrix.config }} --remote-only --image-label "git-${GITHUB_SHA}" --build-arg GIT_SHA="${GITHUB_SHA}" --wait-timeout 5m
       - name: Explain a failed deploy
         if: failure()
         run: |
