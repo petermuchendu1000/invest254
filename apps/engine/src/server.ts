@@ -88,6 +88,22 @@ function resolveMasterSeed(): string {
 }
 
 const MASTER_SEED = resolveMasterSeed();
+
+/**
+ * The PREVIOUS master seed, if the platform has rotated. Used only to reveal days committed under
+ * it — see SeedManagerOptions.legacyMasterSeed for why rotation is otherwise a one-way door that
+ * permanently orphans every open day.
+ *
+ * Deliberately NOT subjected to the fail-closed checks above. The leaked literal is a legitimate
+ * value here: it is precisely what the already-committed days were derived from, and the whole
+ * point is to be able to open them. It can never produce a new commitment, so a public value in
+ * this variable cannot make any future outcome predictable.
+ */
+const LEGACY_MASTER_SEED = process.env.MASTER_SEED_LEGACY ?? process.env.SERVER_SEED_LEGACY;
+if (LEGACY_MASTER_SEED) {
+  console.log("[engine] legacy master seed configured: days committed before the rotation remain revealable");
+}
+
 const ONLINE_FLOOR = Number(process.env.ONLINE_FLOOR ?? 0);
 const DEFAULT_SITE = process.env.DEFAULT_SITE_ID ?? "00000000-0000-0000-0000-000000000001";
 
@@ -274,6 +290,9 @@ const registry = new SiteRegistry({
   masterSeed: MASTER_SEED,
   repo,
   configFor,
+  // Rotation support: days committed under the previous master stay revealable. Only ever read on
+  // a reveal whose primary-seed attempt was refused by the stored commitment.
+  ...(LEGACY_MASTER_SEED ? { seedManagerOpts: { legacyMasterSeed: LEGACY_MASTER_SEED } } : {}),
   ...(masterSeedFor ? { masterSeedFor } : {}),
   ...(curveProfileFor ? { curveProfileFor } : {}),
   // loadOverride: per-user overrides, COMPOSED with the platform-global cohort economy (0099) when the
