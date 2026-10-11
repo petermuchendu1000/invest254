@@ -78,3 +78,34 @@ test('isBrokerTerminalBrand: named outright, or reached by a TradingView chart a
   assert.equal(isBrokerTerminalBrand('candlestick', true), false);
   assert.equal(isBrokerTerminalBrand('digits', true), false);
 });
+
+/**
+ * ANTI-DRIFT DEVICE. This test exists for one reason: `seededSocialProofAllowed` (packages/shared/
+ * src/chart.ts) restates `isBrokerTerminalBrand`'s expression, because the shared package cannot
+ * import a web module and the server has to make the same screen decision this file makes. Two
+ * copies of a rule drift, and the failure mode is silent — seeded social proof appearing on a
+ * MetaTrader screen, which is exactly what the product rule forbids. So every one of the 4 x 5 = 20
+ * legal (trade_ui, chart_style) pairs is checked against the terminal rule as it is written HERE.
+ *
+ * If this fails, do not "fix" the expectation: the two definitions have diverged, and the shared
+ * predicate is the one that has to follow this file.
+ */
+test('seededSocialProofAllowed agrees with isBrokerTerminalBrand on all 20 brand combinations', async () => {
+  const { seededSocialProofAllowed, chartStyleOf, tradingViewTypeOf, CHART_STYLES, TRADE_UIS } =
+    await import('@invest254/shared/chart');
+
+  assert.equal(TRADE_UIS.length * CHART_STYLES.length, 20, 'the matrix is 4 trade_ui x 5 chart_style');
+
+  let allowed = 0;
+  for (const tradeUi of TRADE_UIS) {
+    for (const chartStyle of CHART_STYLES) {
+      // Exactly how both call sites compute it — TradeSurface.tsx and AppShell.tsx.
+      const chartIsTradingView = tradingViewTypeOf(chartStyleOf(chartStyle)) !== null;
+      const expected = !isBrokerTerminalBrand(tradeUi, chartIsTradingView) && tradeUi !== 'digits';
+      assert.equal(seededSocialProofAllowed(tradeUi, chartStyle), expected, `${tradeUi}/${chartStyle}`);
+      if (expected) allowed++;
+    }
+  }
+  // Not vacuous: the matrix really does split, and it splits 6/14 (candlestick x 5, classic+line).
+  assert.equal(allowed, 6);
+});

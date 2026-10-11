@@ -49,23 +49,100 @@ export interface LeaderboardRow {
   rank: number;
   name: string;
   trades: number;
+  /**
+   * The amount the board RANKED this row by, in cents — total winnings by default, net profit when
+   * the caller asks for the `profit` metric.
+   *
+   * The name is kept because it is the field the client already renders (TopTradersPane), and this
+   * DTO is public; a rename would be a breaking change to a payload for the sake of a word. The
+   * route echoes which metric produced it, so the number is never ambiguous on the wire.
+   */
   profitCents: number;
+  /**
+   * True for a row aggregated out of `leaderboard_seed` (0194) rather than out of settled positions.
+   * Carried for the same reason `BrandActivityItem.seeded` is: the server must never be the thing
+   * that makes seeded social proof indistinguishable from a real result.
+   */
+  seeded?: boolean;
 }
 
 /** The windows the mock's four chips select. */
 export type LeaderboardPeriod = 'today' | 'yesterday' | 'week' | 'month';
 
-export interface BrandActivityStore {
-  recent(siteId: string, limit: number): Promise<BrandActivityItem[]>;
-  leaderboard(siteId: string, period: LeaderboardPeriod, limit: number): Promise<LeaderboardRow[]>;
+/**
+ * What the board is RANKED by.
+ *
+ *  - `winnings` (the default, and the product decision): total GROSS winnings. For real rows that is
+ *    `sum(positions.payout)` over the winning positions — see the note on the query.
+ *  - `profit`: net `sum(positions.pnl)`, which is what the board used to rank by and is kept
+ *    available because it is the honest number for real money.
+ */
+export type LeaderboardMetric = 'winnings' | 'profit';
+
+/** Everything beyond the window and the cap that a caller may ask the board for. */
+export interface LeaderboardOptions {
+  metric?: LeaderboardMetric;
+  /**
+   * Whether this brand's screen may show SEEDED rows (`seededSocialProofAllowed`, shared/chart.ts).
+   * Defaults to TRUE so every existing caller behaves exactly as it does today; the route computes
+   * it from the brand and passes it, which is where the gate actually bites.
+   */
+  seededAllowed?: boolean;
 }
 
-/** Each chip's window, as SQL the query can drop in. Closed at both ends so a day means that day. */
-const WINDOW: Record<LeaderboardPeriod, string> = {
-  today: "o.settled_at >= date_trunc('day', now())",
-  yesterday: "o.settled_at >= date_trunc('day', now()) - interval '1 day' and o.settled_at < date_trunc('day', now())",
-  week: "o.settled_at >= date_trunc('week', now())",
-  month: "o.settled_at >= date_trunc('month', now())",
+/** Same gate for the feed. Defaults to TRUE for the same reason. */
+export interface ActivityOptions {
+  seededAllowed?: boolean;
+}
+
+export interface BrandActivityStore {
+  recent(siteId: string, limit: number, opts?: ActivityOptions): Promise<BrandActivityItem[]>;
+  leaderboard(siteId: string, period: LeaderboardPeriod, limit: number, opts?: LeaderboardOptions): Promise<LeaderboardRow[]>;
+}
+
+/**
+ * Each chip's window, as SQL the query can drop in. Closed at both ends so a day means that day.
+ *
+ * `{at}` is the timestamp column the window applies to, because TWO sources are now windowed by the
+ * same chip: `positions.settled_at` for the real board and `leaderboard_seed.created_at` for the
+ * seeded one. One template rather than two copies, so a chip cannot come to mean different spans on
+ * the two sources — which would show a seeded trader in Today's board and a real one only in This
+ * Month's.
+ *
+ * STRING-INTERPOLATED INTO SQL, and safe for exactly one reason: `period` is validated against this
+ * record's own keys before it gets here (app.activity.ts), and `at` is a column name written as a
+ * literal at the two call sites below — NEITHER is ever request text. Any axis added here must keep
+ * that property: validate the key against the map and interpolate the MAP'S VALUE, never the input.
+ */
+const WINDOW_AT: Record<LeaderboardPeriod, string> = {
+  today: "{at} >= date_trunc('day', now())",
+  yesterday: "{at} >= date_trunc('day', now()) - interval '1 day' and {at} < date_trunc('day', now())",
+  week: "{at} >= date_trunc('week', now())",
+  month: "{at} >= date_trunc('month', now())",
+};
+
+/** The window predicate for one chip over one timestamp column. Exported for the drift test. */
+export function leaderboardWindowSql(period: LeaderboardPeriod, at: string): string {
+  return (WINDOW_AT[period] ?? WINDOW_AT.today).split('{at}').join(at);
+}
+
+/**
+ * The aggregate each metric ranks by, over the REAL source.
+ *
+ * `winnings` sums `payout`, not `pnl`. Settlement writes both on the same row —
+ * `payout = p_payout, pnl = p_payout - stake` (fn_settle_position, 0010 and every reissue since,
+ * latest 0176) — so `payout` is the gross amount credited back on a win and `pnl` is that minus the
+ * stake, i.e. the net. "Total winnings" is the gross one, so it is `payout`; and it is taken only
+ * over the rows settlement called a WIN, because a loss settles with payout 0 and must contribute
+ * nothing rather than being silently included as a zero.
+ *
+ * Interpolated into SQL under exactly the same rule as WINDOW_AT: the KEY is validated against this
+ * record before it reaches the query, and the value interpolated is this record's own, never the
+ * caller's text.
+ */
+const METRIC_SQL: Record<LeaderboardMetric, string> = {
+  winnings: "coalesce(sum(o.payout) filter (where o.result = 'win'), 0)",
+  profit: 'sum(o.pnl)',
 };
 
 /**
@@ -82,9 +159,34 @@ export function publicName(username: string | null | undefined): string {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
 }
 
+/**
+ * THE MERGE RULE, used by both the feed and the board: REAL ROWS FIRST, seeded rows fill whatever
+ * slots are left, and the result is then ordered by its own key so what is shown is honestly
+ * ordered among the rows shown.
+ *
+ * Why not "merge both sources and cut to the cap", which is what the feed did: the cap is 40 and the
+ * seed table is about to hold thousands of rows minutes apart, so sorting the union by recency and
+ * truncating would fill all 40 slots with seed rows and a brand's genuine deposits and wins — the
+ * only events on that screen that actually happened — would never be seen again. Social proof that
+ * hides the real thing it is proof of is worse than an empty feed. So the real rows are reserved
+ * their slots unconditionally, and the seeded rows are the ones that get cut.
+ *
+ * `key` is ascending-is-first (seconds-ago for the feed, negated amount for the board), which is why
+ * the two callers can share this.
+ */
+function mergeRealFirst<T>(real: readonly T[], seeded: readonly T[], limit: number, key: (x: T) => number): T[] {
+  if (limit <= 0) return [];
+  const kept = real.slice(0, limit);
+  const room = limit - kept.length;
+  // `seeded` arrives already ordered best-first from SQL; sorting again here keeps that assumption
+  // local rather than load-bearing.
+  const fill = room > 0 ? [...seeded].sort((a, b) => key(a) - key(b)).slice(0, room) : [];
+  return [...kept, ...fill].sort((a, b) => key(a) - key(b));
+}
+
 export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
   return {
-    async recent(siteId, limit) {
+    async recent(siteId, limit, opts) {
       /**
        * Deposits and withdrawals that COMPLETED, and positions that WON, newest first.
        *
@@ -135,6 +237,17 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
       }));
 
       /**
+       * THE GATE (shared/chart.ts `seededSocialProofAllowed`). Seeded social proof is allowed on the
+       * candlestick trade UI and on the ordinary classic screen, and never on the digits screen or
+       * the broker terminal — and it is enforced HERE, server-side, so no client can ask for seeded
+       * rows its brand is not meant to have. A gated brand does not even cost the second round trip.
+       *
+       * The REAL arms above have already run and are returned exactly as they always were: the gate
+       * only ever removes seeded rows.
+       */
+      if (opts?.seededAllowed === false) return real.slice(0, limit);
+
+      /**
        * The SEEDED rows (0193), merged in so a brand nobody has deposited on yet still has a feed.
        *
        * A SECOND statement rather than a fourth UNION arm, because the arm above is the one piece of
@@ -146,12 +259,19 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
        * `name` is taken as stored and NOT passed through publicName: that function exists to shrink
        * a real player's username to the least that still reads as a person, and there is no player
        * behind a seed row to protect — running it would only mangle the display name on purpose.
+       *
+       * `created_at <= now()` is what makes a static table into a LIVE feed. Without it the newest
+       * 40 seed rows are the newest 40 forever: the feed never changes again, and a week later every
+       * row on it reads "7d ago". With it the seeding script can POST-DATE rows and they arrive on
+       * their own schedule — a month of seeded activity revealing itself at the pace it was seeded
+       * at. The index is already (site_id, created_at desc), so the bound is a scan boundary, not a
+       * filter. (A separate script owns the writing; this is the read path it needs.)
        */
       const s = await q.query(
         `select kind, name, amount_cents,
                 extract(epoch from (now() - created_at)) as ago_seconds
            from public.activity_seed
-          where site_id = $1
+          where site_id = $1 and created_at <= now()
           order by created_at desc
           limit $2`,
         [siteId, limit],
@@ -164,40 +284,112 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
         seeded: true,
       }));
 
-      // Newest first across both sources, then cut to `limit` — the age is the sort key the DTO
-      // already carries, so the merged order is exactly the order the client renders.
-      return [...real, ...seeded].sort((a, b) => a.agoSeconds - b.agoSeconds).slice(0, limit);
+      // Real rows keep their slots, seeded rows fill the remainder, and the result is newest-first
+      // across both — the age is the sort key the DTO already carries, so the merged order is
+      // exactly the order the client renders. See `mergeRealFirst` for why the cut falls on the
+      // seeded side.
+      return mergeRealFirst(real, seeded, limit, (x) => x.agoSeconds);
     },
 
-    async leaderboard(siteId, period, limit) {
+    async leaderboard(siteId, period, limit, opts) {
+      const metric: LeaderboardMetric = opts?.metric === 'profit' ? 'profit' : 'winnings';
+      const amount = METRIC_SQL[metric];
+
       /**
-       * Ranked by NET profit over the window, which is the only ranking that is not misleading.
+       * Ranked by TOTAL WINNINGS over the window by default, with net profit still on offer.
        *
-       * Ranking by winnings alone would put whoever staked most at the top regardless of whether
-       * they are up or down, and a board that calls a losing player a top trader is worse than no
-       * board. `pnl` is what settlement already wrote per position, so this sums rows rather than
-       * recomputing anything — there is no second opinion about money here.
+       * The board used to rank by net `sum(o.pnl)` only, and the note here used to say that was the
+       * only ranking that is not misleading — the argument being that winnings alone puts whoever
+       * staked most on top whether or not they are up. That argument is still true and is why
+       * `profit` is kept as a metric. The product decision is nonetheless to SHOW winnings: the net
+       * board is near-empty on a quiet brand (see 0194), and `metric` is now an explicit axis rather
+       * than an assumption buried in one aggregate, so which number is on screen is a choice the
+       * route states out loud instead of a thing this file decides for everyone.
+       *
+       * `amount` and the window are string-interpolated, and both are safe for exactly one reason:
+       * the KEYS are validated against METRIC_SQL / WINDOW_AT before they reach here
+       * (app.activity.ts), so what lands in the SQL is always one of this file's own literals and
+       * never request text. Preserve that for any axis added later.
+       *
+       * `group by p.username` collapses two real accounts that happen to share a username into one
+       * board row, which it did not before 0190 made usernames non-unique. That is NOT what one
+       * would write today — a board row should be one trader, so the grouping should be on the
+       * account — but changing it would change what real players see on every brand's board, and
+       * this change is additive by contract. Two things make it survivable in the meantime: the
+       * username is a display name and nothing else since 0190 (nothing authenticates by it), and
+       * `publicName` already collapses distinct usernames to the same first token for display
+       * anyway ("wanjiku_254" and "wanjiku.m" both render as "Wanjiku"). Recorded here so the next
+       * reader knows it was seen and not missed.
        *
        * Demo and practice are excluded for the same reason they are excluded from the feed.
        */
       const r = await q.query(
-        `select p.username, count(*)::int as trades, sum(o.pnl)::bigint as profit_cents
+        `select p.username, count(*)::int as trades, ${amount}::bigint as amount_cents
            from positions o join profiles p on p.id = o.user_id
           where o.site_id = $1 and o.status = 'settled' and o.settled_at is not null
             and coalesce(o.demo, false) = false and coalesce(o.practice, false) = false
-            and ${WINDOW[period] ?? WINDOW.today}
+            and ${leaderboardWindowSql(period, 'o.settled_at')}
           group by p.username
-         having sum(o.pnl) > 0
-          order by sum(o.pnl) desc
+         having ${amount} > 0
+          order by ${amount} desc
           limit $2`,
         [siteId, limit],
       );
-      return r.rows.map((x, i) => ({
-        rank: i + 1,
+      const real: LeaderboardRow[] = r.rows.map((x) => ({
+        rank: 0,
         name: publicName(x.username as string | null),
         trades: Math.max(0, Math.round(Number(x.trades ?? 0))),
-        profitCents: Math.max(0, Math.round(Number(x.profit_cents ?? 0))),
+        profitCents: Math.max(0, Math.round(Number(x.amount_cents ?? 0))),
       }));
+
+      /**
+       * The SEEDED board rows (0194), under the SAME gate as the feed, and only for the winnings
+       * metric: `leaderboard_seed` stores gross `winnings_cents` and no stake, so it has no honest
+       * answer to "net profit". Asking it for one would mean reading winnings and calling them
+       * profit, which is the single thing this whole two-table arrangement exists to avoid. A
+       * `profit` board therefore stays exactly as real — and as sparse — as it is today.
+       */
+      if (opts?.seededAllowed === false || metric !== 'winnings') return rank(real.slice(0, limit));
+
+      /**
+       * One row is a BUCKET (some trades, some winnings, at a point in time), so the seeded source
+       * is aggregated `group by name` INSIDE the window — the same shape as the real query above,
+       * which is what makes a seeded trader's standing differ between Today and This Month the way a
+       * real one's does. `created_at <= now()` for the same reason the feed has it: a post-dated
+       * bucket must not count before it arrives.
+       *
+       * `name` is shown verbatim, NOT through publicName, for the reason given on the feed's seed
+       * rows and spelled out in 0194: there is no account behind it to protect.
+       */
+      const s = await q.query(
+        `select name, sum(trades)::int as trades, sum(winnings_cents)::bigint as amount_cents
+           from public.leaderboard_seed
+          where site_id = $1 and created_at <= now()
+            and ${leaderboardWindowSql(period, 'created_at')}
+          group by name
+         having sum(winnings_cents) > 0
+          order by sum(winnings_cents) desc
+          limit $2`,
+        [siteId, limit],
+      );
+      const seeded: LeaderboardRow[] = s.rows.map((x) => ({
+        rank: 0,
+        name: String(x.name ?? '').trim() || 'A trader',
+        trades: Math.max(0, Math.round(Number(x.trades ?? 0))),
+        profitCents: Math.max(0, Math.round(Number(x.amount_cents ?? 0))),
+        seeded: true,
+      }));
+
+      // The same merge rule as the feed: every real trader who qualified keeps a place on the board
+      // however large the seeded numbers beside them are, and the seeded rows fill what is left.
+      // The rows that ARE shown are then ordered by the ranked amount, descending, so the board is
+      // never out of order with the number printed on it.
+      return rank(mergeRealFirst(real, seeded, limit, (x) => -x.profitCents));
     },
   };
+}
+
+/** Number the board 1..n in the order it is already in. */
+function rank(rows: LeaderboardRow[]): LeaderboardRow[] {
+  return rows.map((x, i) => ({ ...x, rank: i + 1 }));
 }

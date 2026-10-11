@@ -227,3 +227,62 @@ export function heikinAshiBar(c: Candle, prev: Candle | null): Candle {
     low: Math.min(c.low, open, close),
   };
 }
+
+/**
+ * May this brand's screens carry SEEDED social proof (activity_seed 0193, leaderboard_seed 0194)?
+ *
+ * The product rule is a rule about SCREENS, not about chart styles: seeded rows may appear on the
+ * candlestick trade UI and on the ordinary classic screen, and must NEVER appear on the digits
+ * screen or on the broker (MetaTrader) terminal. Real rows are unaffected everywhere.
+ *
+ * WHY THIS IS NOT "the five chart styles". `sites.chart_style` has exactly five legal values
+ * (CHART_STYLES above; the CHECK is 0147_chart_systems_expand.sql), so a list of all five is every
+ * brand there is and cannot filter anything. The binding constraint is the EXCLUSION, and the
+ * exclusion is not expressible in chart_style alone either: the broker terminal is reached two ways
+ * (web/src/lib/ui/terminalScreen.ts `isBrokerTerminalBrand`) —
+ *
+ *     tradeUi === 'broker'  ||  (tradeUi !== 'candlestick' && tradeUi !== 'digits' && chartIsTradingView)
+ *
+ * where `chartIsTradingView` is `tradingViewTypeOf(chartStyleOf(style)) !== null`, i.e. every style
+ * except `line`. So `classic` + any non-line style renders the BROKER TERMINAL, not the classic
+ * screen, and the allowed set collapses to exactly:
+ *
+ *     trade_ui = 'candlestick'  (any chart style)
+ *   | trade_ui = 'classic' (or unset/unknown, which coerces to classic)  AND  chart_style = 'line'
+ *
+ * That enumeration is the OUTPUT of the rule, not the rule. It is written below as the complement
+ * of "digits screen or broker terminal" on purpose, mirroring `isBrokerTerminalBrand` term for
+ * term, so that if the terminal's routes ever change this predicate changes with them instead of
+ * silently handing seeded rows to a MetaTrader screen. Do not "simplify" it to a chart-style list
+ * or to the two-branch enumeration above: both would be correct today and wrong the day the screen
+ * rule moves. `apps/web/src/lib/ui/terminalScreen.test.ts` cross-checks the two for all 20
+ * (trade_ui, chart_style) pairs and exists only to catch that drift.
+ *
+ * Pure, and takes the raw column values: unknown/null inputs coerce through `tradeUiOf` /
+ * `chartStyleOf` to the free defaults (classic + line), which is the ALLOWED side — the same
+ * fallback those functions already give every other reader, so a brand with an unreadable column
+ * gets the free screen's behaviour rather than a third one.
+ */
+export function seededSocialProofAllowed(tradeUi: unknown, chartStyle: unknown): boolean {
+  const ui = tradeUiOf(tradeUi);
+  const chartIsTradingView = tradingViewTypeOf(chartStyleOf(chartStyle)) !== null;
+  // The complement of "the digits screen, or the broker terminal". Both terms are evaluated, and
+  // neither is folded into the other: the `ui !== "digits"` inside the terminal test is redundant
+  // here given the `ui === "digits"` beside it, and it STAYS, because the point of this function is
+  // that its terminal test is `isBrokerTerminalBrand`'s, verbatim, term for term.
+  return !(brokerTerminal(ui, chartIsTradingView) || ui === "digits");
+}
+
+/**
+ * `isBrokerTerminalBrand` (apps/web/src/lib/ui/terminalScreen.ts), restated.
+ *
+ * Its own copy is in the web app and this package cannot import from there, while the API has to
+ * reach the same verdict about the same brand. Kept as a separate, un-narrowed function of the raw
+ * values so the expression can stay identical to the original — written inline after a `digits`
+ * check, tsc would (correctly) call the `ui !== "digits"` term dead and refuse to compile the
+ * mirror. Any change to the terminal's routes belongs here, and the 20-pair cross-check test in
+ * terminalScreen.test.ts is what fails if it is made in only one of the two places.
+ */
+function brokerTerminal(tradeUi: string, chartIsTradingView: boolean): boolean {
+  return tradeUi === "broker" || (tradeUi !== "candlestick" && tradeUi !== "digits" && chartIsTradingView);
+}
