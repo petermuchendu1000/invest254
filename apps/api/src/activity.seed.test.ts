@@ -86,9 +86,9 @@ test("feed: the seed read is bounded by now(), which is what lets a script post-
   });
 });
 
-test("feed: real rows keep their slots when the seed table holds far more, far newer rows", async () => {
-  // The case that made this necessary: 3000 seeded rows minutes apart against a cap of 5. Sorting
-  // the union by recency and truncating would show five seed rows and bury every real event.
+test("feed: real rows can never be crowded out, however many newer seed rows there are", async () => {
+  // The first case that made a merge rule necessary: thousands of seeded rows minutes apart against
+  // a small cap. Sorting the union by recency and truncating would bury every real event.
   const real = Array.from({ length: 3 }, (_, i) => ({
     kind: "deposit", username: `player${i}`, amount_cents: 100, ago_seconds: 10_000 + i,
   }));
@@ -97,21 +97,56 @@ test("feed: real rows keep their slots when the seed table holds far more, far n
   }));
   const q = stubQuerier((sql) => (sql.includes("activity_seed") ? seeded : real));
 
-  const out = await makePgBrandActivity(q).recent(SITE_A, 5, { seededAllowed: true });
-  assert.equal(out.length, 5);
-  assert.equal(out.filter((x) => x.seeded !== true).length, 3, "all three real rows survive");
-  assert.equal(out.filter((x) => x.seeded === true).length, 2, "seeded rows fill only the remainder");
-  // What IS shown is still newest-first, so the client renders an honestly ordered feed.
+  const out = await makePgBrandActivity(q).recent(SITE_A, 8, { seededAllowed: true });
+  assert.equal(out.length, 8);
+  // The floor is ceil(8 * 0.25) = 2, and these real rows are the OLDEST rows in play, so they win
+  // nothing on merit — the floor is the only reason any of them is on screen. That is the point.
+  assert.ok(out.filter((x) => x.seeded !== true).length >= 2, "real rows keep their floor");
   const ages = out.map((x) => x.agoSeconds);
-  assert.deepEqual(ages, [...ages].sort((a, b) => a - b));
+  assert.deepEqual(ages, [...ages].sort((a, b) => a - b), "what is shown is honestly newest-first");
 });
 
-test("feed: a brand with more real rows than the cap shows no seed rows at all", async () => {
-  const real = Array.from({ length: 6 }, (_, i) => ({ kind: "win", username: `p${i}`, amount_cents: 1, ago_seconds: i }));
-  const q = stubQuerier((sql) => (sql.includes("activity_seed") ? [{ kind: "win", name: "S", amount_cents: 1, ago_seconds: 0 }] : real));
-  const out = await makePgBrandActivity(q).recent(SITE_A, 4, { seededAllowed: true });
-  assert.equal(out.length, 4);
-  assert.equal(out.every((x) => x.seeded !== true), true);
+test("feed: a brand with more real rows than the cap still shows seeded rows, when its own are stale", async () => {
+  /**
+   * The mirror failure, and the one that actually shipped. "Real rows take every slot they can
+   * fill" made the whole feature inert on the brand it was built for: cpfmarket has more real
+   * events in its history than the cap, so all 40 slots went to real rows — the newest of them 29
+   * HOURS old, several a fortnight old — and 3000 seeded rows were invisible. Measured on the live
+   * API as `seeded=0, real=40`.
+   *
+   * A fortnight-old feed above a deposit button is the dead-product look the seed exists to fix, so
+   * past the floor the slots are contested on recency and recent seeded rows win them.
+   */
+  const real = Array.from({ length: 40 }, (_, i) => ({
+    kind: "win", username: `p${i}`, amount_cents: 1, ago_seconds: 104_400 + i * 3600, // 29h and older
+  }));
+  const seeded = Array.from({ length: 40 }, (_, i) => ({
+    kind: "deposit", name: `s${i}`, amount_cents: 1, ago_seconds: 60 + i * 60, // minutes old
+  }));
+  const q = stubQuerier((sql) => (sql.includes("activity_seed") ? seeded : real));
+
+  const out = await makePgBrandActivity(q).recent(SITE_A, 40, { seededAllowed: true });
+  assert.equal(out.length, 40);
+  const realShown = out.filter((x) => x.seeded !== true).length;
+  const seedShown = out.filter((x) => x.seeded === true).length;
+  assert.equal(realShown, 10, "exactly the floor: ceil(40 * 0.25)");
+  assert.equal(seedShown, 30, "and the contested slots went to the rows that are actually recent");
+  assert.ok(out[0]!.seeded === true, "the top of the feed is the newest thing in it");
+});
+
+test("feed: genuinely recent real activity beats seeded rows outright, no reservation needed", async () => {
+  // The case that proves the floor is a floor and not a cap: when a brand's own events are the
+  // newest, they take the whole feed on merit and seeded rows get nothing.
+  const real = Array.from({ length: 40 }, (_, i) => ({
+    kind: "deposit", username: `p${i}`, amount_cents: 1, ago_seconds: i, // seconds old
+  }));
+  const seeded = Array.from({ length: 40 }, (_, i) => ({
+    kind: "deposit", name: `s${i}`, amount_cents: 1, ago_seconds: 90_000 + i,
+  }));
+  const q = stubQuerier((sql) => (sql.includes("activity_seed") ? seeded : real));
+
+  const out = await makePgBrandActivity(q).recent(SITE_A, 40, { seededAllowed: true });
+  assert.equal(out.filter((x) => x.seeded !== true).length, 40, "a live brand's feed is all its own");
 });
 
 test("the four chips mean exactly what they always meant on positions.settled_at", () => {
