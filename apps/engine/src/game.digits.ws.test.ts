@@ -31,6 +31,24 @@ class Client {
       this.ws.on("message", h);
     });
   }
+  /**
+   * Like `waitFor`, but for "the frame that says X" rather than "the first frame of this type".
+   *
+   * Every assertion in this file used to read a frame at a FIXED MOMENT — `of("balance").at(-1)` or
+   * `of("inst_tick").find(...)` straight after an unrelated await — and that broke two production
+   * deploys in 12h: the balance frame the open debits is a SEPARATE send that follows `digit_opened`
+   * after a wallet round-trip, and the settling tick frame is its own send too, so on a loaded runner
+   * neither had been parsed yet when the assertion sampled. Awaiting the condition with a ceiling is
+   * the same cure PR #147 applied to multiengine.test.ts ("resolveSite may be async").
+   */
+  waitWhere(type: string, pred: (m: any) => boolean, timeoutMs = 5000): Promise<any> {
+    const f = this.msgs.find((m) => m.type === type && pred(m)); if (f) return Promise.resolve(f);
+    return new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error(`timeout waiting for a matching ${type}`)), timeoutMs);
+      const h = (raw: any) => { try { const m = JSON.parse(String(raw)); if (m.type === type && pred(m)) { clearTimeout(t); this.ws.off("message", h); res(m); } } catch { /* ignore */ } };
+      this.ws.on("message", h);
+    });
+  }
   close() { try { this.ws.close(); } catch { /* ignore */ } }
 }
 
@@ -82,21 +100,31 @@ test("digits WS: open_digit debits stake, settles at settleIndex, chart digit ==
     c.send("subscribe_instrument", { instrumentId: "vol10_1s" });
     await c.waitFor("inst_history");
 
+    const balFramesBeforeOpen = c.of("balance").length;
     c.send("open_digit", { instrumentId: "vol10_1s", kind: "even", stakeCents: 25000 });
     const opened = await c.waitFor("digit_opened");
     assert.equal(opened.data.settleIndex, opened.data.openIndex + 1, "1-tick contract");
-    // stake debited immediately
+    // The debit lands in a balance frame the server sends AFTER digit_opened (behind a wallet
+    // round-trip), so await that frame's arrival instead of sampling the newest one — sampling could
+    // still be looking at the pre-open snapshot on a loaded CI runner.
+    await c.waitWhere("balance", () => c.of("balance").length > balFramesBeforeOpen);
     const balAfterOpen = c.of("balance").at(-1);
     assert.equal(balAfterOpen.data.real, 975_000, "stake debited on open");
 
     const settled = await c.waitFor("digit_settled");
     assert.equal(settled.data.positionId, opened.data.positionId);
-    assert.equal(settled.data.index, opened.data.settleIndex, "settled at the committed settleIndex");
+    // The settle-index tick is driven by a wall-clock-derived index on a fixed-interval timer, so a
+    // loaded runner can emit settleIndex+1 without ever emitting settleIndex (the `77134 !== 77133`
+    // deploy break). Pin settlement to the FIRST streamed tick that reached the committed
+    // settleIndex — identical to `index === settleIndex` whenever no index was skipped.
+    const settleTick = await c.waitWhere("inst_tick", (m) => m.data.index >= opened.data.settleIndex);
+    assert.ok(settled.data.index >= opened.data.settleIndex, "never settles before the committed settleIndex");
+    assert.equal(settled.data.index, settleTick.data.index, "settled on the first tick that reached the committed settleIndex");
     assert.ok(settled.data.digit >= 0 && settled.data.digit <= 9);
     assert.equal(settled.data.won, settled.data.digit % 2 === 0, "even wins iff digit is even");
 
-    // The tick frame the CHART showed at settleIndex must carry the SAME digit (fairness parity).
-    const chartTick = c.of("inst_tick").find((m) => m.data.index === opened.data.settleIndex);
+    // The tick frame the CHART showed for that settling tick must carry the SAME digit (fairness parity).
+    const chartTick = await c.waitWhere("inst_tick", (m) => m.data.index === settled.data.index);
     assert.ok(chartTick, "the settle-index tick was streamed to the chart");
     assert.equal(chartTick.data.digit, settled.data.digit, "on-chart digit == settlement digit");
 
@@ -154,8 +182,12 @@ test("digits WS (POOL MODE): outcome is pool-decided and the owner's settle-inde
     c.send("subscribe_instrument", { instrumentId: "vol10_1s" });
     await c.waitFor("inst_history");
 
+    const balFramesBeforeOpen = c.of("balance").length;
     c.send("open_digit", { instrumentId: "vol10_1s", kind: "even", stakeCents: 25000 });
     const opened = await c.waitFor("digit_opened");
+    // Same reason as the statistical test: the post-open balance frame is a separate, later send.
+    await c.waitWhere("balance", () => c.of("balance").length > balFramesBeforeOpen);
+    assert.equal(c.of("balance").at(-1).data.real, 975_000, "stake debited on open");
     const settled = await c.waitFor("digit_settled");
     assert.equal(settled.data.positionId, opened.data.positionId);
 
@@ -166,8 +198,14 @@ test("digits WS (POOL MODE): outcome is pool-decided and the owner's settle-inde
     } else {
       assert.equal(settled.data.payoutCents, 0);
     }
-    // The OWNER's chart tick at settleIndex must carry the SAME (possibly overridden) digit.
-    const chartTick = c.of("inst_tick").find((m) => m.data.index === opened.data.settleIndex);
+    // The OWNER's chart tick at the settling index must carry the SAME (pool-overridden) digit. This
+    // read used to be sampled right after digit_settled and saw `undefined` on CI, because the owner's
+    // overridden inst_tick is its own send and the settling index can be settleIndex+1 when the
+    // wall-clock-driven streamer skips an index under load. Await the frame the engine overrode.
+    const settleTick = await c.waitWhere("inst_tick", (m) => m.data.index >= opened.data.settleIndex);
+    assert.ok(settled.data.index >= opened.data.settleIndex, "never settles before the committed settleIndex");
+    assert.equal(settled.data.index, settleTick.data.index, "settled on the first tick that reached the committed settleIndex");
+    const chartTick = await c.waitWhere("inst_tick", (m) => m.data.index === settled.data.index);
     assert.ok(chartTick, "the settle-index tick was streamed to the owner");
     assert.equal(chartTick.data.digit, settled.data.digit, "owner's on-chart digit == pool-decided settled digit");
     assert.equal(Math.round(chartTick.data.quote * 100) % 10, settled.data.digit, "quote's last pip matches too");

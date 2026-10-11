@@ -12,6 +12,7 @@ import { useNavDrawer } from '@/lib/ui/drawer';
 import { useDisplayMoney } from '@/lib/money';
 import { useCandlestickUi } from '@/components/game/candlestick/ui';
 import { CIcon } from '@/components/game/candlestick/icons';
+import { CandlestickModeBadge } from '@/components/candlestick-account/CandlestickModeBadge';
 
 /**
  * The candlestick screen's header, as the mock draws it: the wordmark and a mode badge on the left
@@ -24,7 +25,8 @@ import { CIcon } from '@/components/game/candlestick/icons';
  * of which is a variant of the others.
  *
  * Every control routes to the surface that already exists: the deposit sheet, the withdraw sheet,
- * the auth modal and the nav drawer. Nothing here opens anything new except the How to sheet.
+ * the auth modal, the nav drawer and — behind the mode badge — the shared Real/Demo account panel.
+ * Nothing here opens anything new except the How to sheet.
  */
 export function CandlestickTopBar() {
   const brand = useBrand();
@@ -49,11 +51,10 @@ export function CandlestickTopBar() {
           <Link href="/" aria-label={`${brand.name} home`} className="shrink-0">
             <Wordmark text={brandWordmark(brand)} />
           </Link>
-          {/* The mock's mode badge. It states the ONE thing a player must not be wrong about: real
-              money. There is no demo wallet in this product, so it says Real and means it. */}
-          <span className="h-5 shrink-0 whitespace-nowrap rounded-full border border-[#22c55e]/40 bg-[#22c55e]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#22c55e]">
-            Real
-          </span>
+          {/* The mock's mode badge, and the screen's account switch: it names the ONE thing a
+              player must not be wrong about — which money a tap spends — and is the control that
+              changes it, through the demo mechanism the other shells already use (DEMO-1). */}
+          <CandlestickModeBadge />
         </div>
 
         <nav className="hidden items-center gap-1 border-l border-[#1f2937] pl-4 md:flex">

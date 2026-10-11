@@ -334,7 +334,7 @@ export function AuthModal() {
     return (
       <Modal open={open} onClose={close} title="Password updated" chrome={false} panelStyle={mt5 ? MT5_TOKENS : undefined} panelClassName={mt5 ? 'mt5-square sm:!rounded-sm' : undefined}>
         <Header onClose={close} />
-        <div className="flex flex-col items-center gap-3 px-6 pb-8 pt-2 text-center">
+        <div className="flex flex-col items-center gap-3 px-4 pb-8 pt-2 text-center sm:px-6">
           <CheckIcon />
           <h2 className="text-lg font-semibold tracking-tight text-fg">Password updated</h2>
           <p className="max-w-xs text-sm leading-relaxed text-muted">
@@ -357,7 +357,7 @@ export function AuthModal() {
       {mt5 ? (
         copy.sub ? <p className="px-4 pb-3 pt-3 text-[13px] text-muted">{copy.sub}</p> : <div className="pt-1" />
       ) : (
-        <div className="px-6 pb-4">
+        <div className="px-4 pb-4 sm:px-6">
           <h2 className="text-[22px] font-semibold leading-tight tracking-tight text-fg">{copy.title}</h2>
           {copy.sub ? <p className="mt-1 text-sm text-muted">{copy.sub}</p> : null}
         </div>
@@ -365,7 +365,7 @@ export function AuthModal() {
 
       {/* Quiet underline tabs (hidden in reset, which is a sub-flow of log in) */}
       {!isReset ? (
-        <div className="px-6">
+        <div className="px-4 sm:px-6">
           <div className="flex gap-6 border-b border-border" role="tablist" aria-label="Authentication mode">
             {(['login', 'register'] as const).map((m) => {
               const active = mode === m;
@@ -377,7 +377,9 @@ export function AuthModal() {
                   aria-selected={active}
                   onClick={() => openAuth(m)}
                   className={cn(
-                    '-mb-px border-b-2 pb-2.5 text-sm font-semibold transition-colors',
+                    // The underline stays as quiet as before; the padding is what makes the tab a
+                    // finger-sized target rather than the height of its own 14px label.
+                    '-mb-px border-b-2 px-0.5 pb-3 pt-2.5 text-sm font-semibold transition-colors',
                     active ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg',
                   )}
                 >
@@ -388,11 +390,11 @@ export function AuthModal() {
           </div>
         </div>
       ) : (
-        <div className="px-6">
+        <div className="px-4 sm:px-6">
           <button
             type="button"
             onClick={() => openAuth('login')}
-            className="inline-flex items-center gap-1 text-sm font-medium text-muted transition hover:text-fg"
+            className="-ml-1 inline-flex min-h-11 items-center gap-1 px-1 text-sm font-medium text-muted transition hover:text-fg"
           >
             <BackIcon />
             Back to log in
@@ -400,7 +402,10 @@ export function AuthModal() {
         </div>
       )}
 
-      <form className="flex flex-col gap-4 px-6 pt-5" onSubmit={onSubmit} noValidate>
+      {/* A 24px gutter either side costs a 320px phone a sixth of its width, which is what pushed
+          the field adornments and the "At least 4 characters" placeholder against each other; the
+          wider gutter comes back as soon as there is room for it. */}
+      <form className="flex flex-col gap-4 px-4 pt-5 sm:px-6" onSubmit={onSubmit} noValidate>
         <Input
           label="Phone number"
           name="phone"
@@ -432,14 +437,16 @@ export function AuthModal() {
         <div className="flex flex-col gap-1.5">
           {/* Label row carries the inline recovery affordance, as on major exchanges. */}
           {!isRegister && !isReset ? (
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm font-medium text-fg">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-sm font-medium text-fg">
                 Password<span className="text-down" aria-hidden> *</span>
               </span>
+              {/* Negative margins keep the label row visually tight while the recovery link itself
+                  carries a full-height hit area. */}
               <button
                 type="button"
                 onClick={() => openAuth('reset')}
-                className="text-xs font-medium text-accent transition hover:underline"
+                className="-my-2 -mr-1 inline-flex min-h-11 shrink-0 items-center whitespace-nowrap px-1 text-xs font-medium text-accent transition hover:underline"
               >
                 Forgot password?
               </button>
@@ -458,7 +465,7 @@ export function AuthModal() {
                 type="button"
                 onClick={() => setShowPw((v) => !v)}
                 aria-label={showPw ? 'Hide password' : 'Show password'}
-                className="flex h-9 w-9 items-center justify-center rounded-lg transition hover:bg-border hover:text-fg"
+                className="flex h-10 w-10 items-center justify-center rounded-lg transition hover:bg-border hover:text-fg"
               >
                 <EyeIcon off={showPw} />
               </button>
@@ -527,7 +534,7 @@ export function AuthModal() {
             <button
               type="button"
               onClick={() => setShowRef(true)}
-              className="self-start text-xs font-medium text-muted transition hover:text-accent"
+              className="-my-1.5 -ml-1 inline-flex min-h-11 items-center self-start px-1 text-xs font-medium text-muted transition hover:text-accent"
             >
               + Add a referral code
             </button>
@@ -544,7 +551,7 @@ export function AuthModal() {
               <line x1="12" y1="8" x2="12" y2="13" strokeLinecap="round" />
               <circle cx="12" cy="16.5" r="0.5" fill="currentColor" />
             </svg>
-            <span>{serverError}</span>
+            <span className="min-w-0 break-words">{serverError}</span>
           </p>
         ) : null}
 
@@ -561,7 +568,7 @@ export function AuthModal() {
               onChange={(e) => setCode(useRecovery ? e.target.value.slice(0, 32) : e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
             />
             <p className="text-xs text-muted">{useRecovery ? 'Use one of the recovery codes you saved when you turned on two-factor.' : 'Two-factor is on for this account. Enter the 6-digit code from your authenticator app.'}</p>
-            <button type="button" onClick={() => { setUseRecovery((v) => !v); setCode(''); }} className="self-start text-xs font-medium text-accent hover:underline">
+            <button type="button" onClick={() => { setUseRecovery((v) => !v); setCode(''); }} className="-ml-1 inline-flex min-h-11 items-center self-start px-1 text-left text-xs font-medium text-accent hover:underline">
               {useRecovery ? 'Use the app code instead' : 'Lost your phone? Use a recovery code'}
             </button>
           </div>
@@ -585,7 +592,7 @@ export function AuthModal() {
             <button
               type="button"
               onClick={() => openAuth(isRegister ? 'login' : 'register')}
-              className="min-w-11 px-1 font-semibold text-accent transition hover:underline"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center px-1 align-middle font-semibold text-accent transition hover:underline"
             >
               {isRegister ? 'Log in' : 'Create one'}
             </button>
@@ -594,7 +601,7 @@ export function AuthModal() {
       </form>
 
       {/* Trust + legal footer */}
-      <div className="mt-2 flex flex-col gap-2.5 border-t border-border px-6 py-5">
+      <div className="mt-2 flex flex-col gap-2.5 border-t border-border px-4 py-5 sm:px-6">
         <div className="flex items-center justify-center gap-1.5 text-xs text-muted">
           <span className="text-up">
             <ShieldIcon />
@@ -626,7 +633,7 @@ function Header({ onClose, mt5, title }: { onClose: () => void; mt5?: boolean; t
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="-mr-1 grid h-8 w-8 shrink-0 place-items-center rounded text-white transition hover:bg-white/20"
+          className="-mr-1 grid h-10 w-10 shrink-0 place-items-center rounded text-white transition hover:bg-white/20"
         >
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
@@ -637,15 +644,15 @@ function Header({ onClose, mt5, title }: { onClose: () => void; mt5?: boolean; t
     );
   }
   return (
-    <div className="flex items-center justify-between px-6 pb-5 pt-5">
+    <div className="flex items-center justify-between gap-2 px-4 pb-5 pt-5 sm:px-6">
       <Logo />
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <ThemeToggle />
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-fg"
         >
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />

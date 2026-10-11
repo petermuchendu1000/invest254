@@ -39,12 +39,12 @@ export function CandlestickTradeScreen() {
       {/* ── Phone: one pane at a time, four tabs ───────────────────────────── */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden">
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div className={cn('absolute inset-0 overflow-y-auto', phoneTab === 'trade' ? 'block' : 'hidden')}>
+          <div className={cn('absolute inset-0 overflow-y-auto overflow-x-hidden', phoneTab === 'trade' ? 'block' : 'hidden')}>
             <QuoteBar compact />
             <div className="relative h-[350px] w-full shrink-0 bg-[#0a0f1c]">
               <Tape />
             </div>
-            <div className="border-t border-[#1f2937]">
+            <div className="min-w-0 border-t border-[#1f2937]">
               <TradingPanel />
             </div>
           </div>
@@ -53,6 +53,12 @@ export function CandlestickTradeScreen() {
           <div className={cn('absolute inset-0', phoneTab === 'tours' ? 'block' : 'hidden')}><TournamentsPane /></div>
         </div>
 
+        {/*
+          Four tabs across a 320px phone is 80px each, so the label is pinned to one line
+          (`leading-none` + nowrap) and the icon is 16px: an 18px glyph plus a wrapped label did not
+          clear the 48px bar. `min-w-0` lets the cells stay equal instead of the widest label
+          ("tours") stretching its own.
+        */}
         <div className="flex h-12 shrink-0 border-t border-[#1f2937] bg-[#111827]">
           {(['trade', 'chat', 'top', 'tours'] as const).map((t) => (
             <button
@@ -60,12 +66,12 @@ export function CandlestickTradeScreen() {
               type="button"
               onClick={() => setPhoneTab(t)}
               className={cn(
-                'flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors',
+                'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 text-[10px] font-semibold uppercase leading-none tracking-wider transition-colors',
                 phoneTab === t ? 'border-t-2 border-[#22c55e] text-[#22c55e]' : 'text-gray-500',
               )}
             >
-              <CIcon name={t} className="h-[18px] w-[18px]" />
-              {t}
+              <CIcon name={t} className="h-4 w-4" />
+              <span className="max-w-full truncate">{t}</span>
             </button>
           ))}
         </div>
@@ -81,11 +87,11 @@ export function CandlestickTradeScreen() {
         </div>
 
         <div className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-[#1f2937] min-h-0 lg:w-[640px] lg:flex-row">
-          <div className="flex-1 overflow-y-auto border-b border-[#1f2937] lg:w-[320px] lg:flex-none lg:border-b-0 lg:border-r">
+          <div className="min-w-0 flex-1 overflow-y-auto border-b border-[#1f2937] lg:w-[320px] lg:flex-none lg:border-b-0 lg:border-r">
             <TradingPanel />
           </div>
 
-          <div className="flex flex-1 flex-col overflow-hidden lg:w-[320px] lg:flex-none">
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden lg:w-[320px] lg:flex-none">
             <div className="flex shrink-0 border-b border-[#1f2937]">
               {(['chat', 'top', 'tours'] as const).map((t) => (
                 <button
@@ -93,12 +99,12 @@ export function CandlestickTradeScreen() {
                   type="button"
                   onClick={() => setRailTab(t)}
                   className={cn(
-                    'flex flex-1 items-center justify-center gap-1.5 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-colors',
+                    'flex min-h-10 min-w-0 flex-1 items-center justify-center gap-1.5 px-1 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-colors',
                     railTab === t ? 'border-b-2 border-[#22c55e] text-[#22c55e]' : 'text-gray-500 hover:text-white',
                   )}
                 >
                   <CIcon name={t} className="h-3.5 w-3.5" />
-                  {t}
+                  <span className="truncate">{t}</span>
                 </button>
               ))}
             </div>
@@ -145,20 +151,25 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center justify-between border-b border-[#1f2937] bg-[#0a0f1c] px-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="shrink-0">
-            <div className="text-[8px] uppercase tracking-wider text-gray-500">Balance</div>
-            <div className="whitespace-nowrap text-xs font-bold leading-none text-[#22c55e]">{balance}</div>
+      <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[#1f2937] bg-[#0a0f1c] px-3">
+        {/*
+          The balance is the only unbounded figure in this band (a brand's wallet can run to eight
+          digits), so the two readouts take the leftover width and TRUNCATE; the live dot and the
+          currency chip on the right are fixed and never give way to them.
+        */}
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <div className="min-w-0">
+            <div className="text-[8px] uppercase leading-none tracking-wider text-gray-500">Balance</div>
+            <div className="truncate text-xs font-bold leading-none text-[#22c55e]">{balance}</div>
           </div>
-          <div className="min-w-0 shrink-0">
-            <div className="text-[8px] uppercase tracking-wider text-gray-500">Price</div>
-            <div className="whitespace-nowrap font-mono text-xs leading-none text-white">{price === null ? '—' : price.toFixed(digits)}</div>
+          <div className="min-w-0">
+            <div className="text-[8px] uppercase leading-none tracking-wider text-gray-500">Price</div>
+            <div className="truncate font-mono text-xs leading-none text-white">{price === null ? '—' : price.toFixed(digits)}</div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex items-center gap-1">
-            <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#22c55e]" />
+            <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#22c55e]" />
             <span className="text-[10px] font-bold tracking-widest text-[#22c55e]">LIVE</span>
           </div>
           <div className="flex items-center gap-1 rounded border border-[#374151] bg-[#1f2937] px-1.5 py-0.5 text-[10px]">
@@ -170,18 +181,18 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="flex h-16 shrink-0 items-center justify-between border-b border-[#1f2937] px-6">
-      <div className="flex items-center gap-8">
-        <div>
+    <div className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-[#1f2937] px-6">
+      <div className="flex min-w-0 items-center gap-8">
+        <div className="min-w-0">
           <div className="text-xs uppercase tracking-wider text-gray-500">Balance</div>
-          <div className="whitespace-nowrap text-lg font-bold text-white">{balance}</div>
+          <div className="truncate text-lg font-bold text-white">{balance}</div>
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="text-xs uppercase tracking-wider text-gray-500">Price</div>
-          <div className="whitespace-nowrap font-mono text-lg font-bold text-white">{price === null ? '—' : price.toFixed(digits)}</div>
+          <div className="truncate font-mono text-lg font-bold text-white">{price === null ? '—' : price.toFixed(digits)}</div>
         </div>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-4">
         <div className="flex items-center gap-2">
           <div className="h-2 w-2 animate-pulse rounded-full bg-[#22c55e]" />
           <span className="text-sm font-bold tracking-widest text-[#22c55e]">LIVE</span>

@@ -53,18 +53,20 @@ export function HowToModal() {
         role="dialog"
         aria-modal="true"
         aria-label="How to trade"
-        className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-[#1f2937] bg-[#111827] sm:rounded-2xl"
+        className="max-h-[85dvh] w-full min-w-0 max-w-lg overflow-y-auto overscroll-contain rounded-t-2xl border border-[#1f2937] bg-[#111827] pb-[env(safe-area-inset-bottom)] sm:rounded-2xl sm:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 flex items-center justify-between border-b border-[#1f2937] bg-[#111827] px-4 py-3">
-          <div className="text-sm font-bold text-white">How to Trade</div>
-          <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="h-8 w-8 rounded text-gray-400 hover:bg-[#1f2937] hover:text-white">×</button>
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-[#1f2937] bg-[#111827] px-3 py-2 sm:px-4 sm:py-3">
+          <div className="min-w-0 truncate text-sm font-bold text-white">How to Trade</div>
+          {/* 40px square: the close button is the only way out of the sheet on a phone, where the
+              backdrop around it is a sliver. */}
+          <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="-mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded text-xl leading-none text-gray-400 hover:bg-[#1f2937] hover:text-white">×</button>
         </div>
-        <div className="space-y-4 p-4">
+        <div className="space-y-4 p-3 sm:p-4">
           {sections.map((s) => (
-            <div key={s.title}>
+            <div key={s.title} className="min-w-0">
               <div className="mb-1 text-xs font-bold uppercase tracking-wider text-[#22c55e]">{s.title}</div>
-              <p className="text-sm leading-relaxed text-gray-300">{s.body}</p>
+              <p className="break-words text-sm leading-relaxed text-gray-300">{s.body}</p>
             </div>
           ))}
         </div>

@@ -26,6 +26,8 @@ import type {
   CommissionLineDto,
   CommissionPayoutDto,
   MarketerExpensesResponse,
+  MarketerMoneyDto,
+  MarketerMoneyRange,
   PositionDetailDto,
   PositionDto,
   ReferralRecord,
@@ -207,11 +209,11 @@ export const api = {
   // marketerDemoTopup tops it up to the policy cap (no real cash — migration 0102).
   marketerMe: (token: string) => apiFetch<MarketerProfileDto>('/marketers/me', { token }),
   // ── Live sessions (docs/55). Reporting only: starting one changes no attribution. ──
-  marketerLive: (token: string) => apiFetch<MarketerLiveDto>('/marketers/me/live', { token }),
+  marketerLive: (token: string) => apiFetch<MarketerLiveDto>('/affiliate/live', { token }),
   marketerLiveStart: (token: string, streamUrl?: string) =>
-    apiFetch<LiveSessionDto>('/marketers/me/live/start', { method: 'POST', token, body: streamUrl ? { streamUrl } : {} }),
-  marketerLiveEnd: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/end', { method: 'POST', token }),
-  marketerLiveExtend: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/extend', { method: 'POST', token }),
+    apiFetch<LiveSessionDto>('/affiliate/live/start', { method: 'POST', token, body: streamUrl ? { streamUrl } : {} }),
+  marketerLiveEnd: (token: string) => apiFetch<LiveSessionDto>('/affiliate/live/end', { method: 'POST', token }),
+  marketerLiveExtend: (token: string) => apiFetch<LiveSessionDto>('/affiliate/live/extend', { method: 'POST', token }),
 
   // ── Community channel (docs/56). Read for players, write for admins. ──
   community: (token: string, limit?: number) =>
@@ -254,6 +256,16 @@ export const api = {
     apiFetch<{ items: CommissionPayoutDto[] }>('/me/referral/payouts', { token }),
   affiliateExpenses: (token: string) =>
     apiFetch<MarketerExpensesResponse>('/affiliate/expenses', { token }),
+  /**
+   * The marketer's money statement for one time range (the /dashboard money table).
+   *
+   * `range` is a closed server-side enum — an unrecognised value is refused with 400 INVALID_RANGE
+   * rather than quietly answered with a different window's figures. The reply echoes the resolved
+   * inclusive EAT bounds (`from`/`to`) and carries the LIFETIME ladder alongside the windowed
+   * figures, so the UI can say which is which.
+   */
+  affiliateMoney: (token: string, range: MarketerMoneyRange) =>
+    apiFetch<MarketerMoneyDto>('/affiliate/money', { token, query: { range } }),
 
   // Marketer advance requests (0122): request a cash advance, list own requests, cancel a pending one.
   affiliateAdvances: (token: string) =>

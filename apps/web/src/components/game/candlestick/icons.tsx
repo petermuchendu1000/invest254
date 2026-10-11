@@ -6,13 +6,18 @@
  * optical size as the labels beside them. `currentColor` throughout, because every one of them is
  * painted by the tab state around it — green when active, grey when not.
  */
+import { cn } from '@/lib/cn';
+
 export type CandleIconName = 'trade' | 'chat' | 'top' | 'tours';
 
 export function CIcon({ name, className = 'h-4 w-4' }: { name: CandleIconName; className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      className={className}
+      // `shrink-0` here rather than at every call site: an SVG is a flex child on every tab bar that
+      // uses it, and a flex child with no basis is squashed before the label beside it is, which at
+      // 320px turned the glyphs into slivers.
+      className={cn('shrink-0', className)}
       aria-hidden="true"
       focusable="false"
       fill="none"

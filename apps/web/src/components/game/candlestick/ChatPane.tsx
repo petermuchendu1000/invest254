@@ -54,18 +54,18 @@ export function ChatPane() {
   const items = useMemo(() => activity?.items ?? [], [activity]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#0a0f1c]">
-      <div className="flex shrink-0 items-center justify-between border-b border-[#1f2937] bg-[#111827] px-4 py-2.5">
-        <div className="flex items-center gap-2 text-sm font-bold text-white">
-          <div className="h-2 w-2 animate-pulse rounded-full bg-[#22c55e]" />
-          Live Chat
+    <div className="flex h-full w-full min-w-0 flex-col bg-[#0a0f1c]">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#1f2937] bg-[#111827] px-3 py-2.5 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-white">
+          <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#22c55e]" />
+          <span className="truncate">Live Chat</span>
         </div>
         {/* The mock prints an online count here. There is no number that would be true, so this
             says what the list below actually is. */}
-        <div className="text-xs text-gray-500">Recent activity</div>
+        <div className="shrink-0 whitespace-nowrap text-xs text-gray-500">Recent activity</div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto bg-[#0a0f1c] px-3 py-2">
+      <div className="min-h-0 w-full min-w-0 flex-1 space-y-1.5 overflow-y-auto bg-[#0a0f1c] px-3 py-2">
         {items.length === 0 && messages.length === 0 ? (
           <p className="px-2 py-6 text-center text-xs italic text-gray-500">Nothing has happened here yet today.</p>
         ) : null}
@@ -78,7 +78,9 @@ export function ChatPane() {
           <div
             key={m.id}
             className={cn(
-              'rounded-lg px-3 py-2 text-xs leading-relaxed',
+              // `break-words`: a pasted URL or a long unspaced run has no break opportunity, and a
+              // 320px pane is narrow enough for one to push the whole column sideways.
+              'min-w-0 break-words rounded-lg px-3 py-2 text-xs leading-relaxed',
               m.authorRole === 'player' ? 'bg-[#22c55e]/10 text-white' : 'bg-[#111827] text-gray-200',
             )}
           >
@@ -88,9 +90,9 @@ export function ChatPane() {
         ))}
       </div>
 
-      <div className="shrink-0 border-t border-[#1f2937] bg-[#111827]">
+      <div className="w-full min-w-0 shrink-0 border-t border-[#1f2937] bg-[#111827]">
         {token ? (
-          <div className="p-2.5">
+          <div className="min-w-0 p-2.5">
             <ChatComposer
               busy={send.isPending}
               placeholder="Say something…"
@@ -104,7 +106,7 @@ export function ChatPane() {
           <button
             type="button"
             onClick={() => openAuth('login')}
-            className="w-full p-2.5 text-center text-xs italic text-gray-500 hover:text-white"
+            className="min-h-11 w-full px-3 py-2.5 text-center text-xs italic text-gray-500 hover:text-white"
           >
             Login to join the chat
           </button>
@@ -126,12 +128,12 @@ function ActivityLine({ item }: { item: BrandActivityDto }) {
     : 'has won';
 
   return (
-    <div className="rounded-lg bg-[#111827] px-3 py-2 text-xs leading-relaxed">
+    <div className="min-w-0 break-words rounded-lg bg-[#111827] px-3 py-2 text-xs leading-relaxed">
       <span className="font-bold text-[#22c55e]">System: </span>
       <span className="text-gray-200">
-        {item.name} {verb} {amount}.
+        {item.name} {verb} <span className="whitespace-nowrap tabular-nums">{amount}</span>.
       </span>{' '}
-      <span className="text-gray-500">{ago(item.agoSeconds)}</span>
+      <span className="whitespace-nowrap text-gray-500">{ago(item.agoSeconds)}</span>
     </div>
   );
 }

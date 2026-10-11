@@ -28,9 +28,26 @@ the money path.
 | `extend_minutes` — one press of Extend | 30 |
 | `max_sessions_daily` — 0 is unlimited | 0 |
 
-**Routes:** `GET /marketers/me/live`, `POST …/live/{start,end,extend}` (marketer's own, guarded by
-`requireMarketer`, which checks the database rather than the JWT claim).
-`GET|PUT /platform/sites/:id/live-settings` (platform admin, audited).
+**Routes:** `GET /affiliate/live`, `POST /affiliate/live/{start,end,extend}` (the marketer's own,
+behind the same `requireEarningRole` + role='marketer' + `requireSite` gate as the rest of the
+dashboard). `GET|PUT /platform/sites/:id/live-settings` (platform admin, audited).
+
+### Which "marketer" this is
+Two different entities in this codebase answer to the name, and the live routes were first written
+against the wrong one:
+
+* **`public.marketers`** — the field-agent till app. Its own table, its own PIN login, token
+  subject is a `marketers.id`, money in `marketer_wallets`, gate `requireMarketer`.
+* **a `profiles` row with `role='marketer'`** — the affiliate who earns `deposit_commissions` and
+  reads `/dashboard`, where the Start Live panel is mounted. Token subject is a `profiles.id`.
+
+A live session is keyed to the **second**: `marketer_live_sessions.marketer_id` and
+`community_posts.author_id` both reference `profiles(id)`, and `deposit_commissions
+.beneficiary_user` — the column the earnings join matches on — is a `profiles.id`. Behind
+`requireMarketer` the dashboard's own marketer got `403 NOT_MARKETER`, so the panel rendered
+nothing and Start Live never appeared; a till-app token that did reach it would have failed the
+foreign key with a 500. `app.affiliate.live.test.ts` asserts the gate and that the store receives
+the caller's own profile id.
 
 ## The community channel (`community_posts`)
 A **channel, not a group**: operators post, players read and vote. There is no player composer in

@@ -381,6 +381,59 @@ export interface AdminAdvanceDto extends MarketerAdvanceDto {
   siteId: string;
 }
 
+// ── Ranged marketer money statement — GET /affiliate/money ──────────────────────────────────────
+/**
+ * The windows the money table's filter selects. `7d`/`30d`/`90d`/`180d` are TRAILING windows of N
+ * days ending today (inclusive), matching `periodRange` in lib/history/mt5history.ts — NOT the
+ * leaderboard's calendar-to-date `week`/`month`. Server-side the key resolves to inclusive EAT
+ * (Africa/Nairobi) `YYYY-MM-DD` bounds; `all` is unbounded on both sides.
+ */
+export type MarketerMoneyRange = 'today' | 'yesterday' | '7d' | '30d' | '90d' | '180d' | 'all';
+
+/** What happened INSIDE the selected window. Every figure is a server-side SQL aggregate over the
+ *  whole range — never a sum of the returned page (BUGLOG #23). */
+export interface MarketerMoneyWindowDto {
+  earnedCents: Cents;
+  earnedCount: number;
+  /** Non-marketer commission in the window (a promoted player's instant 5%); funds nothing in the
+   *  commission balance, so it is reported apart from `earnedCents`. */
+  otherCommissionCents: Cents;
+  expensesCents: Cents;
+  expensesCount: number;
+  /** Advances approved in the window. ALREADY counted inside `expensesCents` (an approved advance is
+   *  logged as a category='advance' expense) — never add it to the arithmetic again. */
+  advancesApprovedCents: Cents;
+  advancesPendingCents: Cents;
+  advancesCount: number;
+  payoutsPaidCents: Cents;
+  payoutsPendingCents: Cents;
+}
+
+/** The LIFETIME ladder — the exact terms of fn_commission_balance, unaffected by the range filter.
+ *  `availableCents` is `max(earned − expenses − paid − held, 0)` over all time: the hero figure. */
+export interface MarketerMoneyLifetimeDto {
+  earnedCents: Cents;
+  expensesCents: Cents;
+  paidCents: Cents;
+  heldCents: Cents;
+  availableCents: Cents;
+}
+
+export interface MarketerMoneyDto {
+  /** The resolved window, echoed back so the UI can label which figures are windowed. */
+  range: MarketerMoneyRange;
+  /** Inclusive EAT calendar bounds; `null` on a side means unbounded (`all`). */
+  from: string | null;
+  to: string | null;
+  limit: number;
+  window: MarketerMoneyWindowDto;
+  lifetime: MarketerMoneyLifetimeDto;
+  /** Display pages, newest first, capped at `limit`. */
+  commissions: CommissionLineDto[];
+  expenses: MarketerExpenseRow[];
+  advances: MarketerAdvanceDto[];
+}
+
 /** A sticky notification shown to the player (J7). */
 export interface NotificationDto {
   id: number;
