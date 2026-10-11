@@ -160,7 +160,11 @@ export interface ApiDeps {
     | "beginMfaEnrolment" | "confirmMfa" | "disableMfa" | "mfaStatus"
     | "changePassword" | "resetPassword"
     | "setSecurityAnswers" | "securitySetupRequired" | "getResetQuestionKeys" | "assertSessionValid"
-    | "verifyStepUp" | "myQuestionKeys">;
+    | "verifyStepUp" | "myQuestionKeys"
+    // 0198: marketer-app security questions + the marketer-gated website password reset. These reuse
+    // the operator knowledge-factor crypto for the marketers.id subject (see AuthService).
+    | "hashSecurityAnswers" | "assertSecurityAnswersAgainst" | "publicDecoyQuestionKeys"
+    | "setNonPrivilegedPasswordByPhone">;
   /**
    * Per-session operator state behind the step-up 2FA gate and the idle timeout (0196).
    *

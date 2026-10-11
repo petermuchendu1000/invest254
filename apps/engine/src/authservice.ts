@@ -685,6 +685,75 @@ export class AuthService {
     return n < SECURITY_ANSWERS_REQUIRED;
   }
 
+  // ── Security-question primitives for a NON-profile subject (0198: the marketer-app identity) ────
+  //
+  // The marketer app authenticates as a marketers.id, not a profiles.id, so its answers live in a
+  // separate table owned by the marketer repo — not in IdentityRepository. Rather than grow a second
+  // copy of the knowledge-factor crypto there (the exact drift the 0097 comments warn against), the
+  // marketer flow hands its stored hashes to these methods, which reuse the SAME validation, scrypt
+  // hashing, normalization and uniform-timing verification as the operator path. One enforcement
+  // point; the only thing that differs between the two subjects is where the row is stored.
+
+  /**
+   * Validate a submitted answer set and return its scrypt hashes, ready to persist. Throws
+   * `SECURITY_ANSWERS_<reason>` for an invalid set (too few, unknown/duplicate key, too short/long),
+   * identical to `setSecurityAnswers`. Pure with respect to storage — the caller persists the result.
+   */
+  async hashSecurityAnswers(
+    answers: ReadonlyArray<{ key: string; answer: string }>,
+  ): Promise<SecurityAnswerHash[]> {
+    const check = validateSecurityAnswerSet(answers.map((a) => ({ key: a.key, answer: a.answer })));
+    if (!check.ok) throw new Error(`SECURITY_ANSWERS_${check.reason}`);
+    return Promise.all(
+      answers.map(async (a) => ({ questionKey: a.key, answerHash: await hashPassword(normalizeSecurityAnswer(a.answer)) })),
+    );
+  }
+
+  /**
+   * Verify provided answers against an already-loaded stored set. Throws SECURITY_QUESTIONS_NOT_SET
+   * (fewer than the required number stored — fail closed) or SECURITY_ANSWERS_MISMATCH (one or more
+   * wrong), the same two errors the operator reset throws. Reuses `verifyAllSecurityAnswers`, so the
+   * no-early-exit uniform timing is identical. The caller loads `stored` from wherever that subject's
+   * answers live.
+   */
+  async assertSecurityAnswersAgainst(
+    stored: ReadonlyArray<SecurityAnswerHash>,
+    provided: ReadonlyArray<{ key: string; answer: string }>,
+  ): Promise<void> {
+    if (stored.length < SECURITY_ANSWERS_REQUIRED) throw new Error("SECURITY_QUESTIONS_NOT_SET");
+    if (!(await this.verifyAllSecurityAnswers(stored, provided))) throw new Error("SECURITY_ANSWERS_MISMATCH");
+  }
+
+  /**
+   * Deterministic decoy question keys for a phone that has no answers, so a public "which questions
+   * do I answer" step cannot be used to tell a real marketer account from a non-existent one. Thin
+   * public wrapper over the same HMAC-seeded shuffle the operator reset uses.
+   */
+  publicDecoyQuestionKeys(seed: string): string[] {
+    return this.decoyQuestionKeys(seed);
+  }
+
+  /**
+   * Set a NON-privileged account's password by phone (+ brand), for the marketer-gated website
+   * password reset (0198). The caller MUST have already verified that subject's security answers;
+   * this is the credential write only.
+   *
+   * Refuses a privileged target outright — an operator account is never reset through the marketer
+   * flow, whatever phone it shares — and returns false (rather than throwing a distinguishable error)
+   * when no eligible account exists, so the caller can answer with one uniform code and leak nothing
+   * about which accounts exist. A soft-deleted account is treated as absent.
+   */
+  async setNonPrivilegedPasswordByPhone(phone: string, newPassword: string, siteId?: string): Promise<boolean> {
+    const pw = validatePassword(newPassword);
+    if (!pw.ok) throw new Error(`PASSWORD_${pw.reason}`);
+    let normalized: string;
+    try { normalized = normalizeMsisdn(phone); } catch { throw new Error("INVALID_PHONE"); }
+    const rec = await this.repo.findByPhone(normalized, siteId);
+    if (!rec || rec.status === "deleted" || isPrivilegedRole(rec.role)) return false;
+    await this.repo.setPasswordHash(rec.userId, await hashPassword(newPassword));
+    return true;
+  }
+
   /**
    * Public reset flow step 1: the question keys a privileged account must answer to reset. Returns
    * an EMPTY array for a non-privileged/unknown phone or one without answers set (anti-enumeration:

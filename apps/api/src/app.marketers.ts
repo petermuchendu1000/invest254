@@ -2,6 +2,8 @@ import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, rateLimit
 import { assertSiteTarget } from "./scope.js";
 import type { ApiDeps } from "./app.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
+import { isTokenSessionValid } from "@invest254/engine";
+import { SECURITY_QUESTIONS, SECURITY_ANSWERS_REQUIRED, validatePassword } from "@invest254/shared";
 
 /**
  * Admin marketer routes (marketers = special players who RECEIVE payments and can withdraw).
@@ -39,7 +41,15 @@ export interface MarketerProfile {
    *  Marketer expenses/advances are keyed to THIS id so they land on the marketer's dashboard and
    *  net their withdrawable. null when this marketer-app account has no website marketer account. */
   affiliate_user_id?: string | null;
+  /** Force-logout epoch (0198): a marketer token minted before this is refused by requireMarketer.
+   *  ISO timestamp, or null/undefined when the marketer has never been forced out. */
+  sessions_valid_after?: string | null;
 }
+
+/** One stored marketer security answer (0198): catalog key + the app-layer scrypt hash of the
+ *  normalized answer. Mirrors the engine `SecurityAnswerHash`; declared locally to keep the
+ *  marketer repo contract free of a cross-package type import. */
+export interface MarketerSecurityAnswer { questionKey: string; answerHash: string; }
 export interface MarketerLedgerRow {
   id: number; entry_type: string; amount_cents: number; balance_after_cents: number;
   ref: string | null; meta: unknown; created_at: string;
@@ -131,6 +141,15 @@ export interface MarketerRepo {
   /** HARD delete a demo marketer (cascades wallet/ledger/withdrawals/credentials). Un-demos the
    *  matching person. `siteId` scopes a brand admin to their own brand. Returns whether a row went. */
   delete(id: string, siteId?: string): Promise<{ deleted: boolean }>;
+  // ── Security questions + force-logout (0198) ──
+  /** The marketer's stored security answers (catalog key + scrypt hash); empty when none set. */
+  getSecurityAnswers(id: string): Promise<MarketerSecurityAnswer[]>;
+  /** Replace the marketer's security answers with EXACTLY `answers` (upsert + prune). Hashes are
+   *  computed by AuthService; this is a pure durable write mirroring user_security_answers (0097). */
+  setSecurityAnswers(id: string, answers: MarketerSecurityAnswer[]): Promise<void>;
+  /** Stamp the marketer force-logout epoch to now(), invalidating every marketer token already
+   *  issued for this account (the half that actually ends a stateless JWT session). */
+  forceLogout(id: string): Promise<void>;
 }
 
 // ── Domain-error → HTTP status ───────────────────────────────────────────────
@@ -147,7 +166,21 @@ const MARKETER_STATUS: Readonly<Record<string, number>> = {
   NO_PIN_SET: 409,
   INVALID_CREDENTIALS: 401,
   INVALID_STATUS: 400,
+  // Security questions + resets (0198).
+  SECURITY_QUESTIONS_NOT_SET: 403,
+  SECURITY_ANSWERS_MISMATCH: 401,
+  // One uniform refusal for EVERY reason a marketer reset can fail (no marketer, no answers set,
+  // wrong answers, ineligible target) — same anti-enumeration stance as the operator reset.
+  RESET_UNAVAILABLE: 403,
 };
+
+function statusForMarketer(code: string): number {
+  if (MARKETER_STATUS[code]) return MARKETER_STATUS[code]!;
+  // Answer-set validation failures (SECURITY_ANSWERS_TOO_FEW / _INVALID_KEY / _DUPLICATE_KEY / …)
+  // and password-format failures are client input errors → 400.
+  if (code.startsWith("SECURITY_ANSWERS_") || code.startsWith("PASSWORD_")) return 400;
+  return 0;
+}
 
 /** Translate a thrown DB/domain error (code prefix before ':') into a controlled ApiError. */
 async function domain<T>(fn: () => Promise<T>): Promise<T> {
@@ -157,11 +190,55 @@ async function domain<T>(fn: () => Promise<T>): Promise<T> {
     if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     const code = message.split(":")[0]!.trim();
-    const status = MARKETER_STATUS[code];
+    const status = statusForMarketer(code);
     if (status) throw new ApiError(code, message, status);
     throw err;
   }
 }
+
+/**
+ * Parse `body.answers` into a clean [{key, answer}] list for the security-question flows (0198),
+ * mirroring the operator transport guard in app.auth.ts. Tolerant of a missing field (→ []) but
+ * rejects a present-but-malformed shape so AuthService sees well-typed input. Deep validation
+ * (distinct keys, count, length) lives in the shared validator.
+ */
+function parseAnswers(body: Record<string, unknown>): Array<{ key: string; answer: string }> {
+  const raw = body["answers"];
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new ApiError("VALIDATION", "answers must be an array", 400);
+  return raw.map((item, i) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new ApiError("VALIDATION", `answers[${i}] must be an object`, 400);
+    }
+    const o = item as Record<string, unknown>;
+    if (typeof o.key !== "string" || typeof o.answer !== "string") {
+      throw new ApiError("VALIDATION", `answers[${i}] requires string key + answer`, 400);
+    }
+    return { key: o.key, answer: o.answer };
+  });
+}
+
+/** A marketer must set this many security answers before a reset can verify them (0198). */
+function needsSecuritySetup(stored: { questionKey: string }[]): boolean {
+  return stored.length < SECURITY_ANSWERS_REQUIRED;
+}
+
+/**
+ * Optional HARD enforcement of security-question setup for the marketer app (0198). Default OFF.
+ *
+ * The till app is an external build this repo cannot change, so blocking its actions before it ships
+ * a "set your questions" screen would lock out live agents. Everything else in this feature ships
+ * immediately (the force sign-out, the `securitySetupRequired` signal, the fail-closed resets); this
+ * flag is the switch to flip to BLOCKING once the app supports setup. When on, a marketer who has not
+ * set answers is refused on the gated routes below, EXCEPT the ones that let them read their state or
+ * finish setup (so the block is never a dead end).
+ */
+const MARKETER_SETUP_ENFORCED = (): boolean => process.env.MARKETER_SECURITY_SETUP_ENFORCED === "1";
+const MARKETER_SETUP_EXEMPT: ReadonlySet<string> = new Set([
+  "GET /api/v1/marketers/me",
+  "GET /api/v1/marketers/auth/security-questions/mine",
+  "POST /api/v1/marketers/auth/security-questions",
+]);
 
 // ── Input helpers ────────────────────────────────────────────────────────────
 function bodyObj(ctx: Ctx): Record<string, unknown> {
@@ -246,6 +323,25 @@ function requireMarketer(deps: ApiDeps) {
     const profile = await deps.marketers.profile(ctx.claims.userId);
     if (!profile) throw new ApiError("NOT_MARKETER", "not a marketer account", 403);
     if (profile.status !== "active") throw new ApiError("MARKETER_INACTIVE", `marketer is ${profile.status}`, 403);
+    // Force-logout epoch (0198). The marketer app's token is a stateless 7-day JWT whose subject is a
+    // marketers.id, so neither the operator force-logout epoch (profiles.sessions_valid_after) nor the
+    // 0196 privileged-session gate ever reached it. This is the equivalent, read on the same single
+    // profile() this gate already does: a token minted before the marketer's epoch is revoked. Fails
+    // closed exactly like isTokenSessionValid — a missing iat on a stamped account cannot verify.
+    const iat = (ctx.claims.raw as { iat?: unknown } | undefined)?.iat;
+    const epochMs = profile.sessions_valid_after ? Date.parse(profile.sessions_valid_after) : null;
+    if (!isTokenSessionValid(typeof iat === "number" ? iat : undefined, Number.isNaN(epochMs as number) ? null : epochMs)) {
+      throw new ApiError("SESSION_REVOKED", "session ended, sign in again", 401);
+    }
+    // Optional hard setup gate (default off — see MARKETER_SETUP_ENFORCED). When on, a marketer who
+    // has not set security answers is blocked on action routes but can still read status and finish
+    // setup, so the control never becomes a dead end.
+    if (MARKETER_SETUP_ENFORCED()) {
+      const key = `${ctx.method} ${ctx.routePath ?? ""}`;
+      if (!MARKETER_SETUP_EXEMPT.has(key) && needsSecuritySetup(await deps.marketers.getSecurityAnswers(profile.id))) {
+        throw new ApiError("SECURITY_SETUP_REQUIRED", "set your security questions to continue", 403);
+      }
+    }
     marketerCtx.set(ctx, profile);
   };
 }
@@ -266,6 +362,10 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     return p;
   };
   const loginLimit = rateLimit({ name: "marketer-login", by: "ip", limit: Number(process.env.RATE_LIMIT_AUTH_PER_MIN) || 40, windowMs: 60_000 });
+  // 0198: resets are unauthenticated and end in a credential change — throttle hard per IP, like the
+  // operator reset. Security-answer setup is authenticated, so it is budgeted per user.
+  const resetLimit = rateLimit({ name: "marketer-reset", by: "ip", limit: Number(process.env.RATE_LIMIT_RESET_PER_MIN) || 5, windowMs: 60_000 });
+  const securityLimit = rateLimit({ name: "marketer-security", by: "user", limit: Number(process.env.RATE_LIMIT_MFA_PER_MIN) || 10, windowMs: 60_000 });
   // Self-service demo top-up: modest abuse guard (the RPC is idempotent + capped, so this is belt-and-braces).
   const demoTopupLimit = rateLimit({ name: "marketer-demo-topup", by: "ip", limit: 30, windowMs: 60_000 });
   // Policy ceiling for a marketer's SIMULATED (funny-money) wallet. Server-side only — the marketer
@@ -363,7 +463,10 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const marketerProfile = await deps.marketers.profile(id);
     // Issue 1 / F-43: bind the marketer-app session to the marketer's brand (site claim).
     const token = await deps.auth.issueToken(id, "marketer", marketerProfile?.site_id ?? undefined);
-    return { token, marketer: marketerProfile };
+    // 0198: tell the app whether this marketer still has to set its security questions, so it can
+    // force the setup screen (the server enforces the same on reset, fail-closed).
+    const securitySetupRequired = needsSecuritySetup(await deps.marketers.getSecurityAnswers(id));
+    return { token, marketer: marketerProfile, ...(securitySetupRequired ? { securitySetupRequired: true } : {}) };
   });
 
   // Website-credential login: the marketer signs in with the SAME phone + password they use on the
@@ -418,11 +521,17 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     // 3) Mint a marketer-scoped token (subject = marketer id, as requireMarketer/me expect).
     // Issue 1 / F-43: bind the marketer-app session to the marketer's brand (site claim).
     const token = await deps.auth.issueToken(profile.id, "marketer", profile.site_id ?? undefined);
-    return { token, marketer: profile };
+    const securitySetupRequired = needsSecuritySetup(await deps.marketers.getSecurityAnswers(profile.id));
+    return { token, marketer: profile, ...(securitySetupRequired ? { securitySetupRequired: true } : {}) };
   });
 
-  // The authenticated marketer's own profile (name/initials/balance/Fuliza/airtime).
-  router.get(`${BASE}/marketers/me`, auth, marketer, async (ctx: Ctx) => marketerCtx.get(ctx)!);
+  // The authenticated marketer's own profile (name/initials/balance/Fuliza/airtime) + whether the
+  // marketer still needs to set its security questions (0198).
+  router.get(`${BASE}/marketers/me`, auth, marketer, async (ctx: Ctx) => {
+    const profile = marketerCtx.get(ctx)!;
+    const securitySetupRequired = needsSecuritySetup(await deps.marketers.getSecurityAnswers(profile.id));
+    return { ...profile, securitySetupRequired };
+  });
 
   // Marketer's own transaction feed (newest-first), each with a ready-to-render M-PESA
   // confirmation. The app polls this to raise "money received" notifications when a game
@@ -448,6 +557,96 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const b = bodyObj(ctx);
     await domain(() => deps.marketers.changePin(marketerCtx.get(ctx)!.id, reqPin(b, "currentPin"), reqPin(b, "newPin")));
     return { ok: true };
+  });
+
+  // ── Security questions: the knowledge second factor for the marketer app (0198) ────────────────
+  //
+  // The marketer till app had no self-service recovery at all (PIN reset was admin-only, 0034). These
+  // give it one, gated by security questions — the same catalog, hashing and uniform-timing
+  // verification operators use, applied to the marketers.id subject. All reset failures collapse to
+  // one RESET_UNAVAILABLE, the same anti-enumeration stance as the operator reset.
+
+  // Public catalog of selectable questions (labels for the setup + reset UI). No secrets.
+  router.get(`${BASE}/marketers/auth/security-questions/catalog`, resetLimit, async () => ({
+    questions: SECURITY_QUESTIONS.map((q) => ({ key: q.key, label: q.label })),
+  }));
+
+  // Authenticated: set (replace) MY three security answers. Used by the mandatory setup prompt.
+  router.post(`${BASE}/marketers/auth/security-questions`, auth, marketer, securityLimit, async (ctx: Ctx) => {
+    const answers = parseAnswers(bodyObj(ctx));
+    const hashed = await domain(() => deps.auth.hashSecurityAnswers(answers));
+    await deps.marketers.setSecurityAnswers(marketerCtx.get(ctx)!.id, hashed);
+    return { set: true };
+  });
+
+  // Authenticated: which question keys I have set, so the reset/step-up UI prompts the ones I chose
+  // rather than making me guess. Safe — I have already proven I am this marketer.
+  router.get(`${BASE}/marketers/auth/security-questions/mine`, auth, marketer, async (ctx: Ctx) => {
+    const stored = await deps.marketers.getSecurityAnswers(marketerCtx.get(ctx)!.id);
+    return { keys: stored.map((s) => s.questionKey) };
+  });
+
+  // Public reset step 1: which question keys must be answered to reset this phone's credentials.
+  // Returns decoys for an unknown phone or one without answers set (anti-enumeration: always 200).
+  router.post(`${BASE}/marketers/auth/reset-questions`, resetLimit, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const phone = reqStr(b, "phone");
+    const siteId = await resolveSiteId(ctx, b, deps);
+    const m = await deps.marketers.profileByPhone(phone, siteId);
+    if (!m) return { keys: deps.auth.publicDecoyQuestionKeys(phone) };
+    const stored = await deps.marketers.getSecurityAnswers(m.id);
+    if (needsSecuritySetup(stored)) return { keys: deps.auth.publicDecoyQuestionKeys(phone) };
+    return { keys: stored.map((s) => s.questionKey) };
+  });
+
+  // Public reset step 2a: forgot PIN. Verify the security answers, set a new PIN, end live sessions.
+  router.post(`${BASE}/marketers/auth/pin/reset`, resetLimit, async (ctx: Ctx) => {
+    if (deps.platformGate && !(await deps.platformGate.allows("marketers")))
+      throw new ApiError("SYSTEM_DISABLED", "The marketer system is temporarily disabled by the platform.", 403);
+    const b = bodyObj(ctx);
+    const phone = reqStr(b, "phone");
+    const newPin = reqPin(b, "newPin");       // 400 INVALID_PIN on a bad format — about input, not the account
+    const answers = parseAnswers(b);
+    const siteId = await resolveSiteId(ctx, b, deps);
+    // Everything from here collapses to one RESET_UNAVAILABLE, so the endpoint cannot distinguish a
+    // real marketer / one with answers set / a correct answer (matches the operator reset).
+    try {
+      const m = await deps.marketers.profileByPhone(phone, siteId);
+      if (!m) throw new ApiError("RESET_UNAVAILABLE", "reset unavailable", 403);
+      await deps.auth.assertSecurityAnswersAgainst(await deps.marketers.getSecurityAnswers(m.id), answers);
+      await deps.marketers.setPin(m.id, newPin);
+      await deps.marketers.forceLogout(m.id);
+      return { reset: true };
+    } catch {
+      throw new ApiError("RESET_UNAVAILABLE", "reset unavailable", 403);
+    }
+  });
+
+  // Public reset step 2b: forgot website password. Verify the marketer's security answers, then reset
+  // the NON-privileged website (profiles) account on this phone+brand. An operator account sharing the
+  // phone is never reset through this path (setNonPrivilegedPasswordByPhone refuses it).
+  router.post(`${BASE}/marketers/auth/password/reset`, resetLimit, async (ctx: Ctx) => {
+    if (deps.platformGate && !(await deps.platformGate.allows("marketers")))
+      throw new ApiError("SYSTEM_DISABLED", "The marketer system is temporarily disabled by the platform.", 403);
+    const b = bodyObj(ctx);
+    const phone = reqStr(b, "phone");
+    const newPassword = typeof b.new_password === "string" ? b.new_password
+      : (typeof b.newPassword === "string" ? b.newPassword : "");
+    const pw = validatePassword(newPassword);  // input-shape check up front (distinguishable 400, no account leak)
+    if (!pw.ok) throw new ApiError(`PASSWORD_${pw.reason}`, "password does not meet requirements", 400);
+    const answers = parseAnswers(b);
+    const siteId = await resolveSiteId(ctx, b, deps);
+    try {
+      const m = await deps.marketers.profileByPhone(phone, siteId);
+      if (!m) throw new ApiError("RESET_UNAVAILABLE", "reset unavailable", 403);
+      await deps.auth.assertSecurityAnswersAgainst(await deps.marketers.getSecurityAnswers(m.id), answers);
+      const ok = await deps.auth.setNonPrivilegedPasswordByPhone(phone, newPassword, m.site_id ?? undefined);
+      if (!ok) throw new ApiError("RESET_UNAVAILABLE", "reset unavailable", 403);
+      await deps.marketers.forceLogout(m.id);
+      return { reset: true };
+    } catch {
+      throw new ApiError("RESET_UNAVAILABLE", "reset unavailable", 403);
+    }
   });
 
   // ── Admin lifecycle (onboarding + demotion/suspension) ─────────────────────

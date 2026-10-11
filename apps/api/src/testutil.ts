@@ -103,12 +103,16 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
   const ledgers = new Map<string, MarketerLedgerRow[]>();
   const refs = new Map<string, { balance: number; ledgerId: number }>();
   const pins = new Map<string, string>();
+  // 0198: marketer security answers (marketer id -> question_key -> answer_hash) and the force-logout
+  // epoch (marketer id -> epoch ms). Mirror the SQL semantics so the in-memory and Pg paths agree.
+  const securityAnswers = new Map<string, Map<string, string>>();
+  const forceLogoutAt = new Map<string, number>();
   let mseq = 0, lseq = 0;
   const now = () => new Date().toISOString();
   const parts = (n: string) => n.trim().split(/\s+/).filter(Boolean);
   const firstName = (n: string) => parts(n)[0] ?? "";
   const initials = (n: string) => { const p = parts(n); return p.length === 0 ? "" : p.length === 1 ? p[0]!.slice(0, 2).toUpperCase() : (p[0]![0]! + p[p.length - 1]![0]!).toUpperCase(); };
-  const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES", site_id: m.site_id, brand_name: brandBySite.get(m.site_id) ?? null });
+  const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES", site_id: m.site_id, brand_name: brandBySite.get(m.site_id) ?? null, sessions_valid_after: forceLogoutAt.has(m.id) ? new Date(forceLogoutAt.get(m.id)!).toISOString() : null });
   const push = (id: string, entry_type: string, amount_cents: number, balance_after_cents: number, ref: string | null, meta: unknown): number => {
     const row: MarketerLedgerRow = { id: ++lseq, entry_type, amount_cents, balance_after_cents, ref, meta: meta ?? {}, created_at: now() };
     (ledgers.get(id) ?? []).push(row);
@@ -208,6 +212,17 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       byId.delete(id); byPhone.delete(pkey(m.phone, m.site_id)); ledgers.delete(id); pins.delete(id);
       return { deleted: true };
     },
+    // ── Security questions + force-logout (0198) ──
+    async getSecurityAnswers(id: string): Promise<{ questionKey: string; answerHash: string }[]> {
+      const m = securityAnswers.get(id);
+      if (!m) return [];
+      return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([questionKey, answerHash]) => ({ questionKey, answerHash }));
+    },
+    async setSecurityAnswers(id: string, answers: { questionKey: string; answerHash: string }[]): Promise<void> {
+      // Replace the whole set (mirror the Pg upsert-and-prune): the stored map becomes exactly `answers`.
+      securityAnswers.set(id, new Map(answers.map((a) => [a.questionKey, a.answerHash])));
+    },
+    async forceLogout(id: string): Promise<void> { forceLogoutAt.set(id, Date.now()); },
     // Test-only: register a brand (site) display name so profiles resolve `brand_name` like the
     // 0096 view does in production. Mirrors the `_seed*` helpers on the affiliate in-memory repo.
     _setBrandName(siteId: string, name: string): void { brandBySite.set(siteId, name); },
@@ -361,10 +376,13 @@ export function stubVerifier(): Verifier {
     if (!token) throw new Error("TOKEN_REQUIRED");
     // `<userId>` | `<userId>:<role>` | `<userId>:<role>:<siteId>` | `<userId>:<role>:<siteId>:<platformId>`
     // — the optional 3rd/4th segments exercise the JWT `site` (requireSite) and `platform`
-    // (adminScopePlatform, Issue 1) claims.
-    const [userId, role, site, platform] = token.split(":");
+    // (adminScopePlatform, Issue 1) claims. An optional 5th segment is the token `iat` (seconds),
+    // which the 0196 idle gate and the 0198 marketer force-logout epoch read from `raw.iat`; tokens
+    // with four or fewer segments keep `raw: {}` exactly as before.
+    const [userId, role, site, platform, iat] = token.split(":");
     if (!userId) throw new Error("TOKEN_INVALID");
-    return { userId, role: role || "player", ...(site ? { site } : {}), ...(platform ? { platform } : {}), raw: {} };
+    const raw = iat !== undefined && iat !== "" ? { iat: Number(iat) } : {};
+    return { userId, role: role || "player", ...(site ? { site } : {}), ...(platform ? { platform } : {}), raw };
   };
 }
 
