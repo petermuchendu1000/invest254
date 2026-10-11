@@ -10,7 +10,6 @@ import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useWallet } from '@/lib/wallet/hooks';
 import { useNavDrawer } from '@/lib/ui/drawer';
 import { useDisplayMoney } from '@/lib/money';
-import { useCandlestickUi } from '@/components/game/candlestick/ui';
 import { CIcon } from '@/components/game/candlestick/icons';
 import { CandlestickModeBadge } from '@/components/candlestick-account/CandlestickModeBadge';
 
@@ -38,7 +37,6 @@ export function CandlestickTopBar() {
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
   const toggleDrawer = useNavDrawer((s) => s.toggle);
-  const setHowTo = useCandlestickUi((s) => s.setHowTo);
 
   const authed = !!token;
   const balance = fmt((wallet?.real ?? 0) + (wallet?.bonus ?? 0));
@@ -84,16 +82,6 @@ export function CandlestickTopBar() {
             <span className="whitespace-nowrap text-xs font-bold text-white">{balance}</span>
           </div>
         ) : null}
-
-        <button
-          type="button"
-          onClick={() => setHowTo(true)}
-          aria-label="How to trade"
-          className="h-8 shrink-0 rounded-md border border-[#22c55e]/40 px-2 text-xs font-semibold text-[#22c55e] transition-colors hover:bg-[#22c55e]/10 md:px-3"
-        >
-          <span className="hidden sm:inline">How to</span>
-          <span className="sm:hidden">?</span>
-        </button>
 
         {authed ? (
           <>
