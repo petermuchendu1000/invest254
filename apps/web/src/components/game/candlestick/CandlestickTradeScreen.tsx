@@ -14,6 +14,7 @@ import { TopTradersPane } from '@/components/game/candlestick/TopTradersPane';
 import { TournamentsPane } from '@/components/game/candlestick/TournamentsPane';
 import { useLivePrice } from '@/components/game/candlestick/useLivePrice';
 import { CIcon } from '@/components/game/candlestick/icons';
+import { WinNotice } from '@/components/game/candlestick/WinNotice';
 
 /** The rail's three tabs, and the phone's fourth. */
 type RailTab = 'chat' | 'top' | 'tours';
@@ -36,6 +37,14 @@ export function CandlestickTradeScreen() {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#0a0f1c] text-white">
+      {/*
+        Other players' wins, floating over the chart. One element, outside both trees, because it is
+        the same notification on a phone and a desktop and must not be mounted twice — two copies
+        would poll the same feed into two independent queues and show every event twice. It positions
+        itself against AppShell's <main>, takes no pointer events and changes nothing below it.
+      */}
+      <WinNotice />
+
       {/* ── Phone: one pane at a time, four tabs ───────────────────────────── */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden">
         <div className="relative min-h-0 flex-1 overflow-hidden">
