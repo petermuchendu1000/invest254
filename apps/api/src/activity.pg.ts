@@ -2,11 +2,18 @@
  * The brand's recent REAL activity: deposits that settled, withdrawals that were paid, and trades
  * that won. This is what the candlestick screen's Live Chat shows between players' messages.
  *
- * Every row here describes something that actually happened to a real account on this brand. The
- * screen it feeds was copied from a page whose equivalent feed is generated — its own rows come back
- * typed `system_simulated`, naming withdrawals nobody made — and that is the one thing from the mock
- * that is not reproduced. A feed of invented winnings above a deposit button is a lie told to the
- * person about to deposit.
+ * Every row the QUERIES here read out of `transactions` and `positions` describes something that
+ * actually happened to a real account on this brand, and that stays true: those arms were never
+ * going to grow a generated row. The screen it feeds was copied from a page whose equivalent feed
+ * is wholly generated — its own rows come back typed `system_simulated`, naming withdrawals nobody
+ * made.
+ *
+ * SEEDED ROWS. On top of the real events the feed now also carries rows from `activity_seed` (0193),
+ * which the product owner seeds so a newly-launched brand's feed is not empty. They are kept in
+ * their own table, outside every money table, so the ledger stays exactly as correct as it was and
+ * the seeds can be deleted wholesale at any time. Nothing downstream of them moves a balance; what
+ * they do move is what a person about to deposit believes about this brand, which is the reason the
+ * boundary is drawn in the schema rather than in a flag on a real row.
  *
  * PRIVACY. A public feed naming real people and real money has to give up as little as it can:
  *  - the name is the account's own username, truncated, never a phone number, an id or an email;
@@ -25,6 +32,16 @@ export interface BrandActivityItem {
   amountCents: number;
   /** Whole seconds ago, so the client can say "2m ago" without being handed a wall-clock time. */
   agoSeconds: number;
+  /**
+   * True for a row that came from `activity_seed` (0193) rather than from a settled transaction or
+   * position.
+   *
+   * Carried so the distinction survives in the API payload itself: an operator, an auditor, or
+   * whoever next reads this endpoint can tell seeded social proof from a real event without
+   * joining anything. The client does not have to use it, and today does not — but the server
+   * should never be the thing that makes the two indistinguishable.
+   */
+  seeded?: boolean;
 }
 
 /** One trader on the board, as the Top tab lists them. */
@@ -110,12 +127,46 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
          order by at desc limit $2`,
         [siteId, limit],
       );
-      return r.rows.map((x) => ({
+      const real: BrandActivityItem[] = r.rows.map((x) => ({
         kind: x.kind === 'withdrawal' ? 'withdrawal' : x.kind === 'win' ? 'win' : 'deposit',
         name: publicName(x.username as string | null),
         amountCents: Math.max(0, Math.round(Number(x.amount_cents ?? 0))),
         agoSeconds: Math.max(0, Math.round(Number(x.ago_seconds ?? 0))),
       }));
+
+      /**
+       * The SEEDED rows (0193), merged in so a brand nobody has deposited on yet still has a feed.
+       *
+       * A SECOND statement rather than a fourth UNION arm, because the arm above is the one piece of
+       * SQL in this file that has already broken production once and the comment on it says why: its
+       * brackets are load-bearing and nothing but a real database parses them. Editing that string
+       * to bolt marketing copy onto it risks the route for the sake of saving a round trip against a
+       * tiny, single-index table. The merge is then done here, where it is plain to read.
+       *
+       * `name` is taken as stored and NOT passed through publicName: that function exists to shrink
+       * a real player's username to the least that still reads as a person, and there is no player
+       * behind a seed row to protect — running it would only mangle the display name on purpose.
+       */
+      const s = await q.query(
+        `select kind, name, amount_cents,
+                extract(epoch from (now() - created_at)) as ago_seconds
+           from public.activity_seed
+          where site_id = $1
+          order by created_at desc
+          limit $2`,
+        [siteId, limit],
+      );
+      const seeded: BrandActivityItem[] = s.rows.map((x) => ({
+        kind: x.kind === 'withdrawal' ? 'withdrawal' : x.kind === 'win' ? 'win' : 'deposit',
+        name: String(x.name ?? '').trim() || 'A trader',
+        amountCents: Math.max(0, Math.round(Number(x.amount_cents ?? 0))),
+        agoSeconds: Math.max(0, Math.round(Number(x.ago_seconds ?? 0))),
+        seeded: true,
+      }));
+
+      // Newest first across both sources, then cut to `limit` — the age is the sort key the DTO
+      // already carries, so the merged order is exactly the order the client renders.
+      return [...real, ...seeded].sort((a, b) => a.agoSeconds - b.agoSeconds).slice(0, limit);
     },
 
     async leaderboard(siteId, period, limit) {
