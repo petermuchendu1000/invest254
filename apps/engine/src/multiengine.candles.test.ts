@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { WebSocket } from "ws";
 import { DEFAULT_VERSIONED_CONFIG, TIMEFRAMES, valueOfRate, type VersionedGameConfig } from "@invest254/shared";
 import { InMemoryGameRepository } from "./wallet.js";
 import { StaticConfigProvider } from "./gameconfig.js";
@@ -8,6 +7,7 @@ import { SiteRegistry } from "./siteregistry.js";
 import { startMultiEngine, type MultiEngineHandle } from "./multiengine.js";
 import { MAX_ANCHORS, MAX_BARS } from "./markethistory.js";
 import { DEFAULT_MAX_RESIDENT } from "./symbolhistories.js";
+import { WsTestClient, WARM_MS, ticksBudget } from "./wstestkit.js";
 
 /**
  * The candle feed over the wire (Step 2 of the MT5 chart work).
@@ -20,43 +20,27 @@ import { DEFAULT_MAX_RESIDENT } from "./symbolhistories.js";
 
 const CANDLE_SITE = "00000000-0000-0000-0000-0000000000c1";
 const LINE_SITE = "00000000-0000-0000-0000-0000000000c2";
-const cfg: VersionedGameConfig = { ...DEFAULT_VERSIONED_CONFIG, version: 1, defaultDurationS: 1, tickRateMs: 60 };
+/** The brand's own tick cadence, which the quote fan-out rides: ceilings for "n more quote frames"
+ *  are a multiple of THIS rather than a flat number, so they follow the config if it ever changes. */
+const TICK_MS = 60;
+const cfg: VersionedGameConfig = { ...DEFAULT_VERSIONED_CONFIG, version: 1, defaultDurationS: 1, tickRateMs: TICK_MS };
 
-class Client {
-  ws: WebSocket;
-  constructor(url: string) { this.ws = new WebSocket(url); }
-  open(): Promise<void> {
-    // Already open? `once("open")` would never fire — the event has been and gone — and the test
-    // would hang for ever instead of failing. Costs one check; saves a mystery timeout.
-    if (this.ws.readyState === this.ws.OPEN) return Promise.resolve();
-    return new Promise((res, rej) => { this.ws.once("open", () => res()); this.ws.once("error", rej); });
+/**
+ * The shared test client, with this file's ceilings.
+ *
+ * Every request here can land behind a cold symbol-chain warm — `candles`, `anchors`, `symbols` and
+ * `subscribe_symbols` all walk a day's chain for a symbol this brand has not drawn yet, which costs
+ * 5s for gold and up to 24s for a second symbol warmed while the brand is already ticking. The old
+ * fixed 20_000/30_000 ceilings were therefore inside a factor of 1.25 of the unloaded cost of the
+ * very thing they were waiting for; `WARM_MS` is that measured cost scaled for a busy runner.
+ */
+class Client extends WsTestClient {
+  override ask(type: string, data: unknown, expect: string, timeoutMs = WARM_MS): Promise<any> {
+    return super.ask(type, data, expect, timeoutMs);
   }
-  /** Send a request and resolve on the first reply of `type` (or an `error`, so a test fails fast). */
-  ask(type: string, data: unknown, expect: string, timeoutMs = 20_000): Promise<any> {
-    return new Promise((res, rej) => {
-      const t = setTimeout(() => rej(new Error(`timeout waiting for ${expect}`)), timeoutMs);
-      const h = (raw: any) => {
-        let m: any; try { m = JSON.parse(String(raw)); } catch { return; }
-        if (m.type !== expect && m.type !== "error") return;
-        clearTimeout(t); this.ws.off("message", h); res(m);
-      };
-      this.ws.on("message", h);
-      this.ws.send(JSON.stringify({ type, data }));
-    });
+  override next(type: string, timeoutMs = WARM_MS): Promise<any> {
+    return super.next(type, timeoutMs);
   }
-  /** Resolve on the next message of `type` (for pushed events like the tick stream). */
-  next(type: string, timeoutMs = 20_000): Promise<any> {
-    return new Promise((res, rej) => {
-      const t = setTimeout(() => rej(new Error(`timeout waiting for ${type}`)), timeoutMs);
-      const h = (raw: any) => {
-        let m: any; try { m = JSON.parse(String(raw)); } catch { return; }
-        if (m.type !== type) return;
-        clearTimeout(t); this.ws.off("message", h); res(m);
-      };
-      this.ws.on("message", h);
-    });
-  }
-  close() { try { this.ws.close(); } catch { /* ignore */ } }
 }
 
 async function boot(): Promise<{ handle: MultiEngineHandle; url: (site: string) => string }> {
@@ -356,22 +340,6 @@ test("WS anchors: a named symbol's anchors price that symbol's own days", async 
  * disagree.
  */
 
-/** Collect every message of the given types until `done` says it has enough. */
-function collect(c: Client, types: readonly string[], done: (seen: any[]) => boolean, timeoutMs = 30_000): Promise<any[]> {
-  return new Promise((res, rej) => {
-    const seen: any[] = [];
-    const t = setTimeout(() => rej(new Error(`timeout; saw ${seen.map((m) => m.type).join(",")}`)), timeoutMs);
-    const h = (raw: any) => {
-      let m: any; try { m = JSON.parse(String(raw)); } catch { return; }
-      if (!types.includes(m.type)) return;
-      seen.push(m);
-      if (!done(seen)) return;
-      clearTimeout(t); c.ws.off("message", h); res(seen);
-    };
-    c.ws.on("message", h);
-  });
-}
-
 test("WS quotes: the watch list is a set the client owns, capped, with unoffered symbols refused", async () => {
   const { handle, url } = await boot();
   const c = new Client(url(CANDLE_SITE));
@@ -409,7 +377,10 @@ test("WS quotes: a subscribed symbol is seeded with what makes its ticks pricabl
   const c = new Client(url(CANDLE_SITE));
   try {
     await c.open();
-    const seeded = collect(c, ["symbol_quote"], (s) => s.length >= 1);
+    // The seed is sent only once EURUSD's chain has warmed, and that warm is the whole cost of this
+    // test: 24s unloaded against the old 30_000 ceiling, which is why a busy runner saw zero frames
+    // and timed out here. Same condition, a ceiling sized off that measurement.
+    const seeded = c.collect(["symbol_quote"], (s) => s.length >= 1, "the EURUSD seed quote", WARM_MS);
     await c.ask("subscribe_symbols", { symbols: ["EURUSD"] }, "subscribed_symbols");
     const [q] = await seeded;
     assert.equal(q.data.symbol, "EURUSD");
@@ -425,7 +396,7 @@ test("WS quotes: a subscribed symbol is seeded with what makes its ticks pricabl
     assert.ok(price > 0.5 && price < 2, `EURUSD priced at ${price}`);
 
     // Then the live stream, carrying only what changes.
-    const ticks = await collect(c, ["symbol_ticks"], (s) => s.length >= 3);
+    const ticks = await c.collect(["symbol_ticks"], (s) => s.length >= 3, "3 EURUSD quote frames", ticksBudget(3, TICK_MS));
     for (const m of ticks) {
       assert.equal(m.data.quotes.length, 1);
       assert.equal(m.data.quotes[0].symbol, "EURUSD");
@@ -449,11 +420,11 @@ test("WS quotes: the default symbol's quote is the same number the brand's own t
   try {
     await c.open();
     await c.ask("subscribe_symbols", { symbols: ["XAUUSD"] }, "subscribed_symbols");
-    const pair = await collect(c, ["tick", "symbol_ticks"], (seen) => {
+    const pair = await c.collect(["tick", "symbol_ticks"], (seen) => {
       // Enough once some brand tick and some symbol_ticks share a timestamp.
       const ts = new Set(seen.filter((m) => m.type === "tick").map((m) => m.data.t));
       return seen.some((m) => m.type === "symbol_ticks" && ts.has(m.data.t));
-    });
+    }, "a brand tick and a quote sharing a timestamp", WARM_MS);
     const quotes = pair.filter((m) => m.type === "symbol_ticks");
     const byT = new Map(pair.filter((m) => m.type === "tick").map((m) => [m.data.t, m.data.rate]));
     const matched = quotes.filter((m) => byT.has(m.data.t));
@@ -478,16 +449,16 @@ test("WS quotes: a line brand is told it has none, and unsubscribing stops the s
 
     await candle.open();
     await candle.ask("subscribe_symbols", { symbols: ["XAUUSD"] }, "subscribed_symbols");
-    await collect(candle, ["symbol_ticks"], (s) => s.length >= 1);
+    await candle.collect(["symbol_ticks"], (s) => s.length >= 1, "the first XAUUSD quote frame", WARM_MS);
     await candle.ask("unsubscribe_symbols", {}, "subscribed_symbols");
     // Nothing more should arrive. The brand keeps ticking, so this is a real silence rather than a
     // stopped clock: wait for several brand ticks and assert no quote came with them.
-    const after: any[] = [];
-    const h = (raw: any) => { try { const x = JSON.parse(String(raw)); if (x.type === "symbol_ticks") after.push(x); } catch { /* ignore */ } };
-    candle.ws.on("message", h);
-    await collect(candle, ["tick"], (s) => s.length >= 5);
-    candle.ws.off("message", h);
-    assert.deepEqual(after, []);
+    // The window is a mark into the frame log rather than a hand-rolled listener, so a quote that
+    // arrived between the unsubscribe reply and the listener going on cannot be missed — and it is
+    // still a window that STARTS here, so quotes from before the unsubscribe cannot satisfy it.
+    const cursor = candle.mark();
+    await candle.collect(["tick"], (s) => s.length >= 5, "5 brand ticks after unsubscribing", ticksBudget(5, TICK_MS));
+    assert.deepEqual(candle.since(cursor, "symbol_ticks"), []);
   } finally { line.close(); candle.close(); await handle.close(); }
 });
 

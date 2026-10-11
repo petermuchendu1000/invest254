@@ -160,28 +160,53 @@ export function publicName(username: string | null | undefined): string {
 }
 
 /**
- * THE MERGE RULE, used by both the feed and the board: REAL ROWS FIRST, seeded rows fill whatever
- * slots are left, and the result is then ordered by its own key so what is shown is honestly
- * ordered among the rows shown.
+ * Fill `limit` slots from two sources, newest/best first, with a GUARANTEED FLOOR for real rows.
  *
- * Why not "merge both sources and cut to the cap", which is what the feed did: the cap is 40 and the
- * seed table is about to hold thousands of rows minutes apart, so sorting the union by recency and
- * truncating would fill all 40 slots with seed rows and a brand's genuine deposits and wins — the
- * only events on that screen that actually happened — would never be seen again. Social proof that
- * hides the real thing it is proof of is worse than an empty feed. So the real rows are reserved
- * their slots unconditionally, and the seeded rows are the ones that get cut.
+ * Both of the obvious rules are wrong, and each is wrong in a way that only shows up on a real
+ * brand:
+ *
+ *   "sort the union by recency and cut"  — the seed table holds thousands of rows minutes apart, so
+ *     every slot goes to seeded rows and a brand's genuine deposits and wins, the only events on
+ *     the screen that actually happened, are never seen again. Social proof that hides the real
+ *     thing it is proof of is worse than an empty feed.
+ *
+ *   "real rows take every slot they can fill"  — what this function did first, and it made the
+ *     whole feature inert on the one brand it was built for. cpfmarket has more than `limit` real
+ *     events in its history, so real rows filled all 40 slots and the 3000 seeded rows were
+ *     invisible — while the newest of those 40 real rows was 29 HOURS old and several were two
+ *     weeks old. A feed of fortnight-old activity above a deposit button is exactly the dead-product
+ *     look the seed exists to fix. Verified against the live API, which is the only place either
+ *     rule can be judged: `seeded=0, real=40`.
+ *
+ * So: real rows are guaranteed a floor of the slots (they can never be crowded out), and every
+ * remaining slot is contested by both sources on merit — which for the feed means recency, so a
+ * seeded row from ten minutes ago outranks a real one from last fortnight, and a REAL deposit from
+ * two minutes ago outranks both. The floor is what the first rule protects; the contest is what
+ * makes a quiet brand look alive. A brand with plenty of recent real activity still fills the feed
+ * with it, because it wins the contest outright rather than by reservation.
  *
  * `key` is ascending-is-first (seconds-ago for the feed, negated amount for the board), which is why
  * the two callers can share this.
  */
-function mergeRealFirst<T>(real: readonly T[], seeded: readonly T[], limit: number, key: (x: T) => number): T[] {
+/** Share of the slots real rows can never be pushed out of. */
+const REAL_FLOOR_SHARE = 0.25;
+
+function mergeByMeritWithRealFloor<T>(
+  real: readonly T[], seeded: readonly T[], limit: number, key: (x: T) => number,
+): T[] {
   if (limit <= 0) return [];
-  const kept = real.slice(0, limit);
-  const room = limit - kept.length;
-  // `seeded` arrives already ordered best-first from SQL; sorting again here keeps that assumption
-  // local rather than load-bearing.
-  const fill = room > 0 ? [...seeded].sort((a, b) => key(a) - key(b)).slice(0, room) : [];
-  return [...kept, ...fill].sort((a, b) => key(a) - key(b));
+  const byKey = (a: T, b: T): number => key(a) - key(b);
+  const realSorted = [...real].sort(byKey);
+  const seededSorted = [...seeded].sort(byKey);
+
+  // The floor is a floor, not a quota: if there are fewer real rows than that, the rest of the
+  // slots simply go to the contest, and if real rows win more than the floor on merit they keep
+  // them all.
+  const floor = Math.min(realSorted.length, Math.ceil(limit * REAL_FLOOR_SHARE));
+  const reserved = realSorted.slice(0, floor);
+
+  const contested = [...realSorted.slice(floor), ...seededSorted].sort(byKey);
+  return [...reserved, ...contested.slice(0, limit - reserved.length)].sort(byKey);
 }
 
 export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
@@ -284,11 +309,12 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
         seeded: true,
       }));
 
-      // Real rows keep their slots, seeded rows fill the remainder, and the result is newest-first
-      // across both — the age is the sort key the DTO already carries, so the merged order is
-      // exactly the order the client renders. See `mergeRealFirst` for why the cut falls on the
-      // seeded side.
-      return mergeRealFirst(real, seeded, limit, (x) => x.agoSeconds);
+      // Real rows are guaranteed a floor of the slots and the rest is contested on recency, so a
+      // ten-minute-old seeded row outranks a fortnight-old real one while a two-minute-old REAL
+      // deposit outranks both. The age is the sort key the DTO already carries, so the merged order
+      // is exactly the order the client renders. See the helper for why neither "real takes
+      // everything" nor "sort the union and cut" works.
+      return mergeByMeritWithRealFloor(real, seeded, limit, (x) => x.agoSeconds);
     },
 
     async leaderboard(siteId, period, limit, opts) {
@@ -384,7 +410,7 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
       // however large the seeded numbers beside them are, and the seeded rows fill what is left.
       // The rows that ARE shown are then ordered by the ranked amount, descending, so the board is
       // never out of order with the number printed on it.
-      return rank(mergeRealFirst(real, seeded, limit, (x) => -x.profitCents));
+      return rank(mergeByMeritWithRealFloor(real, seeded, limit, (x) => -x.profitCents));
     },
   };
 }

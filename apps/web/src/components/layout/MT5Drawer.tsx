@@ -13,6 +13,8 @@ import { useBrand } from '@/lib/brand/BrandProvider';
 import { mt5ServerName } from '@/lib/brand/mt5Server';
 import { useDisplayMoney } from '@/lib/money';
 import { useLiveChat } from '@/lib/chat/liveChat';
+import { useCandlestickUi } from '@/components/game/candlestick/ui';
+import { resolveTradeUi, useTradeUiOverride } from '@/lib/ui/tradeUi';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { MarketerLogoHotspot } from '@/components/marketer/MarketerHUD';
 import { cn } from '@/lib/cn';
@@ -84,6 +86,13 @@ const ChatIcon = () => (
     <path d="M20 15a2 2 0 0 1-2 2H8l-4 3V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+const HowToIcon = () => (
+  <svg viewBox="0 0 24 24" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .9-1 1.6v.3" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M12 16.8h.01" strokeLinecap="round" />
+  </svg>
+);
 const SignOutIcon = () => (
   <svg viewBox="0 0 24 24" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
     <path d="M15 17l5-5-5-5M20 12H9M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" strokeLinecap="round" strokeLinejoin="round" />
@@ -115,6 +124,10 @@ export function MT5Drawer() {
   const money = useDisplayMoney();
   const setChat = useLiveChat((s) => s.setOpen);
   const unread = useLiveChatUnread();
+  // Which trade screen the brand wears, resolved exactly as AppShell resolves it (brand row, with
+  // the ?ui= override honoured) so the drawer and the shell can never disagree about it.
+  const isCandlestick = resolveTradeUi(useTradeUiOverride(), brand.tradeUi) === 'candlestick';
+  const setHowTo = useCandlestickUi((st) => st.setHowTo);
 
   // Escape closes, and the page behind must not scroll under the panel.
   useEffect(() => {
@@ -193,6 +206,20 @@ export function MT5Drawer() {
             label="Chat"
             badge={unread > 0 ? unread : undefined}
           />
+          {/* The candlestick screen's How-to sheet.
+            *
+            * It used to be a button in that screen's top bar, where it rendered as a bare "?" on a
+            * phone — a control sitting between the account badge and Deposit that cost more
+            * attention than it returned. It lives here instead rather than being deleted, because
+            * AppShell mounts HowToModal ONLY in the candlestick shell and the top-bar button was
+            * its single opener: removing both would leave the sheet mounted and unreachable.
+            *
+            * Gated on the same answer AppShell branches on, so the other shells' drawers are
+            * unchanged — the digits screen has its own how-to in DigitsTopBar, and the classic and
+            * broker screens have no such sheet to open. */}
+          {isCandlestick ? (
+            <Row onClick={() => { close(); setHowTo(true); }} icon={<HowToIcon />} label="How to trade" />
+          ) : null}
         </div>
 
         <div className="border-t border-[var(--mt5-border)] py-1">

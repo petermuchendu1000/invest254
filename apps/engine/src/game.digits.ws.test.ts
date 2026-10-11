@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { WebSocket } from "ws";
 import { DEFAULT_VERSIONED_CONFIG, DEFAULT_POOL_KNOBS, type VersionedGameConfig } from "@invest254/shared";
 import { InMemoryGameRepository } from "./wallet.js";
 import { StaticConfigProvider } from "./gameconfig.js";
 import { SiteRegistry } from "./siteregistry.js";
 import { startMultiEngine, type MultiEngineHandle } from "./multiengine.js";
 import { PoolController, InMemoryPoolRepo, eatDay } from "./poolcontroller.js";
+import { WsTestClient as Client, SETTLE_MS } from "./wstestkit.js";
 
 /**
  * Phase 2 — DIGIT contracts end-to-end over the real WebSocket transport (in-memory brand).
@@ -17,40 +17,16 @@ import { PoolController, InMemoryPoolRepo, eatDay } from "./poolcontroller.js";
 const SITE = "00000000-0000-0000-0000-0000000000cc";
 const cfg: VersionedGameConfig = { ...DEFAULT_VERSIONED_CONFIG, version: 1, minStakeCents: 25000, digitPayoutFactor: 0.95 };
 
-class Client {
-  ws: WebSocket; msgs: any[] = [];
-  constructor(url: string) { this.ws = new WebSocket(url); this.ws.on("message", (r) => { try { this.msgs.push(JSON.parse(String(r))); } catch { /* ignore */ } }); }
-  open(): Promise<void> { return new Promise((res, rej) => { this.ws.once("open", () => res()); this.ws.once("error", rej); }); }
-  send(type: string, data: unknown) { this.ws.send(JSON.stringify({ type, data })); }
-  of(type: string) { return this.msgs.filter((m) => m.type === type); }
-  waitFor(type: string, timeoutMs = 5000): Promise<any> {
-    const f = this.msgs.find((m) => m.type === type); if (f) return Promise.resolve(f);
-    return new Promise((res, rej) => {
-      const t = setTimeout(() => rej(new Error(`timeout waiting for ${type}`)), timeoutMs);
-      const h = (raw: any) => { try { const m = JSON.parse(String(raw)); if (m.type === type) { clearTimeout(t); this.ws.off("message", h); res(m); } } catch { /* ignore */ } };
-      this.ws.on("message", h);
-    });
-  }
-  /**
-   * Like `waitFor`, but for "the frame that says X" rather than "the first frame of this type".
-   *
-   * Every assertion in this file used to read a frame at a FIXED MOMENT — `of("balance").at(-1)` or
-   * `of("inst_tick").find(...)` straight after an unrelated await — and that broke two production
-   * deploys in 12h: the balance frame the open debits is a SEPARATE send that follows `digit_opened`
-   * after a wallet round-trip, and the settling tick frame is its own send too, so on a loaded runner
-   * neither had been parsed yet when the assertion sampled. Awaiting the condition with a ceiling is
-   * the same cure PR #147 applied to multiengine.test.ts ("resolveSite may be async").
-   */
-  waitWhere(type: string, pred: (m: any) => boolean, timeoutMs = 5000): Promise<any> {
-    const f = this.msgs.find((m) => m.type === type && pred(m)); if (f) return Promise.resolve(f);
-    return new Promise((res, rej) => {
-      const t = setTimeout(() => rej(new Error(`timeout waiting for a matching ${type}`)), timeoutMs);
-      const h = (raw: any) => { try { const m = JSON.parse(String(raw)); if (m.type === type && pred(m)) { clearTimeout(t); this.ws.off("message", h); res(m); } } catch { /* ignore */ } };
-      this.ws.on("message", h);
-    });
-  }
-  close() { try { this.ws.close(); } catch { /* ignore */ } }
-}
+/**
+ * This file's client used to be local, and its `waitWhere` — the fix for deploys 170 and 171 — is
+ * now the shared one in wstestkit.ts, along with the ceilings. The semantics it documented are
+ * unchanged and spelled out there: every waiter sees the whole frame log the moment it is created,
+ * so no frame can slip between a scan and an attach, because nothing attaches.
+ *
+ * The settle path is the slow one here: the engine waits for the instrument's own 1s tick and then
+ * a wallet round-trip, so the waits that straddle it are given `SETTLE_MS` rather than the default
+ * round-trip ceiling.
+ */
 
 async function boot(): Promise<{ handle: MultiEngineHandle; url: string }> {
   const repo = new InMemoryGameRepository();
@@ -111,20 +87,20 @@ test("digits WS: open_digit debits stake, settles at settleIndex, chart digit ==
     const balAfterOpen = c.of("balance").at(-1);
     assert.equal(balAfterOpen.data.real, 975_000, "stake debited on open");
 
-    const settled = await c.waitFor("digit_settled");
+    const settled = await c.waitFor("digit_settled", SETTLE_MS);
     assert.equal(settled.data.positionId, opened.data.positionId);
     // The settle-index tick is driven by a wall-clock-derived index on a fixed-interval timer, so a
     // loaded runner can emit settleIndex+1 without ever emitting settleIndex (the `77134 !== 77133`
     // deploy break). Pin settlement to the FIRST streamed tick that reached the committed
     // settleIndex — identical to `index === settleIndex` whenever no index was skipped.
-    const settleTick = await c.waitWhere("inst_tick", (m) => m.data.index >= opened.data.settleIndex);
+    const settleTick = await c.waitWhere("inst_tick", (m) => m.data.index >= opened.data.settleIndex, SETTLE_MS);
     assert.ok(settled.data.index >= opened.data.settleIndex, "never settles before the committed settleIndex");
     assert.equal(settled.data.index, settleTick.data.index, "settled on the first tick that reached the committed settleIndex");
     assert.ok(settled.data.digit >= 0 && settled.data.digit <= 9);
     assert.equal(settled.data.won, settled.data.digit % 2 === 0, "even wins iff digit is even");
 
     // The tick frame the CHART showed for that settling tick must carry the SAME digit (fairness parity).
-    const chartTick = await c.waitWhere("inst_tick", (m) => m.data.index === settled.data.index);
+    const chartTick = await c.waitWhere("inst_tick", (m) => m.data.index === settled.data.index, SETTLE_MS);
     assert.ok(chartTick, "the settle-index tick was streamed to the chart");
     assert.equal(chartTick.data.digit, settled.data.digit, "on-chart digit == settlement digit");
 
@@ -188,7 +164,7 @@ test("digits WS (POOL MODE): outcome is pool-decided and the owner's settle-inde
     // Same reason as the statistical test: the post-open balance frame is a separate, later send.
     await c.waitWhere("balance", () => c.of("balance").length > balFramesBeforeOpen);
     assert.equal(c.of("balance").at(-1).data.real, 975_000, "stake debited on open");
-    const settled = await c.waitFor("digit_settled");
+    const settled = await c.waitFor("digit_settled", SETTLE_MS);
     assert.equal(settled.data.positionId, opened.data.positionId);
 
     // The decision governs: digit parity must reproduce the decided result exactly.
@@ -202,10 +178,10 @@ test("digits WS (POOL MODE): outcome is pool-decided and the owner's settle-inde
     // read used to be sampled right after digit_settled and saw `undefined` on CI, because the owner's
     // overridden inst_tick is its own send and the settling index can be settleIndex+1 when the
     // wall-clock-driven streamer skips an index under load. Await the frame the engine overrode.
-    const settleTick = await c.waitWhere("inst_tick", (m) => m.data.index >= opened.data.settleIndex);
+    const settleTick = await c.waitWhere("inst_tick", (m) => m.data.index >= opened.data.settleIndex, SETTLE_MS);
     assert.ok(settled.data.index >= opened.data.settleIndex, "never settles before the committed settleIndex");
     assert.equal(settled.data.index, settleTick.data.index, "settled on the first tick that reached the committed settleIndex");
-    const chartTick = await c.waitWhere("inst_tick", (m) => m.data.index === settled.data.index);
+    const chartTick = await c.waitWhere("inst_tick", (m) => m.data.index === settled.data.index, SETTLE_MS);
     assert.ok(chartTick, "the settle-index tick was streamed to the owner");
     assert.equal(chartTick.data.digit, settled.data.digit, "owner's on-chart digit == pool-decided settled digit");
     assert.equal(Math.round(chartTick.data.quote * 100) % 10, settled.data.digit, "quote's last pip matches too");
