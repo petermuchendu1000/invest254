@@ -16,6 +16,7 @@ import { Select } from '@/components/ui/Select';
 import { useToast } from '@/lib/toast/ToastProvider';
 import { ApiError } from '@/lib/api/client';
 import { ROLE_LABELS } from '@/lib/roles';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { usePlatformAdmins, useUserSearch, useAppointPlatformAdmin, useRevokePlatformAdmin } from '@/lib/platform/hooks';
 import type { DirectoryUserDto, PlatformAdminDto, PlatformDto } from '@/lib/platform/endpoints';
 
@@ -35,7 +36,15 @@ export function appointBlocker(u: DirectoryUserDto, platformId: string): string 
   return null;
 }
 
-const who = (x: { username: string | null; phone: string | null }) => (x.username ? `@${x.username}` : x.phone ?? 'Unknown user');
+/**
+ * The person-label used in every sentence on this panel ("X will lose access to …"). A nameless
+ * account used to be labelled with its raw number, so the one place a username is missing was also
+ * the one place a full MSISDN was printed. It now falls back to the MASKED number: still unique
+ * enough to tell two nameless accounts apart (and it matches the masked number shown beside it),
+ * without putting a login identity on screen. "Unknown user" is kept for an account with neither.
+ */
+const who = (x: { username: string | null; phone: string | null }) =>
+  (x.username ? `@${x.username}` : x.phone ? maskPhoneForDisplay(x.phone) : 'Unknown user');
 
 export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] }) {
   const toast = useToast();
@@ -90,7 +99,7 @@ export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] })
               <li key={a.userId} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
                 <div className="flex min-w-0 flex-col">
                   <span className="font-medium">{who(a)}</span>
-                  <span className="text-xs text-muted">{a.phone ?? '-'} · runs <strong className="text-fg">{a.platformName ?? '-'}</strong>{a.homeSiteName ? ` · home brand ${a.homeSiteName}` : ''}</span>
+                  <span className="text-xs text-muted">{maskPhoneForDisplay(a.phone) || '-'} · runs <strong className="text-fg">{a.platformName ?? '-'}</strong>{a.homeSiteName ? ` · home brand ${a.homeSiteName}` : ''}</span>
                 </div>
                 {revoking?.userId === a.userId ? (
                   <div className="flex flex-wrap items-end gap-2">
@@ -145,7 +154,9 @@ export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] })
                       className={`flex w-full flex-col items-start gap-0.5 p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60 ${selected ? 'bg-accent/10' : 'hover:bg-surface-2'}`}
                     >
                       <span className="font-medium">{who(u)} <span className="text-xs font-normal text-muted">· {ROLE_LABEL[u.role] ?? u.role}</span></span>
-                      <span className="text-xs text-muted">{u.phone ?? '-'} · {u.siteName ?? 'no brand'}{u.platformName ? ` · ${u.platformName}` : ''}</span>
+                      {/* Masked: the search above matches on the real column server-side, so an
+                          operator who already knows the number can still find the person. */}
+                      <span className="text-xs text-muted">{maskPhoneForDisplay(u.phone) || '-'} · {u.siteName ?? 'no brand'}{u.platformName ? ` · ${u.platformName}` : ''}</span>
                       {blocker ? <span className="text-xs text-warn">{blocker}</span> : null}
                     </button>
                   </li>

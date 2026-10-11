@@ -30,6 +30,7 @@ import {
 import { useRowSelection, SelectAllCheckbox, RowCheckbox, BulkBar, downloadCsv, copyText } from '@/components/admin/BulkSelect';
 import type { AdminMarketerRow } from '@/lib/admin/types';
 import { formatKes } from '@invest254/shared/money';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 
 /*
  * MarketersPanel — full marketer wallet management, ported verbatim from the former standalone
@@ -110,6 +111,8 @@ export function MarketersPanel() {
       },
     );
   }
+  // NOT masked, deliberately: the clipboard and the CSV are how a marketer actually gets paid.
+  // Masking the source would hand finance a list of numbers that cannot receive money.
   async function copyPhones() {
     const ok = await copyText(sel.selectedRows.map((m) => m.phone).join('\n'));
     toast.push({ tone: ok ? 'success' : 'error', title: ok ? 'Phone numbers copied' : 'Copy failed', description: `${sel.count} number(s)` });
@@ -178,7 +181,9 @@ export function MarketersPanel() {
                     <span className="font-medium">{m.name}</span>
                   </span>
                 </Td>
-                <Td className="tabular-nums">{m.phone}</Td>
+                {/* Masked on screen — a marketer's number "should be astericked e.g. 0798****061".
+                    "Copy phones" / "Export CSV" below still carry the full numbers to pay them. */}
+                <Td className="tabular-nums">{maskPhoneForDisplay(m.phone)}</Td>
                 <Td className="font-medium tabular-nums"><Money cents={m.balance_cents} /></Td>
                 <Td className="tabular-nums"><Money cents={m.available_fuliza_cents} /></Td>
                 <Td className="tabular-nums"><Money cents={m.airtime_balance_cents} /></Td>
@@ -221,7 +226,9 @@ function CreateMarketerModal({ open, onClose }: { open: boolean; onClose: () => 
       { name: name.trim(), phone: phone.trim() },
       {
         onSuccess: (m) => {
-          toast.push({ tone: 'success', title: 'Marketer saved', description: `${m.name} (${m.phone}) is ready. Set their PIN next.` });
+          // Masked echo: head and tail are enough to spot a mistyped number, and this toast is the
+          // one place a just-created marketer's number would otherwise be read off a shared screen.
+          toast.push({ tone: 'success', title: 'Marketer saved', description: `${m.name} (${maskPhoneForDisplay(m.phone)}) is ready. Set their PIN next.` });
           setName('');
           setPhone('');
           onClose();
@@ -267,7 +274,7 @@ function ManageMarketerModal({ id, onClose }: { id: string | null; onClose: () =
                 </span>
                 <span className="flex flex-col">
                   <span className="font-semibold">{m.name}</span>
-                  <span className="text-xs text-muted tabular-nums">{m.phone}</span>
+                  <span className="text-xs text-muted tabular-nums">{maskPhoneForDisplay(m.phone)}</span>
                 </span>
               </span>
               <StatusBadge status={m.status} />
@@ -332,6 +339,9 @@ function EditMarketerAction({ m }: { m: AdminMarketerRow }) {
   const update = useUpdateMarketer();
   const toast = useToast();
   const [name, setName] = useState(m.name);
+  // NOT masked, deliberately: an editable prefill that is saved back. A masked prefill would be
+  // written to the marketer record as their login number and payout destination, and the
+  // `!== m.phone` check below would read as a change on every save.
   const [phone, setPhone] = useState(m.phone);
   const inputCls = 'h-9 flex-1 rounded-lg border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus:border-accent';
   function save() {

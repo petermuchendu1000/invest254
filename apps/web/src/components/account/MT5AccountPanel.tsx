@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useSession } from '@/lib/auth/session';
+import { maskPhoneForDisplay } from '@invest254/shared/payments';
 import { useWallet, useWalletFigures, useSetAccountMode, useTopupDemo } from '@/lib/wallet/hooks';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { mt5ServerName } from '@/lib/brand/mt5Server';
@@ -145,7 +146,9 @@ export function MT5AccountPanel({ embedded = false }: {
           <Row label="Balance" value={money.fmt(balanceCents)} strong />
           {/* MetaTrader's Login. Ours is the account identifier support asks for. */}
           <Row label="Account ID" value={user.userId} strong mono />
-          {user.phone ? <Row label="Phone" value={user.phone} /> : null}
+          {/* Masked: this panel is the screen players screenshot for support, and the number is the
+              login identity and the payout destination — it must not travel in a screenshot. */}
+          {user.phone ? <Row label="Phone" value={maskPhoneForDisplay(user.phone)} /> : null}
         </dl>
 
         {/* A demo account nobody can refill is a demo account that works once. MetaTrader's own demo

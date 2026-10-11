@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 const COOLDOWN_S = 6;
 import { useQuery } from '@tanstack/react-query';
 import { centsToKes, formatKes, kesToCents } from '@invest254/shared/money';
-import { normalizeMsisdn, MIN_DEPOSIT_CENTS } from '@invest254/shared/payments';
+import { normalizeMsisdn, MIN_DEPOSIT_CENTS, maskPhoneForDisplay } from '@invest254/shared/payments';
 import { useDisplayMoney, USD_LIMITS } from '@/lib/money';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -18,7 +18,6 @@ import { useDepositUi } from '@/lib/wallet/depositUi';
 import { useAuthUi } from '@/lib/auth/ui';
 import { useSession } from '@/lib/auth/session';
 import { paymentErrorMessage } from '@/lib/wallet/errors';
-import { maskMsisdn } from '@/lib/wallet/format';
 import { MpesaIcon } from '@/components/wallet/MpesaIcon';
 
 /** Common top-up amounts (KES). One tap beats typing on mobile (NN/g: match input to data). */
@@ -211,7 +210,9 @@ export function DepositForm({ provider = 'mpesa', methodCode }: { provider?: 'mp
         <Spinner />
         <h3 className="text-base font-semibold text-fg">Check your phone</h3>
         <p className="text-sm text-muted">
-          We sent a prompt to <span className="font-medium text-fg">{maskMsisdn(normalizeMsisdn(effectivePhone))}</span>.
+          {/* Masked for the screen only: the STK push already went out with the FULL
+              `effectivePhone` (a masked MSISDN would be rejected by the gateway). */}
+          We sent a prompt to <span className="font-medium text-fg">{maskPhoneForDisplay(normalizeMsisdn(effectivePhone))}</span>.
           Enter your M-Pesa PIN to approve {formatKes(amountKesCents)}.
         </p>
         <Button variant="ghost" fullWidth onClick={close}>Cancel</Button>
@@ -283,7 +284,9 @@ export function DepositForm({ provider = 'mpesa', methodCode }: { provider?: 'mp
                 <MpesaIcon />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold tabular-nums text-fg">{maskMsisdn(accountPhone)}</div>
+                {/* Masked on screen; "Change" clears the field rather than prefilling it, so the
+                    mask can never be typed back in as the number to charge. */}
+                <div className="text-sm font-semibold tabular-nums text-fg">{maskPhoneForDisplay(accountPhone)}</div>
                 <div className="text-xs text-muted">Your account number</div>
               </div>
               <button
