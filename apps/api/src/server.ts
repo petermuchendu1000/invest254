@@ -25,7 +25,7 @@ import { makePgCommunity } from "./community.pg.js";
 import { makePgKycStore } from "./kyc.pg.js";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
 import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, tradeUiOf, MIN_DEPOSIT_CENTS, type VersionedGameConfig, type Cents } from "@invest254/shared";
-import { BrandOriginAllowlist } from "./cors.js";
+import { BrandOriginAllowlist, ExtraOriginAllowlist } from "./cors.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
 import { makePgReferralRepo } from "./referral.pg.js";
 import { makePgSupportDeps } from "./support.pg.js";
@@ -889,6 +889,12 @@ async function buildDeps(): Promise<ApiDeps> {
   await brandCors.init();
   console.log(`[api] CORS: ${brandCors.size} active brand origin(s) allowed dynamically`);
 
+  // Extra NON-BRAND origins (e.g. the Cloudflare Pages PR previews), opt-in from the same
+  // CORS_ALLOWED_ORIGINS var and empty unless configured — see cors.ts for why the suffix match is
+  // anchored the way it is. Purely additive: brand origins are decided exactly as before.
+  const extraCors = ExtraOriginAllowlist.fromEnv();
+  if (extraCors.size > 0) console.log(`[api] CORS: extra origin(s) allowed: ${extraCors.describe().join(", ")}`);
+
   return {
     verifier,
     auth,
@@ -913,7 +919,7 @@ async function buildDeps(): Promise<ApiDeps> {
     telegramForumChatId,
     telegramTopics: { approved: telegramTopics.approved, rejected: telegramTopics.rejected },
     onCommissionRequested: commissionRequestedAlert,
-    corsAllowOrigin: (origin: string) => brandCors.allows(origin),
+    corsAllowOrigin: (origin: string) => brandCors.allows(origin) || extraCors.allows(origin),
     logger: dbLog,
     marketers: makePgMarketerRepo((sql, params) => q.query(sql, params ?? [])),
     referral: referralRepo,
