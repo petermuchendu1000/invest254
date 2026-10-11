@@ -517,7 +517,8 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     const pkey = idKey(phone, siteId);
     const ukey = idKey(username, siteId);
     if (this.byPhone.has(pkey)) throw new Error("PHONE_TAKEN");        // uniqueness is PER SITE
-    if (this.usernames.has(ukey)) throw new Error("USERNAME_TAKEN");
+    // The username is NOT unique (migration 0190): it is a display name, and the phone above is the
+    // identity. `usernames` is still maintained because callers read it, but it no longer refuses.
     const u: MemUser = {
       userId: randomUUID(), phone, username, role: "player", status: "active",
       passwordHash, referredBy: null, createdAtMs: Date.now(), siteId: siteId ?? null,

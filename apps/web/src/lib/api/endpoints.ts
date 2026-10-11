@@ -1,6 +1,9 @@
 import { apiFetch } from '@/lib/api/client';
 import type {
   BrandActivityDto,
+  CommunityPostDto,
+  MarketerLiveDto,
+  LiveSessionDto,
   LeaderboardRowDto,
   MarketerProfileDto,
   AffiliateEnrollment,
@@ -203,6 +206,26 @@ export const api = {
   // Marketer self-service (funny-money demo wallet). marketerMe returns the simulated wallet balance;
   // marketerDemoTopup tops it up to the policy cap (no real cash — migration 0102).
   marketerMe: (token: string) => apiFetch<MarketerProfileDto>('/marketers/me', { token }),
+  // ── Live sessions (docs/55). Reporting only: starting one changes no attribution. ──
+  marketerLive: (token: string) => apiFetch<MarketerLiveDto>('/marketers/me/live', { token }),
+  marketerLiveStart: (token: string, streamUrl?: string) =>
+    apiFetch<LiveSessionDto>('/marketers/me/live/start', { method: 'POST', token, body: streamUrl ? { streamUrl } : {} }),
+  marketerLiveEnd: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/end', { method: 'POST', token }),
+  marketerLiveExtend: (token: string) => apiFetch<LiveSessionDto>('/marketers/me/live/extend', { method: 'POST', token }),
+
+  // ── Community channel (docs/56). Read for players, write for admins. ──
+  community: (token: string, limit?: number) =>
+    apiFetch<{ items: CommunityPostDto[] }>('/community', { token, ...(limit ? { query: { limit: String(limit) } } : {}) }),
+  communityVote: (token: string, postId: string, optionId: string) =>
+    apiFetch<CommunityPostDto>(`/community/${postId}/vote`, { method: 'POST', token, body: { optionId } }),
+  communityPost: (token: string, input: { kind?: 'post' | 'poll'; title?: string | null; body: string; options?: string[]; pinned?: boolean }) =>
+    apiFetch<CommunityPostDto>('/community', { method: 'POST', token, body: input }),
+  communityPin: (token: string, postId: string, pinned: boolean) =>
+    apiFetch<{ ok: true }>(`/community/${postId}/pin`, { method: 'POST', token, body: { pinned } }),
+  communityClose: (token: string, postId: string, closed: boolean) =>
+    apiFetch<{ ok: true }>(`/community/${postId}/close`, { method: 'POST', token, body: { closed } }),
+  communityDelete: (token: string, postId: string) =>
+    apiFetch<{ ok: true }>(`/community/${postId}/delete`, { method: 'POST', token }),
   marketerDemoTopup: (token: string) =>
     apiFetch<{ balanceCents: number; capCents: number }>('/marketers/me/demo-topup', { method: 'POST', token }),
   // Public: record a referral-link click from the /r/<code> landing page (fire-and-forget, no auth).

@@ -32,6 +32,13 @@ import { cn } from '@/lib/cn';
 
 const ICON = 'h-[18px] w-[18px] shrink-0';
 
+/** A channel: a speech bubble with lines, in the same stroke as the icons beside it. */
+const CommunityIcon = () => (
+  <svg viewBox="0 0 24 24" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+    <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.9-.9L3 20.5l1.7-4.9a8.1 8.1 0 0 1-1-3.9 8.4 8.4 0 0 1 8.5-8.2 8.4 8.4 0 0 1 8.8 8Z" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M8.5 10h7M8.5 13.5h4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 const TradeIcon = () => (
   <svg viewBox="0 0 24 24" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
     <path d="M3 12l4-4 4 4 6-6" strokeLinecap="round" strokeLinejoin="round" />
@@ -176,6 +183,8 @@ export function MT5Drawer() {
         <div className="flex-1 py-1">
           <Row href="/" icon={<TradeIcon />} label="Trade" active={pathname === '/'} />
           <Row href="/history" icon={<HistoryIcon />} label="History" active={pathname.startsWith('/history')} />
+          {/* The brand's channel (docs/56): announcements, questions and live sessions. */}
+          <Row href="/community" icon={<CommunityIcon />} label="Community" active={pathname.startsWith('/community')} />
           <Row href="/wallet" icon={<FundsIcon />} label="Funds" active={pathname.startsWith('/wallet')} />
           <Row href="/account" icon={<SettingsIcon />} label="Settings" active={pathname.startsWith('/account')} />
           <Row

@@ -73,34 +73,39 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
        *
        * One statement rather than three round trips, and `limit` is applied inside each arm as well
        * as outside so a brand with a million settled deposits still reads an index-sized slice.
+       *
+       * EACH ARM IS PARENTHESISED, and must stay that way: in Postgres an ORDER BY or LIMIT written
+       * directly on a UNION arm belongs to the whole UNION, so without the brackets this is a
+       * syntax error (42601) and the route 500s. Neither tsc nor a unit test can see that — nothing
+       * but a real database parses this string — which is how it reached production once already.
        * Demo and practice rows are excluded in the positions arm; transactions carry no demo flag
        * because a demo wallet never reaches a payment provider.
        */
       const r = await q.query(
         `select kind, username, amount_cents, ago_seconds from (
-             select 'deposit' as kind, p.username,
-                    t.amount as amount_cents,
-                    extract(epoch from (now() - t.created_at)) as ago_seconds,
-                    t.created_at as at
-               from transactions t join profiles p on p.id = t.user_id
-              where t.site_id = $1 and t.kind = 'deposit' and t.status = 'success'
-              order by t.created_at desc limit $2
+           (select 'deposit' as kind, p.username,
+                   t.amount as amount_cents,
+                   extract(epoch from (now() - t.created_at)) as ago_seconds,
+                   t.created_at as at
+              from transactions t join profiles p on p.id = t.user_id
+             where t.site_id = $1 and t.kind = 'deposit' and t.status = 'success'
+             order by t.created_at desc limit $2)
            union all
-             select 'withdrawal', p.username, t.amount,
-                    extract(epoch from (now() - t.created_at)),
-                    t.created_at
-               from transactions t join profiles p on p.id = t.user_id
-              where t.site_id = $1 and t.kind = 'withdrawal' and t.status = 'success'
-              order by t.created_at desc limit $2
+           (select 'withdrawal', p.username, t.amount,
+                   extract(epoch from (now() - t.created_at)),
+                   t.created_at
+              from transactions t join profiles p on p.id = t.user_id
+             where t.site_id = $1 and t.kind = 'withdrawal' and t.status = 'success'
+             order by t.created_at desc limit $2)
            union all
-             select 'win', p.username, o.payout,
-                    extract(epoch from (now() - o.settled_at)),
-                    o.settled_at
-               from positions o join profiles p on p.id = o.user_id
-              where o.site_id = $1 and o.result = 'win' and o.status = 'settled'
-                and o.settled_at is not null and o.payout > 0
-                and coalesce(o.demo, false) = false and coalesce(o.practice, false) = false
-              order by o.settled_at desc limit $2
+           (select 'win', p.username, o.payout,
+                   extract(epoch from (now() - o.settled_at)),
+                   o.settled_at
+              from positions o join profiles p on p.id = o.user_id
+             where o.site_id = $1 and o.result = 'win' and o.status = 'settled'
+               and o.settled_at is not null and o.payout > 0
+               and coalesce(o.demo, false) = false and coalesce(o.practice, false) = false
+             order by o.settled_at desc limit $2)
          ) rows
          order by at desc limit $2`,
         [siteId, limit],

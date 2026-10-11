@@ -38,10 +38,8 @@ export function passwordError(v: string): string | undefined {
   if (r.ok) return undefined;
   return pick(
     {
-      TOO_SHORT: 'At least 8 characters.',
+      TOO_SHORT: 'At least 4 characters.',
       TOO_LONG: 'Too long.',
-      NEEDS_LETTER: 'Add at least one letter.',
-      NEEDS_DIGIT: 'Add at least one number.',
     },
     r.reason,
     'Invalid password.',

@@ -180,3 +180,88 @@ export function useRequestCommissionPayout() {
     },
   });
 }
+
+// ── Live sessions (docs/55) ─────────────────────────────────────────────────────────────────────
+// A marketer marks when they go live; the earnings shown are a REPORT over commissions already
+// attributed to them, so nothing here moves money.
+
+/**
+ * The brand's live rules, the running session, and recent history.
+ *
+ * Polled while a session is RUNNING, because the figure it shows is what the session has earned so
+ * far and a marketer watching their own stream is watching this number. Idle otherwise — a marketer
+ * who is not live has nothing changing.
+ */
+export function useMarketerLive(enabled: boolean) {
+  const token = useSession((s) => s.token);
+  return useQuery({
+    queryKey: ['marketer', 'live'],
+    queryFn: () => api.marketerLive(token as string),
+    enabled: !!token && enabled,
+    retry: false,
+    refetchInterval: (q) => (q.state.data?.current?.live ? 15_000 : false),
+    refetchIntervalInBackground: false,
+  });
+}
+
+/** Start / end / extend. Each settles by refetching the one query above, so the UI has one truth. */
+export function useLiveSessionActions() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  const settle = { onSettled: () => void qc.invalidateQueries({ queryKey: ['marketer', 'live'] }) };
+  return {
+    start: useMutation({ mutationFn: (streamUrl?: string) => api.marketerLiveStart(token as string, streamUrl), ...settle }),
+    end: useMutation({ mutationFn: () => api.marketerLiveEnd(token as string), ...settle }),
+    extend: useMutation({ mutationFn: () => api.marketerLiveExtend(token as string), ...settle }),
+  };
+}
+
+// ── Community channel (docs/56) ─────────────────────────────────────────────────────────────────
+
+/** The brand's channel. Polled gently: a channel changes when an operator posts, not every second. */
+export function useCommunity(enabled: boolean) {
+  const token = useSession((s) => s.token);
+  return useQuery({
+    queryKey: ['community'],
+    queryFn: () => api.community(token as string, 30),
+    enabled: !!token && enabled,
+    refetchInterval: enabled ? 60_000 : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Vote on a poll.
+ *
+ * The server returns the whole post with fresh counts, so the cache is written from the SERVER's
+ * answer rather than guessed locally — a poll's numbers are the one thing on this screen that
+ * several people are changing at once.
+ */
+export function useCommunityVote() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { postId: string; optionId: string }) => api.communityVote(token as string, v.postId, v.optionId),
+    onSuccess: (updated) => {
+      qc.setQueryData<{ items: import('@/lib/api/types').CommunityPostDto[] }>(['community'], (old) =>
+        old ? { items: old.items.map((p) => (p.id === updated.id ? updated : p)) } : old);
+    },
+  });
+}
+
+/** Admin writes. Each settles by refetching the channel, so the list has one source of truth. */
+export function useCommunityAdmin() {
+  const token = useSession((s) => s.token);
+  const qc = useQueryClient();
+  const settle = { onSettled: () => void qc.invalidateQueries({ queryKey: ['community'] }) };
+  return {
+    post: useMutation({
+      mutationFn: (v: { kind?: 'post' | 'poll'; title?: string | null; body: string; options?: string[]; pinned?: boolean }) =>
+        api.communityPost(token as string, v),
+      ...settle,
+    }),
+    pin: useMutation({ mutationFn: (v: { id: string; pinned: boolean }) => api.communityPin(token as string, v.id, v.pinned), ...settle }),
+    close: useMutation({ mutationFn: (v: { id: string; closed: boolean }) => api.communityClose(token as string, v.id, v.closed), ...settle }),
+    remove: useMutation({ mutationFn: (id: string) => api.communityDelete(token as string, id), ...settle }),
+  };
+}

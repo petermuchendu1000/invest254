@@ -470,3 +470,49 @@ export interface LeaderboardRowDto {
   trades: number;
   profitCents: number;
 }
+
+/** One live session and what it earned (docs/55). Earnings are a REPORT over existing attribution. */
+export interface LiveSessionDto {
+  id: string;
+  startedAt: string;
+  endsAt: string;
+  endedAt: string | null;
+  streamUrl: string | null;
+  marginMinutes: number;
+  live: boolean;
+  earnedCents: number;
+  deposits: number;
+}
+
+/** The brand's live rules, the running session (if any), and recent history. */
+export interface MarketerLiveDto {
+  settings: {
+    enabled: boolean;
+    sessionMinutes: number;
+    marginMinutes: number;
+    extendMinutes: number;
+    maxSessionsDaily: number;
+  };
+  current: LiveSessionDto | null;
+  history: LiveSessionDto[];
+}
+
+/** One choice on a community poll, with how many PEOPLE picked it (one vote per player). */
+export interface CommunityPollOptionDto { id: string; label: string; votes: number }
+
+/** A post in the brand's community channel (docs/56). Admins write; players read and vote. */
+export interface CommunityPostDto {
+  id: string;
+  kind: 'post' | 'poll' | 'live';
+  title: string | null;
+  body: string;
+  streamUrl: string | null;
+  pinned: boolean;
+  closed: boolean;
+  createdAt: string;
+  author: string;
+  options: CommunityPollOptionDto[];
+  /** The option this reader chose, so their own vote is shown back to them. */
+  myVote: string | null;
+  totalVotes: number;
+}
