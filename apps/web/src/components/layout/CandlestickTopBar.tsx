@@ -24,8 +24,12 @@ import { CandlestickModeBadge } from '@/components/candlestick-account/Candlesti
  * of which is a variant of the others.
  *
  * Every control routes to the surface that already exists: the deposit sheet, the withdraw sheet,
- * the auth modal, the nav drawer and — behind the mode badge — the shared Real/Demo account panel.
- * Nothing here opens anything new except the How to sheet.
+ * the auth modal and — behind the mode badge — the shared Real/Demo account panel. The hamburger
+ * opens `CandlestickNavSheet`, this shell's own simple menu (Trade / Deposit / Withdraw / History /
+ * Profile / How to trade), NOT the terminal's `MT5Drawer`: see that file and AppShell's candlestick
+ * branch for why the broker's panel has no business on this screen.
+ *
+ * The balance is on the bar at every width, phone included — see the note on it below.
  */
 export function CandlestickTopBar() {
   const brand = useBrand();
@@ -43,10 +47,16 @@ export function CandlestickTopBar() {
   const needAuth = (fn: () => void) => () => (authed ? fn() : openAuth('login'));
 
   return (
-    <header className="flex h-14 w-full shrink-0 items-center justify-between border-b border-[#1f2937] bg-[#111827] px-3 md:h-16 md:px-4">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <Link href="/" aria-label={`${brand.name} home`} className="shrink-0">
+    // `px-2` on a phone rather than `px-3`: the bar now carries the balance as well as the wordmark,
+    // the badge, Deposit and the menu, and at 320px those 8px are the difference between a row that
+    // fits and one that squeezes the figure.
+    <header className="flex h-14 w-full shrink-0 items-center justify-between gap-1.5 border-b border-[#1f2937] bg-[#111827] px-2 md:h-16 md:gap-3 md:px-4">
+      <div className="flex min-w-0 items-center gap-4">
+        <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
+          {/* The wordmark is the one thing here a player can still identify when it is clipped, so
+              it is the child that gives way: `min-w-0` + `truncate` inside. Everything to its right
+              — the badge, the balance, Deposit, the menu — is load-bearing. */}
+          <Link href="/" aria-label={`${brand.name} home`} className="min-w-0">
             <Wordmark text={brandWordmark(brand)} />
           </Link>
           {/* The mock's mode badge, and the screen's account switch: it names the ONE thing a
@@ -75,11 +85,19 @@ export function CandlestickTopBar() {
         </nav>
       </div>
 
-      <div className="flex items-center gap-1.5 rounded border border-[#00ff901a] bg-[#142425] px-2 py-1 md:gap-3 md:px-3">
+      <div className="flex min-w-0 items-center gap-1 rounded border border-[#00ff901a] bg-[#142425] px-1.5 py-1 md:gap-3 md:px-3">
+        {/* The balance, on the bar, at EVERY width.
+
+            It used to be `hidden sm:flex`, which hid it on the one device this audience actually
+            trades on: the figure was only on the chart pane's quote band, so a player who had
+            switched to Chat or Top Traders could not see their money at all. The username is the
+            half that goes: a name tells a player nothing they do not know, so below `sm` the block
+            is the figure alone, centred on one line. `min-w-0` + `truncate` because a brand's
+            wallet can run to eight digits and this is the only unbounded thing in the row. */}
         {authed ? (
-          <div className="hidden min-w-0 flex-col items-end leading-tight sm:flex">
-            <span className="max-w-[9rem] truncate text-[10px] text-gray-400">{user?.username ?? 'Account'}</span>
-            <span className="whitespace-nowrap text-xs font-bold text-white">{balance}</span>
+          <div className="flex min-w-0 flex-col items-end justify-center leading-tight">
+            <span className="hidden max-w-[9rem] truncate text-[10px] text-gray-400 sm:block">{user?.username ?? 'Account'}</span>
+            <span className="min-w-0 max-w-[6rem] truncate text-xs font-bold text-white sm:max-w-[9rem]">{balance}</span>
           </div>
         ) : null}
 
@@ -88,7 +106,9 @@ export function CandlestickTopBar() {
             <button
               type="button"
               onClick={() => openDeposit()}
-              className="h-8 shrink-0 rounded-md border border-[#22c55e] px-2 text-xs font-bold uppercase tracking-wide text-[#22c55e] transition-colors hover:bg-[#22c55e]/10 md:px-3"
+              // `px-1.5` and `text-[11px]` on a phone: Deposit stays (it is the one action this bar
+              // exists to offer) but it gives up the padding the balance beside it needs.
+              className="h-8 shrink-0 rounded-md border border-[#22c55e] px-1.5 text-[11px] font-bold uppercase tracking-wide text-[#22c55e] transition-colors hover:bg-[#22c55e]/10 sm:px-2 sm:text-xs md:px-3"
             >
               Deposit
             </button>
@@ -145,7 +165,7 @@ function Wordmark({ text }: { text: string }) {
   const i = text.indexOf(' ');
   const [a, b] = i > 0 ? [text.slice(0, i), text.slice(i + 1)] : [text, ''];
   return (
-    <span className="whitespace-nowrap text-base font-black uppercase leading-none tracking-tighter md:text-xl">
+    <span className="block truncate whitespace-nowrap text-sm font-black uppercase leading-none tracking-tighter sm:text-base md:text-xl">
       <span className="text-[#22c55e]">{a}</span>
       {b ? <span className="text-white">{b}</span> : null}
     </span>

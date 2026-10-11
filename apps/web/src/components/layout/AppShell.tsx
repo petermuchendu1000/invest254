@@ -22,6 +22,7 @@ import { RegisterSW } from '@/components/RegisterSW';
 import { MarketerHUD } from '@/components/marketer/MarketerHUD';
 import { MT5Drawer } from '@/components/layout/MT5Drawer';
 import { CandlestickTopBar } from '@/components/layout/CandlestickTopBar';
+import { CandlestickNavSheet } from '@/components/layout/CandlestickNavSheet';
 import { HowToModal } from '@/components/game/candlestick/HowToModal';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
@@ -65,8 +66,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
    * two navigations stacked.
    *
    * Everything a control in that header opens is mounted here, exactly as the digits shell mounts
-   * its own: the deposit and withdraw sheets (WalletModal), the auth modal, the nav drawer and the
+   * its own: the deposit and withdraw sheets (WalletModal), the auth modal, the nav sheet and the
    * account dialogs. The How to sheet is this screen's own.
+   *
+   * The menu is `CandlestickNavSheet`, NOT `MT5Drawer` — do not swap it back. MT5Drawer is the
+   * BROKER product's navigation: a MetaTrader account card with a server name, the `--mt5-*`
+   * palette, and rows reading Funds / Settings / Community. This screen is the line-graph shell's
+   * audience, who are served by the classic `BottomNav`'s plain words, so its menu carries those
+   * instead (Trade / Deposit / Withdraw / History / Profile, plus How to trade and the session
+   * action) in this screen's own palette. See that file's header for why it is a sheet rather than
+   * `BottomNav` — the screen's own four tabs are the only tab row this shell may have.
    */
   if (isTrade && tradeUi === 'candlestick') {
     return (
@@ -81,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <WalletModal />
         <RegisterSW />
         <MarketerHUD />
-        <MT5Drawer />
+        <CandlestickNavSheet />
       </div>
     );
   }
