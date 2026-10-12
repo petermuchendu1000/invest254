@@ -68,6 +68,18 @@ export function CandlestickTopBar() {
           <Wordmark text={brandWordmark(brand)} />
         </Link>
 
+        {/*
+          DEMO, beside the wordmark, for a visitor with no account.
+          Anybody can place a trade here without registering, and the money that tap spends is
+          simulated — so the screen says so where the brand says its own name, which is where the
+          mock puts it too. The balance itself is in the quote band below; this is the label.
+        */}
+        {authed ? null : (
+          <span className="shrink-0 rounded-md border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-warn">
+            Demo
+          </span>
+        )}
+
         {/* Desktop-only section links. Both opened the drawer already; what changed is that they no
             longer hover to two DIFFERENT colours (warn and accent), which made a two-item nav look
             like two unrelated controls. */}
