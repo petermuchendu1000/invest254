@@ -1,7 +1,10 @@
 'use client';
 
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { InstrumentTick } from '@/lib/game/useInstrument';
+import type { ConnStatus } from '@/lib/game/types';
+import { ChartPlaceholder } from '@/components/ui/ChartPlaceholder';
+import { dataPhaseOf, phaseIsBlocking } from '@/lib/ui/dataPhase';
 
 function readVar(cs: CSSStyleDeclaration, name: string, fallback: string): string {
   const v = cs.getPropertyValue(name).trim();
@@ -86,6 +89,15 @@ interface DerivChartProps {
   /** MARKETER: hide the price axis, time axis, grid and numeric live-price tag, and force a neutral
    *  accent area — so the chart reads as a game visual, not a trading chart (TikTok Phase 2). */
   marketer?: boolean;
+  /**
+   * The game socket's state, used ONLY to say what the empty chart is waiting for.
+   *
+   * Optional because the chart does not need it to draw — it reads the tick buffer. Without it the
+   * pane was a bare `--pp-bg` rectangle for the full height of the screen whenever the socket was
+   * still connecting or the instrument had not quoted yet: no axes (the library is imported
+   * lazily), no grid, no text, nothing. On a phone that is the entire viewport.
+   */
+  status?: ConnStatus;
 }
 
 /**
@@ -96,10 +108,22 @@ interface DerivChartProps {
  * the imperative handle. Purely presentational.
  */
 export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function DerivChart(
-  { getTicks, getLastTick, resetKey, precision = 2, paused = false, barSpacing, markers = [], variant = 'line', drawMode = false, onLineDrawn, marketer = false },
+  { getTicks, getLastTick, resetKey, precision = 2, paused = false, barSpacing, markers = [], variant = 'line', drawMode = false, onLineDrawn, marketer = false, status = 'open' },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Has this chart ever plotted a point? Once true it STAYS true, so a reconnect keeps the last
+   * picture rather than blanking the chart a trader is reading. Latched through a ref as well as
+   * state because the plotting loop runs every 200ms and must not call `setState` on every pass.
+   */
+  const [hasPoints, setHasPoints] = useState(false);
+  const plottedRef = useRef(false);
+  const markPlotted = () => {
+    if (plottedRef.current) return;
+    plottedRef.current = true;
+    setHasPoints(true);
+  };
   const tagRef = useRef<HTMLDivElement | null>(null);
   const dotRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<import('lightweight-charts').IChartApi | null>(null);
@@ -225,7 +249,7 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
         .map((t) => ({ time: secOf(t.t), value: t.rate }))
         .filter((d) => (seen.has(d.time) ? false : (seen.add(d.time), true)))
         .map((d) => ({ time: d.time as unknown as import('lightweight-charts').UTCTimestamp, value: d.value }));
-      if (data.length) { series.setData(data); lastRateRef.current = data[data.length - 1]!.value; }
+      if (data.length) { series.setData(data); lastRateRef.current = data[data.length - 1]!.value; markPlotted(); }
       lastTRef.current = getLastTick()?.t ?? 0;
       chart.timeScale().scrollToRealTime();
 
@@ -241,6 +265,7 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
             plottedAny = true;
           }
         }
+        if (plottedAny) markPlotted();
         if (plottedAny && followRef.current) {
           // Until the buffer is wide enough to fill the chart, stretch it edge to edge (no empty
           // band on the left on big screens); after that, follow the live edge at the chosen zoom.
@@ -332,6 +357,12 @@ export const DerivChart = forwardRef<DerivChartHandle, DerivChartProps>(function
         aria-hidden
         className="pointer-events-none absolute right-1 top-0 z-10 rounded-md border border-accent bg-bg px-2 py-[3px] font-mono text-[11px] font-bold tabular-nums text-fg opacity-0 shadow-[0_0_12px_-4px_var(--pp-accent)]"
       />
+      {/* Carries its own `z-10` (see ChartPlaceholder) so the chart canvas cannot paint over it.
+          The price tag and dot above are also `z-10` and come later in the DOM, so they still win
+          the tie and sit on top once there is a price to show. */}
+      {phaseIsBlocking(dataPhaseOf(status, hasPoints)) ? (
+        <ChartPlaceholder phase={dataPhaseOf(status, hasPoints)} />
+      ) : null}
     </div>
   );
 });

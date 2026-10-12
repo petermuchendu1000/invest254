@@ -7,6 +7,8 @@ import { useWallet } from '@/lib/wallet/hooks';
 import { useSession } from '@/lib/auth/session';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDisplayMoney } from '@/lib/money';
+import { valueIsStale } from '@/lib/ui/dataPhase';
+import { LiveBadge } from '@/components/ui/LiveBadge';
 import { CandlestickTape } from '@/components/game/candlestick/CandlestickTape';
 import { TradingPanel } from '@/components/game/candlestick/TradingPanel';
 import { ChatPane } from '@/components/game/candlestick/ChatPane';
@@ -153,8 +155,12 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
   const { data: wallet } = useWallet();
   const brand = useBrand();
   const { fmt } = useDisplayMoney();
+  const { status } = useGameSocket();
   const { tick, priceOfRate, digits } = useLivePrice();
   const price = priceOfRate(tick?.rate);
+  /* The tick buffer survives a drop, so this price is whatever arrived last. Dimmed, because a
+     last-known price rendered at full strength beside an OFFLINE badge is still a half-lie. */
+  const stale = valueIsStale(status);
   const currency = (brand.currency ?? 'KES').toUpperCase();
   const balance = token ? fmt((wallet?.real ?? 0) + (wallet?.bonus ?? 0)) : fmt(0);
 
@@ -173,14 +179,13 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
           </div>
           <div className="min-w-0">
             <div className="text-[8px] uppercase leading-none tracking-wider text-muted">Price</div>
-            <div className="truncate font-mono text-xs leading-none text-fg">{price === null ? '—' : price.toFixed(digits)}</div>
+            <div className={cn('truncate font-mono text-xs leading-none text-fg', stale && 'opacity-50')}>
+              {price === null ? '—' : price.toFixed(digits)}
+            </div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <div className="flex items-center gap-1">
-            <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
-            <span className="text-[10px] font-bold tracking-widest text-accent">LIVE</span>
-          </div>
+          <LiveBadge status={status} className="gap-1" />
           <div className="flex items-center gap-1 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px]">
             <span className="font-bold text-fg">{currency}</span>
           </div>
@@ -198,14 +203,13 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
         </div>
         <div className="min-w-0">
           <div className="text-xs uppercase tracking-wider text-muted">Price</div>
-          <div className="truncate font-mono text-lg font-bold text-fg">{price === null ? '—' : price.toFixed(digits)}</div>
+          <div className={cn('truncate font-mono text-lg font-bold text-fg', stale && 'opacity-50')}>
+            {price === null ? '—' : price.toFixed(digits)}
+          </div>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-4">
-        <div className="flex items-center gap-2">
-          <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-          <span className="text-sm font-bold tracking-widest text-accent">LIVE</span>
-        </div>
+        <LiveBadge status={status} className="gap-2" dotClassName="h-2 w-2" labelClassName="text-sm" />
         <div className="flex items-center gap-2 rounded border border-border bg-surface-2 px-3 py-1 text-sm">
           <span className="text-muted">Global</span>
           <span className="font-bold text-fg">{currency}</span>

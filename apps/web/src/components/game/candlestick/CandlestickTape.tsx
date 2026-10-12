@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TIMEFRAMES, type Timeframe } from '@invest254/shared/candles';
 import type { Candle } from '@invest254/shared/chart';
 import type { Tick, ConnStatus } from '@/lib/game/types';
 import type { CandlesReply } from '@/lib/game/GameSocketProvider';
+import { ChartPlaceholder } from '@/components/ui/ChartPlaceholder';
+import { dataPhaseOf, phaseIsBlocking } from '@/lib/ui/dataPhase';
+import { cn } from '@/lib/cn';
 
 /**
  * The candlestick screen's chart: bars, a price axis, a time axis, and nothing else.
@@ -33,6 +36,13 @@ export function CandlestickTape({
   className?: string;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Has this chart ever drawn a bar? Drives the placeholder below: until the first seed lands the
+   * area showed a bare container, which on a brand whose socket was still connecting was a
+   * full-height void with no explanation. After the first bar it stays false-y forever, so a
+   * reconnect keeps the last picture instead of blanking a trader's chart.
+   */
+  const [hasBars, setHasBars] = useState(false);
   const chartRef = useRef<import('lightweight-charts').IChartApi | null>(null);
   const seriesRef = useRef<import('lightweight-charts').ISeriesApi<'Candlestick'> | null>(null);
   /** The bar currently forming, kept here so the loop can extend it without refetching history. */
@@ -109,6 +119,7 @@ export function CandlestickTape({
             priceFormat: { type: 'price', precision: reply.instrument.digits, minMove: 1 / 10 ** reply.instrument.digits },
           });
           series.setData(reply.bars as never);
+          setHasBars(true);
           liveRef.current = { ...reply.bars[reply.bars.length - 1]! };
           if (followRef.current) chart.timeScale().scrollToRealTime();
         } catch {
@@ -174,6 +185,10 @@ export function CandlestickTape({
         const series = seriesRef.current;
         if (cancelled || !series || !reply.bars.length) return;
         series.setData(reply.bars as never);
+        // Also lifts the placeholder: if the mount-time seed() threw and only this path ever
+        // succeeds, the chart draws bars while `hasBars` stays false and the placeholder sits on
+        // top of a perfectly good chart forever.
+        setHasBars(true);
         liveRef.current = { ...reply.bars[reply.bars.length - 1]! };
         if (followRef.current) chartRef.current?.timeScale().scrollToRealTime();
       } catch {
@@ -183,7 +198,13 @@ export function CandlestickTape({
     return () => { cancelled = true; };
   }, [status, timeframe, count]);
 
-  return <div ref={hostRef} className={className ?? 'h-full w-full'} />;
+  const phase = dataPhaseOf(status, hasBars);
+  return (
+    <div className={cn('relative', className ?? 'h-full w-full')}>
+      <div ref={hostRef} className="h-full w-full" />
+      {phaseIsBlocking(phase) ? <ChartPlaceholder phase={phase} /> : null}
+    </div>
+  );
 }
 
 /**

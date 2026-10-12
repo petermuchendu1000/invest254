@@ -91,6 +91,9 @@ export function MT5TickBand({
   if (last !== null && Number.isFinite(last)) lines.push({ p: last, colour: '#8fa2b8', dashed: true, tag: false });
   if (bid !== null && Number.isFinite(bid)) lines.push({ p: bid, colour: '#f23645', dashed: false, tag: true });
 
+  /** Nothing has quoted and no tick survived the window — the band has literally nothing to draw. */
+  const empty = pts.length === 0 && lines.length === 0;
+
   /**
    * Absolutely filled rather than `h-full`.
    *
@@ -138,6 +141,21 @@ export function MT5TickBand({
           })}
           {path ? <path d={path} fill="none" stroke="#c9d6e4" strokeWidth={1.2} /> : null}
         </svg>
+      ) : null}
+      {/*
+        Nothing to draw: no tick survived the window and no side has quoted, so `lines` is empty and
+        `path` is ''. That used to render an empty `<svg>` — a blank band in the middle of the order
+        ticket, with no hint that it was waiting rather than broken. Its desktop sibling
+        (`MT5TicksChart`) has always said so; this is the same sentence.
+      */}
+      {empty ? (
+        <p
+          className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 px-4 text-center text-[11px] leading-snug text-[var(--mt5-muted)]"
+          role="status"
+          aria-live="polite"
+        >
+          Waiting for ticks. The band fills as the server quotes.
+        </p>
       ) : null}
     </div>
   );

@@ -16,6 +16,8 @@ import {
 } from '@/components/game/mobile/MT5SwipeRow';
 import { ticketLabel, type ActivePosition, type PendingOrderDto } from '@/lib/game/betting';
 import { useNavDrawer } from '@/lib/ui/drawer';
+import { valueIsStale } from '@/lib/ui/dataPhase';
+import { LiveBadge } from '@/components/ui/LiveBadge';
 import { cn } from '@/lib/cn';
 
 /**
@@ -56,6 +58,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
   const money = useDisplayMoney();
   const { data: wallet } = useWallet();
   const { positions, pendingOrders, status, sell, cancelPending, earlyCloseEnabled } = useGameSocket();
+  const stale = valueIsStale(status);
   const { getLastTick } = useGameSocketApi();
   const openDrawer = useNavDrawer((s) => s.setOpen);
   // `volDigits` is the ORDER TICKET's own volume digits, so the row states the same lot size the
@@ -223,10 +226,10 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
             {mtAmount(money.toDisplay(floatingCents))} {money.currency}
           </div>
         </div>
-        <span
-          className={cn('ml-auto h-1.5 w-1.5 shrink-0 rounded-full', status === 'open' ? 'bg-[var(--mt5-green)]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[var(--mt5-red)]')}
-          title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
-        />
+        {/* One definition of this dot, shared with the three other surfaces that had grown their
+            own copy of the same ternary — and it now carries a text equivalent, which a 6px dot
+            with a `title` never had on a touch device. */}
+        <LiveBadge status={status} showLabel={false} variant="terminal" className="ml-auto" />
         {/* MetaTrader's sort button. Drawn only where there is an order to change: one row has no
             ordering, and a control that cannot do anything is worse than one that is not there. */}
         {positions.length > 1 ? (
@@ -303,7 +306,11 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
                 direction={pos.direction}
                 lots={lotsOfStake(pos.stakeCents, volDigits)}
                 from={px(pos.entryRate)}
+                /* The tick buffer outlives a disconnect, so this "to" price and the P/L derived
+                   from it freeze at their last values. `stale` dims the pair rather than letting a
+                   stopped number pass for a live one; the dot in the header says why. */
                 to={px(getLastTick()?.rate ?? null)}
+                stale={stale}
                 profit={money.mt(pos.livePnlCents)}
                 profitCents={pos.livePnlCents}
                 ticket={ticketLabel(pos)}
@@ -430,7 +437,7 @@ export function MT5MobileTrade({ onNewOrder, onChart }: { onNewOrder: () => void
  * none: a row of `0.00` would be a real-looking number for a cost that does not exist.
  */
 function MobilePositionRow({
-  symbol, direction, lots, from, to, profit, profitCents, ticket, sl, tp, settling, expanded, onToggle, onOpenMenu,
+  symbol, direction, lots, from, to, profit, profitCents, ticket, sl, tp, settling, stale = false, expanded, onToggle, onOpenMenu,
 }: {
   symbol: string;
   direction: string;
@@ -444,6 +451,8 @@ function MobilePositionRow({
   tp: string | null;
   /** Already closing: the row stays, dimmed, until the engine's settle takes it off the list. */
   settling: boolean;
+  /** The feed is down, so `to` and the profit are the last values seen rather than current ones. */
+  stale?: boolean;
   expanded: boolean;
   onToggle: () => void;
   onOpenMenu: () => void;
@@ -486,12 +495,15 @@ function MobilePositionRow({
             {symbol},{' '}
             <span className={cn('font-semibold', buy ? 'text-[var(--mt5-blue)]' : 'text-[var(--mt5-red)]')}>{direction} {lots}</span>
           </div>
-          <div className="pt-0.5 font-mono text-[12px] text-[var(--mt5-muted)] tabular-nums">{from} → {to}</div>
+          <div className={cn('pt-0.5 font-mono text-[12px] text-[var(--mt5-muted)] tabular-nums', stale && 'opacity-50')}>
+            {from} → {to}
+          </div>
         </div>
         <div
           className={cn(
             'shrink-0 font-mono text-[13px] font-bold tabular-nums',
             profitCents > 0 ? 'text-[var(--mt5-blue)]' : profitCents < 0 ? 'text-[var(--mt5-red)]' : 'text-white',
+            stale && 'opacity-50',
           )}
         >
           {profit}

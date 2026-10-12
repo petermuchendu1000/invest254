@@ -8,6 +8,8 @@ import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { useSession } from '@/lib/auth/session';
 import { useOnlineDisplay } from '@/lib/game/onlineDisplay';
 import { useBrand } from '@/lib/brand/BrandProvider';
+import { valueIsStale } from '@/lib/ui/dataPhase';
+import { LiveBadge } from '@/components/ui/LiveBadge';
 
 /** Signed display value the chart plots: rate = BASE + AMP * value. */
 const toValue = (rate: number) => (rate - CURVE_BASE_RATE) / CURVE_AMPLITUDE;
@@ -66,16 +68,28 @@ export function PriceHeader() {
     : (value ?? 0) * 100;
   const show = (v: number) => (market ? v.toFixed(market.instrument.digits) : fmt(v));
   const up = changePct >= 0;
-  const statusDot = status === 'open' ? 'bg-up' : status === 'connecting' ? 'bg-warn' : 'bg-down';
+  /**
+   * The tick buffer survives a disconnect, so `value`, the % pill and H/L keep printing the last
+   * figures received — at `text-lg font-bold`, with the 8px dot as the only cue, and that cue is a
+   * `title` tooltip no touch device will ever show. Dimmed and labelled instead: the number is
+   * still useful (it is the last real price) but it is no longer passed off as the current one.
+   */
+  const stale = valueIsStale(status);
 
   return (
     <div className="shrink-0 rounded-xl border border-border bg-surface px-3 py-1.5">
       {/* Single compact row: pair + live | price + % | 24H stats + online. Keeps the chart tall. */}
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
-          <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDot)} title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} aria-label={status} />
+          <LiveBadge status={status} showLabel={false} dotClassName="h-2 w-2" />
           <span className="text-xs font-semibold text-fg">{pair}</span>
-          <span className={cn('ml-1 font-mono text-lg font-bold leading-none tabular-nums', up ? 'text-up' : 'text-down')}>
+          <span
+            className={cn(
+              'ml-1 font-mono text-lg font-bold leading-none tabular-nums',
+              up ? 'text-up' : 'text-down',
+              stale && 'opacity-50',
+            )}
+          >
             {value !== null ? show(value) : '\u2014'}
           </span>
           {value !== null ? (
@@ -83,15 +97,22 @@ export function PriceHeader() {
               className={cn(
                 'rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums',
                 up ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
+                stale && 'opacity-50',
               )}
             >
               {signed(changePct)}%
             </span>
           ) : null}
+          {/* The word, because the dot alone is 2% of the area of the number it qualifies. */}
+          {stale && value !== null ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+              {status === 'connecting' ? 'syncing' : 'last known'}
+            </span>
+          ) : null}
         </div>
         <div className="flex min-w-0 items-center gap-3 text-right">
-          <Stat className="hidden sm:flex" label="H" value={hi !== null ? show(hi) : '\u2014'} />
-          <Stat className="hidden sm:flex" label="L" value={lo !== null ? show(lo) : '\u2014'} />
+          <Stat className={cn('hidden sm:flex', stale && 'opacity-50')} label="H" value={hi !== null ? show(hi) : '\u2014'} />
+          <Stat className={cn('hidden sm:flex', stale && 'opacity-50')} label="L" value={lo !== null ? show(lo) : '\u2014'} />
           <Stat
             label="Online"
             valueClassName="text-up"
