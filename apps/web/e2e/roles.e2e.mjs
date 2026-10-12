@@ -597,8 +597,21 @@ try {
     check('BILL-1: invoices show a plain overdue state', await page.getByText('Overdue 5 days').first().isVisible().catch(() => false));
     check('BILL-1: platform admins get no owner money controls', !(await page.getByRole('button', { name: 'Run billing now' }).count()) && !(await page.getByRole('tab', { name: 'Settings' }).count()));
     await page.getByRole('alert').getByRole('button', { name: /Pay KES 45,000/ }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(300);
-    const phone = await page.getByLabel('M-Pesa phone number').inputValue().catch(() => '');
-    check('BILL-1: Pay now pre-fills the admin’s own phone', phone === '0700000003', phone);
+    /**
+     * The prefilled number is MASKED at rest, and revealed on request.
+     *
+     * This used to assert the raw number was in the field. It is not any more, and deliberately:
+     * billing is walked through on camera, so the admin's own number is shown as 0700****003 until
+     * they ask for it (see the note on the Input in components/billing/parts.tsx). The money half
+     * is unchanged and is asserted two lines down — what gets POSTed is still the real number, and
+     * the display mask can never be read back as input.
+     */
+    const masked = await page.getByLabel('M-Pesa phone number').inputValue().catch(() => '');
+    check('BILL-1: Pay now pre-fills the admin’s own phone, masked', masked === '0700****003', masked);
+    await page.getByRole('button', { name: 'Show the hidden digits' }).click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(150);
+    const revealed = await page.getByLabel('M-Pesa phone number').inputValue().catch(() => '');
+    check('BILL-1: …and Show reveals the real digits', revealed === '0700000003', revealed);
     await page.getByRole('button', { name: /Send prompt for KES 45,000/ }).click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(400);
     const sent = bodies.find(([k]) => k === 'POST /platform/billing/invoices/inv-1/pay');
     check('BILL-1: Pay now sends the STK request for that invoice with the phone', !!sent && sent[1]?.phone === '0700000003', JSON.stringify(bodies.map(([k]) => k)));
