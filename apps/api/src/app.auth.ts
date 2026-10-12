@@ -200,6 +200,11 @@ export function registerAuthRoutes(router: Router, deps: ApiDeps): void {
       phone,
       password,
       anyBrand: true, // identity-based: resolve across all brands, session = account's own site/platform
+      // When one phone holds several accounts and more than one password matches, the OPERATOR
+      // account is the one being signed in for — this is the console's own door. Without it an
+      // older player account on the same number shadowed a real admin, who then met the wrong-tier
+      // 404 on every console surface (BUGLOG #135). Only this route sets it.
+      preferPrivileged: true,
       ...(totp !== undefined ? { totp } : {}),
       ...(recoveryCode !== undefined ? { recoveryCode } : {}),
     }));

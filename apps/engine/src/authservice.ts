@@ -279,7 +279,7 @@ export class AuthService {
    * Privileged roles that have not enrolled yet are still admitted but flagged with
    * `mfaEnrolmentRequired` so enabling MFA can never lock an operator out of their own back office.
    */
-  async login(input: { phone: string; password: string; totp?: string; recoveryCode?: string; siteId?: string; anyBrand?: boolean }): Promise<AuthSession> {
+  async login(input: { phone: string; password: string; totp?: string; recoveryCode?: string; siteId?: string; anyBrand?: boolean; preferPrivileged?: boolean }): Promise<AuthSession> {
     let phone: string;
     try { phone = normalizeMsisdn(input.phone); } catch { throw new Error("INVALID_CREDENTIALS"); }
 
@@ -290,6 +290,11 @@ export class AuthService {
     //    brand's account is signing in, and its brand becomes the session's site. This is OPT-IN so
     //    it never weakens the default per-brand identity isolation of the normal web login.
     //  - otherwise (default) -> the legacy single lookup (scoped/default bucket): brand isolation.
+    //
+    // `preferPrivileged` then decides WHICH match wins when several do — see the scan below. It is
+    // passed by the operator sign-in alone, so the marketer apps' anyBrand login is untouched (a
+    // marketer's wallet lives on one brand, and resolving them to an admin account they happen to
+    // also own would send them to the wrong one).
     const candidates = input.anyBrand && !input.siteId
       ? await this.repo.findAllByPhone(phone)
       : await this.repo.findByPhone(phone, input.siteId).then((r) => (r ? [r] : []));
@@ -309,7 +314,28 @@ export class AuthService {
         // was blocking his active safitraders marketer login.)
         if (c.status === "deleted") continue;
         verifiedAny = true;
-        if (await verifyPassword(input.password, c.passwordHash)) { rec = c; break; }
+        if (await verifyPassword(input.password, c.passwordHash)) {
+          // The first match is the answer, and on the default path it ends the scan — oldest-first,
+          // exactly as before.
+          if (!rec) rec = c;
+          if (!input.preferPrivileged) break;
+          // preferPrivileged (the OPERATOR entry point only): an operator candidate outranks a
+          // non-operator one, whatever the ages. One person, one phone, two accounts — an older
+          // PLAYER and a newer ADMIN — used to resolve to the player whenever both accounts shared
+          // a password, because oldest-first took the first match and stopped. The operator was
+          // handed a valid player session and every console surface answered with its wrong-tier
+          // 404: "an admin who can't login anywhere, just 404" (BUGLOG #135). `created_at` is a
+          // deterministic tie-break, which is not the same as a correct one.
+          //
+          // This cannot escalate anything. A candidate is only ever considered here after ITS OWN
+          // hash verified the submitted password, so the password that wins the admin's session is
+          // the admin's own. When the two accounts have different passwords, the player's password
+          // matches only the player and still resolves to the player — there is a test for each
+          // direction. And the same credential already opened this account through the per-brand
+          // login on its own brand's host, so no new door is being opened; one that was shut on the
+          // operator domain is being opened.
+          if (isPrivilegedRole(c.role)) { rec = c; break; }
+        }
       }
       // Constant time when every candidate was skipped (all-deleted phone): still cost one verify.
       if (!verifiedAny) await verifyPassword(input.password, await DUMMY_HASH);

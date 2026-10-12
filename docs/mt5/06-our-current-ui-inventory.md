@@ -23,7 +23,7 @@ All under `/home/user/invest254/apps/web/src/app`. Root layout is `app/layout.ts
 | `app/offline/page.tsx` | `/offline` | Service-worker fallback: "You're offline" / "Reconnect to trade." / "Retry". |
 | `app/r/[code]/page.tsx` → `app/r/[code]/view.tsx` | `/r/<CODE>` | Referral landing: brand initial tile, brand name, "Invite code" card, "Create account" / "Already have an account? Log in", "18+ only. Play responsibly, learn more". |
 
-**Not player-reachable:** `app/admin/**` (18 pages), `app/platform/**` (20 pages), `app/console/page.tsx`. `AppShell` suppresses all player chrome for `/admin`, `/platform`, `/console`. `src/middleware.ts` redirects `/` → `/console` on the admin host (`ADMIN_HOST`, default `triocodes.com`).
+**Not player-reachable:** `app/admin/**` (18 pages), `app/platform/**` (20 pages), `app/console/page.tsx`. `AppShell` suppresses all player chrome for `/admin`, `/platform`, `/console`. `src/middleware.ts` redirects `/` → `/console` on the admin host (`ADMIN_HOST`, default `triocodes.com`) — and, on any host that is NOT an operator host, rewrites those three paths to a 404 before the route matches, so a brand domain behaves as though they do not exist (BUGLOG #134; the allowed hosts are the admin host plus loopback / `.test` / `.localhost` / `*.pages.dev`, see `lib/brand/adminHost.ts`).
 
 ---
 
