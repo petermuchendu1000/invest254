@@ -3,7 +3,7 @@ import { assertSiteTarget } from "./scope.js";
 import type { ApiDeps } from "./app.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
 import { isTokenSessionValid } from "@invest254/engine";
-import { SECURITY_QUESTIONS, SECURITY_ANSWERS_REQUIRED, validatePassword } from "@invest254/shared";
+import { SECURITY_QUESTIONS, SECURITY_ANSWERS_REQUIRED, validatePassword, maskPhoneForDisplay } from "@invest254/shared";
 
 /**
  * Admin marketer routes (marketers = special players who RECEIVE payments and can withdraw).
@@ -221,6 +221,18 @@ function parseAnswers(body: Record<string, unknown>): Array<{ key: string; answe
 /** A marketer must set this many security answers before a reset can verify them (0198). */
 function needsSecuritySetup(stored: { questionKey: string }[]): boolean {
   return stored.length < SECURITY_ANSWERS_REQUIRED;
+}
+
+/**
+ * Issue 2: hide the phone number on the marketer side. The marketer app only ever renders the
+ * agent's OWN number (login + /me), never anyone else's, and never uses it functionally, so we mask
+ * it at the response boundary with the canonical display mask (0798****061). ONLY the marketer-app
+ * responses are masked here; admin/platform reads of a marketer still return the full number (their
+ * web masks at render and keeps a deliberate full-number copy/export — see docs/57 / the admin UI),
+ * so this cannot change what an operator sees or break any payment path.
+ */
+function maskedMarketer<T extends { phone: string } | null | undefined>(p: T): T {
+  return (p ? { ...p, phone: maskPhoneForDisplay(p.phone) } : p) as T;
 }
 
 /**
@@ -466,7 +478,7 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     // 0198: tell the app whether this marketer still has to set its security questions, so it can
     // force the setup screen (the server enforces the same on reset, fail-closed).
     const securitySetupRequired = needsSecuritySetup(await deps.marketers.getSecurityAnswers(id));
-    return { token, marketer: marketerProfile, ...(securitySetupRequired ? { securitySetupRequired: true } : {}) };
+    return { token, marketer: maskedMarketer(marketerProfile), ...(securitySetupRequired ? { securitySetupRequired: true } : {}) };
   });
 
   // Website-credential login: the marketer signs in with the SAME phone + password they use on the
@@ -522,7 +534,7 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     // Issue 1 / F-43: bind the marketer-app session to the marketer's brand (site claim).
     const token = await deps.auth.issueToken(profile.id, "marketer", profile.site_id ?? undefined);
     const securitySetupRequired = needsSecuritySetup(await deps.marketers.getSecurityAnswers(profile.id));
-    return { token, marketer: profile, ...(securitySetupRequired ? { securitySetupRequired: true } : {}) };
+    return { token, marketer: maskedMarketer(profile), ...(securitySetupRequired ? { securitySetupRequired: true } : {}) };
   });
 
   // The authenticated marketer's own profile (name/initials/balance/Fuliza/airtime) + whether the
@@ -530,7 +542,7 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   router.get(`${BASE}/marketers/me`, auth, marketer, async (ctx: Ctx) => {
     const profile = marketerCtx.get(ctx)!;
     const securitySetupRequired = needsSecuritySetup(await deps.marketers.getSecurityAnswers(profile.id));
-    return { ...profile, securitySetupRequired };
+    return { ...maskedMarketer(profile), securitySetupRequired };
   });
 
   // Marketer's own transaction feed (newest-first), each with a ready-to-render M-PESA
