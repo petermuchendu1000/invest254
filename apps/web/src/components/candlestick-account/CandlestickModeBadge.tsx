@@ -15,6 +15,7 @@ import { MK } from '@/lib/marketer/labels';
 // what switching accounts offers (top-up on demo, no Withdraw on demo — DEMO-3).
 import { AccountMenu } from '@/components/wallet/AccountMenu';
 import { useCandlestickUi } from '@/components/game/candlestick/ui';
+import { useDemoTrade } from '@/lib/game/demoTrade';
 
 /**
  * The candlestick header's ACCOUNT CHIP: which account is active, what is in it, and the switch.
@@ -56,6 +57,7 @@ export function CandlestickAccountChip() {
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
   const toast = useToast();
   const { isMarketer: skin } = useMarketerSkin();
+  const demoBalance = useDemoTrade((st) => st.balanceCents);
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
 
@@ -79,7 +81,35 @@ export function CandlestickAccountChip() {
     demo ? 'border-warn/40' : 'border-border',
   );
 
-  if (!token || !wallet) {
+  /**
+   * SIGNED OUT is a DEMO account now, not an empty one.
+   *
+   * A guest can place a trade without registering, so this chip names the account that tap spends
+   * and shows its balance — simulated, in this browser only (`lib/game/demoTrade`). The word DEMO
+   * is always present here, at every width, for the same reason it is on the signed-in demo
+   * account: the one thing a trader must not be wrong about is which money is at stake. There is
+   * nothing to switch to, so it is a label rather than a button.
+   */
+  if (!token) {
+    return (
+      <span className={cn(chip, 'border-warn/40')} title={`Demo account, ${fmt(demoBalance)}`}>
+        <ModeDot demo />
+        <span className="flex min-w-0 flex-col items-start leading-none">
+          <span className="text-[9px] font-bold uppercase leading-none tracking-widest text-warn">
+            {skin ? MK.practiceTab : 'Demo'}
+          </span>
+          <span className="mt-0.5 max-w-[7.5rem] truncate text-xs font-bold tabular-nums text-fg sm:max-w-[10rem] sm:text-sm">
+            {fmt(demoBalance)}
+          </span>
+        </span>
+      </span>
+    );
+  }
+
+  /* Signed in, wallet still loading: a neutral placeholder. It must NOT fall through to the guest
+     branch above — showing a real trader their simulated demo balance, even for a moment, is the
+     one confusion this chip exists to prevent. */
+  if (!wallet) {
     return (
       <span className={cn(chip, 'text-[11px] font-bold uppercase tracking-wide text-muted')}>
         <ModeDot demo={demo} />

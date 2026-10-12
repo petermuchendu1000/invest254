@@ -15,10 +15,11 @@ import { useDisplayMoney } from '@/lib/money';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { isContinuousBrand } from '@/lib/game/levelWatch';
-import { LivePnl } from '@/components/game/LivePnl';
 import { useLivePrice } from '@/components/game/candlestick/useLivePrice';
 import { useCandlestickUi } from '@/components/game/candlestick/ui';
 import { dataPhaseOf, tradeDisabledReason } from '@/lib/ui/dataPhase';
+import { CurrentTradePanel } from '@/components/game/candlestick/CurrentTradePanel';
+import { useDemoTrade, demoLive, DEMO_FALLBACK_MULTIPLIER } from '@/lib/game/demoTrade';
 
 /**
  * The candlestick screen's order entry, laid out exactly as the mock lays it out: the two sides,
@@ -86,10 +87,15 @@ export function TradingPanel({ className }: { className?: string }) {
   const minCents = limits.minCents;
   const maxCents = limits.maxCents;
   // Bonus funds are stakeable (bonus-first, migration 0094), so affordability counts real + bonus.
-  const spendable = (wallet?.real ?? 0) + (wallet?.bonus ?? 0);
+  const demoBalance = useDemoTrade((st) => st.balanceCents);
+  /**
+   * What this tap can actually spend. A guest spends the simulated demo balance, a signed-in trader
+   * spends their wallet — the two are never added together and never substituted for each other.
+   */
+  const spendable = token ? (wallet?.real ?? 0) + (wallet?.bonus ?? 0) : demoBalance;
   const validStake = Number.isInteger(stakeCents) && stakeCents >= minCents;
   const overMax = maxCents !== undefined && Number.isFinite(stakeCents) && stakeCents > maxCents;
-  const overBalance = !!token && Number.isFinite(stakeCents) && stakeCents > spendable;
+  const overBalance = Number.isFinite(stakeCents) && stakeCents > spendable;
   const connecting = status !== 'open';
 
   /**
@@ -109,14 +115,69 @@ export function TradingPanel({ className }: { className?: string }) {
     if (!Number.isFinite(stakeCents)) return null;
     if (!validStake) return `Minimum stake is ${both(minCents)}`;
     if (overMax && maxCents !== undefined) return `Maximum stake is ${both(maxCents)}`;
+    // A guest over their simulated balance would otherwise tap and have nothing happen at all:
+    // `demoOpen` refuses silently, as it should, so the reason has to be said here.
+    if (!token && overBalance) return 'Not enough demo balance for that stake.';
     return null;
   })();
 
+  /**
+   * THE GUEST DEMO. Simulated, in this browser only, and never mixed with a real contract: a
+   * signed-in trader's panel never looks at `demoPos`, and a guest has no real position to look at.
+   */
+  const demoPos = useDemoTrade((st) => st.position);
+  const demoOpen = useDemoTrade((st) => st.open);
+  const demoSettle = useDemoTrade((st) => st.settle);
+  /**
+   * Deliberately NOT `config.maxMultiplier`.
+   *
+   * That field is the CEILING the engine will ever pay (5x on this brand), not what a winning
+   * contract typically returns. Paying it on every simulated win would have the demo advertise a
+   * return the live market does not give, which is the one thing a demo must not do — so this is a
+   * conservative, representative figure instead.
+   */
+  const demoMultiplier = DEMO_FALLBACK_MULTIPLIER;
+  const { tick, priceOfRate, digits } = useLivePrice();
+  const livePrice = priceOfRate(tick?.rate);
+
+  /** Ticks the simulated figures. 100ms, as `LivePnl` does, so the countdown reads smoothly. */
+  const [demoNow, setDemoNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!demoPos) return;
+    const id = setInterval(() => setDemoNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [demoPos]);
+
+  const demo = demoPos ? demoLive(demoPos, demoNow) : null;
+
+  /** Settle once the contract has run its course. The store ignores a second call for the same id. */
+  useEffect(() => {
+    if (!demoPos || !demo?.expired) return;
+    demoSettle(demoPos.id);
+  }, [demoPos, demo?.expired, demoSettle]);
+
+  /** One contract at a time, whichever kind it is. */
+  const inFlight = !!activePosition || !!demoPos;
+
   function place(direction: Direction) {
-    if (!validStake || overMax || connecting || activePosition) return;
-    // A logged-out tap is real buying intent: open the deposit sheet seeded with this stake (it
-    // routes through sign-up/login and resumes), so funding leads rather than a login wall.
-    if (!token || overBalance) {
+    if (!validStake || overMax || connecting || inFlight) return;
+    /**
+     * A LOGGED-OUT TAP OPENS A DEMO TRADE, not the deposit sheet.
+     *
+     * It used to open deposit seeded with the stake, on the argument that a logged-out tap is
+     * buying intent and funding should lead. The product decision is now the one the mock makes:
+     * let anybody trade the demo first and ask for the account afterwards. Nothing about this
+     * touches money — the balance is this browser's localStorage and the outcome is simulated; see
+     * the module note on `demoTrade`, which is explicit about the win rate being a configured one.
+     */
+    if (!token) {
+      if (livePrice === null) return;
+      demoOpen({ direction, stakeCents, entryPrice: livePrice, durationS, multiplier: demoMultiplier });
+      return;
+    }
+    // A signed-in trader who cannot cover the stake still gets the deposit sheet, seeded and
+    // resumable — that path is about REAL money and is unchanged.
+    if (overBalance) {
       openDeposit({ amountCents: stakeCents, pending: { direction, stakeCents } });
       return;
     }
@@ -126,6 +187,62 @@ export function TradingPanel({ className }: { className?: string }) {
   }
 
   const money = (cents: number) => (isForeign ? `${symbol} ${toDisplay(cents).toFixed(2)}` : `KSh ${centsToKes(cents).toFixed(2)}`);
+
+  /** The instrument, named the way the quote band names it. */
+  const market = `GLOBAL/${(brand.currency ?? 'KES').toUpperCase()}`;
+
+  /**
+   * WHILE A CONTRACT IS IN FLIGHT the panel IS the contract.
+   *
+   * The order form is replaced rather than left disabled underneath: there is nothing a trader can
+   * do with it until this settles, and on a phone it was pushing the one figure they are watching
+   * below the fold. Both kinds of contract render the same panel — the engine's numbers for a real
+   * one, the simulation's for a guest's demo.
+   */
+  if (activePosition) {
+    const totalMs = activePosition.durationS * 1000;
+    const remainingMs = activePosition.expiresAtMs ? Math.max(0, activePosition.expiresAtMs - demoNow) : totalMs;
+    return (
+      <div className={cn('flex h-full w-full min-w-0 flex-col bg-surface p-3 sm:p-4', className)}>
+        <CurrentTradePanel
+          direction={activePosition.direction}
+          market={market}
+          entryPrice={activePosition.entryRate === null ? null : priceOfRate(activePosition.entryRate)}
+          priceDigits={digits}
+          stakeCents={activePosition.stakeCents}
+          secondsLeft={Math.ceil(remainingMs / 1000)}
+          progress={totalMs > 0 ? 1 - remainingMs / totalMs : 0}
+          livePnlCents={activePosition.livePnlCents}
+          estReturnCents={activePosition.stakeCents + activePosition.livePnlCents}
+          livePrice={livePrice}
+          phase={activePosition.phase}
+          {...(earlyCloseEnabled
+            ? { onClose: () => sell(), closeDisabled: !(activePosition.phase === 'open' && activePosition.sellable && activePosition.positionId) }
+            : {})}
+        />
+      </div>
+    );
+  }
+
+  if (demoPos && demo) {
+    return (
+      <div className={cn('flex h-full w-full min-w-0 flex-col bg-surface p-3 sm:p-4', className)}>
+        <CurrentTradePanel
+          direction={demoPos.direction}
+          market={market}
+          entryPrice={demoPos.entryPrice}
+          priceDigits={digits}
+          stakeCents={demoPos.stakeCents}
+          secondsLeft={demo.secondsLeft}
+          progress={demo.progress}
+          livePnlCents={demo.livePnlCents}
+          estReturnCents={demo.estReturnCents}
+          livePrice={livePrice}
+          phase="open"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={cn('flex h-full w-full min-w-0 flex-col bg-surface p-3 sm:p-4', className)}>
@@ -138,7 +255,7 @@ export function TradingPanel({ className }: { className?: string }) {
       <div className="mb-5 flex gap-2">
         <button
           type="button"
-          disabled={connecting || !!activePosition}
+          disabled={connecting || inFlight}
           onClick={() => place('buy')}
           className="h-11 min-w-0 flex-1 rounded-lg bg-up text-sm font-bold tracking-wide text-accent-fg transition-colors hover:bg-up/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -146,7 +263,7 @@ export function TradingPanel({ className }: { className?: string }) {
         </button>
         <button
           type="button"
-          disabled={connecting || !!activePosition}
+          disabled={connecting || inFlight}
           onClick={() => place('sell')}
           className="h-11 min-w-0 flex-1 rounded-lg bg-down text-sm font-bold tracking-wide text-accent-fg transition-colors hover:bg-down/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -158,7 +275,7 @@ export function TradingPanel({ className }: { className?: string }) {
           Both reasons they can be dead are named — the feed, and a contract already in flight. The
           second is not self-evident: its live P&L panel is far below the stake fields and is off the
           fold on a phone. Nothing renders once the panel works, so the mock's spacing is kept. */}
-      {connecting || activePosition ? (
+      {connecting || inFlight ? (
         <p className="-mt-4 mb-4 text-center text-[11px] text-muted" role="status" aria-live="polite">
           {connecting
             ? tradeDisabledReason(dataPhaseOf(status, false))
@@ -252,39 +369,29 @@ export function TradingPanel({ className }: { className?: string }) {
       </div>
 
       {/*
-        The summary block, pinned to the bottom of the panel (`mt-auto`) as the mock pins it. While a
-        contract is in flight it carries that contract instead: the mock has no in-flight state, and
-        inventing a second surface for it would hide the one thing a trader is watching.
+        The summary block, pinned to the bottom of the panel (`mt-auto`) as the mock pins it.
+
+        It no longer carries the in-flight contract: that now REPLACES the whole panel (see the
+        early returns above), which is what the mock does and what keeps the live P&L on screen
+        instead of below the fold on a phone.
       */}
-      <div className="mt-auto min-w-0 space-y-2 rounded-lg bg-surface-2 p-3 sm:p-4">
-        {activePosition ? (
-          <>
-            <LivePnl pos={activePosition} />
-            {earlyCloseEnabled ? (
-              <button
-                type="button"
-                disabled={!(activePosition.phase === 'open' && activePosition.sellable && activePosition.positionId)}
-                onClick={() => sell()}
-                className="h-11 w-full rounded-lg bg-border text-sm font-bold text-fg transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {activePosition.phase === 'settling' ? 'Closing…' : 'Close Trade'}
-              </button>
-            ) : null}
-          </>
-        ) : (
-          <>
-            {/* Label fixed, figure allowed to shrink: a six-figure stake is the long half of the
-                row, and without `min-w-0` + `truncate` it widened the whole panel instead. */}
-            <div className="flex items-baseline justify-between gap-2 text-sm">
-              <span className="shrink-0 text-muted">Live Price</span>
-              <LivePriceReadout />
-            </div>
-            <div className="flex items-baseline justify-between gap-2 text-sm">
-              <span className="shrink-0 text-muted">Stake</span>
-              <span className="min-w-0 truncate font-bold tabular-nums text-fg">{Number.isFinite(stakeCents) ? money(stakeCents) : '—'}</span>
-            </div>
-          </>
-        )}
+      {/*
+        DROPPED ON A VERY SHORT PHONE (under 600px tall), where the whole tab has to fit one screen
+        and this block is the only thing on it that says nothing new: the live price is already in
+        the quote band two inches above, and the stake is in its own input right there. Clipping the
+        stake fields or the BUY/SELL pair to keep a duplicate readout would be the wrong trade.
+      */}
+      <div className="mt-auto hidden min-w-0 space-y-2 rounded-lg bg-surface-2 p-3 [@media(min-height:600px)]:block sm:p-4">
+        {/* Label fixed, figure allowed to shrink: a six-figure stake is the long half of the row,
+            and without `min-w-0` + `truncate` it widened the whole panel instead. */}
+        <div className="flex items-baseline justify-between gap-2 text-sm">
+          <span className="shrink-0 text-muted">Live Price</span>
+          <LivePriceReadout />
+        </div>
+        <div className="flex items-baseline justify-between gap-2 text-sm">
+          <span className="shrink-0 text-muted">Stake</span>
+          <span className="min-w-0 truncate font-bold tabular-nums text-fg">{Number.isFinite(stakeCents) ? money(stakeCents) : '—'}</span>
+        </div>
       </div>
 
       {/* The mock's refusal line. Present only when there is something to refuse. */}

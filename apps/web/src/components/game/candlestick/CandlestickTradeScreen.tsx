@@ -8,6 +8,7 @@ import { useSession } from '@/lib/auth/session';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { valueIsStale } from '@/lib/ui/dataPhase';
+import { useDemoTrade } from '@/lib/game/demoTrade';
 import { LiveBadge } from '@/components/ui/LiveBadge';
 import { CandlestickTape } from '@/components/game/candlestick/CandlestickTape';
 import { TradingPanel } from '@/components/game/candlestick/TradingPanel';
@@ -50,12 +51,23 @@ export function CandlestickTradeScreen() {
       {/* ── Phone: one pane at a time, four tabs ───────────────────────────── */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden">
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div className={cn('absolute inset-0 overflow-y-auto overflow-x-hidden', phoneTab === 'trade' ? 'block' : 'hidden')}>
+          {/*
+            ONE SCREEN. No vertical scroll on the trade tab.
+
+            This was a scrolling column: a 40px quote band, a chart pinned at 350px, and the panel
+            below it — which on any phone put the stake fields, the quick stakes and the live P&L
+            under the fold, so placing a trade meant scrolling away from the chart you were placing
+            it on. It is a flex column now and the CHART is the part that gives: the band and the
+            panel take the height they need and the chart absorbs whatever is left, down to a floor
+            that still reads as a chart. `min-h-0` on the chart cell is load-bearing — without it a
+            flex item refuses to shrink below its content and the panel is pushed off again.
+          */}
+          <div className={cn('absolute inset-0 flex-col overflow-hidden', phoneTab === 'trade' ? 'flex' : 'hidden')}>
             <QuoteBar compact />
-            <div className="relative h-[350px] w-full shrink-0 bg-bg">
+            <div className="relative min-h-[110px] w-full min-w-0 flex-1 bg-bg">
               <Tape />
             </div>
-            <div className="min-w-0 border-t border-border">
+            <div className="min-w-0 shrink-0 border-t border-border">
               <TradingPanel />
             </div>
           </div>
@@ -162,7 +174,15 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
      last-known price rendered at full strength beside an OFFLINE badge is still a half-lie. */
   const stale = valueIsStale(status);
   const currency = (brand.currency ?? 'KES').toUpperCase();
-  const balance = token ? fmt((wallet?.real ?? 0) + (wallet?.bonus ?? 0)) : fmt(0);
+  /**
+   * A GUEST SEES THEIR DEMO BALANCE, not a zero.
+   *
+   * Anybody can place a demo trade without an account now, so this band has to show the money that
+   * tap actually spends. It is simulated and lives in this browser only (see `lib/game/demoTrade`),
+   * and the header's chip reads DEMO beside it so the figure is never mistaken for real funds.
+   */
+  const demoBalance = useDemoTrade((st) => st.balanceCents);
+  const balance = fmt(token ? (wallet?.real ?? 0) + (wallet?.bonus ?? 0) : demoBalance);
 
   if (compact) {
     return (
