@@ -7,115 +7,108 @@ import { brandWordmark } from '@/lib/brand/brand';
 import { useSession } from '@/lib/auth/session';
 import { useAuthUi } from '@/lib/auth/ui';
 import { useDepositUi } from '@/lib/wallet/depositUi';
-import { useWallet } from '@/lib/wallet/hooks';
 import { useNavDrawer } from '@/lib/ui/drawer';
-import { useDisplayMoney } from '@/lib/money';
 import { CIcon } from '@/components/game/candlestick/icons';
-import { CandlestickModeBadge } from '@/components/candlestick-account/CandlestickModeBadge';
+import { CandlestickAccountChip } from '@/components/candlestick-account/CandlestickModeBadge';
 
 /**
- * The candlestick screen's header, as the mock draws it: the wordmark and a mode badge on the left
- * with the two section links beside them, and one bordered cluster on the right carrying the
- * account, How to, Deposit, Withdraw and the menu.
+ * The candlestick screen's header.
  *
  * It is a separate component from `TopBar` and `DigitsTopBar` for the same reason those two are
- * separate from each other: they are different headers, not one header with branches. This one is
- * 56/64px, sits on `surface`, and its right-hand controls live inside a single outlined box — none
- * of which is a variant of the others.
+ * separate from each other: they are different headers, not one header with branches.
  *
- * Every control routes to the surface that already exists: the deposit sheet, the withdraw sheet,
- * the auth modal and — behind the mode badge — the shared Real/Demo account panel. The hamburger
- * opens `CandlestickNavSheet`, this shell's own simple menu (Trade / Deposit / Withdraw / History /
- * Profile / How to trade), NOT the terminal's `MT5Drawer`: see that file and AppShell's candlestick
- * branch for why the broker's panel has no business on this screen.
+ * WHAT THIS LAYOUT IS CORRECTING. The previous version put the balance, the account badge, Deposit,
+ * Withdraw and the menu inside ONE outlined box with `gap-1` between them, beside a separate
+ * pill-shaped mode badge. Four problems, all visible at a glance on a phone:
  *
- * The balance is on the bar at every width, phone included — see the note on it below.
+ *  1. A box around a group of controls draws a second border 2px inside the header's own, so the
+ *     bar read as a frame inside a frame with the controls crammed into the gap. Grouping is done
+ *     with SPACE here instead — the only border left on the bar is the one under it.
+ *  2. Three saturated colours competed in a 200px strip: a warn-orange mode pill, an accent-outlined
+ *     Deposit and a `bg-down` RED Withdraw. Red is this product's loss colour; a withdrawal is not a
+ *     loss or an error, and painting it red made the safest action on the bar look destructive.
+ *     There is now exactly one filled colour on the bar — Deposit, the action it exists to offer —
+ *     and one small state dot. Everything else is foreground, muted or a hairline.
+ *  3. `gap-1` (4px) between tap targets on a touch screen is a mis-tap waiting to happen, and the
+ *     controls were 32px tall in a 56px bar. Targets are 40px on a phone with 8px between them.
+ *  4. The mode badge and the balance were separate items, which is backwards: the mode is what the
+ *     balance MEANS. "Demo" beside "KSh 77.08" asks the player to join two facts that belong in one.
+ *     They are one control now — see `CandlestickAccountChip`.
+ *
+ * Every control still routes to the surface that already exists: the deposit sheet, the withdraw
+ * sheet, the auth modal and — behind the account chip — the shared Real/Demo panel. The hamburger
+ * opens `CandlestickNavSheet`, this shell's own menu, NOT the terminal's `MT5Drawer`.
  */
 export function CandlestickTopBar() {
   const brand = useBrand();
   const token = useSession((s) => s.token);
-  const user = useSession((s) => s.user);
-  const { data: wallet } = useWallet();
-  const { fmt } = useDisplayMoney();
   const openAuth = useAuthUi((s) => s.openAuth);
   const openDeposit = useDepositUi((s) => s.openDeposit);
   const openWithdraw = useDepositUi((s) => s.openWithdraw);
   const toggleDrawer = useNavDrawer((s) => s.toggle);
 
   const authed = !!token;
-  const balance = fmt((wallet?.real ?? 0) + (wallet?.bonus ?? 0));
   const needAuth = (fn: () => void) => () => (authed ? fn() : openAuth('login'));
 
   return (
-    // `px-2` on a phone rather than `px-3`: the bar now carries the balance as well as the wordmark,
-    // the badge, Deposit and the menu, and at 320px those 8px are the difference between a row that
-    // fits and one that squeezes the figure.
-    <header className="flex h-14 w-full shrink-0 items-center justify-between gap-1.5 border-b border-border bg-surface px-2 md:h-16 md:gap-3 md:px-4">
-      <div className="flex min-w-0 items-center gap-4">
-        <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
-          {/* The wordmark is the one thing here a player can still identify when it is clipped, so
-              it is the child that gives way: `min-w-0` + `truncate` inside. Everything to its right
-              — the badge, the balance, Deposit, the menu — is load-bearing. */}
-          <Link href="/" aria-label={`${brand.name} home`} className="min-w-0">
-            <Wordmark text={brandWordmark(brand)} />
-          </Link>
-          {/* The mock's mode badge, and the screen's account switch: it names the ONE thing a
-              player must not be wrong about — which money a tap spends — and is the control that
-              changes it, through the demo mechanism the other shells already use (DEMO-1). */}
-          <CandlestickModeBadge />
-        </div>
+    <header
+      className={cn(
+        'flex h-14 w-full shrink-0 items-center justify-between border-b border-border bg-surface',
+        // The gutter grows with the viewport rather than being one cramped value everywhere. 12px
+        // at 320px is the smallest edge margin that still reads as a margin.
+        'gap-2 px-3 sm:gap-3 sm:px-4 md:h-16 md:gap-4 md:px-6',
+      )}
+    >
+      {/* ── Identity ─────────────────────────────────────────────────────────────────────────
+          The wordmark is the one thing here a player can still identify when it is clipped, so it
+          is the child that gives way: `min-w-0` + `truncate`. Everything to its right is
+          load-bearing and `shrink-0`. */}
+      <div className="flex min-w-0 flex-1 items-center gap-4">
+        <Link href="/" aria-label={`${brand.name} home`} className="min-w-0 shrink">
+          <Wordmark text={brandWordmark(brand)} />
+        </Link>
 
-        <nav className="hidden items-center gap-1 border-l border-border pl-4 md:flex">
-          <button
-            type="button"
-            onClick={toggleDrawer}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-muted transition-colors hover:bg-warn/10 hover:text-warn"
-          >
-            <CIcon name="top" className="h-3.5 w-3.5" />
-            Top Traders
-          </button>
-          <button
-            type="button"
-            onClick={toggleDrawer}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-muted transition-colors hover:bg-accent/10 hover:text-accent"
-          >
-            <CIcon name="tours" className="h-3.5 w-3.5" />
-            Tournaments
-          </button>
+        {/* Desktop-only section links. Both opened the drawer already; what changed is that they no
+            longer hover to two DIFFERENT colours (warn and accent), which made a two-item nav look
+            like two unrelated controls. */}
+        <nav className="hidden items-center gap-1 lg:flex">
+          <NavLink icon="top" label="Top Traders" onClick={toggleDrawer} />
+          <NavLink icon="tours" label="Tournaments" onClick={toggleDrawer} />
         </nav>
       </div>
 
-      <div className="flex min-w-0 items-center gap-1 rounded border border-accent/10 bg-surface-2 px-1.5 py-1 md:gap-3 md:px-3">
-        {/* The balance, on the bar, at EVERY width.
-
-            It used to be `hidden sm:flex`, which hid it on the one device this audience actually
-            trades on: the figure was only on the chart pane's quote band, so a player who had
-            switched to Chat or Top Traders could not see their money at all. The username is the
-            half that goes: a name tells a player nothing they do not know, so below `sm` the block
-            is the figure alone, centred on one line. `min-w-0` + `truncate` because a brand's
-            wallet can run to eight digits and this is the only unbounded thing in the row. */}
-        {authed ? (
-          <div className="flex min-w-0 flex-col items-end justify-center leading-tight">
-            <span className="hidden max-w-[9rem] truncate text-[10px] text-muted sm:block">{user?.username ?? 'Account'}</span>
-            <span className="min-w-0 max-w-[6rem] truncate text-xs font-bold text-fg sm:max-w-[9rem]">{balance}</span>
-          </div>
-        ) : null}
-
+      {/* ── Account and actions ──────────────────────────────────────────────────────────────
+          No enclosing box. The cluster reads as a group because it is spaced as one and separated
+          from the identity block by the flex gap, which is what grouping by proximity means. */}
+      <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
         {authed ? (
           <>
+            {/* Mode + balance, one control, opening the shared Real/Demo panel. */}
+            <CandlestickAccountChip />
+
+            {/* THE primary action, and the only filled colour on this bar. */}
             <button
               type="button"
               onClick={() => openDeposit()}
-              // `px-1.5` and `text-[11px]` on a phone: Deposit stays (it is the one action this bar
-              // exists to offer) but it gives up the padding the balance beside it needs.
-              className="h-8 shrink-0 rounded-md border border-accent px-1.5 text-[11px] font-bold uppercase tracking-wide text-accent transition-colors hover:bg-accent/10 sm:px-2 sm:text-xs md:px-3"
+              className={cn(
+                'h-10 shrink-0 rounded-lg bg-accent px-2.5 text-[11px] font-bold uppercase tracking-wide text-accent-fg sm:px-3 sm:text-xs',
+                'transition hover:brightness-110 active:brightness-95 md:h-9 md:px-4',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
+              )}
             >
               Deposit
             </button>
+
+            {/* Secondary, and deliberately quiet: it used to be a solid RED button, the same hue the
+                charts use for a loss. From `sm` because a 320px bar has no room for a second verb. */}
             <button
               type="button"
               onClick={needAuth(openWithdraw)}
-              className="hidden h-8 shrink-0 rounded-md bg-down px-3 text-xs font-bold uppercase tracking-wide text-fg transition-colors hover:bg-down sm:block"
+              className={cn(
+                'hidden h-10 shrink-0 rounded-lg border border-border px-3 text-xs font-semibold uppercase tracking-wide text-muted',
+                'transition hover:border-fg/30 hover:text-fg sm:block md:h-9',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              )}
             >
               Withdraw
             </button>
@@ -125,14 +118,20 @@ export function CandlestickTopBar() {
             <button
               type="button"
               onClick={() => openAuth('login')}
-              className="h-8 shrink-0 rounded-md border border-border px-2 text-xs font-semibold text-fg transition-colors hover:border-border md:px-3"
+              className={cn(
+                'h-10 shrink-0 rounded-lg px-3 text-xs font-semibold text-fg transition hover:bg-fg/5 md:h-9',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              )}
             >
               Login
             </button>
             <button
               type="button"
               onClick={() => openAuth('register')}
-              className="h-8 shrink-0 rounded-md bg-accent px-2 text-xs font-bold text-accent-fg transition-colors hover:brightness-110 md:px-3"
+              className={cn(
+                'h-10 shrink-0 rounded-lg bg-accent px-3 text-xs font-bold text-accent-fg transition hover:brightness-110 md:h-9 md:px-4',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
+              )}
             >
               Register
             </button>
@@ -143,7 +142,13 @@ export function CandlestickTopBar() {
           type="button"
           onClick={toggleDrawer}
           aria-label="Menu"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg transition-colors hover:bg-fg/5 hover:text-fg"
+          className={cn(
+            // Square and 40px on a phone: an icon-only control is the easiest thing on a bar to
+            // mis-tap, so it gets a full target rather than the 32px it had.
+            'flex h-10 w-9 shrink-0 items-center justify-center rounded-lg text-muted sm:w-10',
+            'transition hover:bg-fg/5 hover:text-fg md:h-9 md:w-9',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          )}
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M4 6h16M4 12h16M4 18h16" />
@@ -154,20 +159,49 @@ export function CandlestickTopBar() {
   );
 }
 
+function NavLink({ icon, label, onClick }: { icon: 'top' | 'tours'; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold uppercase tracking-wide text-muted',
+        'transition hover:bg-fg/5 hover:text-fg',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+      )}
+    >
+      <CIcon name={icon} className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
 /**
- * The mock's two-tone wordmark: the first word in the brand's accent, the rest in the foreground.
+ * The two-tone wordmark: the first word in the brand's accent, the rest in the foreground.
  *
- * The page this copies hard-codes "Mpesa" + "Cash"; this takes the split from the brand's own
- * wordmark, so every brand that wears this screen gets its own name in the same lockup rather than
- * someone else's.
+ * The split comes from the brand's own wordmark, so every brand that wears this screen gets its own
+ * name in the same lockup rather than someone else's. `tracking-tighter` is gone — at `font-black`
+ * and uppercase it was pulling the letters into each other, which is most of why the bar read as
+ * cramped in the first place.
  */
 function Wordmark({ text }: { text: string }) {
   const i = text.indexOf(' ');
   const [a, b] = i > 0 ? [text.slice(0, i), text.slice(i + 1)] : [text, ''];
   return (
-    <span className="block truncate whitespace-nowrap text-sm font-black uppercase leading-none tracking-tighter sm:text-base md:text-xl">
+    <span className="block max-w-[7.5rem] truncate whitespace-nowrap text-base font-extrabold uppercase leading-none tracking-tight text-fg sm:max-w-none sm:text-lg md:text-xl">
       <span className="text-accent">{a}</span>
-      {b ? <span className="text-fg">{b}</span> : null}
+      {/*
+        THE SECOND WORD IS DROPPED ON THE SMALLEST SCREENS, deliberately.
+
+        At 320px the balance, Deposit and the menu need about 250 of the 320 pixels, which left the
+        wordmark around 30 and rendered it as "C…" — a brand nobody can identify, which is worse
+        than no wordmark at all. An ellipsis is what a layout does when it has run out of ideas; a
+        short mark is a decision. So below `sm` the lockup is its FIRST word only ("CPF"), which is
+        how an abbreviated brand mark is supposed to behave, and the full two-tone name returns the
+        moment there is room for it. The `<Link>` still carries the full brand name as its
+        accessible label, so nothing is lost to a screen reader at any width.
+      */}
+      {b ? <span className="hidden sm:inline">{b}</span> : null}
     </span>
   );
 }

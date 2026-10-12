@@ -9,7 +9,11 @@ import { useDisplayMoney } from '@/lib/money';
 import { cn } from '@/lib/cn';
 
 /**
- * The floating "someone just won" card the mock pops over the chart.
+ * The floating "someone just won" card that pops over the chart.
+ *
+ * Shown by the CANDLESTICK and WAVE shells. Not by the broker terminal, which is MetaTrader and has
+ * no social-proof surface, and never to a MARKETER, whose whole skin exists to remove the financial
+ * tells this card is made of.
  *
  * WHERE THE EVENTS COME FROM. The same place the Chat tab's system lines come from, and nowhere
  * else: `GET /api/v1/site/activity` (`api.siteActivity`), on the same query key, the same limit and
@@ -30,7 +34,17 @@ import { cn } from '@/lib/cn';
  * focus, it never swallows a pointer event, and the chart and the ticket stay live underneath it.
  * A card that could eat a tap on Higher/Lower would cost the player a trade.
  */
-export function WinNotice() {
+export function ActivityNotice({ className }: {
+  /**
+   * Where the card sits, as positioning classes on the live region.
+   *
+   * It is a prop because the two shells that show it have different furniture above the chart: the
+   * candlestick screen has one quote band of a known height, the wave has a price strip and a
+   * ticker whose heights vary with the viewport. The default is the candlestick placement; the
+   * wave passes an offset measured from the chart's own box instead of from the top of the screen.
+   */
+  className?: string;
+} = {}) {
   const brand = useBrand();
 
   /**
@@ -86,27 +100,47 @@ export function WinNotice() {
     if (!primed) setPrimed(true);
   }, [items, seen, primed]);
 
-  // ── One at a time, then gone ────────────────────────────────────────────────
+  /**
+   * ── Take the next card off the queue ──────────────────────────────────────
+   *
+   * Nothing but bookkeeping happens here. The TIMERS deliberately live in their own effect below,
+   * and splitting the two is a bug fix rather than tidying:
+   *
+   * this effect writes `current` and `queue`, which were also its own dependencies. So React tore
+   * the effect down the instant it ran — running the cleanup, which cleared the hide and drop
+   * timeouts — and re-ran it, where `if (current)` now returned early and armed nothing. The card
+   * was shown and then never hidden: measured in a real browser, it sat at `opacity: 1` for every
+   * sample across twelve seconds, which is what "it should only last a few seconds" was describing.
+   * `SHOW_MS` had nothing to do with it; no value of it would have helped.
+   */
   useEffect(() => {
     if (current || queue.length === 0) return;
-    const next = queue[0]!;
+    setCurrent(queue[0]!);
     setQueue((q) => q.slice(1));
-    setCurrent(next);
     setShown((n) => n + 1);
+  }, [current, queue]);
 
+  /**
+   * ── The life of the card that is up ───────────────────────────────────────
+   *
+   * Keyed on `current` ALONE, which changes exactly twice per card (null → card → null), so the
+   * timers below are armed once and survive every other render. That is the whole fix.
+   */
+  useEffect(() => {
+    if (!current) return;
     // Painted hidden for one frame so the transition has a state to move FROM; under
     // `prefers-reduced-motion` the transition is off and this frame is simply invisible.
     const raf = requestAnimationFrame(() => setVisible(true));
     const hide = setTimeout(() => setVisible(false), SHOW_MS);
-    // Unmounted only after the exit has run, plus a gap — back-to-back cards with no gap read as
-    // one card flickering rather than as two separate events.
-    const drop = setTimeout(() => setCurrent(null), SHOW_MS + EXIT_MS + GAP_MS);
+    // Dropped only after the exit has run, plus a gap — back-to-back cards with no gap read as one
+    // card flickering rather than as two separate events.
+    const drop = setTimeout(() => { setVisible(false); setCurrent(null); }, SHOW_MS + EXIT_MS + GAP_MS);
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(hide);
       clearTimeout(drop);
     };
-  }, [current, queue]);
+  }, [current]);
 
   if (!current) return null;
 
@@ -131,7 +165,10 @@ export function WinNotice() {
        * its Higher/Lower buttons live in the right-hand rail, and the left of the chart is the one
        * region of this screen with nothing to cover.
        */
-      className="pointer-events-none absolute inset-x-0 top-11 z-30 flex justify-center px-3 md:top-[72px] md:justify-start md:px-6"
+      className={cn(
+        'pointer-events-none absolute inset-x-0 z-30 flex justify-center px-3 md:justify-start md:px-6',
+        className ?? 'top-11 md:top-[72px]',
+      )}
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -245,7 +282,14 @@ const MIN_WITHDRAWAL_CENTS = 100_000;
 const INITIAL_BURST = 3;
 /** How many cards a screen reader hears before the region goes quiet. */
 const MAX_ANNOUNCEMENTS = 3;
-const SHOW_MS = 5_000;
+/**
+ * Three seconds on screen, as specified.
+ *
+ * It is enough to read a name and a figure — which is all the card carries — and short enough that
+ * a card arriving while the player is choosing a stake is gone before it becomes an irritation.
+ * The exit is excluded: `EXIT_MS` runs after this, so the card is legible for the full three.
+ */
+const SHOW_MS = 3_000;
 const EXIT_MS = 300;
 const GAP_MS = 2_500;
 
