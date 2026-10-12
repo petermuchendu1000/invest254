@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { ApiError } from '@/lib/api/client';
 import { useSessionEnd } from '@/lib/auth/operatorSession';
+import { phoneDisplay, isMaskedValue } from '@/lib/auth/phoneMask';
 
 /**
  * Operator sign-in. Deliberately MINIMAL: brand + credentials only. It states nothing about who the
@@ -12,10 +13,11 @@ import { useSessionEnd } from '@/lib/auth/operatorSession';
  */
 
 function Field({
-  label, type, name, value, onChange, placeholder, autoComplete, inputMode, trailing, required,
+  label, type, name, value, onChange, placeholder, autoComplete, inputMode, trailing, required, onFocus, onBlur,
 }: {
   label: string; type: string; name: string; value: string; onChange: (v: string) => void;
   placeholder?: string; autoComplete?: string; inputMode?: 'tel' | 'numeric' | 'text'; trailing?: React.ReactNode; required?: boolean;
+  onFocus?: () => void; onBlur?: () => void;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -26,6 +28,8 @@ function Field({
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onFocus={onFocus}
+          onBlur={onBlur}
           placeholder={placeholder}
           autoComplete={autoComplete}
           inputMode={inputMode}
@@ -45,7 +49,8 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   const [totp, setTotp] = React.useState('');
   const [needsTotp, setNeedsTotp] = React.useState(false);
   const [showPw, setShowPw] = React.useState(false);
-  const [showPhone, setShowPhone] = React.useState(false);   // live-stream safety (see the phone Field)
+  const [showPhone, setShowPhone] = React.useState(false);     // live-stream safety (see the phone Field)
+  const [phoneFocused, setPhoneFocused] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   // Why this screen appeared without being asked for (0196): a five-minute idle timeout ended the
@@ -129,10 +134,15 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
             </div>
           ) : null}
           <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-            {/* Masked by default: operators (and marketers demoing on live streams) sign in on camera,
-                so the real MSISDN must not sit in plain view. Reveal is one tap; the posted value is
-                unchanged. inputMode stays 'tel' so the phone keypad still comes up. */}
-            <Field label="Phone number" type={showPhone ? 'tel' : 'password'} name="phone" inputMode="tel" autoComplete="username" placeholder="07XX XXX XXX" value={phone} onChange={setPhone} trailing={eyeFor(showPhone, () => setShowPhone((v) => !v), 'phone number')} required />
+            {/* Reads as the partial mask 0798****061 at rest (sign-in happens on camera), the real
+                digits while editing — an input renders its own value, so it cannot be masked mid-edit
+                without corrupting what is posted — and the full number once the eye is on. The '*'
+                guard keeps the display mask from ever being read back as input. */}
+            <Field label="Phone number" type="tel" name="phone" inputMode="tel" autoComplete="username" placeholder="07XX XXX XXX"
+              value={phoneDisplay(phone, showPhone, phoneFocused)}
+              onFocus={() => setPhoneFocused(true)} onBlur={() => setPhoneFocused(false)}
+              onChange={(v) => { if (!isMaskedValue(v)) setPhone(v); }}
+              trailing={eyeFor(showPhone, () => setShowPhone((v) => !v), showPhone ? 'phone number' : 'the hidden digits')} required />
             <Field label="Password" type={showPw ? 'text' : 'password'} name="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={setPassword} trailing={eye} required />
             {needsTotp ? (
               <Field label="Authentication code" type="text" name="totp" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={totp} onChange={setTotp} required />

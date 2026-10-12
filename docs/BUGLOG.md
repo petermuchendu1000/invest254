@@ -18,11 +18,18 @@ entry: what, evidence, root cause, impact, and resolution.
   number the user types, or one the client prefills from `/auth/me` (which legitimately returns the full
   number for deposit/withdraw prefill). The leak was entirely client-side and was never in scope.
 - **Impact:** every marketer's real phone number, broadcast to their whole audience, on every demo.
-- **Resolution:** the phone field on both sign-in surfaces is now masked by default
-  (`type={show ? 'tel' : 'password'}`) with a one-tap reveal mirroring the existing password toggle;
-  `inputMode` is unchanged so the numeric keypad still appears and the submitted value is identical.
-  The billing own-number echo now goes through `maskPhoneForDisplay`, and its prefilled field is masked
-  by default too. **Deliberately NOT masked:** the deposit / withdrawal *destination* inputs — you must
+- **Resolution:** the field now shows the house **partial** mask `0798****061` at rest with an eye that
+  reveals the hidden digits — per the owner's requirement, *"not completely hide the number"*. (A first
+  pass used `type="password"`, which the owner rejected as a dots-blob; corrected.) Implemented as
+  `phoneDisplay()` in `apps/web/src/lib/auth/phoneMask.ts`: real digits while the field has FOCUS —
+  an `<input>` renders its own `value`, so masking mid-edit would feed the mask back through `onChange`
+  and silently post `0798061` instead of the real number — mask at rest and on autofill, full number
+  when revealed, and every `onChange` guarded by `isMaskedValue()`. `type="tel"`/`inputMode` unchanged,
+  so keypad and autofill behave as before and the submitted value is identical. Unit-tested in
+  `phoneMask.test.ts`. The billing own-number echo goes through `maskPhoneForDisplay`, and its
+  prefilled field uses the same partial mask. Residual, stated plainly: the digits are visible while
+  the field is actively focused — unavoidable for an editable field, and what the owner asked for.
+  **Deliberately NOT masked:** the deposit / withdrawal *destination* inputs — you must
   be able to read a number back before money moves, and those screens already show the stored number
   masked (only a freshly typed replacement is visible). `/auth/me` still returns the full number, since
   masking it would break deposit/withdraw prefill (a masked string fails `normalizeMsisdn`).

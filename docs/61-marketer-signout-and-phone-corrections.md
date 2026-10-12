@@ -76,17 +76,48 @@ The number a marketer exposes is the one they **type into the website sign-in / 
 rendered plaintext with no hide toggle — while the password field right beneath it already had one.
 Marketers demo the platform on live streams from sign-up onwards, so their real MSISDN was on camera.
 
-Sites found and fixed:
+### The required shape — a PARTIAL mask, not a password blob
+Owner's requirement, verbatim: the field *"should look like `0798***61`, and the user can click the eye
+thing to see the hidden characters, **not completely hide the number**"*. So the field reads as the
+house partial mask `0798****061` (`maskPhoneForDisplay`) — head and tail visible, so you recognise it
+as your own number — and the eye reveals the hidden middle digits. A `type="password"` blob of dots is
+explicitly **not** what is wanted.
+
+### How it is implemented, and why `focused` exists
+`apps/web/src/lib/auth/phoneMask.ts` (unit-tested in `phoneMask.test.ts`):
+
+```ts
+phoneDisplay(real, revealed, focused) => (revealed || focused || !real) ? real : maskPhoneForDisplay(real)
+isMaskedValue(v) => v.includes('*')
+```
+
+An `<input>` renders whatever is in its `value`. Showing the mask *while someone is typing* would feed
+the mask straight back through `onChange`, where the digits-only normaliser would strip the `*` and
+silently post a **different, valid-looking number** (`0798****061` → `0798061`) — on the sign-in field.
+So:
+- **at rest** (not focused, not revealed) → the partial mask. This is the state that is on screen for
+  almost the whole stream, including immediately after browser autofill.
+- **while focused** → the real digits, because you cannot type into or correct a value you cannot see.
+- **eye on** → the full number, without needing focus, and it stays shown.
+- every `onChange` is guarded by `isMaskedValue`, so a masked value can never be read back as input.
+
+Sites fixed:
 
 | Site | Was | Now |
 |---|---|---|
-| `auth/AuthModal.tsx` phone field (serves **signin + signup + reset**) | `type="tel"`, plaintext, no toggle | `type={showPhone ? 'tel' : 'password'}`, masked by default + one-tap reveal |
-| `auth/AdminSignIn.tsx` phone field (operator sign-in) | same | same |
+| `auth/AuthModal.tsx` phone field (serves **signin + signup + reset**) | `type="tel"`, full number plaintext, no toggle | `phoneDisplay(...)` → `0798****061` at rest, eye reveals |
+| `auth/AdminSignIn.tsx` phone field (operator sign-in) | same | same (its local `Field` gained `onFocus`/`onBlur`) |
 | `billing/parts.tsx` "Enter your M-Pesa PIN on **{phone}**" | raw own number | `maskPhoneForDisplay(phone)` |
-| `billing/parts.tsx` phone input, prefilled from `me.phone` | plaintext prefill | masked by default + Show/Hide |
+| `billing/parts.tsx` phone input, prefilled from `me.phone` | plaintext prefill | `phoneDisplay(...)` + Show/Hide |
 
-`inputMode` is unchanged on every field, so the numeric keypad still comes up, and the **submitted
-value is identical** — only the rendering changes.
+`type` stays `tel` and `inputMode` is unchanged on every field, so the numeric keypad and autofill
+behave exactly as before, and the **submitted value is identical** — only the rendering changes.
+
+### Residual exposure, stated plainly
+While the field has focus the digits are visible. That is unavoidable for an editable field (and the
+owner asked for a partially-visible number, not a blob). What this closes is the resting state: the
+number is masked before focus, after blur, and immediately on autofill — i.e. for all of the stream
+except the seconds spent actively typing it.
 
 ### Deliberately NOT changed (and why)
 - **Deposit / withdrawal destination inputs** (`DepositForm`, `WithdrawForm`): you must be able to read

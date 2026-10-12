@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatKes } from '@invest254/shared/money';
 import { maskPhoneForDisplay } from '@/lib/wallet/format';
+import { phoneDisplay, isMaskedValue } from '@/lib/auth/phoneMask';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -95,8 +96,11 @@ export function PayNowModal({ invoiceId, open, onClose }: { invoiceId: string | 
   const me = useSession((s) => s.user);
   const [phone, setPhone] = React.useState('');
   // This field is PREFILLED with the signed-in user's own MSISDN, and billing is walked through on
-  // live streams — so it starts masked. Reveal is one tap; the value sent is unchanged.
+  // live streams — so it reads as the partial mask at rest. Reveal is one tap; the value sent is
+  // unchanged. `phoneFocused` is why: an input renders its own value, so it must show the real digits
+  // while being edited (see the field below).
   const [showPhone, setShowPhone] = React.useState(false);
+  const [phoneFocused, setPhoneFocused] = React.useState(false);
   const [sentAt, setSentAt] = React.useState<number | null>(null);
   const [paymentId, setPaymentId] = React.useState<string | null>(null);
   const pay = usePayNow();
@@ -131,12 +135,20 @@ export function PayNowModal({ invoiceId, open, onClose }: { invoiceId: string | 
             <div className="flex justify-between"><span className="text-muted">Amount</span><span className="font-semibold tabular-nums">{formatKes(shown)}</span></div>
             {shown !== due ? <p className="mt-1 text-xs text-muted">Rounded up to whole shillings; the extra is credited to your next invoice.</p> : null}
           </div>
-          <Input label="M-Pesa phone number" type={showPhone ? 'tel' : 'password'} inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0712 345 678"
+          {/* Prefilled with the signed-in user's own number, and billing is walked through on camera:
+              reads as the partial mask 0798****061 at rest, the real digits while editing (an input
+              renders its own value), full number on Show. The '*' guard stops the display mask ever
+              being read back as input. */}
+          <Input label="M-Pesa phone number" type="tel" inputMode="tel" autoComplete="tel" placeholder="0712 345 678"
+            value={phoneDisplay(phone, showPhone, phoneFocused)}
+            onFocus={() => setPhoneFocused(true)}
+            onBlur={() => setPhoneFocused(false)}
+            onChange={(e) => { if (!isMaskedValue(e.target.value)) setPhone(e.target.value); }}
             trailing={
               <button
                 type="button"
                 onClick={() => setShowPhone((v) => !v)}
-                aria-label={showPhone ? 'Hide phone number' : 'Show phone number'}
+                aria-label={showPhone ? 'Hide phone number' : 'Show the hidden digits'}
                 className="px-2 text-[12px] font-medium text-muted transition hover:text-fg"
               >
                 {showPhone ? 'Hide' : 'Show'}
