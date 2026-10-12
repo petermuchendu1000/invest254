@@ -31,7 +31,7 @@ export function registerActivityRoutes(router: Router, deps: ApiDeps): void {
     const host = ctx.query.get("host")?.trim().toLowerCase();
     if (!host) throw new ApiError("VALIDATION", "host query parameter is required", 400);
     const brand = await deps.brandByHost(host);
-    if (!brand) throw new ApiError("SITE_NOT_FOUND", `no active brand for host '${host}'`, 404);
+    if (!brand) throw new ApiError("SITE_NOT_FOUND", "no active brand for this host", 404);
 
     const raw = Number.parseInt(ctx.query.get("limit") ?? "", 10);
     const limit = Number.isFinite(raw) && raw > 0 ? Math.min(raw, MAX) : DEFAULT;
@@ -69,7 +69,7 @@ export function registerActivityRoutes(router: Router, deps: ApiDeps): void {
     const host = ctx.query.get("host")?.trim().toLowerCase();
     if (!host) throw new ApiError("VALIDATION", "host query parameter is required", 400);
     const brand = await deps.brandByHost(host);
-    if (!brand) throw new ApiError("SITE_NOT_FOUND", `no active brand for host '${host}'`, 404);
+    if (!brand) throw new ApiError("SITE_NOT_FOUND", "no active brand for this host", 404);
 
     /**
      * BOTH AXES ARE VALIDATED HERE, AGAINST A CLOSED SET OF LITERALS, and that is not a formality:

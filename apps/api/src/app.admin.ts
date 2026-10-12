@@ -84,8 +84,13 @@ async function domain<T>(fn: () => Promise<T>): Promise<T> {
     if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     // A Postgres CHECK violation (e.g. the economy-feasibility / min-house-edge guard) surfaces as a
-    // constraint-violation message, not a "CODE: ..." domain error — map it to a clean 422.
-    if (/site_cfg_feasible/.test(message)) throw new ApiError("site_cfg_feasible", message, 422);
+    // constraint-violation message, not a "CODE: ..." domain error — map it to a clean 422 with a
+    // CURATED message. The raw pg text named the table + constraint ("violates check constraint
+    // \"site_cfg_feasible\" on \"site_game_config\""), which told a client this is Postgres and
+    // leaked a schema object name; the code is enough for the client, the detail is in the log.
+    if (/site_cfg_feasible/.test(message)) {
+      throw new ApiError("site_cfg_feasible", "That economy configuration is not feasible — check RTP, win-rate and the minimum house edge.", 422);
+    }
     const code = message.split(":")[0]!.trim();
     const status = ADMIN_STATUS[code];
     if (status) throw new ApiError(code, message, status);

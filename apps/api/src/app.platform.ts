@@ -139,10 +139,14 @@ async function domain<T>(fn: () => Promise<T>): Promise<T> {
   } catch (err) {
     if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : String(err);
-    // Surface the Postgres CHECK name for an infeasible economy as a clean 422.
-    const code = /site_cfg_feasible/.test(message) ? "site_cfg_feasible" : message.split(":")[0]!.trim();
+    // Map the Postgres economy-feasibility CHECK to a clean 422 with a CURATED message — never the
+    // raw pg text, which names the table + constraint and leaks that this is Postgres / a schema
+    // object. The code is enough for the client; the detail is in the server-side log.
+    const feasible = /site_cfg_feasible/.test(message);
+    const code = feasible ? "site_cfg_feasible" : message.split(":")[0]!.trim();
     const status = PLATFORM_STATUS[code];
     if (code === "CONFIG_CHANGE_RATE_LIMIT") throw new ApiError(code, "6 economy changes in the last hour for this brand. Try again later.", 429);
+    if (feasible) throw new ApiError("site_cfg_feasible", "That economy configuration is not feasible — check RTP, win-rate and the minimum house edge.", 422);
     if (status) throw new ApiError(code, message, status);
     throw err;
   }

@@ -148,7 +148,10 @@ function applyCors(req: IncomingMessage, res: ServerResponse, brandAllows?: (ori
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-User-Id,X-User-Role");
+  // Advertise only the headers a real browser client sends. X-User-Id / X-User-Role are the
+  // DEV-ONLY header-auth path (inert in production, which boots with a verifier); advertising them
+  // just told an attacker which header-auth bypass to try, so they are no longer announced.
+  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
   res.setHeader("Access-Control-Max-Age", "86400");
 }
 
@@ -372,9 +375,11 @@ export class Router {
         status = writeResult(res, result);
         return;
       }
-      // Path exists but method does not → 405; otherwise 404.
-      if (matchedPath) throw new ApiError("METHOD_NOT_ALLOWED", `${method} not allowed on ${path}`, 405);
-      throw new ApiError("NOT_FOUND", `no route for ${method} ${path}`, 404);
+      // Path exists but method does not → 405; otherwise 404. The messages are deliberately generic
+      // and do NOT echo the attacker-supplied method/path back: a reflected path is both a (minor)
+      // XSS-shaped surface and free reconnaissance. The concrete request is in the server-side log.
+      if (matchedPath) throw new ApiError("METHOD_NOT_ALLOWED", "method not allowed", 405);
+      throw new ApiError("NOT_FOUND", "not found", 404);
     } catch (err) {
       errObj = err;
       status = writeError(res, err);
@@ -465,7 +470,10 @@ function writeError(res: ServerResponse, err: unknown): number {
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   if (res.headersSent) return;
   const payload = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  // `no-store` on every JSON response: this is an authenticated money API, and several responses
+  // carry bearer tokens (login/register/refresh). Nothing here is safe for a shared cache or an
+  // intermediary to retain, and the API is not CDN-cached, so there is no cost to forbidding it.
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   res.end(payload);
 }
 
