@@ -52,6 +52,8 @@
   --mt5-green: #41be56;
   --mt5-green-deep: #2e9d41;
   --mt5-red: #f23645;
+  /* "syncing" — the connection dot's middle state, between green (live) and red (dropped). */
+  --mt5-amber: #f0b90b;
 }
 
 html.light {
@@ -65,6 +67,7 @@ html.light {
   --mt5-green: #1e9e38;
   --mt5-green-deep: #17802c;
   --mt5-red: #d32030;
+  --mt5-amber: #b8860b;
 }
 
 /* native checkboxes/radios/ranges follow the brand accent and the theme */

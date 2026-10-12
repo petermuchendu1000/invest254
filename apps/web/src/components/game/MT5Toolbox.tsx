@@ -33,6 +33,7 @@ import {
 import { ticketLabel, type ActivePosition, type PendingOrderDto } from '@/lib/game/betting';
 import { PENDING_LABELS } from '@invest254/shared/pending';
 import { useVolumeDigits } from '@/lib/game/volumeDigits';
+import { LiveBadge } from '@/components/ui/LiveBadge';
 import { cn } from '@/lib/cn';
 import { PaneSplitter, usePanelHeight } from '@/components/game/PaneSplitter';
 import {
@@ -366,8 +367,7 @@ export function MT5Toolbox() {
             </span>
           ) : null}
           {openPositions.length ? <span className="rounded bg-[var(--mt5-blue)]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--mt5-blue)]">{openPositions.length} open</span> : null}
-          <span className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[var(--mt5-green)]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[var(--mt5-red)]')}
-            title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'} />
+          <LiveBadge status={status} showLabel={false} variant="terminal" />
           <span className={cn('text-[var(--mt5-muted)] transition', open && 'rotate-180')} aria-hidden>▾</span>
         </span>
       </button>
@@ -529,6 +529,13 @@ export function MT5Toolbox() {
                     </li>
                   ))}
                 </ul>
+              ) : notifications.isLoading ? (
+                /* "No messages." used to be printed while the fetch was still in flight, and again
+                   identically when it failed — so an outage looked like an empty mailbox. The News
+                   tab in this same file has always made all three distinct; this matches it. */
+                <Empty>Loading messages…</Empty>
+              ) : notifications.isError ? (
+                <Empty>Mailbox unavailable. Retrying…</Empty>
               ) : (
                 <Empty>No messages.</Empty>
               )

@@ -18,6 +18,7 @@ import { isContinuousBrand } from '@/lib/game/levelWatch';
 import { LivePnl } from '@/components/game/LivePnl';
 import { useLivePrice } from '@/components/game/candlestick/useLivePrice';
 import { useCandlestickUi } from '@/components/game/candlestick/ui';
+import { dataPhaseOf, tradeDisabledReason } from '@/lib/ui/dataPhase';
 
 /**
  * The candlestick screen's order entry, laid out exactly as the mock lays it out: the two sides,
@@ -152,6 +153,18 @@ export function TradingPanel({ className }: { className?: string }) {
           SELL
         </button>
       </div>
+
+      {/* Two dead buttons with no explanation is the same dead state as a blank chart, in a control.
+          Both reasons they can be dead are named — the feed, and a contract already in flight. The
+          second is not self-evident: its live P&L panel is far below the stake fields and is off the
+          fold on a phone. Nothing renders once the panel works, so the mock's spacing is kept. */}
+      {connecting || activePosition ? (
+        <p className="-mt-4 mb-4 text-center text-[11px] text-muted" role="status" aria-live="polite">
+          {connecting
+            ? tradeDisabledReason(dataPhaseOf(status, false))
+            : 'Trade in progress — one at a time on this market.'}
+        </p>
+      ) : null}
 
       {/*
         Two fields across, as the mock has them. The panel is only ~288px wide at 320px and 320px

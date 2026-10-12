@@ -12,6 +12,7 @@ import { useGameSocket } from '@/lib/game/GameSocketProvider';
 import { useOnlineDisplay, isStaffRole } from '@/lib/game/onlineDisplay';
 import { usePlayerChat, useSendChat, useMarkChatRead } from '@/lib/chat/liveChat';
 import { ChatComposer } from '@/components/chat/ChatParts';
+import { LiveBadge } from '@/components/ui/LiveBadge';
 import { cn } from '@/lib/cn';
 
 /**
@@ -51,7 +52,8 @@ export function ChatPane() {
    * number to keep honest, and the two would eventually disagree on the same screen.
    */
   const displayOnline = useOnlineDisplay(online, role);
-  const { data } = usePlayerChat(true, 3_000);
+  const chatQ = usePlayerChat(true, 3_000);
+  const { data } = chatQ;
   const send = useSendChat();
   const markRead = useMarkChatRead();
 
@@ -60,7 +62,7 @@ export function ChatPane() {
    * connection beside the price one for something nobody is waiting on. 20s is slower than the
    * chat's own 3s for the same reason.
    */
-  const { data: activity } = useQuery({
+  const activityQ = useQuery({
     queryKey: ['siteActivity', brand.slug],
     // The server caps at 40 and the query has no time filter, so asking for the cap is simply "as
     // full as this brand's history allows". Asking for the full 40 also gives the rotation below
@@ -82,7 +84,7 @@ export function ChatPane() {
    * and the memo runs exactly once per response.)
    */
   const pool = useMemo<Row[]>(() => {
-    const rows = activity?.items ?? [];
+    const rows = activityQ.data?.items ?? [];
     const receivedAt = Date.now();
     // React keys must survive a rotation, so they are derived from the ROW's content rather than
     // its position: a line that stays on screen across a roll keeps its key, keeps its DOM node and
@@ -96,7 +98,7 @@ export function ChatPane() {
       return { item, key: `${base}#${n}`, receivedAt };
     });
     return prepared.sort((a, b) => a.item.agoSeconds - b.item.agoSeconds);
-  }, [activity]);
+  }, [activityQ.data]);
 
   /**
    * ROTATION — which of the pool's rows are on screen right now.
@@ -148,7 +150,9 @@ export function ChatPane() {
     <div className="flex h-full w-full min-w-0 flex-col bg-bg">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2.5 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-fg">
-          <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent" />
+          {/* Gated on the socket. This dot used to pulse accent unconditionally, so a dropped feed
+              still advertised a live room — the same false claim the quote band was making. */}
+          <LiveBadge status={status} showLabel={false} dotClassName="h-2 w-2" />
           <span className="truncate">Live Chat</span>
         </div>
         {showOnline ? (
@@ -161,8 +165,36 @@ export function ChatPane() {
       </div>
 
       <div className="min-h-0 w-full min-w-0 flex-1 space-y-2 overflow-y-auto bg-bg px-3 py-2">
+        {/*
+          "Nothing has happened here yet today" is a CLAIM about the brand, and it used to be made
+          on the first paint — before either query had answered — then contradicted a moment later
+          when the rows arrived. It is now made only once we have actually been told so.
+
+          The chat query is `enabled: !!token`, so for a signed-out viewer it sits pending forever;
+          `isLoading` (pending AND fetching) is what keeps that from pinning the skeleton on. The
+          activity query is always enabled, so its `isPending` is the real first-load signal.
+        */}
         {pool.length === 0 && messages.length === 0 ? (
-          <p className="px-2 py-6 text-center text-xs italic text-muted">Nothing has happened here yet today.</p>
+          activityQ.isPending || chatQ.isLoading ? (
+            <div className="space-y-2" aria-hidden>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="flex items-center gap-2 px-2">
+                  <div className="h-6 w-6 shrink-0 animate-pulse rounded-full bg-surface-2" />
+                  <div
+                    className="h-3 animate-pulse rounded bg-surface-2"
+                    style={{ width: `${55 + ((i * 13) % 35)}%` }}
+                  />
+                </div>
+              ))}
+              <span className="sr-only" role="status" aria-live="polite">Loading recent activity…</span>
+            </div>
+          ) : activityQ.isError ? (
+            <p className="px-2 py-6 text-center text-xs text-muted">
+              Couldn&apos;t load recent activity. Retrying…
+            </p>
+          ) : (
+            <p className="px-2 py-6 text-center text-xs italic text-muted">Nothing has happened here yet today.</p>
+          )
         ) : null}
 
         {shown.map((row) => (

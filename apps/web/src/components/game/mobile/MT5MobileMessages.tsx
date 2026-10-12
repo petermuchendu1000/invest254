@@ -45,10 +45,23 @@ export function MT5MobileMessages() {
                   on a chat that has new messages. Neither is here: a notification carries no read
                   state in this API, so a count would be the total dressed up as unread and the
                   circle would be on every row for ever. The count belongs with a read flag. */}
-              <span className="ml-auto font-mono text-[10px] text-[var(--mt5-muted)] tabular-nums">{items.length}</span>
+              <span className="ml-auto font-mono text-[10px] text-[var(--mt5-muted)] tabular-nums">
+                {notifications.isLoading ? '—' : items.length}
+              </span>
             </div>
             {items.length === 0 ? (
-              <p className="px-3 py-6 text-center text-[11px] text-[var(--mt5-muted)]">No messages.</p>
+              /* Three states, not one. The bare "No messages." was printed during the fetch and on
+                 a failed fetch as well, so a broker outage was indistinguishable from an empty
+                 mailbox — and the count beside the header read 0 to agree with it. */
+              notifications.isLoading ? (
+                <p className="px-3 py-6 text-center text-[11px] text-[var(--mt5-muted)]" role="status" aria-live="polite">
+                  Loading messages…
+                </p>
+              ) : notifications.isError ? (
+                <p className="px-3 py-6 text-center text-[11px] text-[var(--mt5-muted)]">Mailbox unavailable. Retrying…</p>
+              ) : (
+                <p className="px-3 py-6 text-center text-[11px] text-[var(--mt5-muted)]">No messages.</p>
+              )
             ) : (
               <ul className="divide-y divide-[var(--mt5-border)]">
                 {items.map((n) => (

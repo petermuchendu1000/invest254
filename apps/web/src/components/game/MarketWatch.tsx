@@ -33,6 +33,7 @@ import {
 import { DURATION_OPTIONS, durationLabel } from '@/components/game/MT5OrderTicket';
 import { MT5OneClickTrading } from '@/components/game/MT5OneClickTrading';
 import { MT5TicksChart } from '@/components/game/MT5TicksChart';
+import { LiveBadge } from '@/components/ui/LiveBadge';
 import { cn } from '@/lib/cn';
 
 /**
@@ -392,10 +393,7 @@ export function MarketWatch({ className, phone = false, onChart, onNewOrder }: {
             </svg>
           </button>
         ) : null}
-        <span
-          className={cn('h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-[var(--mt5-green)]' : status === 'connecting' ? 'bg-[#f0b90b]' : 'bg-[var(--mt5-red)]')}
-          title={status === 'open' ? 'Live' : status === 'connecting' ? 'Syncing' : 'Offline'}
-        />
+        <LiveBadge status={status} showLabel={false} variant="terminal" />
       </div>
       )}
 

@@ -48,7 +48,14 @@ export function VolatilitySelector({
 }: {
   instrument: Instrument;
   price: number | null;
-  changePct: number;
+  /**
+   * Null until the tick window has actually been measured.
+   *
+   * It used to be a plain `number` defaulting to 0, so before the first tick the trigger printed a
+   * GREEN "+0.00%" — a signed, coloured change figure — right beside a `-` where the price should
+   * be. A dash is an honest absence; a green zero is a claim.
+   */
+  changePct: number | null;
   onSelect: (inst: Instrument) => void;
   /** Wide toolbar trigger (icon · bold full label · live price+change · edit affordance). */
   wide?: boolean;
@@ -80,7 +87,7 @@ export function VolatilitySelector({
     setOpen((v) => !v);
   };
 
-  const chgPos = changePct >= 0;
+  const chgPos = (changePct ?? 0) >= 0;
   const leaf = instrument.short.replace(/^Vol\s*/, ''); // e.g. "10 (1s)"
 
   return (
@@ -106,9 +113,11 @@ export function VolatilitySelector({
             {isMarketer ? null : (
               <span className="truncate text-[10px] font-medium tabular-nums text-muted">
                 {price != null ? price.toFixed(2) : '-'}
-                <span className={cn('ml-1 font-semibold', chgPos ? 'text-up' : 'text-down')}>
-                  {chgPos ? '+' : ''}{changePct.toFixed(2)}%
-                </span>
+                {changePct == null ? null : (
+                  <span className={cn('ml-1 font-semibold', chgPos ? 'text-up' : 'text-down')}>
+                    {chgPos ? '+' : ''}{changePct.toFixed(2)}%
+                  </span>
+                )}
               </span>
             )}
           </span>
@@ -135,7 +144,7 @@ export function VolatilitySelector({
           <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span className="text-[13px] font-bold text-fg">{isMarketer ? (instrument.label.match(/\d+/)?.[0] ?? '') : leaf}</span>
-        {isMarketer ? null : (
+        {isMarketer || changePct == null ? null : (
           <span className={cn('ml-0.5 text-[10px] font-semibold tabular-nums', chgPos ? 'text-up' : 'text-down')}>
             {chgPos ? '+' : ''}{changePct.toFixed(2)}%
           </span>

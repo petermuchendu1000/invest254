@@ -20,7 +20,8 @@ import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { MK } from '@/lib/marketer/labels';
 import { play } from '@/lib/sound/sound';
 import { useInvalidateDigitHistory } from '@/lib/game/useDigitHistory';
-import { useGameSocketApi, useInstrumentResetKey, type DigitSettledData } from '@/lib/game/GameSocketProvider';
+import { useGameSocket, useGameSocketApi, useInstrumentResetKey, type DigitSettledData } from '@/lib/game/GameSocketProvider';
+import { dataPhaseOf, tradeDisabledReason } from '@/lib/ui/dataPhase';
 import { instrumentById, DEFAULT_INSTRUMENT_ID, type Instrument } from '@/lib/game/instruments';
 import { payoutForStake, stakeForPayout } from '@/lib/game/digitPayout';
 import { useStakeLimits } from '@/lib/game/useStakeLimits';
@@ -106,6 +107,9 @@ export function DigitsTradeScreen() {
   const [instId, setInstId] = useState<string>(DEFAULT_INSTRUMENT_ID);
   const instrument: Instrument = instrumentById(instId);
   const { getInstrumentTicks, getLastInstrumentTick, subscribeInstrument, openDigit, onDigitSettled, onDigitRejected, onDigitOpened } = useGameSocketApi();
+  /* Read ONLY to say what the screen is waiting for. Until now nothing under `digits/` consumed the
+     connection state at all, which is why every one of this shell's dead states was silent. */
+  const { status } = useGameSocket();
   const instrumentResetKey = useInstrumentResetKey();
   useMultiplierSync(); // multiplier positions survive tab switches (BUGLOG #98)
   const { both, symbol, isForeign, toKesCents, toDisplay } = useDisplayMoney();
@@ -211,7 +215,16 @@ export function DigitsTradeScreen() {
   // A MANUAL trade blocked for lack of funds -> explicit top-up modal (current/required/shortfall).
   const [needFunds, setNeedFunds] = useState<InsufficientFundsInfo | null>(null);
 
-  const [snap, setSnap] = useState<{ price: number; digit: number | null; changePct: number; freqs: number[] }>({
+  /**
+   * The live snapshot driving the price, the change %, the digit row and the payout maths.
+   *
+   * `ready` matters as much as the figures: every field here has a plausible-looking zero value, so
+   * before the first tick the screen used to assert a price of 0, a green "+0.00%", and ten digit
+   * shares of "0.0%" — numbers indistinguishable from real ones. Nothing derived from this snapshot
+   * is shown as a figure until `ready` is true.
+   */
+  const [snap, setSnap] = useState<{ ready: boolean; price: number; digit: number | null; changePct: number; freqs: number[] }>({
+    ready: false,
     price: 0,
     digit: null,
     changePct: 0,
@@ -428,7 +441,7 @@ export function DigitsTradeScreen() {
         const win = Math.min(n, WINDOW);
         const counts = Array<number>(10).fill(0);
         for (let i = n - win; i < n; i++) { const dd = lastDigitOf(ticks[i]!.rate); counts[dd] = (counts[dd] ?? 0) + 1; }
-        setSnap({ price: last.rate, digit, changePct, freqs: counts.map((c) => (c / win) * 100) });
+        setSnap({ ready: true, price: last.rate, digit, changePct, freqs: counts.map((c) => (c / win) * 100) });
       }
 
       // AUTO: one decision whenever nothing is in play (autoBot.ts).
@@ -483,6 +496,16 @@ export function DigitsTradeScreen() {
   }, [snap.freqs, market, barrier, pick]);
   const shareLabel =
     market === 'evenodd' ? 'Even share' : market === 'overunder' ? `Over ${barrier} share` : `Digit ${pick} share`;
+
+  /**
+   * Why the screen is not tradable yet, in words — the digits shell's missing affordance.
+   *
+   * Both BUY cards derive their payout from `snap.freqs`, so with no ticks `winProbability` is 0,
+   * `ctaMeta` disables them, and the player was left looking at two cards faded to 40% opacity
+   * showing a payout figure and no reason at all. This is the reason, and it takes precedence over
+   * `stakeHint` because a feed that has not arrived is the cause of everything else being wrong.
+   */
+  const feedHint = tradeDisabledReason(dataPhaseOf(status, snap.ready));
 
   // Round a cents figure into the input's display-currency string (whole units for KES brands).
   const toAmountStr = (cents: number) =>
@@ -641,12 +664,13 @@ export function DigitsTradeScreen() {
               ) : null}
             </div>
             <div className="min-w-0">
-              <VolatilitySelector wide instrument={instrument} price={snap.price || null} changePct={snap.changePct}
+              <VolatilitySelector wide instrument={instrument} price={snap.price || null} changePct={snap.ready ? snap.changePct : null}
                 onSelect={(i) => { setInstId(i.id); halt(); }} />
             </div>
-            <span title={`${shareLabel} over the last ${WINDOW} ticks`}
+            <span title={snap.ready ? `${shareLabel} over the last ${WINDOW} ticks` : `${shareLabel} — counting ticks`}
               className="ml-auto shrink-0 rounded-lg border border-border bg-surface px-2 py-1 text-[11px] font-semibold tabular-nums text-fg">
-              {Math.round(sharePct)}%
+              {/* A share of "0%" before any tick is counted is a measurement nobody took. */}
+              {snap.ready ? `${Math.round(sharePct)}%` : '—'}
             </span>
           </div>
 
@@ -663,6 +687,7 @@ export function DigitsTradeScreen() {
               drawMode={drawMode}
               onLineDrawn={() => setDrawMode(false)}
               marketer={isMarketer}
+              status={status}
             />
             {/* drawing tools (desktop) */}
             <div className="absolute left-2 top-14 z-10 hidden flex-col gap-1 lg:flex">
@@ -700,7 +725,7 @@ export function DigitsTradeScreen() {
           </div>
         </div>
 
-        {!multi ? <DigitHeatmap freqs={snap.freqs} current={snap.digit} /> : null}
+        {!multi ? <DigitHeatmap freqs={snap.freqs} current={snap.digit} ready={snap.ready} /> : null}
       </div>
 
       {/* Right: trading console */}
@@ -806,7 +831,11 @@ export function DigitsTradeScreen() {
           <span className="font-mono text-[18px] font-bold tabular-nums text-fg">{amt.num(readout)} <span className="text-[11px] font-medium text-muted">{amt.code}</span></span>
         </div>
 
-        {stakeHint ? <p className="text-center text-[11px] text-warn">{stakeHint}</p> : null}
+        {feedHint ? (
+          <p className="text-center text-[11px] text-muted" role="status" aria-live="polite">{feedHint}</p>
+        ) : stakeHint ? (
+          <p className="text-center text-[11px] text-warn">{stakeHint}</p>
+        ) : null}
 
         {/* AUTO settings */}
         {mode === 'auto' ? (

@@ -1,8 +1,10 @@
  'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CURVE_AMPLITUDE, CURVE_BASE_RATE } from '@invest254/shared/config';
-import type { Tick } from '@/lib/game/types';
+import type { Tick, ConnStatus } from '@/lib/game/types';
+import { ChartPlaceholder } from '@/components/ui/ChartPlaceholder';
+import { dataPhaseOf, phaseIsBlocking } from '@/lib/ui/dataPhase';
 
 interface Colors {
   up: string;
@@ -86,6 +88,7 @@ export function CurveCanvas({
   marketer = false,
   numbers = true,
   beat,
+  status = 'open',
 }: {
   getTicks: () => Tick[];
   getLastTick: () => Tick | null;
@@ -109,8 +112,36 @@ export function CurveCanvas({
   /** MARKETER: live round progress + settlement, for the anticipation beat (perimeter charge meter
    *  + live-point pulse + payoff burst). Ignored unless `marketer` is set. */
   beat?: MarketerBeat;
+  /**
+   * The socket's state, used ONLY to word the empty view.
+   *
+   * The canvas painted its own "Waiting for live ticks…" at 12px, unthemed, and invisible to a
+   * screen reader (the canvas carries a static `aria-label`). Worse, it could not tell a first
+   * connection from a dropped one, because the connection state never reached here. Optional, so
+   * the phone order ticket can keep mounting this without one.
+   */
+  status?: ConnStatus;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  /**
+   * Is the canvas drawing anything RIGHT NOW (does the window hold at least two points)?
+   *
+   * Live rather than latched, unlike the chart components: those keep their last picture across a
+   * drop, so they must not re-blank. This canvas does not — `drawEmpty` clears it the moment the
+   * window empties, so a wave whose feed stops ticking for a whole window really is a blank box,
+   * and that is exactly when the words are needed. The canvas painted them itself before; this is
+   * the same condition, now in the DOM.
+   *
+   * Written from the render loop, which runs every frame, so the ref guards the one `setState` to
+   * the two genuine transitions.
+   */
+  const [curveEmpty, setCurveEmpty] = useState(true);
+  const emptyRef = useRef(true);
+  const markEmpty = (next: boolean) => {
+    if (emptyRef.current === next) return;
+    emptyRef.current = next;
+    setCurveEmpty(next);
+  };
   const windowRef = useRef(windowMs);
   windowRef.current = windowMs;
   const marketerRef = useRef(marketer);
@@ -308,11 +339,10 @@ export function CurveCanvas({
       ctx.clearRect(0, 0, cssW, cssH);
       const { Y, y0 } = geom();
       if (marketerRef.current) { drawZones(y0); drawDivider(Y); } else drawAxis(Y);   // MARKETER: tint + divider
-      ctx.fillStyle = colors.muted;
-      ctx.font = '12px ui-sans-serif, system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillText(marketerRef.current ? 'Loading…' : 'Waiting for live ticks…', cssW / 2, y0 - 8);
+      /* The wording used to be painted HERE, in 12px canvas text: unthemed, unreadable by a screen
+         reader, and unable to tell a first connect from a drop because the status never reached
+         this file. It is now a DOM overlay below, so it inherits the brand's type and colours and
+         announces itself. The axis/zones above still draw, so the frame is not empty either. */
     };
 
     const render = () => {
@@ -332,9 +362,11 @@ export function CurveCanvas({
         if (t.t >= start) pts.push(t);
       }
       if (pts.length < 2) {
+        markEmpty(true);
         drawEmpty();
         return;
       }
+      markEmpty(false);
       // decimate for very dense windows
       if (pts.length > 800) {
         const step = Math.ceil(pts.length / 800);
@@ -463,5 +495,19 @@ export function CurveCanvas({
     };
   }, [getTicks, getLastTick]);
 
-  return <canvas ref={canvasRef} className="h-full w-full" aria-label={marketer ? 'Live game motion' : 'Live price curve'} role="img" />;
+  const phase = dataPhaseOf(status, !curveEmpty);
+  return (
+    <div className="relative h-full w-full">
+      <canvas ref={canvasRef} className="h-full w-full" aria-label={marketer ? 'Live game motion' : 'Live price curve'} role="img" />
+      {phaseIsBlocking(phase) ? (
+        <ChartPlaceholder
+          phase={phase}
+          /* MARKETER: never the words "market data" and never the candle skeleton — the whole
+             neutralised wave exists so this surface does not read as a trading chart. */
+          subject={marketer ? 'the round' : 'live ticks'}
+          showSkeleton={!marketer}
+        />
+      ) : null}
+    </div>
+  );
 }

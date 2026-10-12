@@ -208,7 +208,9 @@ export function GameCurve({ phone = false, levelStakeCents = 0, fullScreen, onFu
           settledSymbol={defaultSymbol}
         />
       ) : (
-        <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} />
+        /* `status` reached CandleChart above but never the wave, which is why the wave's empty view
+           could not tell "connecting" from "dropped". */
+        <CurveCanvas getTicks={getTicks} getLastTick={getLastTick} windowMs={WINDOW_MS} marketer={isMarketer} beat={beat} status={status} />
       )}
       {gearHere ? <div className="absolute right-2 top-2 z-20"><InterfaceModeToggle /></div> : null}
     </div>
