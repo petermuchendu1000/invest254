@@ -1,27 +1,75 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { PriceHeader } from '@/components/game/PriceHeader';
 import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
 import { BetPanel } from '@/components/game/BetPanel';
-import { MT5Toolbox } from '@/components/game/MT5Toolbox';
-import { MarketWatch } from '@/components/game/MarketWatch';
-import { MT5OrderTicket } from '@/components/game/MT5OrderTicket';
-import { MT5Chrome } from '@/components/game/MT5Chrome';
 import { cn } from '@/lib/cn';
-import { DigitsTradeScreen } from '@/components/game/digits/DigitsTradeScreen';
-import { CandlestickTradeScreen } from '@/components/game/candlestick/CandlestickTradeScreen';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { isBrokerTerminalBrand } from '@/lib/ui/terminalScreen';
 import { resolveTradeUi, useTradeUiOverride } from '@/lib/ui/tradeUi';
 import { useRestoreSymbolSet } from '@/lib/game/symbolSet';
 import { useRestoreChartSymbol, useQuoteSubscription } from '@/lib/game/chartSymbol';
-import { MT5MobileShell } from '@/components/game/mobile/MT5MobileShell';
 import { useIsPhone } from '@/lib/ui/useIsPhone';
 import { useOrderEntry } from '@/lib/game/useOrderEntry';
 import { useGameSocket } from '@/lib/game/GameSocketProvider';
+
+/**
+ * The four shells are loaded on demand, because a brand only ever renders ONE of them.
+ *
+ * They were static imports, so every brand's first page view downloaded all four — the MetaTrader
+ * terminal, the digits screen, the candlestick screen and the wave — in a single 508KB page chunk,
+ * measured in production. The chart cannot be created until that chunk has parsed, so the biggest
+ * single cause of "the graph takes a long time to appear" was a brand waiting on three shells it
+ * will never show.
+ *
+ * `ssr` is left ON (the default): the brand is known server-side, so the right shell is still
+ * server-rendered into the HTML and that markup stays on screen while its chunk arrives — the
+ * split changes what the CLIENT downloads, not what the first paint contains.
+ */
+const DigitsTradeScreen = dynamic(
+  () => import('@/components/game/digits/DigitsTradeScreen').then((m) => m.DigitsTradeScreen),
+  { loading: () => <ShellSkeleton /> },
+);
+const CandlestickTradeScreen = dynamic(
+  () => import('@/components/game/candlestick/CandlestickTradeScreen').then((m) => m.CandlestickTradeScreen),
+  { loading: () => <ShellSkeleton /> },
+);
+const MT5MobileShell = dynamic(
+  () => import('@/components/game/mobile/MT5MobileShell').then((m) => m.MT5MobileShell),
+  { loading: () => <ShellSkeleton variant="terminal" /> },
+);
+const MT5Toolbox = dynamic(() => import('@/components/game/MT5Toolbox').then((m) => m.MT5Toolbox));
+const MarketWatch = dynamic(() => import('@/components/game/MarketWatch').then((m) => m.MarketWatch));
+const MT5OrderTicket = dynamic(() => import('@/components/game/MT5OrderTicket').then((m) => m.MT5OrderTicket));
+const MT5Chrome = dynamic(() => import('@/components/game/MT5Chrome').then((m) => m.MT5Chrome));
+
+/**
+ * What fills the screen while a shell's chunk is still arriving.
+ *
+ * Only reached on a client-side navigation into the trade screen; a fresh load already has the
+ * server's markup. It is the same promise the rest of the product now makes — a surface that has
+ * nothing to show says so rather than going blank.
+ */
+function ShellSkeleton({ variant = 'brand' }: { variant?: 'brand' | 'terminal' }) {
+  return (
+    <div
+      className={cn(
+        'flex h-full min-h-[320px] w-full items-center justify-center',
+        variant === 'terminal' ? 'bg-[var(--mt5-surface)]' : 'bg-bg',
+      )}
+      role="status"
+      aria-live="polite"
+    >
+      <p className={cn('text-sm', variant === 'terminal' ? 'text-[var(--mt5-muted)]' : 'text-muted')}>
+        Loading your trading screen…
+      </p>
+    </div>
+  );
+}
 
 /**
  * Chooses the trade layout for the current brand:
