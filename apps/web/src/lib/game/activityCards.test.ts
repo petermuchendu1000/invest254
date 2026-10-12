@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { selectCards, eligible, keyOf, MIN_WITHDRAWAL_CENTS } from './activityCards.js';
+import { selectCards, shuffle, eligible, keyOf, MIN_WITHDRAWAL_CENTS } from './activityCards.js';
 import type { BrandActivityDto } from '@/lib/api/types';
 
 /**
@@ -27,11 +27,41 @@ const FEED: BrandActivityDto[] = [
   row({ name: 'Mkeeee', agoSeconds: 1_300_200, amountCents: 700_00 }),
 ];
 
-test('the burst takes the FRESHEST rows, not the oldest — the bug that shipped', () => {
-  const { take } = selectCards(FEED, new Set(), [], 3);
-  assert.deepEqual(take.map((t) => t.name), ['Akinyi', 'Barasa', 'Chebet']);
-  // The fortnight-old rows at the bottom must not be what a player is shown.
-  assert.ok(!take.some((t) => t.agoSeconds > 10_000), 'a stale row reached the card queue');
+/** A deterministic stand-in for Math.random: replays a fixed cycle of values. */
+const seq = (...xs: number[]) => { let i = 0; return () => xs[i++ % xs.length]!; };
+
+test('the draw is TOTALLY random — position in the feed buys a row nothing', () => {
+  // rng() === 0 makes Fisher-Yates swap with index 0 at every step, which rotates the array left
+  // by one: [A,B,C,D,E,F] -> [B,C,D,E,F,A]. So the row drawn first is the feed's SECOND, not its
+  // first — the point being that the newest row has no special claim on the card.
+  const { take } = selectCards(FEED, new Set(), [], 1, () => 0);
+  assert.equal(take[0]!.name, 'Barasa');
+  assert.notEqual(take[0]!.agoSeconds, FEED[0]!.agoSeconds, 'the newest row was picked by position');
+
+  // A different stream yields a different row from the very same feed.
+  const other = selectCards(FEED, new Set(), [], 1, seq(0.99)).take[0]!;
+  assert.notEqual(other.agoSeconds, take[0]!.agoSeconds);
+});
+
+test('over many draws every row gets a turn, and none dominates', () => {
+  // The real guarantee behind "random": no row is structurally favoured or starved.
+  const counts = new Map<string, number>();
+  for (let i = 0; i < 4000; i++) {
+    const { take } = selectCards(FEED, new Set(), [], 1);
+    for (const t of take) counts.set(keyOf(t), (counts.get(keyOf(t)) ?? 0) + 1);
+  }
+  assert.equal(counts.size, FEED.length, 'some row never appeared across 4000 draws');
+  const hits = [...counts.values()];
+  // Uniform would be ~667 each; this is a wide band that still catches a stuck or biased draw.
+  assert.ok(Math.min(...hits) > 350, `a row was starved: ${Math.min(...hits)}`);
+  assert.ok(Math.max(...hits) < 1100, `a row dominated: ${Math.max(...hits)}`);
+});
+
+test('shuffle returns a permutation and does not mutate its input', () => {
+  const src = [1, 2, 3, 4, 5];
+  const out = shuffle(src, seq(0.1, 0.9, 0.4, 0.7));
+  assert.deepEqual(src, [1, 2, 3, 4, 5], 'the source array was mutated');
+  assert.deepEqual([...out].sort(), [...src].sort(), 'not a permutation');
 });
 
 test('one card per trader, however many rows they hold', () => {
@@ -43,12 +73,16 @@ test('one card per trader, however many rows they hold', () => {
     row({ name: 'Wanjiku', agoSeconds: 40 }),
   ];
   const { take } = selectCards(burst, new Set(), [], 3);
-  assert.deepEqual(take.map((t) => t.name), ['Mkeeee', 'Wanjiku']);
+  // Whatever the draw, the three Mkeeee rows can contribute at most one card.
+  assert.equal(take.length, 2);
+  assert.equal(new Set(take.map((t) => t.name.toLowerCase())).size, 2);
+  assert.ok(take.some((t) => t.name === 'Wanjiku'));
 });
 
 test('a trader shown recently does not open the next card either', () => {
   const { take } = selectCards(FEED, new Set(), ['akinyi', 'barasa'], 3);
-  assert.deepEqual(take.map((t) => t.name), ['Chebet', 'Mkeeee']);
+  const names = take.map((t) => t.name.toLowerCase());
+  assert.ok(!names.includes('akinyi') && !names.includes('barasa'), 'a recent trader opened another card');
 });
 
 test('names are matched case- and space-insensitively, so padding cannot defeat the rule', () => {
@@ -57,14 +91,22 @@ test('names are matched case- and space-insensitively, so padding cannot defeat 
   assert.equal(take.length, 1);
 });
 
-test('rows passed over for diversity are marked SEEN, not saved up for the next poll', () => {
-  const { take, seenKeys } = selectCards(FEED, new Set(), [], 3);
-  assert.equal(take.length, 3);
-  // Every eligible row is accounted for, including the three the rule declined.
-  assert.equal(seenKeys.length, FEED.length);
-  // Feeding those keys back yields nothing, so a declined row never returns as news.
-  const second = selectCards(FEED, new Set(seenKeys), [], 3);
-  assert.equal(second.take.length, 0);
+test('only what was SHOWN is marked seen, so the rest stay in the pool for later draws', () => {
+  const { take, seenKeys } = selectCards(FEED, new Set(), [], 2);
+  assert.equal(take.length, 2);
+  // Burning the whole window to show two would leave a player with a few cards and then silence.
+  assert.equal(seenKeys.length, 2);
+
+  // Draining the pool over successive polls shows each row exactly once and then stops.
+  const seen = new Set<string>();
+  let drawn = 0;
+  for (let i = 0; i < 20; i++) {
+    const r = selectCards(FEED, seen, [], 2);
+    drawn += r.take.length;
+    for (const k of r.seenKeys) seen.add(k);
+  }
+  assert.equal(drawn, FEED.length, 'the pool did not drain exactly once through');
+  assert.equal(selectCards(FEED, seen, [], 2).take.length, 0, 'a shown row came back');
 });
 
 test('what earns a card: every win, a withdrawal only above the floor, never a deposit', () => {

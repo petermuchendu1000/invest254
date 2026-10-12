@@ -14,6 +14,7 @@ import { usePlayerChat, useSendChat, useMarkChatRead } from '@/lib/chat/liveChat
 import { ChatComposer } from '@/components/chat/ChatParts';
 import { LiveBadge } from '@/components/ui/LiveBadge';
 import { cn } from '@/lib/cn';
+import { shuffle } from '@/lib/game/activityCards';
 
 /**
  * The rail's Chat tab: the brand's activity feed, with the player's own conversation in it.
@@ -100,20 +101,13 @@ export function ChatPane() {
    * ROTATION — which of the pool's rows are on screen right now.
    *
    * The feed should read as a room that keeps saying things, not as a list that is replaced four
-   * times a minute, so every 5–10s a fresh window is drawn from the pool.
+   * times a minute, so every 5–10s a fresh window is drawn from the pool — at random, in random
+   * order, with nothing pinned. See `pickWindow`.
    *
-   * The trap in reordering an aged feed is that the ages give it away: a column reading
-   * "2m ago / just now / 1h ago" is instantly broken, and a feed that looks broken cannot be
-   * believed. The scheme avoids that without constraining the draw, because of one property: ANY
-   * subset of a recency-sorted list, rendered in that same order, has its ages in order. The
-   * viewer cannot see which rows were skipped — only that what is shown runs oldest to newest, as
-   * a chat log does. So the draw is free to be random; it is the RENDER order that is fixed
-   * (`pickWindow` sorts its result oldest-first, matching the column's newest-at-the-bottom
-   * reading direction).
-   *
-   * The newest ROTATE_PINNED rows are always kept, so the bottom of the column — where the eye
-   * lands and where the composer is — always shows the freshest thing that happened rather than
-   * drifting into an hour-old slice.
+   * The old scheme kept the column sorted by age and pinned the newest rows, because the lines
+   * PRINTED their ages and a column reading "2m ago / just now / 1h ago" is visibly broken. The
+   * ages are gone, so nothing on screen makes a claim about when — and the pinning, which handed
+   * the top of the column permanently to whichever account traded last, goes with it.
    */
   const [shown, setShown] = useState<Row[]>([]);
   useEffect(() => {
@@ -242,36 +236,32 @@ export function ChatPane() {
 /** A pool row: the server's event, a rotation-stable key, and when its age was measured. */
 type Row = { item: BrandActivityDto; key: string };
 
-/** How many lines are on screen at once, and how many of those are always the newest ones. */
+/** How many lines are on screen at once. */
 const ROTATE_WINDOW = 10;
-const ROTATE_PINNED = 3;
 const ROTATE_MIN_MS = 5_000;
 const ROTATE_MAX_MS = 10_000;
 
 /**
- * Draw the on-screen window from a newest-first pool, returned OLDEST-FIRST.
+ * Draw the on-screen window — a TOTALLY RANDOM draw from the whole pool, in random order.
  *
- * Pure and position-free so the ordering guarantee is checkable in one read: whatever is picked,
- * the returned array is sorted by descending age, so the rendered column's ages always descend.
+ * Every row is equally likely and no position is privileged: nothing is pinned, nothing is sorted.
+ *
+ * WHAT THIS REPLACED, AND WHY IT CAN. This used to pin the newest three rows and then sort the
+ * whole window by descending age. Both rules existed for one reason, written out in the old note:
+ * the column PRINTED each row's age, so a window drawn at random would have read "2m ago / just
+ * now / 1h ago" and a feed whose ages are out of order is instantly, visibly broken.
+ *
+ * The ages are no longer printed. With nothing on screen asserting WHEN anything happened, the
+ * order carries no claim, and the two rules were left doing nothing but harm: pinning the newest
+ * three handed the top of the column permanently to whichever account had traded most recently,
+ * which on a brand with one prolific trader meant their name was always there. Dropping both is
+ * what makes the feed read as a room.
+ *
+ * `shuffle` is shared with the notification's own draw, so the two surfaces cannot drift apart in
+ * how random they are.
  */
-function pickWindow(pool: Row[]): Row[] {
-  const byAgeDesc = (a: Row, b: Row) => b.item.agoSeconds - a.item.agoSeconds;
-  // Nothing to rotate — show everything rather than hiding real rows for the sake of churn.
-  if (pool.length <= ROTATE_WINDOW) return pool.slice().sort(byAgeDesc);
-
-  const pinned = pool.slice(0, ROTATE_PINNED);
-  const rest = pool.slice(ROTATE_PINNED);
-  // Partial Fisher–Yates: only the first `take` positions need to be settled.
-  const take = ROTATE_WINDOW - pinned.length;
-  for (let i = 0; i < take; i++) {
-    const j = i + Math.floor(Math.random() * (rest.length - i));
-    // `!` because both indices are provably in range (i < take <= rest.length, i <= j < length),
-    // which `noUncheckedIndexedAccess` cannot see.
-    const a = rest[i]!;
-    rest[i] = rest[j]!;
-    rest[j] = a;
-  }
-  return pinned.concat(rest.slice(0, take)).sort(byAgeDesc);
+function pickWindow(pool: Row[], rng: () => number = Math.random): Row[] {
+  return shuffle(pool, rng).slice(0, ROTATE_WINDOW);
 }
 
 /**
