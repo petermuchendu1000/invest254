@@ -5,6 +5,47 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #135 — An older PLAYER account on the same phone shadowed a real ADMIN: "can't login anywhere, just 404" — FIXED (api/engine)
+- **What:** an admin could not reach the back office from any domain — every operator surface showed
+  a 404. Reported by the owner against phone `0100406758`.
+- **Evidence (live prod, read-only):** that phone holds TWO accounts, one person: `joy` (role
+  `player`, site tamutraders, active, created 2026-08-19) and `joy_admin` (role **admin**, site
+  invest254, active, created 2026-09-11). Both have credential rows, both active, neither locked.
+  `joy_admin` has never held a privileged session (`privileged_sessions` = 0 rows for either id).
+- **Root cause:** `AuthService.login` resolves the identity-based (`anyBrand`) candidate set
+  **oldest-first** (`identity.ts:426`, `order by p.created_at asc`) and took the FIRST candidate
+  whose password verified, then `break`. When both accounts share a password — one person, one
+  number — the older PLAYER always won. The operator was issued a perfectly valid player token, and
+  `/console` (`console/page.tsx:49-57`), `AdminShell` and `PlatformShell` each then rendered their
+  deliberate wrong-tier 404. No error and no bad-password message, which is exactly why it presented
+  as "just 404". The existing comment called `created_at` a deterministic tie-break; it is one, but
+  determinism is not correctness — at the operator door the account that can use the console is the
+  right answer, not the one that happens to be older.
+- **Impact:** TWO admins, both active: `joy_admin` (above) and `Jay` (admin, site madolar, created
+  2026-08-17), shadowed by the older active player `Jay_254` (invest254, 2026-06-27) on
+  `0791908395`. `zrinok` (platform_superadmin) is unaffected — it is the oldest row on its phone.
+  Marketers are unaffected either way (`marketer` is not in `PRIVILEGED_ROLES`). No unauthorised
+  access: the shadow only ever produced a LOWER-privileged session than intended.
+- **Fix:** a `preferPrivileged` option on `login()`, set by `/auth/admin/login` and nothing else. The
+  scan no longer stops at the first match: it keeps the first match as the fallback (so the default
+  path and the all-player case behave exactly as before) and takes an operator match when one
+  exists. The marketer apps' `anyBrand` login does NOT set it, deliberately — a marketer's wallet
+  lives on one brand, and resolving them to an admin account they also own would land them on the
+  wrong one.
+- **Not an escalation, and tested in both directions:** a candidate is only considered after ITS OWN
+  hash verified the submitted password, so the password that opens the admin session is the admin's
+  own. With DIFFERENT passwords the player's password resolves the player and the admin's resolves
+  the admin (that test passed before the fix too). The same credential already opened the admin
+  account through the per-brand login on its own brand's host, so no new door opens; one that was
+  shut on the operator domain opens.
+- **Verification:** reproduced first as a failing test — `expected: 'admin', actual: 'player'` — then
+  green. Four tests: the shadow case, oldest-first preserved when no operator is on the phone, a
+  wrong password still refused when the phone holds an admin, and the different-passwords case both
+  ways. 2240 unit tests pass, `tsc -b` clean.
+- **Note for the affected operator:** `joy_admin` has MFA enabled, so the sign-in will now ask for
+  the 6-digit authenticator code (`AdminSignIn` handles `MFA_REQUIRED`). If that authenticator is
+  gone, a recovery code is needed — or the owner clears MFA for the account.
+
 ## #134 — The operator back office answered on EVERY client brand domain — FIXED (web, middleware + layout gate)
 - **What:** `/console`, `/admin/**` and `/platform/**` were served by hostname-independent routing, so
   every brand domain on the platform presented the operator sign-in form. The console is supposed to
