@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { isAdminHost } from '@/lib/brand/adminHost';
 
 /**
  * Dedicated admin/operator domain routing (Issue 1).
@@ -9,15 +10,10 @@ import type { NextRequest } from 'next/server';
  * `/console`; the app chrome keys off the pathname, so this is what stops the player top-bar
  * (brand + Login/Sign Up) from ever rendering on the admin domain.
  */
-const ADMIN_HOSTS = (process.env.ADMIN_HOST || 'triocodes.com')
-  .split(',')
-  .map((h) => h.trim().toLowerCase())
-  .filter(Boolean);
-
 export function middleware(req: NextRequest) {
-  const host = (req.headers.get('host') || '').split(':')[0]?.toLowerCase() ?? '';
-  const isAdminHost = ADMIN_HOSTS.some((h) => host === h || host === `www.${h}`);
-  if (isAdminHost && req.nextUrl.pathname === '/') {
+  // The host list moved to lib/brand/adminHost so the BRAND path can read the same answer — see
+  // the note there for why it had to.
+  if (isAdminHost(req.headers.get('host')) && req.nextUrl.pathname === '/') {
     const url = req.nextUrl.clone();
     url.pathname = '/console';
     return NextResponse.redirect(url, 307);
