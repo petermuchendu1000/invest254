@@ -15,6 +15,7 @@ import { useBrand } from '@/lib/brand/BrandProvider';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { phoneError, usernameError, passwordError, referralError } from '@/lib/auth/validation';
 import { REF_KEY } from '@/lib/auth/referral';
+import { phoneDisplay, isMaskedValue } from '@/lib/auth/phoneMask';
 import { cn } from '@/lib/cn';
 import { useTerminalSkin } from '@/lib/ui/useTerminalSkin';
 import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
@@ -161,10 +162,12 @@ export function AuthModal() {
   const [referral, setReferral] = useState('');
   const [showRef, setShowRef] = useState(false);
   const [showPw, setShowPw] = useState(false);
-  // Marketers demo the platform on LIVE STREAMS and sign in/up on camera, so the phone field starts
-  // MASKED (the number is their real MSISDN). Reveal is one tap, exactly like the password below.
-  // Nothing functional changes — the typed value is submitted either way.
+  // Marketers demo the platform on LIVE STREAMS and sign in/up on camera, so the phone field reads
+  // as the partial mask 0798****061 at rest and the eye reveals the hidden digits. `phoneFocused`
+  // exists because an input renders its own value: while editing it must show the real digits (see
+  // phoneDisplay). Nothing functional changes — the real value is what is submitted.
   const [showPhone, setShowPhone] = useState(false);
+  const [phoneFocused, setPhoneFocused] = useState(false);
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -413,9 +416,10 @@ export function AuthModal() {
         <Input
           label="Phone number"
           name="phone"
-          // Masked by default (live-stream safety — see showPhone). inputMode stays numeric so the
-          // phone keypad still comes up, and the value posted is unchanged.
-          type={showPhone ? 'tel' : 'password'}
+          // Shows the partial mask 0798****061 at rest, the real digits while editing, and the full
+          // number when the eye is on (see phoneDisplay). type stays 'tel' so the keypad and autofill
+          // behave exactly as before, and `phone` — the real value — is what gets submitted.
+          type="tel"
           inputMode="numeric"
           autoComplete="tel"
           required
@@ -425,14 +429,20 @@ export function AuthModal() {
             <button
               type="button"
               onClick={() => setShowPhone((v) => !v)}
-              aria-label={showPhone ? 'Hide phone number' : 'Show phone number'}
+              aria-label={showPhone ? 'Hide phone number' : 'Show the hidden digits'}
               className="flex h-10 w-10 items-center justify-center rounded-lg transition hover:bg-border hover:text-fg"
             >
               <EyeIcon off={showPhone} />
             </button>
           }
-          value={phone}
-          onChange={(e) => setPhone(localPhone(e.target.value))}
+          value={phoneDisplay(phone, showPhone, phoneFocused)}
+          onFocus={() => setPhoneFocused(true)}
+          onBlur={() => setPhoneFocused(false)}
+          // Guard: the mask is display-only and must never be read back as input. onChange can only
+          // see the real value (typing requires focus; autofill supplies real digits), but a stray
+          // masked value would have its '*' stripped by localPhone and silently corrupt the number —
+          // on the login field. Cheap insurance: ignore anything carrying the mask character.
+          onChange={(e) => { if (!isMaskedValue(e.target.value)) setPhone(localPhone(e.target.value)); }}
           error={errors['phone']}
         />
 
