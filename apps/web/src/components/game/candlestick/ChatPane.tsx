@@ -145,24 +145,24 @@ export function ChatPane() {
   const showOnline = displayOnline > 0 && (!isStaffRole(role) || status === 'open');
 
   return (
-    <div className="flex h-full w-full min-w-0 flex-col bg-[#0a0f1c]">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#1f2937] bg-[#111827] px-3 py-2.5 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-white">
-          <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#22c55e]" />
+    <div className="flex h-full w-full min-w-0 flex-col bg-bg">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2.5 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-fg">
+          <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent" />
           <span className="truncate">Live Chat</span>
         </div>
         {showOnline ? (
-          <div className="shrink-0 whitespace-nowrap text-xs text-gray-500">
-            <span className="tabular-nums text-gray-300">{displayOnline.toLocaleString()}</span> Online
+          <div className="shrink-0 whitespace-nowrap text-xs text-muted">
+            <span className="tabular-nums text-fg">{displayOnline.toLocaleString()}</span> Online
           </div>
         ) : (
-          <div className="shrink-0 whitespace-nowrap text-xs text-gray-500">Recent activity</div>
+          <div className="shrink-0 whitespace-nowrap text-xs text-muted">Recent activity</div>
         )}
       </div>
 
-      <div className="min-h-0 w-full min-w-0 flex-1 space-y-2 overflow-y-auto bg-[#0a0f1c] px-3 py-2">
+      <div className="min-h-0 w-full min-w-0 flex-1 space-y-2 overflow-y-auto bg-bg px-3 py-2">
         {pool.length === 0 && messages.length === 0 ? (
-          <p className="px-2 py-6 text-center text-xs italic text-gray-500">Nothing has happened here yet today.</p>
+          <p className="px-2 py-6 text-center text-xs italic text-muted">Nothing has happened here yet today.</p>
         ) : null}
 
         {shown.map((row) => (
@@ -177,16 +177,16 @@ export function ChatPane() {
               // 320px pane is narrow enough for one to push the whole column sideways.
               // Same card shape as the system bubbles above so the two halves read as one column.
               'min-w-0 break-words rounded-xl px-3 py-2.5 text-xs leading-relaxed',
-              m.authorRole === 'player' ? 'bg-[#22c55e]/10 text-white' : 'bg-[#111827] text-gray-200',
+              m.authorRole === 'player' ? 'bg-accent/10 text-fg' : 'bg-surface text-fg',
             )}
           >
-            <span className="font-bold text-gray-400">{m.authorRole === 'player' ? 'You' : (m.authorName ?? 'Support')}: </span>
+            <span className="font-bold text-muted">{m.authorRole === 'player' ? 'You' : (m.authorName ?? 'Support')}: </span>
             {m.body}
           </div>
         ))}
       </div>
 
-      <div className="w-full min-w-0 shrink-0 border-t border-[#1f2937] bg-[#111827]">
+      <div className="w-full min-w-0 shrink-0 border-t border-border bg-surface">
         {token ? (
           <div className="min-w-0 p-2.5">
             <ChatComposer
@@ -202,7 +202,7 @@ export function ChatPane() {
           <button
             type="button"
             onClick={() => openAuth('login')}
-            className="min-h-11 w-full px-3 py-2.5 text-center text-xs italic text-gray-500 hover:text-white"
+            className="min-h-11 w-full px-3 py-2.5 text-center text-xs italic text-muted hover:text-fg"
           >
             Login to join the chat
           </button>
@@ -253,7 +253,7 @@ function pickWindow(pool: Row[]): Row[] {
  * The mock's wording was marketing copy ("has successfully withdrawn … Congratulations! ✅"), and
  * the emoji plus the exclamation read as an advert for the feed rather than a record of it. These
  * are written as a platform announcing what its ledger did: a short status label naming the event
- * class, then one flat sentence with the figure in it. No emoji, no exclamation; the green dot
+ * class, then one flat sentence with the figure in it. No emoji, no exclamation; the accent dot
  * beside the line already carries the "this is a confirmation" signal.
  *
  * Two rules the variants exist to satisfy, and one they exist to respect.
@@ -327,7 +327,7 @@ function ActivityLine({ row }: { row: Row }) {
   const seconds = item.agoSeconds + Math.max(0, (Date.now() - receivedAt) / 1000);
 
   return (
-    // A dark rounded card with a small green status dot pinned at its left. The dot is
+    // A dark rounded card with a small accent status dot pinned at its left. The dot is
     // `mt-[0.4rem]` rather than centred so it keeps sitting on the FIRST line once a long name
     // wraps the text to two lines at 320px.
     //
@@ -336,16 +336,16 @@ function ActivityLine({ row }: { row: Row }) {
     // is motionless for anyone who asked for that, with no new rule to keep in sync. It plays only
     // for rows that actually MOUNT, which, given the content-derived keys above, means only the
     // lines a roll genuinely brought in.
-    <div className="pp-pop-in flex min-w-0 items-start gap-2 rounded-xl bg-[#111827] px-3 py-2.5">
-      <span className="mt-[0.4rem] h-1.5 w-1.5 shrink-0 rounded-full bg-[#22c55e]" aria-hidden />
+    <div className="pp-pop-in flex min-w-0 items-start gap-2 rounded-xl bg-surface px-3 py-2.5">
+      <span className="mt-[0.4rem] h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden />
       <p className="min-w-0 break-words text-xs leading-relaxed">
-        <span className="font-bold text-[#22c55e]">{phrase.label}: </span>
-        <span className="text-gray-200">
+        <span className="font-bold text-accent">{phrase.label}: </span>
+        <span className="text-fg">
           {phrase.pre(item.name)}
-          <span className="whitespace-nowrap font-semibold tabular-nums text-white">{fmt(item.amountCents)}</span>
+          <span className="whitespace-nowrap font-semibold tabular-nums text-fg">{fmt(item.amountCents)}</span>
           {phrase.post(item.name)}
         </span>{' '}
-        <span className="whitespace-nowrap text-gray-500">{ago(seconds)}</span>
+        <span className="whitespace-nowrap text-muted">{ago(seconds)}</span>
       </p>
     </div>
   );

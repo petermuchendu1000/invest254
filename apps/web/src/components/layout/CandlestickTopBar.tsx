@@ -20,7 +20,7 @@ import { CandlestickModeBadge } from '@/components/candlestick-account/Candlesti
  *
  * It is a separate component from `TopBar` and `DigitsTopBar` for the same reason those two are
  * separate from each other: they are different headers, not one header with branches. This one is
- * 56/64px, sits on `#111827`, and its right-hand controls live inside a single outlined box — none
+ * 56/64px, sits on `surface`, and its right-hand controls live inside a single outlined box — none
  * of which is a variant of the others.
  *
  * Every control routes to the surface that already exists: the deposit sheet, the withdraw sheet,
@@ -50,7 +50,7 @@ export function CandlestickTopBar() {
     // `px-2` on a phone rather than `px-3`: the bar now carries the balance as well as the wordmark,
     // the badge, Deposit and the menu, and at 320px those 8px are the difference between a row that
     // fits and one that squeezes the figure.
-    <header className="flex h-14 w-full shrink-0 items-center justify-between gap-1.5 border-b border-[#1f2937] bg-[#111827] px-2 md:h-16 md:gap-3 md:px-4">
+    <header className="flex h-14 w-full shrink-0 items-center justify-between gap-1.5 border-b border-border bg-surface px-2 md:h-16 md:gap-3 md:px-4">
       <div className="flex min-w-0 items-center gap-4">
         <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
           {/* The wordmark is the one thing here a player can still identify when it is clipped, so
@@ -65,11 +65,11 @@ export function CandlestickTopBar() {
           <CandlestickModeBadge />
         </div>
 
-        <nav className="hidden items-center gap-1 border-l border-[#1f2937] pl-4 md:flex">
+        <nav className="hidden items-center gap-1 border-l border-border pl-4 md:flex">
           <button
             type="button"
             onClick={toggleDrawer}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 transition-colors hover:bg-amber-400/10 hover:text-amber-400"
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-muted transition-colors hover:bg-warn/10 hover:text-warn"
           >
             <CIcon name="top" className="h-3.5 w-3.5" />
             Top Traders
@@ -77,7 +77,7 @@ export function CandlestickTopBar() {
           <button
             type="button"
             onClick={toggleDrawer}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 transition-colors hover:bg-[#22c55e]/10 hover:text-[#22c55e]"
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-muted transition-colors hover:bg-accent/10 hover:text-accent"
           >
             <CIcon name="tours" className="h-3.5 w-3.5" />
             Tournaments
@@ -85,7 +85,7 @@ export function CandlestickTopBar() {
         </nav>
       </div>
 
-      <div className="flex min-w-0 items-center gap-1 rounded border border-[#00ff901a] bg-[#142425] px-1.5 py-1 md:gap-3 md:px-3">
+      <div className="flex min-w-0 items-center gap-1 rounded border border-accent/10 bg-surface-2 px-1.5 py-1 md:gap-3 md:px-3">
         {/* The balance, on the bar, at EVERY width.
 
             It used to be `hidden sm:flex`, which hid it on the one device this audience actually
@@ -96,8 +96,8 @@ export function CandlestickTopBar() {
             wallet can run to eight digits and this is the only unbounded thing in the row. */}
         {authed ? (
           <div className="flex min-w-0 flex-col items-end justify-center leading-tight">
-            <span className="hidden max-w-[9rem] truncate text-[10px] text-gray-400 sm:block">{user?.username ?? 'Account'}</span>
-            <span className="min-w-0 max-w-[6rem] truncate text-xs font-bold text-white sm:max-w-[9rem]">{balance}</span>
+            <span className="hidden max-w-[9rem] truncate text-[10px] text-muted sm:block">{user?.username ?? 'Account'}</span>
+            <span className="min-w-0 max-w-[6rem] truncate text-xs font-bold text-fg sm:max-w-[9rem]">{balance}</span>
           </div>
         ) : null}
 
@@ -108,14 +108,14 @@ export function CandlestickTopBar() {
               onClick={() => openDeposit()}
               // `px-1.5` and `text-[11px]` on a phone: Deposit stays (it is the one action this bar
               // exists to offer) but it gives up the padding the balance beside it needs.
-              className="h-8 shrink-0 rounded-md border border-[#22c55e] px-1.5 text-[11px] font-bold uppercase tracking-wide text-[#22c55e] transition-colors hover:bg-[#22c55e]/10 sm:px-2 sm:text-xs md:px-3"
+              className="h-8 shrink-0 rounded-md border border-accent px-1.5 text-[11px] font-bold uppercase tracking-wide text-accent transition-colors hover:bg-accent/10 sm:px-2 sm:text-xs md:px-3"
             >
               Deposit
             </button>
             <button
               type="button"
               onClick={needAuth(openWithdraw)}
-              className="hidden h-8 shrink-0 rounded-md bg-[#b91c1c] px-3 text-xs font-bold uppercase tracking-wide text-white transition-colors hover:bg-[#991b1b] sm:block"
+              className="hidden h-8 shrink-0 rounded-md bg-down px-3 text-xs font-bold uppercase tracking-wide text-fg transition-colors hover:bg-down sm:block"
             >
               Withdraw
             </button>
@@ -125,14 +125,14 @@ export function CandlestickTopBar() {
             <button
               type="button"
               onClick={() => openAuth('login')}
-              className="h-8 shrink-0 rounded-md border border-[#374151] px-2 text-xs font-semibold text-white transition-colors hover:border-[#4b5563] md:px-3"
+              className="h-8 shrink-0 rounded-md border border-border px-2 text-xs font-semibold text-fg transition-colors hover:border-border md:px-3"
             >
               Login
             </button>
             <button
               type="button"
               onClick={() => openAuth('register')}
-              className="h-8 shrink-0 rounded-md bg-[#22c55e] px-2 text-xs font-bold text-black transition-colors hover:brightness-110 md:px-3"
+              className="h-8 shrink-0 rounded-md bg-accent px-2 text-xs font-bold text-accent-fg transition-colors hover:brightness-110 md:px-3"
             >
               Register
             </button>
@@ -143,7 +143,7 @@ export function CandlestickTopBar() {
           type="button"
           onClick={toggleDrawer}
           aria-label="Menu"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg transition-colors hover:bg-fg/5 hover:text-fg"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M4 6h16M4 12h16M4 18h16" />
@@ -155,7 +155,7 @@ export function CandlestickTopBar() {
 }
 
 /**
- * The mock's two-tone wordmark: the first word in the accent green, the rest white.
+ * The mock's two-tone wordmark: the first word in the brand's accent, the rest in the foreground.
  *
  * The page this copies hard-codes "Mpesa" + "Cash"; this takes the split from the brand's own
  * wordmark, so every brand that wears this screen gets its own name in the same lockup rather than
@@ -166,8 +166,8 @@ function Wordmark({ text }: { text: string }) {
   const [a, b] = i > 0 ? [text.slice(0, i), text.slice(i + 1)] : [text, ''];
   return (
     <span className="block truncate whitespace-nowrap text-sm font-black uppercase leading-none tracking-tighter sm:text-base md:text-xl">
-      <span className="text-[#22c55e]">{a}</span>
-      {b ? <span className="text-white">{b}</span> : null}
+      <span className="text-accent">{a}</span>
+      {b ? <span className="text-fg">{b}</span> : null}
     </span>
   );
 }

@@ -232,7 +232,7 @@ export default function PlatformOverviewPage() {
               {rangeActive ? <Sortable label="New" k="newplayers" sort={sort} setSort={setSort} align="right" /> : null}
               <Sortable label="Deposits" k="deposits" sort={sort} setSort={setSort} align="right" />
               <Sortable label="House revenue" k="ggr" sort={sort} setSort={setSort} align="right" />
-              <Sortable label="Bets" k="bets" sort={sort} setSort={setSort} align="right" />
+              <Sortable label="Trades" k="bets" sort={sort} setSort={setSort} align="right" />
             </tr>
           </thead>
           <tbody>

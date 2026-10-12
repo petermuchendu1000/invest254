@@ -62,8 +62,8 @@ export function CandlestickModeBadge() {
   const badge = cn(
     'flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[10px] font-bold uppercase tracking-wide',
     demo
-      ? 'border-[#f0b90b]/40 bg-[#f0b90b]/10 text-[#f0b90b]'
-      : 'border-[#22c55e]/40 bg-[#22c55e]/10 text-[#22c55e]',
+      ? 'border-warn/40 bg-warn/10 text-warn'
+      : 'border-accent/40 bg-accent/10 text-accent',
   );
 
   if (!token || !wallet) return <span className={badge}>{label}</span>;
@@ -100,7 +100,7 @@ export function CandlestickModeBadge() {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`${label} account, ${fmt((wallet.real ?? 0) + (wallet.bonus ?? 0))}. Switch account`}
-        className={cn(badge, 'transition-colors', demo ? 'hover:bg-[#f0b90b]/20' : 'hover:bg-[#22c55e]/20')}
+        className={cn(badge, 'transition-colors', demo ? 'hover:bg-warn/20' : 'hover:bg-accent/20')}
       >
         {label}
         <svg viewBox="0 0 20 20" className="h-2.5 w-2.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
@@ -108,23 +108,12 @@ export function CandlestickModeBadge() {
         </svg>
       </button>
       {open ? (
-        // The shared panel paints itself from the `--pp-*` tokens, which follow the player's theme —
-        // this screen does not: it is hard-coded dark. Re-pointing those tokens on the wrapper keeps
-        // ONE panel component while dressing it in this header's palette (and keeps a light-theme
-        // player from getting a white card hung off a #111827 bar).
-        <div
-          className="contents"
-          style={{
-            '--pp-surface': '#111827',
-            '--pp-surface-2': '#1f2937',
-            '--pp-border': '#1f2937',
-            '--pp-fg': '#ffffff',
-            '--pp-muted': '#9ca3af',
-            '--pp-accent': '#22c55e',
-            '--pp-accent-fg': '#000000',
-            '--pp-warn': '#f0b90b',
-          } as React.CSSProperties}
-        >
+        // The shared panel paints itself from the `--pp-*` tokens, and so does this header now — the
+        // bar, the badge and the card all read the same brand theme, so the card can never wear a
+        // different palette from the bar it hangs off. This wrapper used to re-point those
+        // tokens at the mock's own hex palette, which was the one thing that made every brand's
+        // account card look identical; it inherits them instead.
+        <div className="contents">
           <AccountMenu
             wallet={wallet}
             fmt={fmt}
