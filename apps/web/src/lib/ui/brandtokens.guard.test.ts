@@ -37,6 +37,14 @@ const COVERED: readonly string[] = [
   'src/components/candlestick-account',
   'src/components/layout/CandlestickTopBar.tsx',
   'src/components/layout/CandlestickNavSheet.tsx',
+  // Lived under `game/candlestick` and so was covered by the directory entry above; it moved out
+  // when the wave shell started showing it too, and is listed by name so the move does not quietly
+  // drop it out of the guarantee. It is brand-skinned on both shells that render it.
+  'src/components/game/ActivityNotice.tsx',
+  // The shared loading/empty treatments. They are mounted inside brand-skinned shells, so a literal
+  // here would reintroduce an unskinnable surface in the middle of one.
+  'src/components/ui/ChartPlaceholder.tsx',
+  'src/components/ui/LiveBadge.tsx',
 ];
 
 /** A literal hex colour, e.g. #0a0f1c / #fff / #22c55e80. */

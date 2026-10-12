@@ -17,7 +17,19 @@ import { AccountMenu } from '@/components/wallet/AccountMenu';
 import { useCandlestickUi } from '@/components/game/candlestick/ui';
 
 /**
- * The candlestick header's mode badge, now the screen's account switch.
+ * The candlestick header's ACCOUNT CHIP: which account is active, what is in it, and the switch.
+ *
+ * It was two things on the bar — a coloured "DEMO" pill, and a balance printed a few pixels away —
+ * which asked the player to join two facts that are one fact. The mode is what the balance MEANS;
+ * a figure with no account beside it is a number a player can act on while believing it is the
+ * other account's money. One control now carries both, and tapping it opens the panel that changes
+ * exactly that.
+ *
+ * WHAT STAYS LOUD. The demo state keeps the warn hue and always keeps its WORD, at every width,
+ * because the one thing a trader must not be wrong about is which money a tap spends. Real is the
+ * default and the safe state, so below `sm` it is carried by the dot and the label alone, which is
+ * what buys the balance its room on a 320px bar. Colour is never the only carrier: the accessible
+ * name spells the account out in both states.
  *
  * It used to be a static word, because this screen was built before anything here could reach the
  * demo wallet. The demo account is not new — `useSetAccountMode` (DEMO-1) and the shared
@@ -33,7 +45,7 @@ import { useCandlestickUi } from '@/components/game/candlestick/ui';
  * ask. The server refuses the switch itself in that case and `useSetAccountMode`'s fail toast says
  * so — the one outcome that must never pass silently.
  */
-export function CandlestickModeBadge() {
+export function CandlestickAccountChip() {
   const token = useSession((s) => s.token);
   const { data: wallet } = useWallet();
   const { fmt } = useDisplayMoney();
@@ -57,16 +69,26 @@ export function CandlestickModeBadge() {
   // MARKETER: game vocabulary (Coins/Practice), never real-money words.
   const label = demo ? (skin ? MK.practiceTab : 'Demo') : (skin ? MK.realTab : 'Real');
 
-  // The badge as the mock draws it. Demo wears the warn hue instead of the accent, because the ONE
-  // thing a trader must not be wrong about is which money a tap spends.
-  const badge = cn(
-    'flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[10px] font-bold uppercase tracking-wide',
-    demo
-      ? 'border-warn/40 bg-warn/10 text-warn'
-      : 'border-accent/40 bg-accent/10 text-accent',
+  /**
+   * The chip. A quiet surface with a hairline, not a saturated pill: it sits next to the bar's one
+   * filled button (Deposit) and a second strong colour beside it is what made the old bar noisy.
+   * The STATE is carried by the dot and the label, and in demo by the warn-tinted border too.
+   */
+  const chip = cn(
+    'flex h-10 shrink-0 items-center gap-1.5 rounded-lg border bg-surface-2 px-2 sm:gap-2 sm:px-2.5 md:h-9',
+    demo ? 'border-warn/40' : 'border-border',
   );
 
-  if (!token || !wallet) return <span className={badge}>{label}</span>;
+  if (!token || !wallet) {
+    return (
+      <span className={cn(chip, 'text-[11px] font-bold uppercase tracking-wide text-muted')}>
+        <ModeDot demo={demo} />
+        {label}
+      </span>
+    );
+  }
+
+  const amount = fmt((wallet.real ?? 0) + (wallet.bonus ?? 0));
 
   const switchTo = (mode: 'real' | 'demo') => {
     if (mode === active || setMode.isPending) return;
@@ -99,11 +121,40 @@ export function CandlestickModeBadge() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`${label} account, ${fmt((wallet.real ?? 0) + (wallet.bonus ?? 0))}. Switch account`}
-        className={cn(badge, 'transition-colors', demo ? 'hover:bg-warn/20' : 'hover:bg-accent/20')}
+        aria-label={`${label} account, ${amount}. Switch account`}
+        className={cn(
+          chip,
+          'transition hover:border-fg/30',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
+        )}
       >
-        {label}
-        <svg viewBox="0 0 20 20" className="h-2.5 w-2.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+        <ModeDot demo={demo} />
+
+        <span className="flex min-w-0 flex-col items-start leading-none">
+          {/*
+            The account word. Always present for DEMO (the state that costs a player a real trade if
+            they misread it) and from `sm` for Real, which is the default. `aria-hidden` because the
+            button's accessible name already says the account in full, in both states.
+          */}
+          <span
+            aria-hidden
+            className={cn(
+              'text-[9px] font-bold uppercase leading-none tracking-widest',
+              demo ? 'text-warn' : 'hidden text-muted sm:block',
+            )}
+          >
+            {label}
+          </span>
+          {/* The balance is the figure on this bar a player actually reads, so it is the strongest
+              text in the chip. `tabular-nums` so it does not jitter as the money changes. */}
+          <span className={cn('max-w-[7.5rem] truncate text-xs font-bold tabular-nums text-fg sm:max-w-[10rem] sm:text-sm', demo ? 'mt-0.5' : 'sm:mt-0.5')}>
+            {amount}
+          </span>
+        </span>
+
+        {/* Pure affordance, and the first thing to go when the row is tight: the chip is tappable
+            with or without it, and at 320px those 20px belong to the brand mark. */}
+        <svg viewBox="0 0 20 20" className="hidden h-3 w-3 shrink-0 text-muted sm:block" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
           <path d="m5.5 8 4.5 4.5L14.5 8" />
         </svg>
       </button>
@@ -134,6 +185,17 @@ export function CandlestickModeBadge() {
       ) : null}
     </div>
   );
+}
+
+/**
+ * The state dot.
+ *
+ * It is a redundant carrier, never the only one: the word is beside it in demo and the button's
+ * accessible name spells the account out in both states, so a player who cannot tell warn from
+ * accent loses nothing.
+ */
+function ModeDot({ demo }: { demo: boolean }) {
+  return <span aria-hidden className={cn('h-1.5 w-1.5 shrink-0 rounded-full', demo ? 'bg-warn' : 'bg-accent')} />;
 }
 
 /**

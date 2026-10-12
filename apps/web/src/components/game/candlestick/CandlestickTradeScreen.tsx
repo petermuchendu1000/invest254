@@ -16,7 +16,7 @@ import { TopTradersPane } from '@/components/game/candlestick/TopTradersPane';
 import { TournamentsPane } from '@/components/game/candlestick/TournamentsPane';
 import { useLivePrice } from '@/components/game/candlestick/useLivePrice';
 import { CIcon } from '@/components/game/candlestick/icons';
-import { WinNotice } from '@/components/game/candlestick/WinNotice';
+import { ActivityNotice } from '@/components/game/ActivityNotice';
 
 /** The rail's three tabs, and the phone's fourth. */
 type RailTab = 'chat' | 'top' | 'tours';
@@ -45,7 +45,7 @@ export function CandlestickTradeScreen() {
         would poll the same feed into two independent queues and show every event twice. It positions
         itself against AppShell's <main>, takes no pointer events and changes nothing below it.
       */}
-      <WinNotice />
+      <ActivityNotice />
 
       {/* ── Phone: one pane at a time, four tabs ───────────────────────────── */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden">

@@ -76,16 +76,12 @@ export function ChatPane() {
   /**
    * The poll's rows, prepared once per response and sorted NEWEST FIRST.
    *
-   * `receivedAt` is the wall clock at which this response's `agoSeconds` were true. Ages are then
-   * derived at render time as `agoSeconds + elapsed`, so a line that landed saying "just now" is
-   * saying "1m ago" a minute later without waiting for the next poll — otherwise every age on
-   * screen would sit frozen for a full 20s and then jump, which is exactly the tell we are trying
-   * not to produce. (Deliberately impure inside useMemo: the value wanted IS "when did this arrive",
-   * and the memo runs exactly once per response.)
+   * `agoSeconds` is never printed any more (see the note where the age label used to be rendered);
+   * it survives here purely as the SORT KEY, which is what lets the window below be drawn at random
+   * without the column reading as shuffled.
    */
   const pool = useMemo<Row[]>(() => {
     const rows = activityQ.data?.items ?? [];
-    const receivedAt = Date.now();
     // React keys must survive a rotation, so they are derived from the ROW's content rather than
     // its position: a line that stays on screen across a roll keeps its key, keeps its DOM node and
     // does not replay its entry animation. The `#n` suffix disambiguates two genuinely identical
@@ -95,7 +91,7 @@ export function ChatPane() {
       const base = `${item.kind}:${item.name}:${item.amountCents}:${item.agoSeconds}`;
       const n = (seen.get(base) ?? 0) + 1;
       seen.set(base, n);
-      return { item, key: `${base}#${n}`, receivedAt };
+      return { item, key: `${base}#${n}` };
     });
     return prepared.sort((a, b) => a.item.agoSeconds - b.item.agoSeconds);
   }, [activityQ.data]);
@@ -135,9 +131,8 @@ export function ChatPane() {
     };
     schedule();
     return () => clearTimeout(id);
-    // Runs on every response, which also re-seeds the window from the new rows. Note the timer is
-    // NOT skipped when the pool is too short to rotate: a brand with eight rows shows all eight
-    // every time, but the re-render is still what keeps their ages advancing.
+    // Runs on every response, which also re-seeds the window from the new rows. A pool too short
+    // to rotate simply shows the same rows each time, which is harmless.
   }, [pool]);
 
   const messages = data?.messages ?? [];
@@ -245,7 +240,7 @@ export function ChatPane() {
 }
 
 /** A pool row: the server's event, a rotation-stable key, and when its age was measured. */
-type Row = { item: BrandActivityDto; key: string; receivedAt: number };
+type Row = { item: BrandActivityDto; key: string };
 
 /** How many lines are on screen at once, and how many of those are always the newest ones. */
 const ROTATE_WINDOW = 10;
@@ -351,12 +346,10 @@ function ActivityLine({ row }: { row: Row }) {
   // foreign one. Hand-rolling the string here is how a non-KES brand ends up announcing a KES
   // payout it never made, so the shared formatter is the only path.
   const { fmt } = useDisplayMoney();
-  const { item, key, receivedAt } = row;
+  const { item, key } = row;
   const variants = PHRASES[item.kind];
   // `!`: every PHRASES entry is a non-empty literal tuple, so the modulo always lands on a member.
   const phrase = variants[hashKey(key) % variants.length]!;
-  // The server's age plus however long this response has been on screen (see `pool`).
-  const seconds = item.agoSeconds + Math.max(0, (Date.now() - receivedAt) / 1000);
 
   return (
     // A dark rounded card with a small accent status dot pinned at its left. The dot is
@@ -376,17 +369,21 @@ function ActivityLine({ row }: { row: Row }) {
           {phrase.pre(item.name)}
           <span className="whitespace-nowrap font-semibold tabular-nums text-fg">{fmt(item.amountCents)}</span>
           {phrase.post(item.name)}
-        </span>{' '}
-        <span className="whitespace-nowrap text-muted">{ago(seconds)}</span>
+        </span>
       </p>
     </div>
   );
 }
 
-/** "just now" / "4m ago" / "2h ago" — a coarse age, which is all the server sends. */
-function ago(seconds: number): string {
-  if (seconds < 90) return 'just now';
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86_400)}d ago`;
-}
+/*
+ * The age label ("just now" / "4m ago" / "2h ago" / "1d ago") used to close each line and has been
+ * removed.
+ *
+ * `agoSeconds` is still read — it is what ORDERS the feed, oldest to newest, which is the property
+ * that lets the window be drawn at random without the column reading as shuffled (see `pool` and
+ * `pickWindow`). What it no longer does is print. A visible age is a claim about WHEN, and on a
+ * feed that mixes real events with seeded ones it was the one element that invited the reader to
+ * audit it: "6h ago" on a seeded row asserts a specific moment that nothing happened at. Dropping
+ * it loses the reader nothing — the feed is ambient, not a ledger, and the real ledger with real
+ * timestamps is one tap away in History.
+ */

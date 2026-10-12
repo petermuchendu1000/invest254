@@ -8,6 +8,7 @@ import { TickerStrip } from '@/components/game/TickerStrip';
 import { GameCurve } from '@/components/game/GameCurve';
 import { BetPanel } from '@/components/game/BetPanel';
 import { cn } from '@/lib/cn';
+import { ActivityNotice } from '@/components/game/ActivityNotice';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { isBrokerTerminalBrand } from '@/lib/ui/terminalScreen';
 import { resolveTradeUi, useTradeUiOverride } from '@/lib/ui/tradeUi';
@@ -209,7 +210,22 @@ export function TradeSurface() {
           // short phones (SE): the decorative marquee gives its row to the chart
           <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
         )}
-        <div className="min-h-[160px] flex-1">
+        {/*
+          `relative` so the activity card below can be placed against the CHART rather than against
+          the screen: the furniture above it here (the price strip, the ticker) changes height with
+          the viewport and disappears entirely for a marketer, so a fixed offset from the top of
+          `<main>` would land the card on a different thing at every breakpoint.
+        */}
+        <div className="relative min-h-[160px] flex-1">
+          {/*
+            The same social-proof card the candlestick screen shows, from the same feed.
+
+            Not for the TERMINAL: MetaTrader has no such surface, and a promotional card over a
+            broker's chart is the one thing that would break that illusion. Not for a MARKETER
+            either — the skin exists to remove exactly the win-and-payout language this card is
+            made of.
+          */}
+          {terminal || isMarketer ? null : <ActivityNotice className="top-3" />}
           {/* `levelStakeCents` is what a contract at the current volume risks, which is the money
               MetaTrader shows against a Stop Loss level. The desktop chart passed nothing, so even
               once the levels were drawn the stop had no figure. */}
