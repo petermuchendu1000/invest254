@@ -5,6 +5,29 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #131 — Marketer money/PIN RPCs had no DB brand fence (single point of failure) — FIXED (migration 0199, docs/60)
+- **What:** the six marketer mutating RPCs (`fn_marketer_credit` / `_withdraw` / `_set_pin` /
+  `_set_status` / `_set_fuliza` / `_set_airtime`) took only the marketer id and had no actor/brand
+  awareness at the database. The user/brand/advance RPCs got the F-46 DB fence in 0156; the marketer
+  RPCs were the one mutating surface left relying on the API `marketerInScope` guard alone.
+- **Evidence:** `pg_get_functiondef` of all six on prod shows no `fn_assert_actor_site_scope` call and no
+  actor params; their only guard is `marketerInScope` in `apps/api/src/app.marketers.ts`. Not a live
+  exploit — that guard is correct today — but a one-route regression (a new/forgotten `marketerInScope`)
+  would be an immediate cross-tenant marketer takeover (re-PIN) / drain / disable, with no backstop.
+- **Root cause (why it was deferred first):** not clean-additive — `fn_marketer_credit` is called
+  internally by `fn_marketer_game_withdraw` (0109) with no actor, so a *required* actor param would
+  break the live demo→wallet game settlement; `fn_marketer_withdraw`'s defaulted params make an appended
+  required arg illegal.
+- **Impact:** defense-in-depth gap (no live hole). Account-takeover / money class if the API guard ever
+  regressed on one route.
+- **Resolution:** migration 0199 adds OPTIONAL trailing `p_actor`/`p_actor_role` to all six, fenced by
+  the existing `fn_assert_actor_site_scope` (0156) only when a site-tier role is passed; old signatures
+  dropped + recreated, bodies byte-identical apart from the one guard line. The admin routes forward the
+  token actor (fence engages on every admin mutation); the internal + self-service paths pass none (fence
+  no-op, game-withdrawal flow untouched). Deploy-order safe both directions. Validated: 61-assertion
+  `e2e_marketer_rpc_tenant_fence.py` on a full 0001..0199 Postgres 16 apply (fence + system path + no body
+  drift) and `app.marketers.tenantfence.test.ts` (wiring + semantics).
+
 ## #65 — 0198 revert block could not drop the appended view column — FIXED (branch `claude/issue1-marketer-signout-2fa`)
 - **What:** the first draft of `0198_marketer_security_and_logout.sql`'s manual revert block restored the
   14-column `marketer_profiles` view with `create or replace view`, which in Postgres can only APPEND

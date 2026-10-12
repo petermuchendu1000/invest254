@@ -42,15 +42,25 @@ C-1, C-2, C-3 and AU1 below were approved and are now **FIXED** (see the part-3 
   platform issues (e.g. a Supabase-Auth `authenticated` token), closing the unbounded-trust gap
   without needing `iss`/`aud` secrets set.
 
-### A1 — DEFERRED (revised risk; needs its own design)
-The marketer money/PIN RPC fence was approved as an additive change, but investigation found it is
-**not** clean-additive: `fn_marketer_credit` is called internally by `fn_marketer_game_withdraw`
-(0108/0109) with no actor, so forcing `p_actor`/`p_actor_role` onto it would break the live marketer
-game-withdrawal flow; and `fn_marketer_withdraw`'s defaulted params make an appended required arg
-illegal (overload pitfalls). A correct fix needs a deliberate design (a separate admin-credit RPC, or
-optional-actor fences that stay a no-op for the internal system path) and its own heavily-tested PR —
-not tail-of-session money-RPC surgery. The TS `marketerInScope` guard fences every marketer admin
-route today, so this remains defense-in-depth, not a live hole. Tracked for a standalone change.
+### A1 — FIXED (migration 0199, standalone PR; see docs/60)
+The marketer money/PIN RPC fence was first deferred because it is **not** clean-additive:
+`fn_marketer_credit` is called internally by `fn_marketer_game_withdraw` (0108/0109) with no actor, so
+forcing required `p_actor`/`p_actor_role` onto it would break the live marketer game-withdrawal flow;
+and `fn_marketer_withdraw`'s defaulted params make an appended *required* arg illegal. The standalone
+0199 design resolves both with **OPTIONAL** trailing actor params on all six marketer mutating RPCs
+(`_credit` / `_withdraw` / `_set_pin` / `_set_status` / `_set_fuliza` / `_set_airtime`), fenced by the
+existing `fn_assert_actor_site_scope` (0156) only when a site-tier role is passed:
+- The admin routes (`apps/api/src/marketers.pg.ts`) now forward the token actor, so the DB fence
+  engages on 100% of admin marketer mutations — the backstop to `marketerInScope`.
+- The internal `fn_marketer_game_withdraw → fn_marketer_credit` 4-arg call and the self-service PIN
+  reset pass **no** actor, so the fence is a deliberate no-op there; the live game-withdrawal flow is
+  untouched (proven end-to-end).
+- Deploy-order safe both ways (old API ↔ new signature resolves via the defaults; a rollback is
+  equally safe). Each old signature is dropped then recreated; bodies are byte-identical to production
+  apart from the one injected guard line (verified by a pre/post diff).
+Validated on a throwaway Postgres 16 with the full 0001..0199 set applied:
+`packages/db/_testkit/e2e_marketer_rpc_tenant_fence.py` (61 assertions) + the TS wiring/semantics tests
+in `apps/api/src/app.marketers.tenantfence.test.ts`.
 
 ## Remaining OWNER actions (no code pending — these are secret/config changes)
 

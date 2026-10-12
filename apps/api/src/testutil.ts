@@ -14,7 +14,7 @@ import {
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance, type Brand } from "./app.js";
 import { createLogger } from "@invest254/shared/logger";
-import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
+import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult, MarketerActor } from "./app.marketers.js";
 import type { ReferralRepo, CommissionPayoutRow, AdminCommissionPayoutRow } from "./app.referral.js";
 import type { SupportDeps, SupportStore, SupportConversation, SupportMessageRow } from "./app.support.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult, RegistrarConfigDeps } from "./app.platform.js";
@@ -84,6 +84,13 @@ export function makeInMemoryReferralRepo(): InMemoryReferralRepo {
 export interface InMemoryMarketerRepo extends MarketerRepo {
   /** Register a site_id -> brand display name so profiles resolve `brand_name` (0096). */
   _setBrandName(siteId: string, name: string): void;
+  /** Register a site-admin actor's home brand, so the in-memory repo can mirror the DB brand fence
+   *  (0199 / A1): a site-tier actor acting on another brand's marketer raises SITE_SCOPE_FORBIDDEN. */
+  _setActorSite(actorId: string, siteId: string): void;
+  /** The actor last forwarded to a given mutating method ('credit'|'withdraw'|'setPin'|'setStatus'|
+   *  'setFuliza'|'setAirtime'), so wiring tests can assert the admin routes pass the token actor and
+   *  the system/self-service paths pass none. undefined when the method ran with no actor. */
+  _lastActor(method: string): MarketerActor | undefined;
 }
 
 export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
@@ -107,6 +114,22 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
   // epoch (marketer id -> epoch ms). Mirror the SQL semantics so the in-memory and Pg paths agree.
   const securityAnswers = new Map<string, Map<string, string>>();
   const forceLogoutAt = new Map<string, number>();
+  // 0199/A1: the DB brand fence mirrored in memory. `actorSites` maps a site-admin actor to its home
+  // brand; `lastActor` records the actor each mutating method last received (for wiring assertions).
+  const actorSites = new Map<string, string>();
+  const lastActor = new Map<string, MarketerActor | undefined>();
+  // Mirrors fn_assert_actor_site_scope (0156): a site-tier actor confined to a single brand (registered
+  // here with `_setActorSite`) may not act on another brand's marketer. A platform actor / the owner
+  // (no registered home => acts across brands) and a null actor (internal/system + self-service) are a
+  // no-op, as is a missing marketer (null site) — left to the method's own MARKETER_NOT_FOUND, exactly
+  // like the SQL helper's `p_site is not null` guard. (The real role→scope mapping lives in the DB and
+  // is proven by packages/db/_testkit/e2e_marketer_rpc_tenant_fence.py; this models it via the home.)
+  const fence = (method: string, marketerSite: string | undefined, actor?: MarketerActor): void => {
+    lastActor.set(method, actor);
+    if (!actor || marketerSite == null) return;
+    const home = actorSites.get(actor.id);
+    if (home !== undefined && home !== marketerSite) throw new Error("SITE_SCOPE_FORBIDDEN");
+  };
   let mseq = 0, lseq = 0;
   const now = () => new Date().toISOString();
   const parts = (n: string) => n.trim().split(/\s+/).filter(Boolean);
@@ -149,7 +172,8 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       const m = [...byId.values()].find((r) => sig9(r.phone) === sig9(phone) && sig9(phone).length === 9);
       return m ? profileOf(m) : null;
     },
-    async credit(id: string, amountCents: number, ref: string | null, meta: unknown): Promise<number> {
+    async credit(id: string, amountCents: number, ref: string | null, meta: unknown, actor?: MarketerActor): Promise<number> {
+      fence("credit", byId.get(id)?.site_id, actor);
       if (amountCents <= 0) throw new Error("AMOUNT_MUST_BE_POSITIVE");
       if (ref && refs.has(ref)) return refs.get(ref)!.balance;
       const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
@@ -167,7 +191,8 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       push(id, "credit", add, m.balance, `self_demo_topup:${now()}`, { source: "self_service_demo" });
       return m.balance;
     },
-    async withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, _method: string): Promise<WithdrawResult> {
+    async withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, _method: string, actor?: MarketerActor): Promise<WithdrawResult> {
+      fence("withdraw", byId.get(id)?.site_id, actor);
       if (amountCents <= 0) throw new Error("AMOUNT_MUST_BE_POSITIVE");
       if (ref && refs.has(ref)) { const e = refs.get(ref)!; return { idempotent: true, balance_cents: e.balance, ledger_id: e.ledgerId }; }
       const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
@@ -178,10 +203,10 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       if (ref) refs.set(ref, { balance: m.balance, ledgerId: lid });
       return { idempotent: false, balance_cents: m.balance, withdrawal_id: `w-${lid}`, ledger_id: lid };
     },
-    async setFuliza(id: string, amountCents: number): Promise<number> { if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.fuliza = amountCents; m.updated_at = now(); return amountCents; },
-    async setAirtime(id: string, amountCents: number): Promise<number> { if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.airtime = amountCents; m.updated_at = now(); return amountCents; },
+    async setFuliza(id: string, amountCents: number, actor?: MarketerActor): Promise<number> { fence("setFuliza", byId.get(id)?.site_id, actor); if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.fuliza = amountCents; m.updated_at = now(); return amountCents; },
+    async setAirtime(id: string, amountCents: number, actor?: MarketerActor): Promise<number> { fence("setAirtime", byId.get(id)?.site_id, actor); if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.airtime = amountCents; m.updated_at = now(); return amountCents; },
     async statement(id: string, limit: number): Promise<MarketerLedgerRow[]> { return (ledgers.get(id) ?? []).slice().reverse().slice(0, limit); },
-    async setPin(id: string, pin: string): Promise<void> { if (!/^\d{4,6}$/.test(pin)) throw new Error("INVALID_PIN"); if (!byId.has(id)) throw new Error("MARKETER_NOT_FOUND"); pins.set(id, pin); },
+    async setPin(id: string, pin: string, actor?: MarketerActor): Promise<void> { fence("setPin", byId.get(id)?.site_id, actor); if (!/^\d{4,6}$/.test(pin)) throw new Error("INVALID_PIN"); if (!byId.has(id)) throw new Error("MARKETER_NOT_FOUND"); pins.set(id, pin); },
     async login(phone: string, pin: string, siteId?: string): Promise<string | null> {
       // Mirrors fn_marketer_login (0093): a phone is unique only within a brand, so match the PIN
       // across every brand holding this phone (or scope to one brand when siteId is given). The PIN
@@ -201,7 +226,8 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       if (pins.get(id) !== currentPin) throw new Error("INVALID_CREDENTIALS");
       pins.set(id, newPin);
     },
-    async setStatus(id: string, status: string): Promise<string> {
+    async setStatus(id: string, status: string, actor?: MarketerActor): Promise<string> {
+      fence("setStatus", byId.get(id)?.site_id, actor);
       if (!["active", "suspended", "disabled"].includes(status)) throw new Error("INVALID_STATUS");
       const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
       m.status = status; m.updated_at = now(); return status;
@@ -226,6 +252,8 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
     // Test-only: register a brand (site) display name so profiles resolve `brand_name` like the
     // 0096 view does in production. Mirrors the `_seed*` helpers on the affiliate in-memory repo.
     _setBrandName(siteId: string, name: string): void { brandBySite.set(siteId, name); },
+    _setActorSite(actorId: string, siteId: string): void { actorSites.set(actorId, siteId); },
+    _lastActor(method: string): MarketerActor | undefined { return lastActor.get(method); },
   };
 }
 

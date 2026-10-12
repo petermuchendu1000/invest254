@@ -113,6 +113,15 @@ export function ledgerToTxDto(r: MarketerLedgerRow, brandName?: string | null): 
   };
 }
 
+/**
+ * The authenticated actor behind an ADMIN marketer mutation, forwarded to the DB fence (0199 / A1).
+ * `id` = the operator's profiles.id (token subject), `role` = the token role claim. The marketer RPCs
+ * pass it to fn_assert_actor_site_scope, which raises SITE_SCOPE_FORBIDDEN for a site-tier actor acting
+ * on another brand's marketer — the database backstop to the route's `marketerInScope` guard. Omitted
+ * (undefined) for the internal/system and self-service paths, where the fence is a deliberate no-op.
+ */
+export type MarketerActor = { id: string; role: string };
+
 /** Persistence contract for the marketer module (Postgres impl in marketers.pg.ts). */
 export interface MarketerRepo {
   /** Create (or upsert) a marketer within a brand. `siteId` stamps the brand; undefined => default site. */
@@ -124,20 +133,24 @@ export interface MarketerRepo {
   profile(id: string): Promise<MarketerProfile | null>;
   /** Look up a marketer by phone (the identity shared with the invest254 website account). `siteId` scopes it. */
   profileByPhone(phone: string, siteId?: string): Promise<MarketerProfile | null>;
-  credit(id: string, amountCents: number, ref: string | null, meta: unknown): Promise<number>;
+  /** Credit the marketer wallet. `actor` (admin routes) engages the DB brand fence (0199); omit it for
+   *  the internal/system credit (fn_marketer_game_withdraw) which has no actor. */
+  credit(id: string, amountCents: number, ref: string | null, meta: unknown, actor?: MarketerActor): Promise<number>;
   /** Marketer SELF-SERVICE demo top-up: tops the marketer's own (funny-money) wallet UP TO capCents.
    *  Atomic + capped + audited; never touches real cash. Returns the new balance. */
   topupDemo(id: string, capCents: number): Promise<number>;
-  withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, method: string): Promise<WithdrawResult>;
-  setFuliza(id: string, amountCents: number): Promise<number>;
-  setAirtime(id: string, amountCents: number): Promise<number>;
+  withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, method: string, actor?: MarketerActor): Promise<WithdrawResult>;
+  setFuliza(id: string, amountCents: number, actor?: MarketerActor): Promise<number>;
+  setAirtime(id: string, amountCents: number, actor?: MarketerActor): Promise<number>;
   statement(id: string, limit: number): Promise<MarketerLedgerRow[]>;
   // ── auth / lifecycle ──
-  setPin(id: string, pin: string): Promise<void>;
+  /** Set/reset the marketer PIN. `actor` (admin route) engages the DB brand fence (0199); omit it for
+   *  the self-service reset (identity proven by security answers, no admin actor). */
+  setPin(id: string, pin: string, actor?: MarketerActor): Promise<void>;
   /** Returns the marketer id on success, or null on ANY failure (no enumeration). `siteId` scopes the brand. */
   login(phone: string, pin: string, siteId?: string): Promise<string | null>;
   changePin(id: string, currentPin: string, newPin: string): Promise<void>;
-  setStatus(id: string, status: string): Promise<string>;
+  setStatus(id: string, status: string, actor?: MarketerActor): Promise<string>;
   /** HARD delete a demo marketer (cascades wallet/ledger/withdrawals/credentials). Un-demos the
    *  matching person. `siteId` scopes a brand admin to their own brand. Returns whether a row went. */
   delete(id: string, siteId?: string): Promise<{ deleted: boolean }>;
@@ -172,6 +185,9 @@ const MARKETER_STATUS: Readonly<Record<string, number>> = {
   // One uniform refusal for EVERY reason a marketer reset can fail (no marketer, no answers set,
   // wrong answers, ineligible target) — same anti-enumeration stance as the operator reset.
   RESET_UNAVAILABLE: 403,
+  // DB brand-fence backstop (0199 / A1): a site-tier actor acting on another brand's marketer. The
+  // route's marketerInScope already returns this 403 first; this maps the database's own raise.
+  SITE_SCOPE_FORBIDDEN: 403,
 };
 
 function statusForMarketer(code: string): number {
@@ -373,6 +389,10 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     await assertSiteTarget(ctx, p.site_id ?? DEFAULT_SITE_ID, scope);
     return p;
   };
+  // The token actor behind an admin marketer mutation, forwarded to the DB brand fence (0199 / A1).
+  // marketerInScope has already fenced at the API; this makes the database enforce the same rule as a
+  // backstop. Only present on authenticated admin routes (auth+admin middleware guarantee the claims).
+  const actorOf = (ctx: Ctx): MarketerActor => ({ id: ctx.claims!.userId, role: ctx.claims!.role ?? "" });
   const loginLimit = rateLimit({ name: "marketer-login", by: "ip", limit: Number(process.env.RATE_LIMIT_AUTH_PER_MIN) || 40, windowMs: 60_000 });
   // 0198: resets are unauthenticated and end in a credential change — throttle hard per IP, like the
   // operator reset. Security-answer setup is authenticated, so it is budgeted per user.
@@ -424,7 +444,7 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     await marketerInScope(ctx, idOf(ctx));   // F-44
     const b = bodyObj(ctx);
     const balanceCents = await domain(() =>
-      deps.marketers.credit(idOf(ctx), reqPositiveCents(b), optStr(b, "ref"), b.meta ?? {}));
+      deps.marketers.credit(idOf(ctx), reqPositiveCents(b), optStr(b, "ref"), b.meta ?? {}, actorOf(ctx)));
     return { balanceCents };
   });
 
@@ -433,20 +453,20 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     await marketerInScope(ctx, idOf(ctx));   // F-44
     const b = bodyObj(ctx);
     return domain(() =>
-      deps.marketers.withdraw(idOf(ctx), reqPositiveCents(b), optStr(b, "ref"), b.meta ?? {}, optStr(b, "method") ?? "internal"));
+      deps.marketers.withdraw(idOf(ctx), reqPositiveCents(b), optStr(b, "ref"), b.meta ?? {}, optStr(b, "method") ?? "internal", actorOf(ctx)));
   });
 
   // Admin sets Available Fuliza for a marketer.
   router.patch(`${BASE}/admin/marketers/:id/fuliza`, auth, admin, async (ctx: Ctx) => {
     await marketerInScope(ctx, idOf(ctx));   // F-44
-    const availableFulizaCents = await domain(() => deps.marketers.setFuliza(idOf(ctx), reqNonNegCents(bodyObj(ctx))));
+    const availableFulizaCents = await domain(() => deps.marketers.setFuliza(idOf(ctx), reqNonNegCents(bodyObj(ctx)), actorOf(ctx)));
     return { availableFulizaCents };
   });
 
   // Admin sets airtime balance for a marketer.
   router.patch(`${BASE}/admin/marketers/:id/airtime`, auth, admin, async (ctx: Ctx) => {
     await marketerInScope(ctx, idOf(ctx));   // F-44
-    const airtimeBalanceCents = await domain(() => deps.marketers.setAirtime(idOf(ctx), reqNonNegCents(bodyObj(ctx))));
+    const airtimeBalanceCents = await domain(() => deps.marketers.setAirtime(idOf(ctx), reqNonNegCents(bodyObj(ctx)), actorOf(ctx)));
     return { airtimeBalanceCents };
   });
 
@@ -665,14 +685,14 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   // Set/reset a marketer's PIN (onboarding or admin recovery — no self-service reset).
   router.post(`${BASE}/admin/marketers/:id/pin`, auth, admin, async (ctx: Ctx) => {
     await marketerInScope(ctx, idOf(ctx));   // F-44
-    await domain(() => deps.marketers.setPin(idOf(ctx), reqPin(bodyObj(ctx), "pin")));
+    await domain(() => deps.marketers.setPin(idOf(ctx), reqPin(bodyObj(ctx), "pin"), actorOf(ctx)));
     return { ok: true };
   });
 
   // Set status: active | suspended | disabled. 'disabled'/'suspended' = demotion (blocks login + /me).
   router.patch(`${BASE}/admin/marketers/:id/status`, auth, admin, async (ctx: Ctx) => {
     await marketerInScope(ctx, idOf(ctx));   // F-44
-    const status = await domain(() => deps.marketers.setStatus(idOf(ctx), reqStr(bodyObj(ctx), "status")));
+    const status = await domain(() => deps.marketers.setStatus(idOf(ctx), reqStr(bodyObj(ctx), "status"), actorOf(ctx)));
     return { status };
   });
 
@@ -689,13 +709,14 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     if (ids.length > 200) throw new ApiError("VALIDATION", "at most 200 marketers per bulk action", 400);
     const STATUS: Record<string, string> = { activate: "active", suspend: "suspended", disable: "disabled" };
     let run: (id: string) => Promise<unknown>;
+    const actor = actorOf(ctx);
     if (action in STATUS) {
       const status = STATUS[action]!;
-      run = async (id) => ({ status: await deps.marketers.setStatus(id, status) });
+      run = async (id) => ({ status: await deps.marketers.setStatus(id, status, actor) });
     } else if (action === "credit") {
       const amountCents = reqPositiveCents(b);
       const batchRef = optStr(b, "ref");
-      run = async (id) => ({ balanceCents: await deps.marketers.credit(id, amountCents, batchRef ? `${batchRef}:${id}` : null, b.meta ?? {}) });
+      run = async (id) => ({ balanceCents: await deps.marketers.credit(id, amountCents, batchRef ? `${batchRef}:${id}` : null, b.meta ?? {}, actor) });
     } else {
       throw new ApiError("VALIDATION", "action must be one of: activate, suspend, disable, credit", 400);
     }
