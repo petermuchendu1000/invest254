@@ -168,12 +168,16 @@ function applySecurityHeaders(res: ServerResponse): void {
   res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
 }
 
-/** Best-effort client IP behind Fly's proxy: prefer Fly-Client-IP, then XFF, then the socket. */
+/**
+ * Client IP behind Fly's proxy. Fly's edge sets `Fly-Client-IP` to the real peer and is the ONLY
+ * ingress to this app, so that header is authoritative. `X-Forwarded-For` is NOT trusted: it is
+ * client-settable, and trusting its first element let an attacker spoof any source IP — which would
+ * defeat the callback CIDR allowlist (restrictToCidrs) and every per-IP rate limit. A request with
+ * no `Fly-Client-IP` is not edge traffic, so we fall through to the socket peer, never to XFF.
+ */
 export function clientIp(req: IncomingMessage): string {
   const fly = req.headers["fly-client-ip"];
   if (typeof fly === "string" && fly.trim()) return fly.trim();
-  const xff = req.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.trim()) return xff.split(",")[0]!.trim();
   return req.socket.remoteAddress ?? "unknown";
 }
 

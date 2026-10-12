@@ -301,10 +301,20 @@ test("affiliate B2C result callback is source-restricted when MPESA_CALLBACK_ALL
     assert.equal(blocked.status, 403);
     assert.equal((await json(blocked)).error.code, "FORBIDDEN");
 
-    // A Safaricom source IP passes the guard (the unknown payout id then 404s, not 403).
-    const allowed = await fetch(path, {
+    // C-2: a spoofed X-Forwarded-For is NO LONGER trusted — only Fly's edge header is. A Safaricom
+    // IP in XFF (but no Fly-Client-IP) must still be refused, or the CIDR lock would be defeatable.
+    const spoofed = await fetch(path, {
       method: "POST",
       headers: { ...headers, "x-forwarded-for": "196.201.212.17" },
+      body,
+    });
+    assert.equal(spoofed.status, 403, "X-Forwarded-For must not satisfy the source-IP allowlist");
+
+    // A Safaricom source IP passes the guard (the unknown payout id then 404s, not 403). The real
+    // client IP comes from Fly's edge header; X-Forwarded-For is no longer trusted (it was spoofable).
+    const allowed = await fetch(path, {
+      method: "POST",
+      headers: { ...headers, "fly-client-ip": "196.201.212.17" },
       body,
     });
     assert.notEqual(allowed.status, 403);
