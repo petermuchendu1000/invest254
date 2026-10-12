@@ -1,9 +1,8 @@
 'use client';
 
-import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
-import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { isTerminalScreen } from '@/lib/ui/terminalScreen';
+import { useBrokerTerminalBrand } from '@/lib/ui/useBrandShell';
 
 /**
  * Does this screen wear MetaTrader's chrome?
@@ -13,7 +12,7 @@ import { isTerminalScreen } from '@/lib/ui/terminalScreen';
  * one of them eventually gets the marketer half wrong.
  */
 export function useTerminalSkin(): boolean {
-  const brand = useBrand();
+  const broker = useBrokerTerminalBrand();
   const { isMarketer } = useMarketerSkin();
-  return isTerminalScreen(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer);
+  return isTerminalScreen(broker, isMarketer);
 }

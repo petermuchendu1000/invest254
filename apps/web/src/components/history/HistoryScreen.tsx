@@ -1,20 +1,21 @@
 'use client';
 
-import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
-import { useBrand } from '@/lib/brand/BrandProvider';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { HistoryTabs } from '@/components/wallet/HistoryTabs';
 import { MT5History } from '@/components/history/MT5History';
 import { isTerminalScreen } from '@/lib/ui/terminalScreen';
+import { useBrokerTerminalBrand } from '@/lib/ui/useBrandShell';
 
 /**
- * A candlestick brand's History screen is MetaTrader's, not the site's generic tabs. Every other
- * shell — line/wave, digits — and every marketer screen keeps what it had.
+ * A BROKER brand's History screen is MetaTrader's, not the site's generic tabs. Every other shell —
+ * line/wave, candlestick, digits — and every marketer screen keeps the house tabs (Transactions /
+ * Ledger / Trades). The candlestick and digits shells are deliberately NOT brokers: they used to land
+ * here because the test read `chart_style` alone, which is a TradingView type for both of them.
  */
 export function HistoryScreen() {
-  const brand = useBrand();
+  const broker = useBrokerTerminalBrand();
   const { isMarketer } = useMarketerSkin();
-  if (isTerminalScreen(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer)) {
+  if (isTerminalScreen(broker, isMarketer)) {
     return <MT5History />;
   }
   return (

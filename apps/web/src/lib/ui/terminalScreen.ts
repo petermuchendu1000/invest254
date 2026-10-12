@@ -102,3 +102,23 @@ export const isBrokerTerminalBrand = (
   tradeUi: string | null | undefined,
   chartIsTradingView: boolean,
 ): boolean => tradeUi === 'broker' || (tradeUi !== 'candlestick' && tradeUi !== 'digits' && chartIsTradingView);
+
+/**
+ * Does this brand PRESENT AS A TRADING PRODUCT, in the only sense the COPY cares about?
+ *
+ * This is a different question from `isBrokerTerminalBrand`, and conflating the two is what the
+ * register note in lib/ui/register.ts could not anticipate: it was written when there were two
+ * shells, so it said "the MetaTrader terminal is a broker, classic or digits is a game". The
+ * candlestick shell is a third case. It is NOT MetaTrader — it must not wear the terminal's chrome
+ * or screens — but it is unmistakably a trading product: its own header says TOP TRADERS, its panel
+ * is the Trading Panel, and its help sheet is "How to trade". Calling its users "players" and their
+ * activity "play" in the footer, the legal pages and a referral landing would contradict the screen
+ * they are standing on.
+ *
+ * So: broker OR candlestick -> 'trading'; classic OR digits -> 'gaming'. Chrome is decided by
+ * `isBrokerTerminalBrand`; vocabulary is decided here.
+ */
+export const presentsAsTradingProduct = (
+  tradeUi: string | null | undefined,
+  chartIsTradingView: boolean,
+): boolean => tradeUi === 'candlestick' || isBrokerTerminalBrand(tradeUi, chartIsTradingView);

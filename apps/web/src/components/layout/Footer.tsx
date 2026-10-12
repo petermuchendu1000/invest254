@@ -6,6 +6,7 @@ import { CurrencySwitcher } from '@/components/layout/CurrencySwitcher';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { registerOf, riskAnchor } from '@/lib/legal/legalPage';
+import { presentsAsTradingProduct } from '@/lib/ui/terminalScreen';
 
 // Global footer: risk messaging, 18+ badge and legal links.
 // Required by FE7 (responsible gaming is first-class, not an afterthought).
@@ -20,7 +21,7 @@ import { registerOf, riskAnchor } from '@/lib/legal/legalPage';
 export function Footer() {
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
-  const register = registerOf(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
+  const register = registerOf(presentsAsTradingProduct(brand.tradeUi, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null));
   const gaming = register === 'gaming';
   const year = new Date().getFullYear();
   return (

@@ -6,6 +6,7 @@ import { useBrand } from '@/lib/brand/BrandProvider';
 import {
   legalSections, legalTitle, registerOf, type LegalBlock, type LegalSection,
 } from '@/lib/legal/legalPage';
+import { presentsAsTradingProduct } from '@/lib/ui/terminalScreen';
 
 /**
  * The legal page, rendered from `lib/legal/legalPage`.
@@ -21,7 +22,7 @@ import {
  */
 export default function LegalPage() {
   const brand = useBrand();
-  const register = registerOf(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
+  const register = registerOf(presentsAsTradingProduct(brand.tradeUi, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null));
   const sections = legalSections(register, {
     name: brand.name,
     licenceLine: brand.licenceLine ?? null,

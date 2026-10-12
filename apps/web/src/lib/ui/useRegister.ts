@@ -3,6 +3,7 @@
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { audienceWords, registerOf, type AudienceWords, type Register } from './register.js';
+import { presentsAsTradingProduct } from '@/lib/ui/terminalScreen';
 
 /**
  * This brand's register and the nouns that go with it, for copy that differs by audience.
@@ -13,6 +14,6 @@ import { audienceWords, registerOf, type AudienceWords, type Register } from './
  */
 export function useRegister(): { register: Register; words: AudienceWords; brandName: string } {
   const brand = useBrand();
-  const register = registerOf(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
+  const register = registerOf(presentsAsTradingProduct(brand.tradeUi, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null));
   return { register, words: audienceWords(register), brandName: brand.name };
 }

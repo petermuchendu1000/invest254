@@ -184,7 +184,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // A MetaTrader screen off the trade surface (History today) is still a terminal screen: it fills
   // the window edge to edge, draws its own blue title bar flush under the app bar, and ends at the
   // toolbar — so no centred reading column, no page padding, and no marketing footer under it.
-  if (isTerminalScreen(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null, isMarketer) && isTerminalRoute(pathname)) {
+  if (isTerminalScreen(isBrokerTerminalBrand(tradeUi, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null), isMarketer) && isTerminalRoute(pathname)) {
     const shellTitle = terminalScreenTitle(pathname);
     return (
       /**
