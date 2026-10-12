@@ -5,6 +5,21 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #65 — 0198 revert block could not drop the appended view column — FIXED (branch `claude/issue1-marketer-signout-2fa`)
+- **What:** the first draft of `0198_marketer_security_and_logout.sql`'s manual revert block restored the
+  14-column `marketer_profiles` view with `create or replace view`, which in Postgres can only APPEND
+  columns, never drop one.
+- **Evidence:** applying 0198 then the revert on a throwaway Postgres 16 raised
+  `ERROR: cannot drop columns from view` and left the view at 15 columns, the epoch column undroppable.
+- **Root cause:** `create or replace view` forbids removing a column; the forward migration appends
+  `sessions_valid_after` (allowed), so only the revert hits the restriction, and the column cannot be
+  dropped while the 15-column view still selects it.
+- **Impact:** documentation-only (a commented manual rollback), never executed by the runner — but a
+  rollback that errors mid-incident is worse than none.
+- **Resolution:** revert now `drop view`s first, recreates the 14-column view, then drops the table and
+  column (order matters). Re-validated on a fresh cluster: forward + revert both clean, view back to 14
+  columns with `security_invoker=true`.
+
 ## #120–#130 — Apple pass: every UI measured on real phone widths — FIXED (branches `ui/apple-pass`, `ui/apple-pass-2`)
 Reported: the Entry Scanner's Market dropdown opened off the bottom of a phone screen. A scripted audit then
 walked every player, admin and owner screen and overlay at 320/360/390/430 (touch) and 1440. It checked five

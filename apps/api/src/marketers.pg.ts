@@ -21,6 +21,7 @@ function toProfile(r: any): MarketerProfile {
     site_id: r.site_id ?? null,
     brand_name: r.brand_name ?? null,
     affiliate_user_id: r.affiliate_user_id ?? null,
+    sessions_valid_after: r.sessions_valid_after ?? null,
   };
 }
 
@@ -146,6 +147,41 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
         "DELETE FROM public.marketers WHERE id = $1 AND ($2::uuid IS NULL OR site_id = $2) RETURNING id",
         [id, siteId ?? null]);
       return { deleted: rows.length > 0 };
+    },
+
+    // ── Security questions + force-logout (0198) ──
+    async getSecurityAnswers(id): Promise<{ questionKey: string; answerHash: string }[]> {
+      const { rows } = await query(
+        "SELECT question_key, answer_hash FROM public.marketer_security_answers WHERE marketer_id = $1 ORDER BY question_key",
+        [id]);
+      return rows.map((r) => ({ questionKey: String(r.question_key), answerHash: String(r.answer_hash) }));
+    },
+
+    async setSecurityAnswers(id, answers): Promise<void> {
+      // Single atomic statement, mirroring the user_security_answers upsert (identity.ts): upsert the
+      // submitted (key, hash) pairs and delete any stored key not in the new set, so the persisted set
+      // is EXACTLY `answers`. unnest() zips the two arrays.
+      const keys = answers.map((a) => a.questionKey);
+      const hashes = answers.map((a) => a.answerHash);
+      await query(
+        `with input as (
+           select question_key, answer_hash
+             from unnest($2::text[], $3::text[]) as t(question_key, answer_hash)
+         ), del as (
+           delete from public.marketer_security_answers
+            where marketer_id = $1 and question_key not in (select question_key from input)
+         )
+         insert into public.marketer_security_answers (marketer_id, question_key, answer_hash)
+         select $1, question_key, answer_hash from input
+         on conflict (marketer_id, question_key)
+           do update set answer_hash = excluded.answer_hash, updated_at = now()`,
+        [id, keys, hashes]);
+    },
+
+    async forceLogout(id): Promise<void> {
+      // now() from the DATABASE, so a skewed app clock cannot stamp an epoch in the past and leave a
+      // just-issued token alive. Mirrors identity.ts stampForceLogout for the marketers.id identity.
+      await query("UPDATE public.marketers SET sessions_valid_after = now(), updated_at = now() WHERE id = $1", [id]);
     },
   };
 }
