@@ -45,6 +45,7 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   const [totp, setTotp] = React.useState('');
   const [needsTotp, setNeedsTotp] = React.useState(false);
   const [showPw, setShowPw] = React.useState(false);
+  const [showPhone, setShowPhone] = React.useState(false);   // live-stream safety (see the phone Field)
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   // Why this screen appeared without being asked for (0196): a five-minute idle timeout ended the
@@ -70,6 +71,22 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
       else setError('Sign-in failed. Please try again.');
     } finally { setBusy(false); }
   }
+
+  // Shared eye glyph for the reveal toggles below (phone + password).
+  const eyeFor = (shown: boolean, toggle: () => void, what: string) => (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={`${shown ? 'Hide' : 'Show'} ${what}`}
+      className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-fg"
+    >
+      {shown ? (
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M1 1l22 22M9.53 9.53a3 3 0 004.24 4.24" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      ) : (
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" strokeLinecap="round" strokeLinejoin="round" /><circle cx="12" cy="12" r="3" /></svg>
+      )}
+    </button>
+  );
 
   const eye = (
     <button
@@ -112,7 +129,10 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
             </div>
           ) : null}
           <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-            <Field label="Phone number" type="tel" name="phone" inputMode="tel" autoComplete="username" placeholder="07XX XXX XXX" value={phone} onChange={setPhone} required />
+            {/* Masked by default: operators (and marketers demoing on live streams) sign in on camera,
+                so the real MSISDN must not sit in plain view. Reveal is one tap; the posted value is
+                unchanged. inputMode stays 'tel' so the phone keypad still comes up. */}
+            <Field label="Phone number" type={showPhone ? 'tel' : 'password'} name="phone" inputMode="tel" autoComplete="username" placeholder="07XX XXX XXX" value={phone} onChange={setPhone} trailing={eyeFor(showPhone, () => setShowPhone((v) => !v), 'phone number')} required />
             <Field label="Password" type={showPw ? 'text' : 'password'} name="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={setPassword} trailing={eye} required />
             {needsTotp ? (
               <Field label="Authentication code" type="text" name="totp" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={totp} onChange={setTotp} required />

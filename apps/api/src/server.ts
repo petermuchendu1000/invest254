@@ -733,11 +733,12 @@ async function buildDeps(): Promise<ApiDeps> {
     ...(process.env.SUPABASE_JWT_ISSUER ? { issuer: process.env.SUPABASE_JWT_ISSUER } : {}),
     ...(process.env.SUPABASE_JWT_AUD ? { audience: process.env.SUPABASE_JWT_AUD } : {}),
   });
-  // Force-logout enforcement (0097): wrap the JWT verifier so a PRIVILEGED token issued before the
-  // account's sessions_valid_after epoch is rejected (→ 401 in requireAuth → re-login). This gives
-  // every authenticated route the force-logout for free with no call-site changes. Non-privileged
-  // (player) tokens skip the DB read entirely, so high-volume traffic is unaffected. A DB error in
-  // the check fails CLOSED for privileged tokens (safer than admitting a possibly-revoked session).
+  // Force-logout enforcement (0097, widened in 0200): wrap the JWT verifier so a SESSION-GATED token
+  // (operators AND marketers — see SESSION_GATED_ROLES) issued before the account's
+  // sessions_valid_after epoch is rejected (→ 401 in requireAuth → re-login). This gives every
+  // authenticated route the force-logout for free with no call-site changes. PLAYER tokens skip the DB
+  // read entirely, so high-volume traffic is unaffected. A DB error in the check fails CLOSED for those
+  // roles (safer than admitting a possibly-revoked session).
   const verifier = baseVerifier
     ? (async (token: string) => {
         const claims = await baseVerifier(token);

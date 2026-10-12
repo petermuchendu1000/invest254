@@ -22,6 +22,30 @@ export function isPrivilegedRole(role: string | undefined | null): boolean {
 }
 
 /**
+ * Roles whose session is FORCE-LOGOUT checked on every request (0097 epoch + migration 0200).
+ *
+ * Deliberately WIDER than PRIVILEGED_ROLES, and a separate set on purpose: `marketer` must be
+ * revocable because marketers demo the platform on LIVE STREAMS, so "sign every marketer out now"
+ * has to actually end their WEBSITE session — not just the till-app one. 0198 added the epoch to the
+ * `public.marketers` identity (token subject = marketers.id, gated in requireMarketer), but a marketer
+ * signed in to the website holds a `profiles` token with role='marketer', and assertSessionValid
+ * skipped it entirely because 'marketer' is not privileged — so profiles.sessions_valid_after was
+ * never even read and the force-logout silently did nothing for them.
+ *
+ * It is NOT folded into PRIVILEGED_ROLES because that set also drives the password-reset
+ * knowledge-factor gate and the MFA requirement; a marketer must stay a non-privileged account there.
+ * Players are still excluded, so the high-volume path keeps skipping the DB read. This gate is only
+ * the force-logout epoch — the 0196 five-minute IDLE timeout stays operator-only, since logging a
+ * marketer out mid-demo every five minutes would be worse than the problem.
+ */
+export const SESSION_GATED_ROLES: ReadonlySet<string> = new Set([...PRIVILEGED_ROLES, "marketer"]);
+
+/** True when `role`'s token must be checked against the account's force-logout epoch. */
+export function isSessionGatedRole(role: string | undefined | null): boolean {
+  return typeof role === "string" && SESSION_GATED_ROLES.has(role);
+}
+
+/**
  * Pure force-logout check (0097): is a token issued at `iatSeconds` (standard JWT `iat`, seconds)
  * still valid given the account's force-logout epoch `sessionsValidAfterMs` (ms, or null)? A token
  * issued strictly before the epoch is revoked. Exported so it can be unit-tested in isolation.
@@ -813,7 +837,9 @@ export class AuthService {
    * high-volume player traffic pays no extra DB read — only the handful of admin tokens do.
    */
   async assertSessionValid(userId: string, role: string | undefined, iat: unknown): Promise<void> {
-    if (!isPrivilegedRole(role)) return;
+    // Force-logout applies to operators AND marketers (see SESSION_GATED_ROLES) — a marketer's
+    // website session must actually end when they are signed out. Players still skip the DB read.
+    if (!isSessionGatedRole(role)) return;
     const va = await this.repo.getSessionsValidAfterMs(userId);
     const iatSeconds = typeof iat === "number" ? iat : undefined;
     if (!isTokenSessionValid(iatSeconds, va)) throw new Error("SESSION_REVOKED");

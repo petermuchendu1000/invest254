@@ -5,6 +5,54 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #133 — Marketer's phone sat in PLAIN VIEW on the sign-in / sign-up screen — FIXED (web, docs/61)
+- **What:** Issue 2 masked the marketer phone in the three `/marketers/*` API responses, but the number
+  a marketer actually exposes is the one they TYPE into the website sign-in / sign-up form — rendered
+  plaintext in a `type="tel"` field with no hide toggle. Marketers demo the platform on live streams
+  from sign-up onwards, so their real MSISDN was on camera every time. Reported by the owner.
+- **Evidence:** `AuthModal.tsx:409-421` (one field serves signin/signup/reset) `type="tel"`, no toggle —
+  while the *password* directly beneath it already had a `showPw` eye toggle. Same in
+  `AdminSignIn.tsx:115`. A full own-number render also survived at `billing/parts.tsx:138`
+  (`Enter your M-Pesa PIN on {phone}`) fed by a prefill of `me.phone` into a plaintext input (`:101`).
+- **Root cause:** Issue 2 was scoped to API *response* bodies. Masking a response does nothing about a
+  number the user types, or one the client prefills from `/auth/me` (which legitimately returns the full
+  number for deposit/withdraw prefill). The leak was entirely client-side and was never in scope.
+- **Impact:** every marketer's real phone number, broadcast to their whole audience, on every demo.
+- **Resolution:** the phone field on both sign-in surfaces is now masked by default
+  (`type={show ? 'tel' : 'password'}`) with a one-tap reveal mirroring the existing password toggle;
+  `inputMode` is unchanged so the numeric keypad still appears and the submitted value is identical.
+  The billing own-number echo now goes through `maskPhoneForDisplay`, and its prefilled field is masked
+  by default too. **Deliberately NOT masked:** the deposit / withdrawal *destination* inputs — you must
+  be able to read a number back before money moves, and those screens already show the stored number
+  masked (only a freshly typed replacement is visible). `/auth/me` still returns the full number, since
+  masking it would break deposit/withdraw prefill (a masked string fails `normalizeMsisdn`).
+
+## #132 — "Force all marketers to sign out" never touched their website session — FIXED (migration 0200)
+- **What:** 0198's force sign-out stamped `public.marketers.sessions_valid_after` (all 24 rows) — the
+  TILL APP identity only. A marketer signed in on the WEBSITE holds an ordinary `profiles` token with
+  role='marketer', and that session was never ended. The owner reported "no marketer was logged out",
+  and they were right.
+- **Evidence (read-only prod):** `profiles where role='marketer'` = **28 rows, only 11 stamped** (those
+  11 from unrelated earlier admin actions). Worse, the stamp was irrelevant: the verifier's force-logout
+  gate `AuthService.assertSessionValid` opens with `if (!isPrivilegedRole(role)) return;` and
+  `PRIVILEGED_ROLES = {admin, platform_admin, platform_superadmin}` — **'marketer' is not privileged**,
+  so `profiles.sessions_valid_after` was never even READ for a marketer token.
+- **Root cause:** two separate gaps compounding — the wrong identity was stamped, AND the gate that
+  would have enforced it skips non-privileged roles by design (a deliberate performance choice so
+  player traffic does no DB read per request). 0198 only ever closed the till-app half via
+  `requireMarketer`, which gates `/marketers/*` routes and nothing else.
+- **Impact:** every marketer's website session (7-day JWT) stayed alive indefinitely. The headline
+  control of Issue 1 did not work for the accounts it was written for.
+- **Resolution:** new `SESSION_GATED_ROLES = PRIVILEGED_ROLES ∪ {marketer}` drives `assertSessionValid`,
+  so a marketer's website token is now checked against the epoch (kept as a SEPARATE set, because
+  `PRIVILEGED_ROLES` also drives the password-reset knowledge factor and the MFA requirement, where a
+  marketer must stay non-privileged; players still skip the read). The 0196 five-minute IDLE timeout is
+  deliberately left operator-only — logging a marketer out mid-demo would be worse than the bug.
+  Migration 0200 stamps `profiles.sessions_valid_after` for every role='marketer' and re-stamps
+  `public.marketers`, so both identities end at one moment. Regression test:
+  `authservice.security.test.ts` — "assertSessionValid revokes a MARKETER website token issued before
+  the epoch (0200)" + a set-membership test pinning marketer in/out of the two role sets.
+
 ## #131 — Marketer money/PIN RPCs had no DB brand fence (single point of failure) — FIXED (migration 0199, docs/60)
 - **What:** the six marketer mutating RPCs (`fn_marketer_credit` / `_withdraw` / `_set_pin` /
   `_set_status` / `_set_fuliza` / `_set_airtime`) took only the marketer id and had no actor/brand
