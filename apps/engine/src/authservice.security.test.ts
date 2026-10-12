@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AuthService, isTokenSessionValid, isPrivilegedRole } from "./authservice.js";
+import { AuthService, isTokenSessionValid, isPrivilegedRole, isSessionGatedRole } from "./authservice.js";
 import { InMemoryIdentityRepository } from "./identity.js";
 import { isValidSecurityQuestionKey } from "@invest254/shared";
 
@@ -194,6 +194,44 @@ test("assertSessionValid revokes a privileged token issued before the force-logo
   const p = await auth.register({ phone: "0700000000", username: "player1", password: "Password1" });
   repo._forceLogout(p.userId, Date.now() + 10_000);
   await auth.assertSessionValid(p.userId, "player", 0); // no throw
+});
+
+/**
+ * Regression (BUGLOG #132, migration 0200): a MARKETER's website session must be force-logout-able.
+ * 0198 only revoked the till-app identity (marketers.id, gated in requireMarketer). A marketer signed
+ * in on the website holds a profiles token with role='marketer', and this gate skipped it because
+ * 'marketer' is not in PRIVILEGED_ROLES — so "sign every marketer out now" silently did nothing to the
+ * session they actually use. Marketers demo on live streams, so that session has to end.
+ */
+test("assertSessionValid revokes a MARKETER website token issued before the epoch (0200)", async () => {
+  const repo = new InMemoryIdentityRepository();
+  const auth = new AuthService(repo, { jwtSecret: SECRET });
+  const { userId } = await seedAdmin(repo, auth);
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // Unstamped: a marketer token is fine.
+  await auth.assertSessionValid(userId, "marketer", nowSec);
+
+  // Force-logout "now" → the marketer's existing (older) token is REVOKED, a fresh one is accepted.
+  repo._forceLogout(userId, Date.now());
+  await assert.rejects(() => auth.assertSessionValid(userId, "marketer", nowSec - 60), /SESSION_REVOKED/);
+  await auth.assertSessionValid(userId, "marketer", nowSec + 60);
+
+  // Fails CLOSED for a stamped marketer whose token carries no iat at all.
+  await assert.rejects(() => auth.assertSessionValid(userId, "marketer", undefined), /SESSION_REVOKED/);
+});
+
+test("SESSION_GATED_ROLES covers marketer + operators but NOT players; PRIVILEGED_ROLES unchanged", () => {
+  // The force-logout gate is wider than the privileged set...
+  for (const r of ["admin", "platform_admin", "platform_superadmin", "marketer"]) {
+    assert.equal(isSessionGatedRole(r), true, r);
+  }
+  assert.equal(isSessionGatedRole("player"), false);
+  assert.equal(isSessionGatedRole(undefined), false);
+  // ...but a marketer must remain NON-privileged, since PRIVILEGED_ROLES also drives the
+  // password-reset knowledge factor and the MFA requirement.
+  assert.equal(isPrivilegedRole("marketer"), false);
+  assert.equal(isPrivilegedRole("admin"), true);
 });
 
 test("assertAccountActive revokes a privileged token once the operator is banned/suspended, ignores players (#7)", async () => {

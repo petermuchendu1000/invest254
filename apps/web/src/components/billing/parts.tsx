@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatKes } from '@invest254/shared/money';
+import { maskPhoneForDisplay } from '@/lib/wallet/format';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -93,6 +94,9 @@ export function InvoiceList({ invoices, showPlatform, onPay, emptyTitle, emptyTe
 export function PayNowModal({ invoiceId, open, onClose }: { invoiceId: string | null; open: boolean; onClose: () => void }) {
   const me = useSession((s) => s.user);
   const [phone, setPhone] = React.useState('');
+  // This field is PREFILLED with the signed-in user's own MSISDN, and billing is walked through on
+  // live streams — so it starts masked. Reveal is one tap; the value sent is unchanged.
+  const [showPhone, setShowPhone] = React.useState(false);
   const [sentAt, setSentAt] = React.useState<number | null>(null);
   const [paymentId, setPaymentId] = React.useState<string | null>(null);
   const pay = usePayNow();
@@ -127,7 +131,17 @@ export function PayNowModal({ invoiceId, open, onClose }: { invoiceId: string | 
             <div className="flex justify-between"><span className="text-muted">Amount</span><span className="font-semibold tabular-nums">{formatKes(shown)}</span></div>
             {shown !== due ? <p className="mt-1 text-xs text-muted">Rounded up to whole shillings; the extra is credited to your next invoice.</p> : null}
           </div>
-          <Input label="M-Pesa phone number" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0712 345 678"
+          <Input label="M-Pesa phone number" type={showPhone ? 'tel' : 'password'} inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0712 345 678"
+            trailing={
+              <button
+                type="button"
+                onClick={() => setShowPhone((v) => !v)}
+                aria-label={showPhone ? 'Hide phone number' : 'Show phone number'}
+                className="px-2 text-[12px] font-medium text-muted transition hover:text-fg"
+              >
+                {showPhone ? 'Hide' : 'Show'}
+              </button>
+            }
             error={phone && !validPhone(phone) ? 'Enter a Safaricom number like 0712 345 678.' : undefined}
             hint="You'll get a prompt on this phone. Enter your M-Pesa PIN there to pay." />
         </div>
@@ -135,7 +149,9 @@ export function PayNowModal({ invoiceId, open, onClose }: { invoiceId: string | 
         <div className="flex flex-col items-center gap-3 py-4 text-center" role="status" aria-live="polite">
           <span className="h-10 w-10 animate-spin rounded-full border-4 border-accent/30 border-t-accent" aria-hidden />
           <p className="font-medium">Check your phone</p>
-          <p className="max-w-xs text-sm text-muted">Enter your M-Pesa PIN on {phone} to pay {formatKes(shown)}. This page confirms as soon as Safaricom does.</p>
+          {/* Masked: this echoes the signed-in user's OWN number, and this screen is shown on live
+              streams. The prompt goes to the full number regardless — only the display is masked. */}
+          <p className="max-w-xs text-sm text-muted">Enter your M-Pesa PIN on {maskPhoneForDisplay(phone)} to pay {formatKes(shown)}. This page confirms as soon as Safaricom does.</p>
         </div>
       ) : step === 'failed' ? (
         <div className="flex flex-col gap-2 py-2 text-sm" role="alert">

@@ -161,6 +161,10 @@ export function AuthModal() {
   const [referral, setReferral] = useState('');
   const [showRef, setShowRef] = useState(false);
   const [showPw, setShowPw] = useState(false);
+  // Marketers demo the platform on LIVE STREAMS and sign in/up on camera, so the phone field starts
+  // MASKED (the number is their real MSISDN). Reveal is one tap, exactly like the password below.
+  // Nothing functional changes — the typed value is submitted either way.
+  const [showPhone, setShowPhone] = useState(false);
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -409,12 +413,24 @@ export function AuthModal() {
         <Input
           label="Phone number"
           name="phone"
-          type="tel"
+          // Masked by default (live-stream safety — see showPhone). inputMode stays numeric so the
+          // phone keypad still comes up, and the value posted is unchanged.
+          type={showPhone ? 'tel' : 'password'}
           inputMode="numeric"
           autoComplete="tel"
           required
           autoFocus
           placeholder="07XX XXX XXX"
+          trailing={
+            <button
+              type="button"
+              onClick={() => setShowPhone((v) => !v)}
+              aria-label={showPhone ? 'Hide phone number' : 'Show phone number'}
+              className="flex h-10 w-10 items-center justify-center rounded-lg transition hover:bg-border hover:text-fg"
+            >
+              <EyeIcon off={showPhone} />
+            </button>
+          }
           value={phone}
           onChange={(e) => setPhone(localPhone(e.target.value))}
           error={errors['phone']}
