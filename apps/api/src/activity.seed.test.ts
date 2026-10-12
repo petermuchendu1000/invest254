@@ -325,3 +325,72 @@ test("routes: metric and period are narrowed to literals, never passed through",
     assert.deepEqual(seen[1], { period: "week", metric: "profit", limit: 40 });
   } finally { await api.close(); }
 });
+
+// ---------------------------------------------------------------------------------------------
+// JOB 4 — the feed has to read as a ROOM, not as one person
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The shape of a real brand that went wrong in production (cpfmarket, observed via the public API):
+ * the only real activity was a single prolific account's session from ~15 DAYS ago, repeated, while
+ * the seeded rows were minutes old. The reserved floor had no age bound, so a quarter of a feed
+ * described as live was held by fortnight-old rows from one trader — and because every client view
+ * (the chat column and the notification card) reads THIS list, that one name was everywhere.
+ */
+const FIFTEEN_DAYS = 15 * 24 * 60 * 60;
+function burstBrand() {
+  return stubQuerier((sql) =>
+    sql.includes("activity_seed")
+      ? Array.from({ length: 40 }, (_, i) => ({
+          kind: "win", name: `Seeded${i}`, amount_cents: 5_000_00, ago_seconds: 60 + i * 60,
+        }))
+      : // One account, one session, a fortnight ago — plus a second name so "real" is not one row.
+        Array.from({ length: 12 }, (_, i) => ({
+          kind: "win", username: i < 10 ? "mkeeee" : "mmekkkk",
+          amount_cents: 300_00, ago_seconds: FIFTEEN_DAYS + i,
+        })),
+  );
+}
+
+test("feed: no single trader may own the window", async () => {
+  const store = makePgBrandActivity(burstBrand());
+  const rows = await store.recent(SITE_A, 40, { seededAllowed: true });
+
+  const perName = new Map<string, number>();
+  for (const r of rows) perName.set(r.name, (perName.get(r.name) ?? 0) + 1);
+  const worst = [...perName.entries()].sort((a, b) => b[1] - a[1])[0]!;
+  assert.ok(worst[1] <= 2, `"${worst[0]}" holds ${worst[1]} of ${rows.length} rows`);
+  // And the room is actually a room.
+  assert.ok(perName.size >= 20, `only ${perName.size} distinct names in ${rows.length} rows`);
+});
+
+test("feed: a fortnight-old real row does not hold a reserved slot against fresh activity", async () => {
+  const store = makePgBrandActivity(burstBrand());
+  const rows = await store.recent(SITE_A, 40, { seededAllowed: true });
+
+  // Stale real rows are not EXCLUDED — they still compete — but they must not displace the fresh.
+  const stale = rows.filter((r) => r.agoSeconds >= FIFTEEN_DAYS);
+  assert.ok(stale.length <= 4, `${stale.length} fortnight-old rows reserved into a live feed`);
+  assert.ok(rows.filter((r) => r.agoSeconds < 3600).length >= 20, 'the window should be mostly fresh');
+});
+
+test("feed: the client reads it NEWEST FIRST, which is what the notification depends on", async () => {
+  const store = makePgBrandActivity(burstBrand());
+  const rows = await store.recent(SITE_A, 40, { seededAllowed: true });
+  for (let i = 1; i < rows.length; i++) {
+    assert.ok(rows[i - 1]!.agoSeconds <= rows[i]!.agoSeconds, `row ${i} is older than its predecessor`);
+  }
+});
+
+test("feed: a brand whose ONLY activity is old still shows it rather than nothing", async () => {
+  // The age bound must not become a filter: with no seeded rows to replace them, the stale real
+  // rows are all there is, and an empty feed would be a worse lie than an old one.
+  const q = stubQuerier((sql) =>
+    sql.includes("activity_seed") ? [] : [
+      { kind: "win", username: "mkeeee", amount_cents: 300_00, ago_seconds: FIFTEEN_DAYS },
+      { kind: "deposit", username: "wanjiku", amount_cents: 500_00, ago_seconds: FIFTEEN_DAYS + 5 },
+    ],
+  );
+  const rows = await makePgBrandActivity(q).recent(SITE_A, 40, { seededAllowed: true });
+  assert.equal(rows.length, 2);
+});
