@@ -74,18 +74,21 @@ function SignedInAffiliate() {
   );
 }
 
-/** Staff sessions: say plainly why the programme is closed to them, and point back to their workspace. */
+/**
+ * Staff sessions: say plainly why the programme is closed to them.
+ *
+ * This had a "Back to your workspace" link to `/console`. It no longer belongs: the console is
+ * served on the operator domain only, and this page is on a brand domain, so the link pointed at a
+ * path that answers 404 on the very host that renders it. A relative link cannot cross to the
+ * operator domain, and hard-coding that domain here would put the operator's address in every
+ * player's JavaScript bundle to save an admin one bookmark. The notice explains itself without it.
+ */
 function OperatorNotice() {
   const { words } = useRegister();
   return (
     <EmptyState
       title="Not available for staff accounts"
       description={`Operator accounts (brand, platform and system admins) can't join the affiliate or referral programme. Commission must never depend on the people who manage ${words.manyPossessive} accounts. Use a separate ${words.one} account if you want to refer friends.`}
-      action={
-        <a href="/console" className="text-sm font-medium text-accent hover:underline">
-          Back to your workspace
-        </a>
-      }
     />
   );
 }

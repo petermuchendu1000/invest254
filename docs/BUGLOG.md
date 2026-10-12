@@ -5,6 +5,47 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #134 — The operator back office answered on EVERY client brand domain — FIXED (web, middleware + layout gate)
+- **What:** `/console`, `/admin/**` and `/platform/**` were served by hostname-independent routing, so
+  every brand domain on the platform presented the operator sign-in form. The console is supposed to
+  live on the operator domain (`triocodes.com`); nothing stopped a player's domain from serving it too.
+  Surfaced while answering "what is the admin entry point" and closed on the owner's decision that the
+  console be reachable only on the admin domain.
+- **Evidence (live production, before the fix):** `https://cpfmarket.com/console` → **200**,
+  `/admin` → **200**, `/platform` → **200**, each rendering `AdminSignIn` (phone + password). The same
+  three paths on `triocodes.com` → 200, as intended. So the back office had as many front doors as the
+  platform had brands.
+- **Root cause:** host was used for exactly one routing decision — `middleware.ts` redirected `/` →
+  `/console` on the admin host — and for nothing else. Access control on the operator surfaces was
+  entirely ROLE-based (`console/page.tsx:18-22`, `AdminShell`, `PlatformShell`), and a role check runs
+  *after* the page is served, so it can refuse an account but cannot refuse a domain.
+- **Impact:** no unauthorised access — every surface still refused anything below `admin` with a 404,
+  and that held. What leaked was the back office's *existence and its login form* onto client-facing
+  domains: a credential form to brute-force or phish a lookalike of, on a domain whose operator never
+  asked to host one, plus a plain statement to any visitor that the brand is one skin of a larger
+  platform. White-label brands are sold on not advertising that.
+- **Fix:** `operatorSurfaceAllowed(host)` (`lib/brand/adminHost.ts`) — one predicate, allowing the admin
+  host, loopback/`.test`/`.localhost` (the e2e harness drives the console at `127.0.0.1:3100`, and CI's
+  own readiness probe is `curl -sf …/console`), and `*.pages.dev` (so a deploy can be checked before DNS
+  points at it). Enforced twice: `middleware.ts` rewrites the operator paths to `/_not-found` with a 404
+  before Next matches the route, and each operator layout calls `requireOperatorHost()` as the backstop.
+  The middleware is what makes it real — with the layout gate alone the 404 still preloaded
+  `static/chunks/app/console/page-*.js` and carried `Console · CPF Market` in its flight payload, i.e.
+  named the page it was hiding. Also removed the now-dead `/console` link from the affiliate page's
+  staff notice.
+- **Verification:** local production build, status matrix over 6 hosts × 8 paths — player hosts 404 on
+  all operator paths and 200 on `/`, `/wallet`, `/account`; `triocodes.com` and `www.` unchanged at 200
+  (`/` still 307 → `/console`); loopback, `.test` and `.pages.dev` 200. Real browser: the operator
+  sign-in form renders on `triocodes.com/console|/admin|/platform` (password + identity field present),
+  and `cpfmarket.com` shows "404 Page not found" with no form. Body diff confirms the 404 no longer
+  carries any route-naming chunk or title. 2236 unit tests pass (9 in `adminHost.test.ts`), typecheck
+  clean, e2e 199/0 + 20/20 + 20/20 + 26/26.
+- **Residual (reported, not actioned):** the 404 a player host returns for an operator path renders
+  without the player chrome, because `AppShell` suppresses chrome by pathname. The page and status are
+  identical to any other 404; the missing nav is a weak oracle that the path is handled specially.
+  Closing it means threading a host-derived flag through `AppShell`, the most load-bearing component in
+  the player app — not worth that risk unprompted.
+
 ## #133 — Marketer's phone sat in PLAIN VIEW on the sign-in / sign-up screen — FIXED (web, docs/61)
 - **What:** Issue 2 masked the marketer phone in the three `/marketers/*` API responses, but the number
   a marketer actually exposes is the one they TYPE into the website sign-in / sign-up form — rendered
