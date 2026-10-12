@@ -69,7 +69,7 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
               <StatCard label="Deposits" money={q.data.depositsCents} tone="up" />
               <StatCard label="Withdrawals" money={q.data.withdrawalsCents} tone="down" />
               <StatCard label="Net deposits" money={q.data.netDepositsCents} tone={q.data.netDepositsCents >= 0 ? 'up' : 'down'} />
-              <StatCard label="Settled bets" value={formatNumber(q.data.betCount)} />
+              <StatCard label="Settled trades" value={formatNumber(q.data.betCount)} />
             </div>
           </Section>
 
@@ -150,9 +150,9 @@ const ACTIVITY_KINDS = [
   { value: '', label: 'All activity' },
   { value: 'deposit', label: 'Deposits' },
   { value: 'withdrawal', label: 'Withdrawals' },
-  { value: 'bet', label: 'Bets' },
+  { value: 'bet', label: 'Trades' },
 ];
-const KIND_LABEL: Record<string, string> = { deposit: 'Deposit', withdrawal: 'Withdrawal', bet: 'Bet', adjustment: 'Manual adjustment' };
+const KIND_LABEL: Record<string, string> = { deposit: 'Deposit', withdrawal: 'Withdrawal', bet: 'Trade', adjustment: 'Manual adjustment' };
 
 function ActivityTimeline({ id }: { id: string }) {
   const [kind, setKind] = useState('');
@@ -169,7 +169,7 @@ function ActivityTimeline({ id }: { id: string }) {
       ) : q.isError ? (
         <Empty title="Couldn't load activity" description="Try again shortly." />
       ) : rows.length === 0 ? (
-        <Empty title="No activity yet" description="Deposits, withdrawals and bets will appear here." />
+        <Empty title="No activity yet" description="Deposits, withdrawals and trades will appear here." />
       ) : (
         <>
           <TableWrap>

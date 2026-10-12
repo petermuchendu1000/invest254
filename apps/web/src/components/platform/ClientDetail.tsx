@@ -438,7 +438,7 @@ function PeopleSection({ site }: { site: SiteWithConfig }) {
         <div className="table-wrapper overflow-x-auto rounded-xl border border-border">
           <table className="w-full min-w-[640px] text-sm">
             <thead><tr className="text-left text-xs uppercase tracking-wide text-muted">
-              <th className="px-3 py-2">Player</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Balance</th><th className="px-3 py-2 text-right">Deposits</th><th className="px-3 py-2 text-right">Bets</th>
+              <th className="px-3 py-2">Player</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Balance</th><th className="px-3 py-2 text-right">Deposits</th><th className="px-3 py-2 text-right">Trades</th>
             </tr></thead>
             <tbody>
               {rows.map((u) => (

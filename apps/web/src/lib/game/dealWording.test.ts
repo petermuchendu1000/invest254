@@ -34,9 +34,16 @@ test('no terminal string contains the word bet', () => {
   assert.equal(dealsTabLabel(true), 'Deals');
 });
 
-test('and every classic string still does, because that shell is not MetaTrader', () => {
+/**
+ * The classic/digits shells say TRADE, not "bet" — the owner's platform-wide rename. This is a
+ * trading product, so no player-facing surface should call a position a bet; `Deals` stays the
+ * terminal's word because that is MetaTrader's own vocabulary.
+ */
+test('the classic shell says Trades, and the gambling word is gone from its copy too', () => {
   const copy = dealListCopy(false);
-  assert.equal(dealsTabLabel(false), 'Bets');
-  assert.ok(/bets/i.test(copy.emptyTitle));
-  assert.ok(/bet history/i.test(copy.loadError));
+  assert.equal(dealsTabLabel(false), 'Trades');
+  assert.equal(copy.emptyTitle, 'No trades yet');
+  assert.ok(/trade history/i.test(copy.loadError));
+  const all = [dealsTabLabel(false), copy.emptyTitle, copy.emptyBody, copy.loadError].join(' ');
+  assert.ok(!/\bbets?\b/i.test(all), all);
 });

@@ -36,7 +36,7 @@ export function CandlestickTradeScreen() {
   const [railTab, setRailTab] = useState<RailTab>('chat');
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#0a0f1c] text-white">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-bg text-fg">
       {/*
         Other players' wins, floating over the chart. One element, outside both trees, because it is
         the same notification on a phone and a desktop and must not be mounted twice — two copies
@@ -50,10 +50,10 @@ export function CandlestickTradeScreen() {
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div className={cn('absolute inset-0 overflow-y-auto overflow-x-hidden', phoneTab === 'trade' ? 'block' : 'hidden')}>
             <QuoteBar compact />
-            <div className="relative h-[350px] w-full shrink-0 bg-[#0a0f1c]">
+            <div className="relative h-[350px] w-full shrink-0 bg-bg">
               <Tape />
             </div>
-            <div className="min-w-0 border-t border-[#1f2937]">
+            <div className="min-w-0 border-t border-border">
               <TradingPanel />
             </div>
           </div>
@@ -68,7 +68,7 @@ export function CandlestickTradeScreen() {
           clear the 48px bar. `min-w-0` lets the cells stay equal instead of the widest label
           ("tours") stretching its own.
         */}
-        <div className="flex h-12 shrink-0 border-t border-[#1f2937] bg-[#111827]">
+        <div className="flex h-12 shrink-0 border-t border-border bg-surface">
           {(['trade', 'chat', 'top', 'tours'] as const).map((t) => (
             <button
               key={t}
@@ -76,7 +76,7 @@ export function CandlestickTradeScreen() {
               onClick={() => setPhoneTab(t)}
               className={cn(
                 'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 text-[10px] font-semibold uppercase leading-none tracking-wider transition-colors',
-                phoneTab === t ? 'border-t-2 border-[#22c55e] text-[#22c55e]' : 'text-gray-500',
+                phoneTab === t ? 'border-t-2 border-accent text-accent' : 'text-muted',
               )}
             >
               <CIcon name={t} className="h-4 w-4" />
@@ -88,20 +88,20 @@ export function CandlestickTradeScreen() {
 
       {/* ── Desktop: chart left, 640px rail right ──────────────────────────── */}
       <div className="hidden min-h-0 flex-1 flex-row overflow-hidden md:flex">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0a0f1c]">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
           <QuoteBar />
           <div className="relative min-h-0 w-full flex-1 overflow-hidden">
             <Tape />
           </div>
         </div>
 
-        <div className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-[#1f2937] min-h-0 lg:w-[640px] lg:flex-row">
-          <div className="min-w-0 flex-1 overflow-y-auto border-b border-[#1f2937] lg:w-[320px] lg:flex-none lg:border-b-0 lg:border-r">
+        <div className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-border min-h-0 lg:w-[640px] lg:flex-row">
+          <div className="min-w-0 flex-1 overflow-y-auto border-b border-border lg:w-[320px] lg:flex-none lg:border-b-0 lg:border-r">
             <TradingPanel />
           </div>
 
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden lg:w-[320px] lg:flex-none">
-            <div className="flex shrink-0 border-b border-[#1f2937]">
+            <div className="flex shrink-0 border-b border-border">
               {(['chat', 'top', 'tours'] as const).map((t) => (
                 <button
                   key={t}
@@ -109,7 +109,7 @@ export function CandlestickTradeScreen() {
                   onClick={() => setRailTab(t)}
                   className={cn(
                     'flex min-h-10 min-w-0 flex-1 items-center justify-center gap-1.5 px-1 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-colors',
-                    railTab === t ? 'border-b-2 border-[#22c55e] text-[#22c55e]' : 'text-gray-500 hover:text-white',
+                    railTab === t ? 'border-b-2 border-accent text-accent' : 'text-muted hover:text-fg',
                   )}
                 >
                   <CIcon name={t} className="h-3.5 w-3.5" />
@@ -160,7 +160,7 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[#1f2937] bg-[#0a0f1c] px-3">
+      <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border bg-bg px-3">
         {/*
           The balance is the only unbounded figure in this band (a brand's wallet can run to eight
           digits), so the two readouts take the leftover width and TRUNCATE; the live dot and the
@@ -168,21 +168,21 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
         */}
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
           <div className="min-w-0">
-            <div className="text-[8px] uppercase leading-none tracking-wider text-gray-500">Balance</div>
-            <div className="truncate text-xs font-bold leading-none text-[#22c55e]">{balance}</div>
+            <div className="text-[8px] uppercase leading-none tracking-wider text-muted">Balance</div>
+            <div className="truncate text-xs font-bold leading-none text-accent">{balance}</div>
           </div>
           <div className="min-w-0">
-            <div className="text-[8px] uppercase leading-none tracking-wider text-gray-500">Price</div>
-            <div className="truncate font-mono text-xs leading-none text-white">{price === null ? '—' : price.toFixed(digits)}</div>
+            <div className="text-[8px] uppercase leading-none tracking-wider text-muted">Price</div>
+            <div className="truncate font-mono text-xs leading-none text-fg">{price === null ? '—' : price.toFixed(digits)}</div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex items-center gap-1">
-            <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#22c55e]" />
-            <span className="text-[10px] font-bold tracking-widest text-[#22c55e]">LIVE</span>
+            <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+            <span className="text-[10px] font-bold tracking-widest text-accent">LIVE</span>
           </div>
-          <div className="flex items-center gap-1 rounded border border-[#374151] bg-[#1f2937] px-1.5 py-0.5 text-[10px]">
-            <span className="font-bold text-white">{currency}</span>
+          <div className="flex items-center gap-1 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px]">
+            <span className="font-bold text-fg">{currency}</span>
           </div>
         </div>
       </div>
@@ -190,25 +190,25 @@ function QuoteBar({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-[#1f2937] px-6">
+    <div className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border px-6">
       <div className="flex min-w-0 items-center gap-8">
         <div className="min-w-0">
-          <div className="text-xs uppercase tracking-wider text-gray-500">Balance</div>
-          <div className="truncate text-lg font-bold text-white">{balance}</div>
+          <div className="text-xs uppercase tracking-wider text-muted">Balance</div>
+          <div className="truncate text-lg font-bold text-fg">{balance}</div>
         </div>
         <div className="min-w-0">
-          <div className="text-xs uppercase tracking-wider text-gray-500">Price</div>
-          <div className="truncate font-mono text-lg font-bold text-white">{price === null ? '—' : price.toFixed(digits)}</div>
+          <div className="text-xs uppercase tracking-wider text-muted">Price</div>
+          <div className="truncate font-mono text-lg font-bold text-fg">{price === null ? '—' : price.toFixed(digits)}</div>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-4">
         <div className="flex items-center gap-2">
-          <div className="h-2 w-2 animate-pulse rounded-full bg-[#22c55e]" />
-          <span className="text-sm font-bold tracking-widest text-[#22c55e]">LIVE</span>
+          <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+          <span className="text-sm font-bold tracking-widest text-accent">LIVE</span>
         </div>
-        <div className="flex items-center gap-2 rounded border border-[#374151] bg-[#1f2937] px-3 py-1 text-sm">
-          <span className="text-gray-400">Global</span>
-          <span className="font-bold text-white">{currency}</span>
+        <div className="flex items-center gap-2 rounded border border-border bg-surface-2 px-3 py-1 text-sm">
+          <span className="text-muted">Global</span>
+          <span className="font-bold text-fg">{currency}</span>
         </div>
       </div>
     </div>

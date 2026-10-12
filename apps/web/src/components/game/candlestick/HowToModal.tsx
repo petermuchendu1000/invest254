@@ -48,25 +48,25 @@ export function HowToModal() {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" onClick={() => setOpen(false)}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" /* brand-token-exempt: a modal scrim dims whatever is behind it; it is not a brand surface, and bg-fg/70 would invert to white in a light theme */ onClick={() => setOpen(false)}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="How to trade"
-        className="max-h-[85dvh] w-full min-w-0 max-w-lg overflow-y-auto overscroll-contain rounded-t-2xl border border-[#1f2937] bg-[#111827] pb-[env(safe-area-inset-bottom)] sm:rounded-2xl sm:pb-0"
+        className="max-h-[85dvh] w-full min-w-0 max-w-lg overflow-y-auto overscroll-contain rounded-t-2xl border border-border bg-surface pb-[env(safe-area-inset-bottom)] sm:rounded-2xl sm:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-[#1f2937] bg-[#111827] px-3 py-2 sm:px-4 sm:py-3">
-          <div className="min-w-0 truncate text-sm font-bold text-white">How to Trade</div>
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2 sm:px-4 sm:py-3">
+          <div className="min-w-0 truncate text-sm font-bold text-fg">How to Trade</div>
           {/* 40px square: the close button is the only way out of the sheet on a phone, where the
               backdrop around it is a sliver. */}
-          <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="-mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded text-xl leading-none text-gray-400 hover:bg-[#1f2937] hover:text-white">×</button>
+          <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="-mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded text-xl leading-none text-muted hover:bg-border hover:text-fg">×</button>
         </div>
         <div className="space-y-4 p-3 sm:p-4">
           {sections.map((s) => (
             <div key={s.title} className="min-w-0">
-              <div className="mb-1 text-xs font-bold uppercase tracking-wider text-[#22c55e]">{s.title}</div>
-              <p className="break-words text-sm leading-relaxed text-gray-300">{s.body}</p>
+              <div className="mb-1 text-xs font-bold uppercase tracking-wider text-accent">{s.title}</div>
+              <p className="break-words text-sm leading-relaxed text-fg">{s.body}</p>
             </div>
           ))}
         </div>

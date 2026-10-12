@@ -4,7 +4,8 @@
  * Inline SVG rather than an icon package: four glyphs do not justify a dependency, and these are
  * drawn to the mock's weight (1.8 stroke on a 24 box, rendered at 14–16px) so they sit at the same
  * optical size as the labels beside them. `currentColor` throughout, because every one of them is
- * painted by the tab state around it — green when active, grey when not.
+ * painted by the tab state around it — the brand's `accent` when active, `muted` when not. No
+ * colour is set here, so these never need touching when a brand's palette changes.
  */
 import { cn } from '@/lib/cn';
 

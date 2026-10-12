@@ -62,19 +62,24 @@ export function CandlestickTape({
       const { createChart, CandlestickSeries, ColorType, CrosshairMode, LineStyle } = lc;
       if (disposed) return;
 
+      /* The library takes colours as plain strings, so the brand's tokens are read off the document
+         here rather than written as classes. This runs in the browser after the chart module lands,
+         by which point globals.css has resolved every `--pp-*` for the active theme. */
+      const PALETTE = chartPalette();
+
       const chart = createChart(host, {
         autoSize: true,
         localization: { locale: safeChartLocale() },
         layout: {
-          background: { type: ColorType.Solid, color: MOCK.bg },
-          textColor: MOCK.axis,
+          background: { type: ColorType.Solid, color: PALETTE.bg },
+          textColor: PALETTE.axis,
           fontSize: 10,
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
           attributionLogo: true,
         },
         grid: {
-          vertLines: { color: MOCK.grid, style: LineStyle.Solid },
-          horzLines: { color: MOCK.grid, style: LineStyle.Solid },
+          vertLines: { color: PALETTE.grid, style: LineStyle.Solid },
+          horzLines: { color: PALETTE.grid, style: LineStyle.Solid },
         },
         rightPriceScale: { visible: true, borderVisible: false, scaleMargins: { top: 0.12, bottom: 0.12 } },
         timeScale: { visible: true, borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 4, barSpacing: 8 },
@@ -85,9 +90,9 @@ export function CandlestickTape({
       chartRef.current = chart;
 
       const series = chart.addSeries(CandlestickSeries, {
-        upColor: MOCK.up, downColor: MOCK.down,
-        wickUpColor: MOCK.up, wickDownColor: MOCK.down,
-        borderUpColor: MOCK.up, borderDownColor: MOCK.down,
+        upColor: PALETTE.up, downColor: PALETTE.down,
+        wickUpColor: PALETTE.up, wickDownColor: PALETTE.down,
+        borderUpColor: PALETTE.up, borderDownColor: PALETTE.down,
         // The dashed line and the tag at the right edge ARE the mock's price readout; it has no
         // other one on the chart itself.
         priceLineVisible: true, priceLineStyle: LineStyle.Dashed, priceLineWidth: 1,
@@ -181,14 +186,29 @@ export function CandlestickTape({
   return <div ref={hostRef} className={className ?? 'h-full w-full'} />;
 }
 
-/** The mock's chart palette, read off the page it copies rather than guessed. */
-const MOCK = {
-  bg: '#0a0f1c',
-  grid: '#131c2e',
-  axis: '#6b7280',
-  up: '#22c55e',
-  down: '#ef4444',
-} as const;
+/**
+ * The chart's palette, taken from the brand's theme tokens instead of a fixed set of hexes.
+ *
+ * The chrome (`bg`, `grid`, `axis`) follows the brand through `--pp-bg`/`--pp-border`/`--pp-muted`,
+ * while the bars read `--pp-up`/`--pp-down`, which globals.css deliberately keeps at fixed
+ * green/red for every brand — a rising candle is a direction, not a logo. The literals here are the
+ * token defaults, used only if a variable is missing (e.g. a test DOM with no stylesheet).
+ */
+/** globals.css :root defaults, reached ONLY when a variable resolves empty (e.g. a test DOM with no
+ *  stylesheet). A real brand's value always wins, so these never paint on a live page. */
+const FALLBACK = { bg: '#0B0E11', grid: '#2A323D', axis: '#8B97A7', up: '#16C784', down: '#EA3943' } as const; // brand-token-exempt: see above
+
+function chartPalette() {
+  const cs = getComputedStyle(document.documentElement);
+  const g = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+  return {
+    bg: g('--pp-bg', FALLBACK.bg),
+    grid: g('--pp-border', FALLBACK.grid),
+    axis: g('--pp-muted', FALLBACK.axis),
+    up: g('--pp-up', FALLBACK.up),
+    down: g('--pp-down', FALLBACK.down),
+  } as const;
+}
 
 /**
  * A guaranteed-valid BCP-47 locale for the time-axis formatter.

@@ -79,26 +79,29 @@ export function CandlestickNavSheet() {
 
   return (
     <>
-      <button type="button" aria-label="Close menu" onClick={close} className="fixed inset-0 z-[70] bg-black/60" />
-      {/* The screen's own palette, written out the way the rest of this screen writes it (#111827 on
-          #0a0f1c, #1f2937 rules, #22c55e accent) — never `--mt5-*`: those tokens ARE the terminal. */}
+      <button type="button" aria-label="Close menu" onClick={close} className="fixed inset-0 z-[70] bg-black/60" /* brand-token-exempt: scrim, see HowToModal — dims the page behind the sheet rather than painting a themed surface */ />
+      {/* The BRAND's palette, through the semantic utilities the rest of this screen now uses
+          (`bg-surface` on the page's `bg`, `border-border` rules, `accent` highlights — i.e.
+          `--pp-bg` / `--pp-surface` / `--pp-border` / `--pp-accent`, which each site fills from its
+          own `sites.color_*`), so this sheet wears the brand it is serving instead of one mock's
+          greens — never `--mt5-*`: those tokens ARE the broker terminal's identity. */}
       <nav
         aria-label="Menu"
-        className="fixed bottom-0 right-0 top-0 z-[71] flex w-[80%] max-w-[300px] flex-col overflow-y-auto border-l border-[#1f2937] bg-[#111827] text-white shadow-2xl"
+        className="fixed bottom-0 right-0 top-0 z-[71] flex w-[80%] max-w-[300px] flex-col overflow-y-auto border-l border-border bg-surface text-fg shadow-2xl"
       >
         {/* Who you are and how much you have — two plain lines, not an account card: no server, no
             login type, nothing to decode. The balance repeats the header's on purpose; this is the
             one place a signed-out player is told there is nothing there yet. */}
-        <header className="border-b border-[#1f2937] px-4 pb-3 pt-4">
+        <header className="border-b border-border px-4 pb-3 pt-4">
           {authed ? (
             <>
               <div className="truncate text-sm font-semibold leading-tight">{user?.username ?? 'Account'}</div>
-              <div className="mt-1 truncate text-lg font-bold leading-none text-[#22c55e]">{balance}</div>
+              <div className="mt-1 truncate text-lg font-bold leading-none text-accent">{balance}</div>
             </>
           ) : (
             <>
               <div className="truncate text-sm font-semibold leading-tight">Welcome</div>
-              <div className="mt-1 text-xs leading-tight text-gray-400">Sign in to trade</div>
+              <div className="mt-1 text-xs leading-tight text-muted">Sign in to trade</div>
             </>
           )}
         </header>
@@ -123,7 +126,7 @@ export function CandlestickNavSheet() {
           <Row onClick={() => { close(); setHowTo(true); }} icon={<HowToIcon />} label="How to trade" />
         </div>
 
-        <div className="border-t border-[#1f2937] py-1">
+        <div className="border-t border-border py-1">
           {authed ? (
             <Row onClick={() => { close(); logout(); }} icon={<SignOutIcon />} label="Log out" tone="bad" />
           ) : (
@@ -150,10 +153,10 @@ function Row({
   const className = cn(
     'flex w-full items-center gap-3 px-4 py-3 text-left text-[15px] font-medium transition-colors',
     active
-      ? 'bg-[#22c55e]/10 text-[#22c55e]'
+      ? 'bg-accent/10 text-accent'
       : tone === 'bad'
-        ? 'text-[#f87171] hover:bg-white/5'
-        : 'text-gray-200 hover:bg-white/5',
+        ? 'text-down hover:bg-fg/5'
+        : 'text-fg hover:bg-fg/5',
   );
   const body = (
     <>

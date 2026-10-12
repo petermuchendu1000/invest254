@@ -140,7 +140,7 @@ export function WinNotice() {
         aria-hidden={announce ? undefined : true}
         className={cn(
           // `max-w-[18rem]` plus the wrapper's `px-3` leaves a real gutter at 320px.
-          'relative w-full max-w-[18rem] rounded-xl border border-[#1f2937] bg-[#111827] px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.55)]',
+          'relative w-full max-w-[18rem] rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.55)]',
           // Never `pointer-events-auto`, unlike MT5CloseNotice: this card has nothing to press, so
           // it has no reason to be in the way. It dismisses itself.
           'transition-all duration-300 ease-out motion-reduce:transition-none',
@@ -148,23 +148,23 @@ export function WinNotice() {
         )}
       >
         {/* The mock's sparkle, top-right. Decorative, and offset outside the corner radius. */}
-        <Sparkle className="absolute -right-1 -top-1 h-3.5 w-3.5 text-amber-300" />
+        <Sparkle className="absolute -right-1 -top-1 h-3.5 w-3.5 text-warn" />
 
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-400/15 ring-1 ring-amber-400/40">
-            <Coin className="h-5 w-5 text-amber-400" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warn/15 ring-1 ring-warn/40">
+            <Coin className="h-5 w-5 text-warn" />
           </div>
 
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-baseline gap-1.5">
-              <span className="truncate text-xs font-semibold text-gray-300">{current.name}</span>
-              <span className="shrink-0 text-[10px] text-gray-500">{VERB[current.kind]}</span>
+              <span className="truncate text-xs font-semibold text-fg">{current.name}</span>
+              <span className="shrink-0 text-[10px] text-muted">{VERB[current.kind]}</span>
             </div>
-            <div className="truncate text-base font-bold leading-tight tabular-nums text-[#22c55e]">
+            <div className="truncate text-base font-bold leading-tight tabular-nums text-up">
               <Amount cents={current.amountCents} />
             </div>
-            <div className="flex min-w-0 items-center gap-1 text-[10px] text-gray-500">
-              <Check className="h-2.5 w-2.5 shrink-0 text-[#22c55e]" />
+            <div className="flex min-w-0 items-center gap-1 text-[10px] text-muted">
+              <Check className="h-2.5 w-2.5 shrink-0 text-accent" />
               <span className="truncate">{PROOF[current.kind]}</span>
             </div>
           </div>

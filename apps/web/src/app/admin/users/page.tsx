@@ -160,7 +160,7 @@ export default function UsersPage() {
           <NumberFilter label="Min deposits (KES)" value={minDep} onChange={setMinDep} placeholder="e.g. 5000" />
           <NumberFilter label="Min withdrawals (KES)" value={minWd} onChange={setMinWd} placeholder="e.g. 5000" />
           <NumberFilter label="Min turnover (KES)" value={minTurn} onChange={setMinTurn} placeholder="e.g. 10000" />
-          <NumberFilter label="Min bets" value={minBets} onChange={setMinBets} placeholder="e.g. 10" />
+          <NumberFilter label="Min trades" value={minBets} onChange={setMinBets} placeholder="e.g. 10" />
         </div>
       ) : null}
 
@@ -184,7 +184,7 @@ export default function UsersPage() {
                 <Th>Status</Th>
                 <Th className="text-right">Balance</Th>
                 <Th className="text-right">Deposited / withdrawn</Th>
-                <Th className="text-right"><span title="What the house kept from this account's bets (stakes minus winnings), and how many bets.">House revenue</span></Th>
+                <Th className="text-right"><span title="What the house kept from this account's trades (stakes minus winnings), and how many trades.">House revenue</span></Th>
                 <Th>Last transaction</Th>
                 <Th className="text-right">Last active</Th>
               </tr>
@@ -394,7 +394,7 @@ function UserRow({ r, selected, onToggle }: { r: AdminUserRow; selected: boolean
       <Td className="text-right tabular-nums">
         <span className="flex flex-col leading-tight">
           <span className={'font-medium ' + (r.ggrCents >= 0 ? 'text-up' : 'text-down')}><Money cents={r.ggrCents} /></span>
-          <span className="text-[11px] text-muted">{formatNumber(r.betCount)} bets</span>
+          <span className="text-[11px] text-muted">{formatNumber(r.betCount)} trades</span>
         </span>
       </Td>
       <Td>
