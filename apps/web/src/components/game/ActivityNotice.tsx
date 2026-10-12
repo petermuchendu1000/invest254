@@ -69,7 +69,6 @@ export function ActivityNotice({ className }: {
   // next poll is not surfaced again. `seen` is state rather than a ref only because the enqueue
   // effect has to read and write it in the same pass.
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
-  const [primed, setPrimed] = useState(false);
   /**
    * The names the last few cards carried. A ref, not state: it is read and written inside the
    * enqueue effect and must not retrigger it.
@@ -81,35 +80,32 @@ export function ActivityNotice({ className }: {
     if (items.length === 0) return;
 
     /**
-     * FIRST LOAD. The window can hold forty rows, every one of them unseen, and firing forty cards
-     * at a player who just opened the screen is the behaviour this component is most likely to be
-     * hated for. So the backlog is capped; from the next poll on only what the server has newly
-     * accepted is fresh, so each event gets at most one card and the screen stops when the brand
-     * does.
+     * A few at a time, drawn at random, every poll.
      *
-     * The selection rules themselves — feed ORDER, one card per trader, what counts as seen — live
-     * in `lib/game/activityCards` and are unit-tested there. They used to be written inline here,
-     * which is how a comment asserting the WRONG feed order survived long enough to put the same
+     * The window holds forty rows and firing forty cards at someone who just opened the screen is
+     * the behaviour this component would be most hated for — so the batch is capped rather than the
+     * first load being special-cased. That cap replaces the old `primed` flag entirely: with every
+     * batch bounded there is no "first load" to distinguish, and one fewer piece of state to keep
+     * in step with the queue.
+     *
+     * The rules themselves — the shuffle, one card per trader, what counts as seen — live in
+     * `lib/game/activityCards` and are unit-tested there. They used to be written inline here,
+     * which is how a comment asserting the wrong feed order survived long enough to put the same
      * trader's fortnight-old wins on every card.
      */
-    const { take, seenKeys } = selectCards(
-      items, seen, lastNamesRef.current, primed ? Number.POSITIVE_INFINITY : INITIAL_BURST,
-    );
-    if (seenKeys.length === 0) return;
+    const { take, seenKeys } = selectCards(items, seen, lastNamesRef.current, MAX_PER_BATCH);
+    if (take.length === 0) return;
 
     setSeen((prev) => {
       const next = new Set(prev);
       for (const k of seenKeys) next.add(k);
       return next;
     });
-    if (take.length > 0) {
-      // Remembered across batches, so one trader cannot open consecutive cards 20s apart either.
-      lastNamesRef.current = [...lastNamesRef.current, ...take.map((t) => t.name.trim().toLowerCase())]
-        .slice(-RECENT_NAME_MEMORY);
-      setQueue((q) => [...q, ...take]);
-    }
-    if (!primed) setPrimed(true);
-  }, [items, seen, primed]);
+    // Remembered across batches, so one trader cannot open consecutive cards 20s apart either.
+    lastNamesRef.current = [...lastNamesRef.current, ...take.map((t) => t.name.trim().toLowerCase())]
+      .slice(-RECENT_NAME_MEMORY);
+    setQueue((q) => [...q, ...take]);
+  }, [items, seen]);
 
   /**
    * ── Take the next card off the queue ──────────────────────────────────────
@@ -254,8 +250,13 @@ const PROOF: Record<BrandActivityDto['kind'], string> = {
   deposit: 'Confirmed deposit · M-Pesa',
 };
 
-/** How many of the rows already in the feed may surface when the screen first opens. */
-const INITIAL_BURST = 3;
+/**
+ * How many cards one poll may queue.
+ *
+ * Every batch is bounded, not just the first: at two per 20s poll the stream is continuous without
+ * ever being a wall of cards, and there is no first-load special case to maintain.
+ */
+const MAX_PER_BATCH = 2;
 /** How many cards a screen reader hears before the region goes quiet. */
 const MAX_ANNOUNCEMENTS = 3;
 /**

@@ -48,46 +48,78 @@ export function keyOf(it: BrandActivityDto): string {
   return `${it.kind}|${it.name}|${it.amountCents}`;
 }
 
+/**
+ * Fisher–Yates, over a COPY, with the source of randomness injected.
+ *
+ * `rng` is a parameter so the selection can be tested deterministically — a shuffle that can only
+ * be tested statistically is a shuffle nobody tests.
+ */
+export function shuffle<T>(rows: readonly T[], rng: () => number = Math.random): T[] {
+  const out = rows.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const a = out[i]!;
+    out[i] = out[j]!;
+    out[j] = a;
+  }
+  return out;
+}
+
 export interface CardSelection {
   /** The rows to show, freshest first. */
   take: BrandActivityDto[];
   /**
-   * Every eligible row considered, INCLUDING the ones diversity passed over.
+   * The keys of the rows actually SHOWN, and only those.
    *
-   * They are marked seen so a row held back because its trader was already on screen does not come
-   * back as news on the next poll — it was declined, not deferred.
+   * It used to be every eligible row in the window, which made sense when the selection was "the
+   * newest three": everything older was deliberately skipped for good. Under a random draw that
+   * would be wrong — it would burn 37 of 40 rows to show 3, so the pool a player sees would be a
+   * handful of events and then silence until the brand produced more.
+   *
+   * Marking only what was shown means each row gets its turn at most once, and the remaining pool
+   * is re-drawn on the next poll. That is what makes the stream keep moving AND keep varying.
    */
   seenKeys: string[];
 }
 
 /**
- * Choose the next cards.
+ * Choose the next cards — a TOTALLY RANDOM draw from everything still unshown.
  *
- * @param items       the feed, freshest first, exactly as `recent()` returns it.
- * @param seen        keys already shown or declined.
+ * Not "the newest few", which is what this did before. Position in the feed buys a row nothing:
+ * every eligible row the player has not already been shown is equally likely, every poll.
+ *
+ * WHY THAT IS SAFE HERE, AND WAS NOT BEFORE. A random draw puts rows on screen out of time order,
+ * and this surface used to print each row's age — so a column reading "2m ago / just now / 1h ago"
+ * would have been instantly, visibly wrong. The ages are gone. With nothing on screen asserting
+ * WHEN anything happened, order carries no claim and can be pure chance. Ordering by recency is
+ * also what let one prolific trader own the screen, so the honest fix and the varied one coincide.
+ *
+ * @param items       the feed window, exactly as `recent()` returns it.
+ * @param seen        keys already shown.
  * @param recentNames names the last few cards carried, lower-cased.
- * @param max         how many to take (the first-load burst cap; Infinity afterwards).
+ * @param max         how many to take this batch.
+ * @param rng         injected for tests; real callers use Math.random.
  */
 export function selectCards(
   items: readonly BrandActivityDto[],
   seen: ReadonlySet<string>,
   recentNames: readonly string[],
   max: number,
+  rng: () => number = Math.random,
 ): CardSelection {
   const fresh = items.filter(eligible).filter((it) => !seen.has(keyOf(it)));
 
   /**
-   * ONE CARD PER TRADER.
+   * ONE CARD PER TRADER, on top of the shuffle.
    *
-   * Reading the feed in the right order is not enough on its own: an account that trades in bursts
-   * owns the TOP of the window as legitimately as it owned the bottom, so the freshest rows can
-   * still be three wins by one person. A feed meant to read as a room cannot keep naming one of
-   * its people. The server caps a name at two rows per window as well — belt and braces, since the
-   * two layers fail independently.
+   * Randomness alone does not prevent a repeat: an account holding many rows is drawn in
+   * proportion to how many it holds, so a prolific one still surfaces more often than anybody
+   * else. A feed meant to read as a room cannot keep naming one of its people. The server caps a
+   * name at two rows per window as well — belt and braces, since the two layers fail independently.
    */
   const used = new Set(recentNames.map((n) => n.trim().toLowerCase()));
   const take: BrandActivityDto[] = [];
-  for (const it of fresh) {
+  for (const it of shuffle(fresh, rng)) {
     if (take.length >= max) break;
     const n = it.name.trim().toLowerCase();
     if (used.has(n)) continue;
@@ -95,5 +127,5 @@ export function selectCards(
     take.push(it);
   }
 
-  return { take, seenKeys: fresh.map(keyOf) };
+  return { take, seenKeys: take.map(keyOf) };
 }
