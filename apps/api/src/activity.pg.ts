@@ -191,6 +191,51 @@ export function publicName(username: string | null | undefined): string {
 /** Share of the slots real rows can never be pushed out of. */
 const REAL_FLOOR_SHARE = 0.25;
 
+/**
+ * How recent a REAL row must be to claim one of the reserved slots.
+ *
+ * The floor exists so a brand's genuine events are never crowded out by marketing copy, and that is
+ * right — but it was unbounded in TIME, so it reserved a quarter of a feed described as live for
+ * events that were a fortnight old. Observed on cpfmarket: the newest real rows in the window were
+ * 21,880 minutes (about 15 days) old, four of them the same account's wins from one session, and
+ * they held reserved slots against seeded rows minutes old.
+ *
+ * Beyond this age a real row is not news and stops being RESERVED. It is not excluded: it still
+ * competes for the contested slots on recency exactly like everything else, so a quiet brand whose
+ * only activity is old still shows it. What it no longer does is displace something fresher.
+ */
+const REAL_FLOOR_MAX_AGE_S = 48 * 60 * 60;
+
+/**
+ * How many rows one NAME may hold in a single feed window.
+ *
+ * A feed is social proof, which means it has to read as a room rather than as one person. An
+ * account that trades in bursts produces a run of events seconds apart and, sorted by recency,
+ * takes the whole top of the window — so the screen names the same trader over and over, both in
+ * the chat column and on every notification card the client pops from this list. Two is enough to
+ * show somebody is active without letting them own the feed.
+ */
+const MAX_ROWS_PER_NAME = 2;
+
+/**
+ * Keep at most `cap` rows per name, preserving order.
+ *
+ * Order is already merit order (newest first for the feed), so walking it forwards keeps each
+ * trader's BEST rows and drops their repeats.
+ */
+function capPerName<T extends { name: string }>(rows: readonly T[], cap: number): T[] {
+  const count = new Map<string, number>();
+  const out: T[] = [];
+  for (const row of rows) {
+    const k = row.name.trim().toLowerCase();
+    const n = count.get(k) ?? 0;
+    if (n >= cap) continue;
+    count.set(k, n + 1);
+    out.push(row);
+  }
+  return out;
+}
+
 function mergeByMeritWithRealFloor<T>(
   real: readonly T[], seeded: readonly T[], limit: number, key: (x: T) => number,
 ): T[] {
@@ -314,7 +359,35 @@ export function makePgBrandActivity(q: ActivityQuerier): BrandActivityStore {
       // deposit outranks both. The age is the sort key the DTO already carries, so the merged order
       // is exactly the order the client renders. See the helper for why neither "real takes
       // everything" nor "sort the union and cut" works.
-      return mergeByMeritWithRealFloor(real, seeded, limit, (x) => x.agoSeconds);
+      /**
+       * Only RECENT real rows claim the reserved floor; older ones drop into the contest.
+       *
+       * They are passed in as part of the contested pool rather than discarded, so nothing is lost
+       * — a brand whose only activity is old still shows it, it just cannot reserve a quarter of a
+       * live feed with it. See REAL_FLOOR_MAX_AGE_S.
+       */
+      /**
+       * The cap is applied to each POOL first, and the merge still runs at `limit`.
+       *
+       * Capping the merged result instead would return a short feed, and widening the merge to
+       * compensate would quietly break the floor: reserved rows are sorted back into recency order,
+       * so trimming a wider result to `limit` can cut the very rows the floor reserved. Thinning
+       * the inputs keeps `mergeByMeritWithRealFloor` working on exactly the window it documents.
+       *
+       * Both pools arrive newest-first from SQL, and the contested pool is re-sorted because it is
+       * two sources concatenated — so `capPerName` keeps each trader's FRESHEST rows, not whichever
+       * happened to be read first.
+       */
+      const byAge = (a: BrandActivityItem, b: BrandActivityItem) => a.agoSeconds - b.agoSeconds;
+      const freshReal = capPerName(real.filter((x) => x.agoSeconds <= REAL_FLOOR_MAX_AGE_S), MAX_ROWS_PER_NAME);
+      const staleReal = real.filter((x) => x.agoSeconds > REAL_FLOOR_MAX_AGE_S);
+      const contested = capPerName([...staleReal, ...seeded].sort(byAge), MAX_ROWS_PER_NAME);
+
+      // The trailing cap catches the one case the two above cannot: a name present in BOTH pools.
+      return capPerName(
+        mergeByMeritWithRealFloor(freshReal, contested, limit, (x) => x.agoSeconds),
+        MAX_ROWS_PER_NAME,
+      );
     },
 
     async leaderboard(siteId, period, limit, opts) {

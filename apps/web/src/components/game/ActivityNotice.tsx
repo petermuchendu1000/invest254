@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api/endpoints';
 import type { BrandActivityDto } from '@/lib/api/types';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { useDisplayMoney } from '@/lib/money';
 import { cn } from '@/lib/cn';
+import { selectCards } from '@/lib/game/activityCards';
 
 /**
  * The floating "someone just won" card that pops over the chart.
@@ -69,34 +70,44 @@ export function ActivityNotice({ className }: {
   // effect has to read and write it in the same pass.
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
   const [primed, setPrimed] = useState(false);
+  /**
+   * The names the last few cards carried. A ref, not state: it is read and written inside the
+   * enqueue effect and must not retrigger it.
+   */
+  const lastNamesRef = useRef<string[]>([]);
 
   // ── What gets queued ────────────────────────────────────────────────────────
   useEffect(() => {
     if (items.length === 0) return;
 
-    // The feed arrives newest LAST (ChatPane renders it in that order); a notification wants the
-    // freshest thing first, so this walks it backwards.
-    const fresh = [...items]
-      .reverse()
-      .filter(eligible)
-      .filter((it) => !seen.has(keyOf(it)));
-    if (fresh.length === 0) return;
-
     /**
      * FIRST LOAD. The window can hold forty rows, every one of them unseen, and firing forty cards
      * at a player who just opened the screen is the behaviour this component is most likely to be
-     * hated for. So the backlog is capped: the three newest are shown, the rest are marked seen and
-     * never surface. From the next poll on, `fresh` is only what the server has newly accepted, so
-     * each real event gets exactly one card and the screen stops when the brand does.
+     * hated for. So the backlog is capped; from the next poll on only what the server has newly
+     * accepted is fresh, so each event gets at most one card and the screen stops when the brand
+     * does.
+     *
+     * The selection rules themselves — feed ORDER, one card per trader, what counts as seen — live
+     * in `lib/game/activityCards` and are unit-tested there. They used to be written inline here,
+     * which is how a comment asserting the WRONG feed order survived long enough to put the same
+     * trader's fortnight-old wins on every card.
      */
-    const take = primed ? fresh : fresh.slice(0, INITIAL_BURST);
+    const { take, seenKeys } = selectCards(
+      items, seen, lastNamesRef.current, primed ? Number.POSITIVE_INFINITY : INITIAL_BURST,
+    );
+    if (seenKeys.length === 0) return;
 
     setSeen((prev) => {
       const next = new Set(prev);
-      for (const it of fresh) next.add(keyOf(it));
+      for (const k of seenKeys) next.add(k);
       return next;
     });
-    setQueue((q) => [...q, ...take]);
+    if (take.length > 0) {
+      // Remembered across batches, so one trader cannot open consecutive cards 20s apart either.
+      lastNamesRef.current = [...lastNamesRef.current, ...take.map((t) => t.name.trim().toLowerCase())]
+        .slice(-RECENT_NAME_MEMORY);
+      setQueue((q) => [...q, ...take]);
+    }
     if (!primed) setPrimed(true);
   }, [items, seen, primed]);
 
@@ -217,39 +228,6 @@ function Amount({ cents }: { cents: number }) {
   return <>+{fmt(cents)}</>;
 }
 
-/**
- * WHICH ROWS EARN A CARD.
- *
- *  - `win`: all of them. A winning trade on this screen's own game is the thing the card is for.
- *  - `withdrawal`: above a floor. The mock's third line reads "Verified withdrawal", and it is
- *    right that a withdrawal belongs here — money actually leaving for the player's phone is the
- *    strongest proof this product can show, and the server only reports withdrawals that were PAID.
- *    But the floor exists: the minimum withdrawal is a few hundred shillings, and popping a card
- *    for one devalues every other card. KES 1,000 is the cheapest figure that still reads as a
- *    payout. The threshold is in KES cents because that is the money of record on every brand,
- *    foreign ones included — a display-currency threshold would drift with the FX rate.
- *  - `deposit`: never. Money going IN is not a win, and a deposit notice over a deposit button is
- *    an advert dressed as news.
- */
-function eligible(it: BrandActivityDto): boolean {
-  if (it.kind === 'win') return true;
-  if (it.kind === 'withdrawal') return it.amountCents >= MIN_WITHDRAWAL_CENTS;
-  return false;
-}
-
-/**
- * Identity for "have I shown this already?".
- *
- * The DTO carries no id — by design, `activity.pg.ts` withholds transaction ids from a public feed
- * — and `agoSeconds` is recomputed on every poll, so it cannot be part of the key. Name + kind +
- * amount is what is left. Two separate wins of the same amount by the same trader collide and the
- * second is dropped, which is the right way to be wrong: a card too few is unnoticeable, the same
- * card twice looks fabricated.
- */
-function keyOf(it: BrandActivityDto): string {
-  return `${it.kind}|${it.name}|${it.amountCents}`;
-}
-
 /** The first line's verb. */
 const VERB: Record<BrandActivityDto['kind'], string> = {
   win: 'won',
@@ -276,8 +254,6 @@ const PROOF: Record<BrandActivityDto['kind'], string> = {
   deposit: 'Confirmed deposit · M-Pesa',
 };
 
-/** KES 1,000 — see `eligible`. */
-const MIN_WITHDRAWAL_CENTS = 100_000;
 /** How many of the rows already in the feed may surface when the screen first opens. */
 const INITIAL_BURST = 3;
 /** How many cards a screen reader hears before the region goes quiet. */
@@ -289,6 +265,8 @@ const MAX_ANNOUNCEMENTS = 3;
  * a card arriving while the player is choosing a stake is gone before it becomes an irritation.
  * The exit is excluded: `EXIT_MS` runs after this, so the card is legible for the full three.
  */
+/** How many recently-shown traders are remembered when enforcing one card each. */
+const RECENT_NAME_MEMORY = 4;
 const SHOW_MS = 3_000;
 const EXIT_MS = 300;
 const GAP_MS = 2_500;
