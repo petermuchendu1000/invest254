@@ -82,29 +82,32 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
       const { rows } = await query("SELECT public.fn_marketer_topup_demo($1, $2) AS balance", [id, capCents]);
       return num(rows[0].balance);
     },
-    async credit(id, amountCents, ref, meta): Promise<number> {
+    async credit(id, amountCents, ref, meta, actor): Promise<number> {
+      // 0199/A1: $5/$6 = the admin actor for the DB brand fence; NULL (internal/system path) => no-op.
       const { rows } = await query(
-        "SELECT public.fn_marketer_credit($1, $2, $3, $4::jsonb) AS balance",
-        [id, amountCents, ref, JSON.stringify(meta ?? {})]);
+        "SELECT public.fn_marketer_credit($1, $2, $3, $4::jsonb, $5, $6) AS balance",
+        [id, amountCents, ref, JSON.stringify(meta ?? {}), actor?.id ?? null, actor?.role ?? null]);
       return num(rows[0].balance);
     },
 
-    async withdraw(id, amountCents, ref, meta, method): Promise<WithdrawResult> {
+    async withdraw(id, amountCents, ref, meta, method, actor): Promise<WithdrawResult> {
       const { rows } = await query(
-        "SELECT public.fn_marketer_withdraw($1, $2, $3, $4::jsonb, $5) AS r",
-        [id, amountCents, ref, JSON.stringify(meta ?? {}), method]);
+        "SELECT public.fn_marketer_withdraw($1, $2, $3, $4::jsonb, $5, $6, $7) AS r",
+        [id, amountCents, ref, JSON.stringify(meta ?? {}), method, actor?.id ?? null, actor?.role ?? null]);
       // fn returns jsonb; node-postgres parses it to an object already.
       const r = rows[0].r as WithdrawResult;
       return { ...r, balance_cents: num(r.balance_cents), ledger_id: num(r.ledger_id) };
     },
 
-    async setFuliza(id, amountCents): Promise<number> {
-      const { rows } = await query("SELECT public.fn_marketer_set_fuliza($1, $2) AS v", [id, amountCents]);
+    async setFuliza(id, amountCents, actor): Promise<number> {
+      const { rows } = await query("SELECT public.fn_marketer_set_fuliza($1, $2, $3, $4) AS v",
+        [id, amountCents, actor?.id ?? null, actor?.role ?? null]);
       return num(rows[0].v);
     },
 
-    async setAirtime(id, amountCents): Promise<number> {
-      const { rows } = await query("SELECT public.fn_marketer_set_airtime($1, $2) AS v", [id, amountCents]);
+    async setAirtime(id, amountCents, actor): Promise<number> {
+      const { rows } = await query("SELECT public.fn_marketer_set_airtime($1, $2, $3, $4) AS v",
+        [id, amountCents, actor?.id ?? null, actor?.role ?? null]);
       return num(rows[0].v);
     },
 
@@ -121,8 +124,9 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
       }));
     },
 
-    async setPin(id, pin): Promise<void> {
-      await query("SELECT public.fn_marketer_set_pin($1, $2)", [id, pin]);
+    async setPin(id, pin, actor): Promise<void> {
+      // 0199/A1: $3/$4 = the admin actor for the DB brand fence; NULL (self-service reset) => no-op.
+      await query("SELECT public.fn_marketer_set_pin($1, $2, $3, $4)", [id, pin, actor?.id ?? null, actor?.role ?? null]);
     },
 
     async login(phone, pin, siteId): Promise<string | null> {
@@ -135,8 +139,9 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
       await query("SELECT public.fn_marketer_change_pin($1, $2, $3)", [id, currentPin, newPin]);
     },
 
-    async setStatus(id, status): Promise<string> {
-      const { rows } = await query("SELECT public.fn_marketer_set_status($1, $2) AS s", [id, status]);
+    async setStatus(id, status, actor): Promise<string> {
+      const { rows } = await query("SELECT public.fn_marketer_set_status($1, $2, $3, $4) AS s",
+        [id, status, actor?.id ?? null, actor?.role ?? null]);
       return rows[0].s as string;
     },
 
