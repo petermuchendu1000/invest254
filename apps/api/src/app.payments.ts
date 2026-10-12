@@ -182,9 +182,15 @@ export function parseC2bConfirmation(body: unknown): C2bConfirmation {
   }
   const amt = Number(amount);
   if (!Number.isFinite(amt) || amt <= 0) throw new ApiError("BAD_CALLBACK", "invalid TransAmount", 400);
+  const amountCents = Math.round(amt * 100);
+  // C-1: cap the C2B amount at the same ceiling as an authenticated deposit. The C2B rail has no
+  // provider re-query (Safaricom cannot be re-queried for Pay Bill), so a forged confirmation that
+  // slips the source-IP lock could otherwise store an UNBOUNDED amount for a player to claim. The
+  // cap bounds the blast radius to one legitimate-sized deposit (no live C2B row is near it).
+  if (amountCents > MAX_AMOUNT_CENTS) throw new ApiError("BAD_CALLBACK", "amount exceeds the maximum allowed", 400);
   return {
     transId: String(transId),
-    amountCents: Math.round(amt * 100),
+    amountCents,
     msisdn: b?.["MSISDN"] != null ? String(b["MSISDN"]) : null,
     billRef: b?.["BillRefNumber"] != null ? String(b["BillRefNumber"]) : null,
     shortcode: b?.["BusinessShortCode"] != null ? String(b["BusinessShortCode"]) : null,

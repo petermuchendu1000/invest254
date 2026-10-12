@@ -640,8 +640,11 @@ async function buildDeps(): Promise<ApiDeps> {
 
   const payments = new PaymentService(payRepo, daraja, {
     // Verify STK callbacks against Safaricom (STKPushQuery) before crediting — defeats forged
-    // callbacks. Set MPESA_VERIFY_CALLBACKS=false only if the callback source is otherwise trusted.
-    verifyStkCallbacks: process.env.MPESA_VERIFY_CALLBACKS !== "false",
+    // callbacks. C-3: MPESA_VERIFY_CALLBACKS=false is honoured ONLY when a callback source-IP lock
+    // (MPESA_CALLBACK_ALLOWED_CIDRS) is configured to compensate; with no IP lock the re-query stays
+    // ON regardless, so the escape hatch can never leave forged STK callbacks completely unguarded.
+    verifyStkCallbacks: !(process.env.MPESA_VERIFY_CALLBACKS === "false"
+      && Boolean((process.env.MPESA_CALLBACK_ALLOWED_CIDRS ?? "").trim())),
     // Mega Pay rail (0116): its callback handler ALWAYS re-queries Mega Pay before crediting, so
     // forged Mega Pay callbacks can't mint balance either.
     megapay,

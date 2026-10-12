@@ -24,52 +24,42 @@ for explicit owner approval — see the PR discussion), or **NOTED** (accepted /
 Residual on S1: a public hostname that later DNS-rebinds to a private address is not caught (needs
 resolve-and-pin); the direct-literal and internal-hostname vectors the audit demonstrated are closed.
 
-## PROPOSED — held for owner approval (touch the LIVE deposit rail / global auth)
+## Status update (owner-approved, implemented in part 3)
 
-These are the high-severity findings. Each changes a path that, done wrong, **halts real customer
-deposits or all authentication**, so they are not shipped autonomously. Proposed fixes and the one
-infrastructure question are in the PR discussion.
+C-1, C-2, C-3 and AU1 below were approved and are now **FIXED** (see the part-3 PR):
+- **C-2 FIXED** — `clientIp()` trusts only Fly's edge `Fly-Client-IP`; the spoofable `X-Forwarded-For`
+  fallback is gone, so the callback CIDR lock and per-IP rate limits can no longer be bypassed by a
+  header. (Owner confirmed the app is reachable only via Fly's proxy.)
+- **C-1 FIXED (code half)** — the C2B confirmation amount is capped at the authenticated-deposit
+  ceiling (KES 250,000); a forged confirmation can no longer store an unbounded amount. The shortcode
+  check was **deliberately dropped**: all live C2B rows carry `org_shortcode = "payhero"` (the PayHero
+  paybill path shares `fn_ingest_c2b`), so a `shortcode = paybill_config` check would have broken the
+  live PayHero deposit flow. With C-2 fixed, the owner setting `MPESA_CALLBACK_ALLOWED_CIDRS` now
+  actually locks the rail to Safaricom's IPs — the remaining owner action.
+- **C-3 FIXED** — `MPESA_VERIFY_CALLBACKS=false` is honoured only when a callback CIDR lock is
+  configured to compensate; with no lock, STKPushQuery verification stays on regardless.
+- **AU1 FIXED** — the JWT verifier now rejects a validly-signed token whose role is not one this
+  platform issues (e.g. a Supabase-Auth `authenticated` token), closing the unbounded-trust gap
+  without needing `iss`/`aud` secrets set.
 
-### C-1 (CRITICAL) — forged M-Pesa C2B Pay Bill confirmation mints real balance
-`POST /api/v1/deposits/c2b/confirmation` (`app.payments.ts`) is public, guarded only by the
-fail-open CIDR check. Unlike every STK rail it has **no provider re-query** (Safaricom can't be
-re-queried for C2B), **no amount cap**, and **no shortcode validation** — it trusts the posted
-`TransID`/`TransAmount`. A forged confirmation with a fresh `TransID` + any amount is stored
-(`fn_ingest_c2b`), then `POST /deposits/paybill/claim` credits it to `wallets.real_balance` (and
-pays 5% referral). The rail is **live** (`paybill_config` enabled, 308 C2B payments seen). Cash-out
-still passes the password-gated withdrawal approval, so this is "mint balance the business will
-honour on approval + farm referral", not instant cash — but it is the single most severe hole.
-*Proposed:* require the C2B CIDR lock to be configured (fail **closed**), validate `BusinessShortCode`
-against `paybill_config`, and apply the deposit max-amount cap in the ingest/claim path — designed so
-a legitimate Safaricom confirmation always passes.
+### A1 — DEFERRED (revised risk; needs its own design)
+The marketer money/PIN RPC fence was approved as an additive change, but investigation found it is
+**not** clean-additive: `fn_marketer_credit` is called internally by `fn_marketer_game_withdraw`
+(0108/0109) with no actor, so forcing `p_actor`/`p_actor_role` onto it would break the live marketer
+game-withdrawal flow; and `fn_marketer_withdraw`'s defaulted params make an appended required arg
+illegal (overload pitfalls). A correct fix needs a deliberate design (a separate admin-credit RPC, or
+optional-actor fences that stay a no-op for the internal system path) and its own heavily-tested PR —
+not tail-of-session money-RPC surgery. The TS `marketerInScope` guard fences every marketer admin
+route today, so this remains defense-in-depth, not a live hole. Tracked for a standalone change.
 
-### C-2 (CRITICAL, enables C-1) — `clientIp()` trusts caller headers
-`clientIp()` (`http.ts`) prefers inbound `Fly-Client-IP`, then `X-Forwarded-For[0]`, both
-client-settable, so the callback CIDR allowlist is spoofable at the app layer unless the edge
-guarantees overwrite. *Proposed:* derive the client IP from a trusted source only (Fly's edge value,
-never a raw `X-Forwarded-For[0]`). **Needs owner confirmation** that the Fly app is reachable only via
-Fly's proxy (so `Fly-Client-IP` is authoritative), or a trusted-hop count.
+## Remaining OWNER actions (no code pending — these are secret/config changes)
 
-### C-3 (HIGH) — STK deposit forge when `MPESA_VERIFY_CALLBACKS=false`
-The escape hatch disables the Safaricom re-query, leaving a forged STK callback able to credit a
-deposit (behind the same spoofable CIDR). *Proposed:* remove the hatch, or hard-require a trustworthy
-IP lock whenever it is off.
-
-### A1 (MEDIUM) — marketer money/PIN RPCs have no DB-level tenant fence
-The user-money RPCs got `fn_assert_actor_site_scope` in 0156; the marketer RPCs
-(`fn_marketer_credit`/`_set_pin`/…) take no actor/role/site argument and act by primary key. Tenant
-isolation for crediting a marketer and resetting a marketer PIN (account takeover) rests **entirely**
-on the TypeScript `marketerInScope` guard — strict and fail-closed today, so no live breach, but a
-single future TS slip = cross-tenant takeover with no backstop. *Proposed:* give these RPCs the same
-actor-scope fence (a migration mirroring 0156), as defense-in-depth.
-
-### AU1 (MEDIUM) — JWT `iss`/`aud` unenforced unless configured
-`makeVerifier` (`apps/engine/src/auth.ts`) only checks `iss`/`aud` when the env vars are set, so by
-default any token validly signed with `SUPABASE_JWT_SECRET` (e.g. a Supabase-Auth-minted token on the
-same project) is accepted as a principal. Algorithm IS pinned (no alg-confusion). *Proposed:* make
-`iss`/`aud` mandatory in production, and/or honour only self-issued roles. **Needs owner confirmation**
-of the production token issuer/audience values before enforcing (enforcing with wrong/absent values
-rejects all logins).
+- **Set `MPESA_CALLBACK_ALLOWED_CIDRS`** to Safaricom's published ranges (shipped in `.env.example`).
+  With C-2 fixed, this is what finally locks the C2B rail (C-1) to Safaricom — the code half is done.
+- **(Optional, stronger) set `SUPABASE_JWT_ISSUER` / `SUPABASE_JWT_AUD`** to the exact values your
+  tokens carry, then enforcement can be turned on. AU1's role-allowlist already blocks foreign tokens
+  without this, so it is defence-in-depth, and enforcing with wrong/absent values would reject all
+  logins — hence owner-set only.
 
 ## NOTED — accepted or low-priority follow-up
 
