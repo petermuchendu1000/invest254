@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isTerminalRoute, isTerminalScreen, isBrokerTerminalBrand, TERMINAL_ROUTES } from './terminalScreen.js';
+import { isTerminalRoute, isTerminalScreen, isBrokerTerminalBrand, presentsAsTradingProduct, TERMINAL_ROUTES } from './terminalScreen.js';
 
 /**
  * Which routes wear MetaTrader's chrome.
@@ -108,4 +108,49 @@ test('seededSocialProofAllowed agrees with isBrokerTerminalBrand on all 20 brand
   }
   // Not vacuous: the matrix really does split, and it splits 6/14 (candlestick x 5, classic+line).
   assert.equal(allowed, 6);
+});
+
+/**
+ * THE LIVE BRAND MATRIX, pinned.
+ *
+ * Thirteen call sites decided "is this a terminal?" from `chart_style` alone. Because a TradingView
+ * chart type is non-null for BOTH `candlestick` and `area`, that swept up two brands that are not
+ * brokers at all: cpfmarket (the single-screen candlestick shell) and mpesapap (digits). They got
+ * MetaTrader's History and Settings screens, its drawer in place of the bottom nav, and its toasts.
+ * These cases are the regression test for that.
+ */
+const CHART_IS_TRADINGVIEW = { line: false, candlestick: true, area: true } as const;
+
+test('live brand matrix: only a real broker brand wears MetaTrader chrome', () => {
+  const chrome = (tradeUi: string, chart: keyof typeof CHART_IS_TRADINGVIEW) =>
+    isBrokerTerminalBrand(tradeUi, CHART_IS_TRADINGVIEW[chart]);
+
+  // The 16 classic/line brands — never were terminals, still are not.
+  assert.equal(chrome('classic', 'line'), false);
+  // muchwins: classic shell on a TradingView chart. It IS reached by the legacy chart route, and
+  // that is deliberate and unchanged — dropping it would silently move a live brand.
+  assert.equal(chrome('classic', 'candlestick'), true);
+  // cpfmarket: the candlestick shell is NOT MetaTrader. This is the bug this matrix exists for.
+  assert.equal(chrome('candlestick', 'candlestick'), false);
+  // mpesapap: digits is a game, not a broker — and `area` is a TradingView type, which is how it
+  // was being swept in.
+  assert.equal(chrome('digits', 'area'), false);
+  // A brand named a broker outright is one however it charts.
+  assert.equal(chrome('broker', 'line'), true);
+});
+
+test('register is a DIFFERENT question from chrome: candlestick speaks trading, digits does not', () => {
+  const voice = (tradeUi: string, chart: keyof typeof CHART_IS_TRADINGVIEW) =>
+    presentsAsTradingProduct(tradeUi, CHART_IS_TRADINGVIEW[chart]);
+
+  // The candlestick shell must not wear MetaTrader's chrome, but its own copy says TOP TRADERS and
+  // "How to trade" — calling its users players would contradict the screen they are standing on.
+  assert.equal(voice('candlestick', 'candlestick'), true);
+  assert.equal(isBrokerTerminalBrand('candlestick', true), false);   // chrome: no. voice: yes.
+
+  // Digits and classic are prediction games: players, not traders.
+  assert.equal(voice('digits', 'area'), false);
+  assert.equal(voice('classic', 'line'), false);
+  // A broker is a trading product on both counts.
+  assert.equal(voice('broker', 'line'), true);
 });

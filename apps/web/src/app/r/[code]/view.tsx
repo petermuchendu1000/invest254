@@ -11,6 +11,7 @@ import { storeReferral } from '@/lib/auth/referral';
 import { api } from '@/lib/api/endpoints';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { registerOf, riskAnchor } from '@/lib/legal/legalPage';
+import { presentsAsTradingProduct } from '@/lib/ui/terminalScreen';
 
 // Referral landing: capture the code, then route the visitor into sign-up with it
 // prefilled. Attribution is finalised server-side at registration (first-touch).
@@ -27,7 +28,7 @@ export default function ReferralLandingPage({ params }: { params: { code: string
   }, [code]);
 
   const brand = useBrand();
-  const register = registerOf(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
+  const register = registerOf(presentsAsTradingProduct(brand.tradeUi, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null));
   return (
     <section className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center gap-5 text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent text-2xl font-bold text-accent-fg">

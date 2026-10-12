@@ -371,10 +371,19 @@ export function GameSocketProvider({ children }: { children: React.ReactNode }) 
   const synthProfileRef = useRef<'market' | 'wave'>(curveProfileForChartStyle(chartStyleOf(brand.chartStyle)));
   synthProfileRef.current = curveProfileForChartStyle(chartStyleOf(brand.chartStyle));
   /**
-   * Whether this brand is a MetaTrader terminal, read inside the socket handler.
+   * Whether this brand draws its own quotes from the engine, read inside the socket handler.
    *
    * A ref rather than a value, because the handler is installed once and closes over what it can
    * see; a brand read at install time would be stale after a brand switch.
+   *
+   * DELIBERATELY still the CHART test, not `isBrokerTerminalBrand`. Everywhere else that asked
+   * "is this a terminal?" was moved onto `isBrokerTerminalBrand`, so a candlestick or digits brand
+   * stops getting MetaTrader's chrome and screens. This one is a different question and must not
+   * follow: it gates the SYNTHETIC CURVE backdrop below, which exists only for the classic shell.
+   * A candlestick brand renders real engine candles, so handing it a synthesized curve would put
+   * made-up numbers on a live trading screen — exactly what the note on that effect warns about
+   * ("a trader could have read a made-up number and pressed Buy against it"). Chart-driven shells
+   * show nothing until the engine speaks, which is the truth.
    */
   const terminalRef = useRef(tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
   terminalRef.current = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;

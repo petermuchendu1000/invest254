@@ -16,7 +16,7 @@ import { MT5AccountPanel } from '@/components/account/MT5AccountPanel';
 import { MT5Settings } from '@/components/account/MT5Settings';
 import { MT5Screen } from '@/components/mt5/kit';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
-import { isTerminalScreen } from '@/lib/ui/terminalScreen';
+import { isTerminalScreen, isBrokerTerminalBrand } from '@/lib/ui/terminalScreen';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { useCan } from '@/lib/auth/can';
@@ -32,7 +32,7 @@ export default function AccountPage() {
   // A terminal brand gets MetaTrader's account panel; every other shell keeps the plain username card.
   const brand = useBrand();
   const { isMarketer } = useMarketerSkin();
-  const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
+  const terminal = isBrokerTerminalBrand(brand.tradeUi, tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null);
   // …and on a candlestick brand the WHOLE page is MetaTrader's Settings screen, which carries that
   // panel at its top. A marketer screen never gets terminal chrome.
   const mt5 = isTerminalScreen(terminal, isMarketer);

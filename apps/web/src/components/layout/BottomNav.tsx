@@ -8,7 +8,7 @@ import { useLiveChat } from '@/lib/chat/liveChat';
 import { useLiveChatUnread } from '@/components/chat/LiveChatPanel';
 import { DIcon } from '@/components/game/digits/icons';
 import { useMarketerSkin } from '@/lib/marketer/isMarketer';
-import { useBrand } from '@/lib/brand/BrandProvider';
+import { useBrokerTerminalBrand } from '@/lib/ui/useBrandShell';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 
 type IconProps = { className?: string };
@@ -83,8 +83,7 @@ export function BottomNav() {
    *
    * Every other shell keeps this bar.
    */
-  const brand = useBrand();
-  const mt5 = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null && !isMarketer;
+  const mt5 = useBrokerTerminalBrand() && !isMarketer;
   const setChat = useLiveChat((s) => s.setOpen);
   // Every hook BEFORE the early return. React matches hooks by call order, so a hook after it is
   // called on some renders and not others, and a brand that switched shells mid-session would hand

@@ -12,6 +12,7 @@ import { cn } from '@/lib/cn';
 import { useBrand } from '@/lib/brand/BrandProvider';
 import { chartStyleOf, tradingViewTypeOf } from '@invest254/shared/chart';
 import { MT5_TOKENS } from '@/lib/ui/mt5Tokens';
+import { useBrokerTerminalBrand } from '@/lib/ui/useBrandShell';
 
 export type ToastTone = 'success' | 'error' | 'info';
 
@@ -51,8 +52,7 @@ const toneDot: Record<ToastTone, string> = {
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   // Safe here: ToastProvider is mounted inside BrandProvider (app/layout.tsx).
-  const brand = useBrand();
-  const terminal = tradingViewTypeOf(chartStyleOf(brand.chartStyle)) !== null;
+  const terminal = useBrokerTerminalBrand();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seq = useRef(0);
   const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
