@@ -27,6 +27,42 @@ type Fetch = typeof fetch;
 const stripSlash = (u: string) => u.replace(/\/+$/, "");
 const missing = (fields: string[]) => ({ ok: false, status: "not_configured" as const, detail: `Missing: ${fields.join(", ")}` });
 
+/**
+ * SSRF guard for a caller-supplied gateway base URL. The "test connection" path merges a draft
+ * `base_url`/`api_base` over the stored config and then issues an outbound request WITH the decrypted
+ * provider secret attached, so an operator (even the system owner) who points it at
+ * `http://169.254.169.254/...`, `http://localhost`, or an internal host would turn this into blind
+ * SSRF against cloud metadata / the internal network AND exfiltrate the live credential to a host
+ * they chose. Validate the host before any probe runs: HTTPS only, and never a loopback/private/
+ * link-local/metadata/`.internal` target.
+ *
+ * (Residual: a public hostname that later DNS-rebinds to a private address is not caught here —
+ * mitigating that needs resolve-and-pin, noted in docs. This closes the direct-literal and
+ * internal-hostname vectors, which is the exploit the audit demonstrated.)
+ */
+function isPrivateIpv4(host: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return false;
+  const o = m.slice(1).map(Number);
+  if (o.some((n) => n > 255)) return false;
+  const [a, b] = o as [number, number, number, number];
+  return a === 10 || a === 127 || (a === 169 && b === 254) || a === 0 ||
+    (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127);           // carrier-grade NAT
+}
+export function assertSafeGatewayUrl(raw: string | undefined | null): void {
+  const v = (raw ?? "").trim();
+  if (!v) return;                                  // empty -> the provider default (a known public host) is used
+  let u: URL;
+  try { u = new URL(v); } catch { throw new Error("GATEWAY_URL_INVALID"); }
+  if (u.protocol !== "https:") throw new Error("GATEWAY_URL_INSECURE");
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".internal") || host.endsWith(".local") ||
+      host === "metadata.google.internal") throw new Error("GATEWAY_URL_BLOCKED");
+  if (host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) throw new Error("GATEWAY_URL_BLOCKED");
+  if (isPrivateIpv4(host)) throw new Error("GATEWAY_URL_BLOCKED");
+}
+
 async function safeJson(res: Response): Promise<any> { try { return await res.json(); } catch { return {}; } }
 
 /**
@@ -177,5 +213,14 @@ export async function testConnection(code: string, cfg: Record<string, string>, 
   getSchema(code); // throws PROVIDER_NOT_CONFIGURABLE for unknown codes
   const probe = PROBES[code];
   if (!probe) return { ok: false, status: "not_configured", detail: "No connectivity test for this provider." };
+  // SSRF guard: a caller-supplied base URL is the only attacker-influenced input that becomes an
+  // outbound target (with the live secret attached). Reject an unsafe one up front — before the probe
+  // fetches — rather than in each provider branch. Empty => the provider's known public default is used.
+  try {
+    assertSafeGatewayUrl(cfg.base_url);
+    assertSafeGatewayUrl(cfg.api_base);
+  } catch {
+    return { ok: false, status: "invalid", detail: "Base URL must be a public https:// address." };
+  }
   return probe(cfg, fetchImpl);
 }
