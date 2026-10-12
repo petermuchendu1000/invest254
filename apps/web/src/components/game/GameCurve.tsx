@@ -2,8 +2,9 @@
 
 import { useCallback, useMemo, useRef } from 'react';
 import { useGameSocket, useGameSocketApi } from '@/lib/game/GameSocketProvider';
+import dynamic from 'next/dynamic';
 import { CurveCanvas, type MarketerBeat } from '@/components/game/CurveCanvas';
-import { CandleChart } from '@/components/game/CandleChart';
+import { ChartPlaceholder } from '@/components/ui/ChartPlaceholder';
 import { lotsOfStake } from '@invest254/shared/account';
 import { PENDING_LABELS } from '@invest254/shared/pending';
 import { useVolumeDigits } from '@/lib/game/volumeDigits';
@@ -18,6 +19,19 @@ import { useChartSymbolStore, chartOverride, CHART_SYMBOL_DND } from '@/lib/game
 import { useChartOrders } from '@/lib/game/chartOrders';
 import type { Timeframe } from '@invest254/shared/candles';
 import type { Tick } from '@/lib/game/types';
+
+/**
+ * MetaTrader's chart, loaded only by the brands that draw one.
+ *
+ * It is the single largest component in the product — the period strip, the object rail, the trade
+ * levels, the Tools menu and the indicator catalogue behind it — and the branch below renders it
+ * ONLY when `tradingViewTypeOf` returns a type. A line brand therefore downloaded the whole
+ * terminal chart to draw a wave with it, on the same critical path as its own chart.
+ */
+const CandleChart = dynamic(
+  () => import('@/components/game/CandleChart').then((m) => m.CandleChart),
+  { loading: () => <div className="relative h-full w-full"><ChartPlaceholder phase="connecting" /></div> },
+);
 
 const WINDOW_MS = 60_000;
 

@@ -67,6 +67,17 @@ export function CandlestickTape({
     host.addEventListener('pointerdown', detach);
     host.addEventListener('touchstart', detach, { passive: true });
 
+    /**
+     * Ask for the bars NOW, before waiting on the chart library.
+     *
+     * These two are independent and used to run back to back: a ~180KB module fetch, and only then
+     * a round trip to the engine for history. `requestCandles` does not need the socket to be open
+     * — it queues into the provider's outbox and flushes on connect — so there is nothing to wait
+     * for. Issuing it here overlaps the two, and the chart costs the SLOWER of them instead of
+     * their sum. On a phone on mobile data that is most of a second.
+     */
+    const barsPromise = requestRef.current(timeframe, count).catch((): null => null);
+
     (async () => {
       const lc = await import('lightweight-charts');
       const { createChart, CandlestickSeries, ColorType, CrosshairMode, LineStyle } = lc;
@@ -110,11 +121,16 @@ export function CandlestickTape({
       });
       seriesRef.current = series;
 
-      /** Fetch history and seed the series. Also re-run after a reconnect, which is why it is named. */
-      const seed = async () => {
+      /**
+       * Seed the series.
+       *
+       * `first` is the in-flight request started before the module was awaited; every later call
+       * (there is none today, but the function is named because it reads as a step) asks again.
+       */
+      const seed = async (first = false) => {
         try {
-          const reply = await requestRef.current(timeframe, count);
-          if (disposed || !reply.bars.length) return;
+          const reply = first ? await barsPromise : await requestRef.current(timeframe, count);
+          if (disposed || !reply || !reply.bars.length) return;
           series.applyOptions({
             priceFormat: { type: 'price', precision: reply.instrument.digits, minMove: 1 / 10 ** reply.instrument.digits },
           });
@@ -127,7 +143,7 @@ export function CandlestickTape({
              next reconnect re-seeds it. */
         }
       };
-      await seed();
+      await seed(true);
 
       const bucketS = TIMEFRAMES[timeframe];
       const loop = () => {
