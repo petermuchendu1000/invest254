@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Cents } from "@invest254/shared";
 
 /**
@@ -103,7 +103,11 @@ export function encodeContent(bizReq: Record<string, unknown>): string {
 /** Constant-shape comparison of a received sign against the expected one (case-insensitive hex). */
 export function signMatches(content: string, sign: string, merchantSecret: string): boolean {
   if (!content || !sign || !merchantSecret) return false;
-  return paynicornSign(content, merchantSecret) === String(sign).trim().toLowerCase();
+  // Constant-time hex compare (both sides are md5 hex). A plain === leaks the expected signature a
+  // character at a time by timing; equal-length buffers are required by timingSafeEqual.
+  const expected = Buffer.from(paynicornSign(content, merchantSecret), "utf8");
+  const got = Buffer.from(String(sign).trim().toLowerCase(), "utf8");
+  return expected.length === got.length && timingSafeEqual(expected, got);
 }
 export function decodeContent(contentBase64: string): Record<string, unknown> {
   const j = JSON.parse(Buffer.from(contentBase64, "base64").toString("utf8"));

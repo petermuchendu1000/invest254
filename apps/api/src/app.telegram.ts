@@ -1,5 +1,13 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router, ApiError, type Ctx } from "./http.js";
 import type { ApiDeps } from "./app.js";
+
+/** Constant-time string compare (returns false on a length mismatch — length is not the secret). */
+function timingSafeStrEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
 import {
   parseCallback, parseApprovalToken, buildApprovalPrompt, buildDecisionText, buildTopicRecord,
   buildQueueHeader, buildHistoryText, buildHelpText,
@@ -219,7 +227,9 @@ export function registerTelegramRoutes(router: Router, deps: ApiDeps): void {
   const tgDeps = buildTelegramUpdateDeps(deps);
   router.post(`${BASE}/telegram/webhook`, async (ctx: Ctx) => {
     const got = ctx.req.headers["x-telegram-bot-api-secret-token"];
-    if (!deps.telegramWebhookSecret || got !== deps.telegramWebhookSecret) {
+    // Constant-time compare: a plain !== on the webhook secret leaks it a byte at a time by timing,
+    // and that secret is the whole gate on the payout approve/reject taps.
+    if (!deps.telegramWebhookSecret || typeof got !== "string" || !timingSafeStrEqual(got, deps.telegramWebhookSecret)) {
       throw new ApiError("FORBIDDEN", "bad webhook secret", 403);
     }
     await processTelegramUpdate(ctx.body, tgDeps);
