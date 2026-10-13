@@ -5,6 +5,55 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #136 — "The graphs has been loading for the last 5mins": a REFUSED chart that looked like a loading one — FIXED (web + engine restart + one brand's config)
+- **What:** dakafx.com sat on "Fetching market data… The first prices are on their way" indefinitely,
+  on a screen whose badge said LIVE. cpfmarket.com runs the SAME shell and drew fine. Reported by the
+  owner, who correctly pushed back that identical code cannot explain it.
+- **Evidence (live production, browser + raw WS):** both pages send the identical frame
+  `{"type":"candles","tf":"M1","count":180}`. cpfmarket gets 180 bars; dakafx got
+  `{"type":"error","code":"NO_CANDLES","message":"this brand draws a line chart, not candles"}` in
+  ~300ms, while ticks streamed the whole time. Asking the live engine directly, per brand:
+  cpfmarket and muchwins (both candlestick) → bars; dakafx → REFUSED. So the engine does serve
+  candles — it refused this one brand.
+- **Root cause (two, stacked):**
+  1. **A STALE ENGINE.** `sites.chart_style` is read once per brand, when `SiteRegistry.ensure`
+     builds that brand's runtime (seeded at boot in `server.ts:162`; `curveProfileFor` only hits the
+     DB on a cache MISS), and the registry has no eviction path — so a brand's runtime, and its
+     "has candles" decision, are fixed for the life of the process. dakafx was switched to
+     `candlestick` at 13:15:21Z; the Fly machine's own event log shows the engine last started at
+     2026-10-12 22:59:56Z, over 14 hours earlier. It was still serving dakafx as a line brand.
+  2. **A SCREEN THAT COULD NOT SAY "REFUSED".** `CandlestickTape` ended its history fetch in
+     `.catch(() => null)` — the rejection was discarded — and `dataPhaseOf(status, hasData)` had no
+     failure state, so an open socket with nothing drawn was `waiting` forever. A definite "never"
+     rendered as "the first prices are on their way". (`CandleChart`, the broker terminal, already
+     handled this correctly with `setLoadError`; only this shell swallowed it.)
+- **Also found:** paidpesa.com was broken the same way for a DIFFERENT reason — `chart_style=line`
+  with `trade_ui=candlestick`, a candlestick screen on a brand with no candle history. A restart
+  would not have fixed it. Predicted from the mechanism, then confirmed by probing it.
+- **Fix:**
+  - web: `DataPhase` gains `failed`; `dataPhaseOf` takes a third `failed` argument (defaulted, so
+    every existing caller is untouched); `CandlestickTape` records the refusal instead of discarding
+    it and renders a retry that genuinely re-asks. A failure never blanks a chart that already has
+    bars, and never outranks a reconnect (which re-asks by itself). `tradeDisabledReason('failed')`
+    is null on purpose: a chart with no history is no reason to refuse a trade.
+  - ops (owner approved): `paidpesa.chart_style` → `candlestick` to match its screen, then ONE engine
+    restart (0 open positions platform-wide at the time, verified immediately before) so both brands'
+    runtimes rebuilt from the current rows.
+- **Verification:** reproduced locally by making the mock engine answer `NO_CANDLES` exactly as
+  production did — the old build spun, the new one says "No market data to show / This chart could
+  not load its history. Try again.", keeps BUY enabled, and the retry re-asks (1 → 2 requests).
+  Regression: with candles present there is no placeholder, no retry and a printed price. On
+  production after the restart: dakafx PRICE 2844.56 with bars, paidpesa 2694.04, cpfmarket
+  unchanged. 2245 unit tests, `tsc -b` clean.
+- **Caught in review of my own copy:** the first draft of the failed-state text read "The live price
+  is still running", but the price axis arrives WITH the history reply, so a brand with no history
+  shows `—` where the price goes. The screenshot had a dash two inches above that sentence. Reworded,
+  and a test now forbids the claim.
+- **Still open (reported, not actioned):** the engine will go stale again the next time a brand's
+  `chart_style` changes, because nothing invalidates a built runtime. Making it live means rebuilding
+  a brand's runtime in a running trading engine — which re-anchors the price axis that open positions
+  are measured against — so it is a deliberate piece of work, not a quick follow-on.
+
 ## #135 — An older PLAYER account on the same phone shadowed a real ADMIN: "can't login anywhere, just 404" — FIXED (api/engine)
 - **What:** an admin could not reach the back office from any domain — every operator surface showed
   a 404. Reported by the owner against phone `0100406758`.

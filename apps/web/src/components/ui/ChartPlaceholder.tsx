@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/cn';
-import { phaseCopy, type DataPhase } from '@/lib/ui/dataPhase';
+import { phaseCopy, phaseNeedsRetry, type DataPhase } from '@/lib/ui/dataPhase';
 
 /**
  * What a chart area shows while it has nothing to draw.
@@ -20,6 +20,7 @@ export function ChartPlaceholder({
   subject,
   variant = 'brand',
   showSkeleton = true,
+  onRetry,
   className,
 }: {
   phase: DataPhase;
@@ -33,6 +34,12 @@ export function ChartPlaceholder({
    * row of pulsing candles there would reinstate exactly the tell the neutralised curve removes.
    */
   showSkeleton?: boolean;
+  /**
+   * Ask again. Drawn ONLY in the `failed` phase (see `phaseNeedsRetry`), because that is the one
+   * state nothing resolves by itself — every other phase is already retrying, and a button there
+   * would invite the player to "fix" something that is in hand.
+   */
+  onRetry?: () => void;
   className?: string;
 }) {
   const { title, detail } = phaseCopy(phase, subject);
@@ -59,14 +66,19 @@ export function ChartPlaceholder({
       aria-live="polite"
     >
       {/* The skeleton: a row of pulsing candles. Low contrast on purpose — it is scaffolding, not
-          content, and must never be mistaken for real prices. */}
+          content, and must never be mistaken for real prices.
+
+          It does NOT pulse once the request has failed: a pulse is the page saying "working on it",
+          and animating under a message that says nothing more is coming is the same lie the
+          five-minute spinner told, just quieter. */}
       {showSkeleton ? (
         <div className="flex h-24 w-full max-w-[280px] items-end justify-center gap-2" aria-hidden>
           {bars.map((h, i) => (
             <div
               key={h}
               className={cn(
-                'w-3 animate-pulse rounded-sm',
+                'w-3 rounded-sm',
+                phaseNeedsRetry(phase) ? 'opacity-50' : 'animate-pulse',
                 terminal ? 'bg-[var(--mt5-border)]' : 'bg-surface-2',
               )}
               style={{ height: `${h}%`, animationDelay: `${i * 110}ms` }}
@@ -82,6 +94,24 @@ export function ChartPlaceholder({
         <p className={cn('max-w-[34ch] text-xs', terminal ? 'text-[var(--mt5-muted)]' : 'text-muted')}>
           {detail}
         </p>
+
+        {phaseNeedsRetry(phase) && onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className={cn(
+              // 36px tall and 100px wide: a real touch target, because the one person who sees this
+              // is already having a bad time on a phone.
+              'mt-2 inline-flex h-9 min-w-[100px] items-center justify-center rounded-lg px-4 text-xs font-semibold',
+              'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              terminal
+                ? 'border border-[var(--mt5-border)] text-[var(--mt5-text)] hover:bg-[var(--mt5-border)]/30'
+                : 'border border-border text-fg hover:bg-fg/5',
+            )}
+          >
+            Try again
+          </button>
+        ) : null}
       </div>
     </div>
   );
