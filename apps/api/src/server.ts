@@ -25,6 +25,8 @@ import { makePgCommunity } from "./community.pg.js";
 import { makePgKycStore } from "./kyc.pg.js";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
 import { normalizeHost, PlatformGate, enforcedValue, createLogger, effectiveMinWithdrawalCents, chartStyleOf, tradeUiOf, MIN_DEPOSIT_CENTS, type VersionedGameConfig, type Cents } from "@invest254/shared";
+import { autoThemeFor, themeIdOfTokens } from "@invest254/shared/siteThemes";
+import { faviconDataUri } from "@invest254/shared/brandMark";
 import { BrandOriginAllowlist, ExtraOriginAllowlist } from "./cors.js";
 import { makeIdleGate, requireStepUp } from "./stepup.js";
 import { makePgMarketerRepo } from "./marketers.pg.js";
@@ -798,10 +800,10 @@ async function buildDeps(): Promise<ApiDeps> {
         primary_domain: input.primaryDomain ? input.primaryDomain.trim().toLowerCase() : null,
         currency: input.currency ?? "KES",
         locale: input.locale ?? "en-KE",
-        theme: input.theme ?? "dark",
-        color_primary: input.colors?.primary ?? "#22c55e",
-        color_bg: input.colors?.bg ?? "#0a0a0a",
-        color_accent: input.colors?.accent ?? "#06b6d4",
+        theme: (input.theme ?? "dark") as string,
+        color_primary: (input.colors?.primary ?? "#22c55e") as string,
+        color_bg: (input.colors?.bg ?? "#0a0a0a") as string,
+        color_accent: (input.colors?.accent ?? "#06b6d4") as string,
         wordmark_text: input.wordmarkText ?? input.primaryDomain ?? input.name,
         licence_line: input.licenceLine ?? null,
         support_email: input.supportEmail ?? null,
@@ -812,16 +814,61 @@ async function buildDeps(): Promise<ApiDeps> {
       // used to overwrite any tenant's brand identity, domain AND economy (house edge, stakes).
       const existingId = await refuseForeignReonboard(q, input.slug, callerScope);
       // F-47: a domain belongs to ONE brand (case-insensitive, like host resolution).
-      if (f.primary_domain) await refuseDomainClash(q, f.primary_domain, existingId);
+      if (f.primary_domain) await refuseDomainClash(q, f.primary_domain as string, existingId);
+
+      /**
+       * EVERY BRAND IS BORN WITH A THEME.
+       *
+       * A brand's appearance lives in `sites.theme_tokens` — around twenty tokens covering the
+       * background, surfaces, borders, text, semantic up/down and the type. The three `color_*`
+       * columns this function used to set produce exactly THREE CSS variables, so a brand created
+       * here rendered on the stock design system and looked like every other untouched brand, no
+       * matter which colour was chosen for it. Seven live brands were in that state before anyone
+       * noticed, and the symptom reported was "brand themes are not taking effect" — they had never
+       * been set (BUGLOG #137).
+       *
+       * So onboarding now assigns a complete theme itself, from the same library the console
+       * offers. The colour the operator picked is honoured — the nearest theme to it wins, so
+       * choosing blue gives the whole blue theme rather than a blue button on a grey site — and a
+       * theme no other brand wears is preferred, so brands do not come out looking alike.
+       *
+       * It only ever FILLS A GAP: a re-onboard of a brand that already has tokens leaves them
+       * alone, because that palette may have been chosen or hand-tuned deliberately.
+       */
+      const themeFields: Record<string, unknown> = {};
+      const alreadyThemed = existingId
+        ? (await q.query("select 1 from sites where id = $1 and theme_tokens is not null", [existingId])).rows.length > 0
+        : false;
+      if (!alreadyThemed) {
+        const worn = (await q.query("select theme_tokens from sites where theme_tokens is not null", [])).rows
+          .map((r: { theme_tokens?: unknown }) => themeIdOfTokens(r.theme_tokens as { brand?: unknown; bg?: unknown }))
+          .filter((id): id is string => !!id);
+        const picked = autoThemeFor({
+          slug: input.slug,
+          mode: f.theme === "light" ? "light" : "dark",
+          preferredColour: input.colors?.primary ?? null,
+          taken: worn,
+        });
+        const tk = picked.tokens as unknown as Record<string, string>;
+        f.theme = picked.mode;
+        f.color_primary = tk.brand!;
+        f.color_bg = tk.bg!;
+        f.color_accent = tk.accent!;
+        themeFields.theme_tokens = JSON.stringify(tk);
+        // The tab icon is generated from the theme + the slug, exactly as the console's apply does,
+        // so a new brand is not left wearing the default mark of whatever it was cloned from.
+        themeFields.favicon_url = faviconDataUri(tk, input.slug);
+      }
       let siteId: string;
       if (existingId) {
         siteId = existingId;
-        const sets = Object.keys(f).map((k, i) => `${k} = $${i + 2}`).join(", ");
-        await q.query(`update sites set ${sets}, updated_at = now() where id = $1`, [siteId, ...Object.values(f)]);
+        const fu: Record<string, unknown> = { ...f, ...themeFields };
+        const sets = Object.keys(fu).map((k, i) => `${k} = $${i + 2}`).join(", ");
+        await q.query(`update sites set ${sets}, updated_at = now() where id = $1`, [siteId, ...Object.values(fu)]);
       } else {
         // A platform admin's NEW brand is stamped into ITS platform; the system owner (null) uses the
         // column default. platform_id is never changed on re-onboard (the update path above).
-        const fi: Record<string, unknown> = { ...f, ...(platformId ? { platform_id: platformId } : {}) };
+        const fi: Record<string, unknown> = { ...f, ...themeFields, ...(platformId ? { platform_id: platformId } : {}) };
         const cols = ["slug", ...Object.keys(fi)];
         const ph = cols.map((_, i) => `$${i + 1}`).join(", ");
         const r = await q.query(`insert into sites (${cols.join(", ")}) values (${ph}) returning id`, [input.slug, ...Object.values(fi)]);

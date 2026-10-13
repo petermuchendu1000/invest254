@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BRAND_FONTS, fontStack, googleFontsHref } from './fonts.js';
+import { BRAND_FONTS, fontStack, googleFontsHref } from './brandFonts.js';
 
 test('BRAND_FONTS is a non-empty, unique family list', () => {
   assert.ok(BRAND_FONTS.length >= 8);
