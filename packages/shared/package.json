@@ -28,6 +28,9 @@
     "./capabilities": "./src/capabilities.ts",
     "./indicators": "./src/indicators.ts",
     "./calendar": "./src/calendar.ts",
-    "./pending": "./src/pending.ts"
+    "./pending": "./src/pending.ts",
+    "./siteThemes": "./src/siteThemes.ts",
+    "./brandFonts": "./src/brandFonts.ts",
+    "./brandMark": "./src/brandMark.ts"
   }
 }

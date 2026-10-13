@@ -5,6 +5,51 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #137 — Brands were born UNTHEMED, so seven live sites rendered as the stock design system — FIXED (api onboarding + the 7 brands applied)
+- **What:** reported as "why are brand themes not taking effect?". Seven of eighteen live brands wore
+  the generic dark/cyan look no matter what colour had been chosen for them.
+- **Evidence (live production):** a brand's appearance comes from `sites.theme_tokens` (~20 tokens:
+  bg, surface, surface2, border, fg, muted, brand/brandHover/brandText, accent/accentFg, up, down,
+  warn, info, three font faces, heading weight, radius). The three `color_*` columns produce exactly
+  THREE CSS variables (`brandCssVars`). Measured: `invest254.com` (tokens present) renders 14+
+  `--brand-*` variables; `dakafx.com` (tokens null) rendered exactly three — primary, bg, accent —
+  and everything else fell back to globals.css. Unthemed: `66investors, 94wins, betyangu, dakafx,
+  fxhacks, paidpesa, peakpesa`.
+- **Root cause:** two write paths that were never reconciled. `onboard` (`api/src/server.ts`)
+  collected ONE colour (`colors: { primary }`) and wrote `color_primary` only — it never wrote
+  `theme_tokens`. The thing that actually skins a brand is the console's "Apply theme"
+  (`useApplySiteTheme` → `fn_platform_set_site_theme`), a separate, manual, platform-tier action.
+  So every brand created through onboarding was born unthemed and stayed that way until a human
+  noticed. Nothing in the onboarding form said so; it asks for a colour, which implies it is enough.
+- **Not the engine.** The question asked was whether a theme change needs an engine restart like
+  BUGLOG #136 did. It does not, and the two are unrelated: the theme path is
+  `sites` row → `GET /site/brand` → the web root layout → CSS variables, server-rendered per
+  request. The only delay is the 60s brand cache (`BRAND_TTL_MS`). Confirmed by applying the seven
+  themes and watching them appear on production with no deploy and no restart.
+- **Fix:**
+  - `autoThemeFor()` + `themeIdOfTokens()` in `@invest254/shared/siteThemes`, with the theme library,
+    the font registry and the mark/favicon generator moved from `apps/web` to `packages/shared` so
+    the API and the console choose from the SAME 56 themes (two copies would drift, and a brand's
+    look would then depend on which screen created it). The web files remain as re-export shims, so
+    no component changed.
+  - `onboard` now assigns a complete theme when a brand has none: mode + the three colour columns +
+    the full token palette + a generated favicon. It honours a colour the operator actually chose
+    (nearest theme wins, so "I picked blue" yields the whole blue theme), never crosses light and
+    dark, prefers a theme no other brand wears, and only ever FILLS A GAP — a re-onboard of a brand
+    that already has tokens leaves them untouched.
+  - The seven existing brands were applied with the same rule (owner approved), each keeping its
+    stored dark mode: Tezos, Ethereum, Bybit, Solana, Cardano, Chainlink, Binance respectively.
+- **Verification:** 9 unit tests on the rule (determinism, mode never crossed, chosen colour
+  honoured, the stock placeholder NOT treated as a choice, taken-theme avoidance, graceful
+  degradation when every theme is worn, invalid colour fall-through). After applying: 18/18 active
+  brands themed, 18/18 with a favicon, 0 unthemed. Live: dakafx `--brand-primary:#9945FF` with the
+  full palette, paidpesa `#375BD2`, peakpesa `#F0B90B`. 2254 unit tests, `tsc -b` clean, web build
+  clean after the module moves.
+- **A rule refined mid-flight:** the first pass picked purely by slug hash and handed three brands
+  LIGHT themes, though all seven are stored as dark. Flipping a brand to a white site is a far bigger
+  change than giving it a palette, so the mode is now treated as the operator's decision and never
+  overridden. Caught by reading the dry run before writing anything.
+
 ## #136 — "The graphs has been loading for the last 5mins": a REFUSED chart that looked like a loading one — FIXED (web + engine restart + one brand's config)
 - **What:** dakafx.com sat on "Fetching market data… The first prices are on their way" indefinitely,
   on a screen whose badge said LIVE. cpfmarket.com runs the SAME shell and drew fine. Reported by the
