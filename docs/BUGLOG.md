@@ -5,6 +5,62 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #138 — Players could not win on half the brands, and marketers lost on them too: one config split, and two platforms with no pool at all — FIXED (config + migration 0203)
+- **What:** reported as "in digit broker, why is a marketer making all those losses? learn how we're
+  doing it in waves and implement the same". The premise turned out to be wrong in an important way,
+  and underneath it was something worse than a marketer problem.
+- **It was never digits vs waves.** Both shells already run the SAME marketer path: a marketer is
+  pool-EXEMPT and takes the statistical path with their overrides — `game.ts:642-652` for digits
+  (`ov?.winRate ?? cfg.targetWinRate`) and `settlementFor()` for waves. No code differed. Measured
+  marketer win rates per brand tracked `site_game_config.target_win_rate` exactly and the shell not
+  at all:
+  | brand | shell | target_win_rate | marketer win % |
+  |---|---|---|---|
+  | 94wins | **classic (waves)** | 0.125 | **26.2%** |
+  | mpesapap | digits | 0.125 | 35.5% |
+  | invest254 / madolar / 33traders / … | classic + candlestick | 0.85 | 90–98.6% |
+  A WAVES brand was the worst of the lot, which is what disproves the shell theory.
+- **The serious half.** The same split governs REAL players through `house_edge`
+  (`targetRtp = 1 - house_edge` on the pool path). Nine brands ran `0.125 / 0.75`; nine ran
+  `0.85 / 0.05`. Real-money, non-demo, settled trades:
+  | brand | config | real trades | win % | actual RTP |
+  |---|---|---|---|---|
+  | invest254 | 0.85 / 0.05 | 6,923 | 82.1% | 91.1% |
+  | madolar | 0.85 / 0.05 | 13,948 | 82.9% | 92.5% |
+  | **mpesapap** | **0.125 / 0.75** | 17 | **0.0%** | **0.0%** |
+  Every real player on the digits brand lost every trade, through 12:53 on the day it was found.
+- **Root cause:** `onboard` creates a brand with `house_edge 0.75 / target_win_rate 0.125` (the
+  column defaults), and nothing ever moved those brands onto the pool-governed economics the
+  established brands use. The two numbers are coupled by the `site_cfg_feasible` CHECK —
+  `(1 - house_edge) / target_win_rate > 1`, winners must profit — so the marketer dial cannot be
+  raised without also setting the player dial. They are one decision, not two.
+- **Fix (owner instruction: "all players in any brand should follow the pool fund (superior to
+  manual config), marketers have a winning rate of 85%"):** every active brand set to
+  `target_win_rate 0.85, house_edge 0.05` — identical to invest254. 18/18 brands now share one
+  config. Versions bumped; the engine applies this live via the `site_game_config_changed` LISTEN
+  channel with a 15s poll fallback, no restart.
+- **The second gap, which the config alone would NOT have fixed:** the pool is what actually pays a
+  winner, and `pool_auto_settings.daily_total_cents` was nullable with no default. Two of three
+  platforms had never had a total set, so the daily distributor stopped on them with "Nothing to
+  split yet: no daily total is set and the brands have no budget", and six live brands — dakafx,
+  fxhacks, paidpesa, peakpesa, shikafx, surewinfx — had no `withdrawal_pool` row at all. A brand
+  with no budget cannot pay a winner whatever its RTP target says. **Migration 0203** gives the
+  column a default of KES 50,000, backfills every platform that has none (only where `updated_by is
+  null`, so an admin's deliberate clear is never overwritten), and adds an AFTER INSERT trigger on
+  `platforms` so a new platform can never be born dormant again.
+- **Verification:** config applied and re-read — all 18 brands `0.85 / 0.05`. Migration applied to
+  production and verified: MUGO and NDUATI now KES 50,000, MUCHENDU untouched at KES 400,000
+  (a human had set it). The trigger was exercised by inserting a real platform inside a transaction —
+  it came out `dynamic / KES 50,000 / 14 days` — and rolled back, with 0 rows left behind.
+- **My own error, recorded because it nearly stopped the fix:** I argued against raising the payout
+  cap on the grounds that it would take real players from 25% RTP to 86%+, and I was protecting a
+  configuration that paid them ZERO. I had reasoned from the constraint instead of measuring the
+  outcome. The owner corrected the premise; the measurement settled it.
+- **Still outstanding:** the six newly-funded brands get their budget at the next distribution
+  (21:15 UTC / 00:15 EAT), or immediately via the pool console's per-platform run. Marketer win
+  rates on the changed brands are not yet confirmed end to end — no marketer had traded in the
+  minutes after the change.
+
 ## #137 — Brands were born UNTHEMED, so seven live sites rendered as the stock design system — FIXED (api onboarding + the 7 brands applied)
 - **What:** reported as "why are brand themes not taking effect?". Seven of eighteen live brands wore
   the generic dark/cyan look no matter what colour had been chosen for them.
