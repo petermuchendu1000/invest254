@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connBadge, dataPhaseOf, phaseCopy, phaseIsBlocking, tradeDisabledReason, valueIsStale } from './dataPhase.js';
+import { connBadge, dataPhaseOf, phaseCopy, phaseIsBlocking, phaseNeedsRetry, tradeDisabledReason, valueIsStale } from './dataPhase.js';
 
 /**
  * Dead states. Every shell mounted its chart as a bare container and waited, so a brand whose socket
@@ -90,4 +90,61 @@ test('a disabled BUY/SELL always says WHY', () => {
   }
   assert.match(tradeDisabledReason('waiting')!, /live prices/i);
   assert.match(tradeDisabledReason('offline')!, /reconnect/i);
+});
+
+/**
+ * BUGLOG #136 — the refusal that looked like loading.
+ *
+ * Reported from production: "the graphs has been loading for the last 5mins". The socket was OPEN
+ * and streaming ticks the whole time; the engine had answered the candles request in ~300ms with
+ * `NO_CANDLES` ("this brand draws a line chart, not candles"), the chart discarded that rejection,
+ * and the phase model had no state for it — so a definite "never" rendered as "Fetching market
+ * data… The first prices are on their way", indefinitely.
+ */
+test('a REFUSED request is not the same as one still in flight', () => {
+  // The exact production shape: socket open, nothing drawn, the request came back refused.
+  assert.equal(dataPhaseOf('open', false, true), 'failed');
+  // ...and without the failure it is still the honest "waiting", unchanged.
+  assert.equal(dataPhaseOf('open', false, false), 'waiting');
+  assert.equal(dataPhaseOf('open', false), 'waiting', 'the flag defaults off: every existing caller is untouched');
+});
+
+test('a failure never blanks a chart that already has bars, and never outranks a reconnect', () => {
+  // Bars already drawn: a later failure must not throw away a trader's chart.
+  assert.equal(dataPhaseOf('open', true, true), 'ready');
+  assert.equal(dataPhaseOf('closed', true, true), 'reconnecting');
+  // Socket gone: the reconnect will re-ask, so "reconnecting" is both truer and more useful than
+  // asking the player to retry something that is already in hand.
+  assert.equal(dataPhaseOf('closed', false, true), 'offline');
+  assert.equal(dataPhaseOf('connecting', false, true), 'connecting');
+});
+
+test('the failed copy promises nothing it will not do, and offers the way out', () => {
+  const { title, detail } = phaseCopy('failed');
+  assert.doesNotMatch(title, /fetching|loading/i, 'it must not claim to be still fetching');
+  assert.doesNotMatch(detail, /on their way|retrying/i, 'nothing is on its way without the player asking');
+  // It must not claim a live price either: the price axis is carried BY the history reply, so a
+  // chart with no history shows `—` where the price goes. An earlier draft of this copy said
+  // "the live price is still running" and the screenshot showed a dash two inches above it.
+  assert.doesNotMatch(detail, /live price/i, 'the screen shows no price in this state');
+  // It still avoids alarming a player about their money, per the rule the other phases follow.
+  assert.doesNotMatch(`${title} ${detail}`, /error|failed|problem/i);
+  assert.match(detail, /try/i, 'it says what to do');
+  // The subject is substituted like every other phase.
+  assert.match(phaseCopy('failed', 'your chart').title, /your chart/);
+});
+
+test('only the failed phase draws a retry — everything else is already retrying itself', () => {
+  assert.equal(phaseNeedsRetry('failed'), true);
+  for (const p of ['connecting', 'waiting', 'reconnecting', 'offline', 'ready'] as const) {
+    assert.equal(phaseNeedsRetry(p), false, p);
+  }
+  // It still blocks: there is nothing drawn underneath, so the placeholder must cover the pane.
+  assert.equal(phaseIsBlocking('failed'), true);
+});
+
+test('a chart that could not load its history does NOT disable trading', () => {
+  // The feed is open and the price is live — that is what a trade is priced from, not the bars.
+  // Disabling BUY/SELL here would turn a cosmetic gap into a dead product.
+  assert.equal(tradeDisabledReason('failed'), null);
 });

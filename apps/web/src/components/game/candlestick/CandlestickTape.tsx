@@ -43,6 +43,18 @@ export function CandlestickTape({
    * reconnect keeps the last picture instead of blanking a trader's chart.
    */
   const [hasBars, setHasBars] = useState(false);
+  /**
+   * The history request came back REFUSED (or timed out), so no bars are coming unless we ask again.
+   *
+   * This used to be thrown away — the fetch below ended in `.catch(() => null)`, which turned a
+   * definite "never" into the same silence as "not yet". The engine answers a brand it has no
+   * candles for in about 300ms with `NO_CANDLES`; the screen went on saying "Fetching market data…"
+   * for five minutes on a live brand, over an open socket that was streaming ticks the whole time.
+   * Recording the failure is what lets the placeholder say so and offer the retry.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
+  /** Bumped by the retry button; in the effect's deps, so a click genuinely re-runs the fetch. */
+  const [retryNonce, setRetryNonce] = useState(0);
   const chartRef = useRef<import('lightweight-charts').IChartApi | null>(null);
   const seriesRef = useRef<import('lightweight-charts').ISeriesApi<'Candlestick'> | null>(null);
   /** The bar currently forming, kept here so the loop can extend it without refetching history. */
@@ -76,7 +88,12 @@ export function CandlestickTape({
      * for. Issuing it here overlaps the two, and the chart costs the SLOWER of them instead of
      * their sum. On a phone on mobile data that is most of a second.
      */
-    const barsPromise = requestRef.current(timeframe, count).catch((): null => null);
+    const barsPromise = requestRef.current(timeframe, count).catch((): null => {
+      // A refusal is DATA about the chart's state, not noise to discard. `disposed` guards the
+      // usual unmount race; the provider never caches a failure, so the retry really re-asks.
+      if (!disposed) setLoadFailed(true);
+      return null;
+    });
 
     (async () => {
       const lc = await import('lightweight-charts');
@@ -136,11 +153,14 @@ export function CandlestickTape({
           });
           series.setData(reply.bars as never);
           setHasBars(true);
+          setLoadFailed(false);
           liveRef.current = { ...reply.bars[reply.bars.length - 1]! };
           if (followRef.current) chart.timeScale().scrollToRealTime();
         } catch {
-          /* A failed history fetch leaves the chart empty rather than throwing into the screen; the
-             next reconnect re-seeds it. */
+          /* A failed history fetch leaves the chart empty rather than throwing into the screen —
+             but it is now SAID rather than silently swallowed, so the placeholder can stop
+             claiming the bars are on their way. The next reconnect, or the retry, re-seeds it. */
+          if (!disposed) setLoadFailed(true);
         }
       };
       await seed(true);
@@ -205,20 +225,35 @@ export function CandlestickTape({
         // succeeds, the chart draws bars while `hasBars` stays false and the placeholder sits on
         // top of a perfectly good chart forever.
         setHasBars(true);
+        setLoadFailed(false);
         liveRef.current = { ...reply.bars[reply.bars.length - 1]! };
         if (followRef.current) chartRef.current?.timeScale().scrollToRealTime();
       } catch {
         /* see seed() */
+        if (!cancelled) setLoadFailed(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [status, timeframe, count]);
+    // `retryNonce` is what makes the placeholder's button do something: this effect is the cheap
+    // path (it re-asks without tearing the chart down), so the retry rides it rather than the
+    // mount effect.
+  }, [status, timeframe, count, retryNonce]);
 
-  const phase = dataPhaseOf(status, hasBars);
+  const phase = dataPhaseOf(status, hasBars, loadFailed);
   return (
     <div className={cn('relative', className ?? 'h-full w-full')}>
       <div ref={hostRef} className="h-full w-full" />
-      {phaseIsBlocking(phase) ? <ChartPlaceholder phase={phase} /> : null}
+      {phaseIsBlocking(phase) ? (
+        <ChartPlaceholder
+          phase={phase}
+          onRetry={() => {
+            // Clear FIRST so the placeholder goes back to "fetching" for the round trip: leaving it
+            // on the failed copy while the retry is in flight makes the button look dead.
+            setLoadFailed(false);
+            setRetryNonce((n) => n + 1);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
