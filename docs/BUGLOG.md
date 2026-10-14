@@ -5,6 +5,62 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #140 — A marketer who ran out of funny money had to wait for an admin — FIXED (screen 1 of 2)
+- **What:** owner report. The marketer till app runs on simulated money (docs/27). When a marketer
+  ran out, the only ways to get more were an admin or platform admin crediting them
+  (`POST /admin/marketers/:id/credit`) or the self top-up to a fixed cap
+  (`POST /marketers/me/demo-topup`, #102). Both put a ceiling or a person in the way of something no
+  real cash passes through. The ask: let a marketer ring a colleague and be sent some.
+- **Root cause:** not a defect — a missing path. Every route that could move money into a marketer
+  wallet was admin-gated or self-only; there was no marketer-to-marketer one, and the till app had
+  no screen that could address another marketer at all.
+- **Fix (this entry):** the **Send Money screen** in `mpesa_2` and the one server read it needs.
+  - `POST /api/v1/marketers/recipients/lookup` `{ phone } -> { name, self }` — auth + marketer gate
+    + a **per-marketer** 20/min budget. Resolves ONLY within the caller's own brand (the site id
+    comes from the authenticated profile, never the request), returns the registered name and
+    nothing else, and collapses "no such number", "another brand's marketer", "suspended" and "not a
+    marketer" into ONE `RECIPIENT_NOT_FOUND` so the response cannot be used to map numbers to
+    brands. POST rather than GET because a number in a query string reaches edge access logs,
+    history and `Referer` headers that a body does not.
+  - `self` is returned because the app **cannot** work it out: `/me` masks the marketer's own number
+    (docs/58), so there is nothing on the handset to compare a typed number against. Without the
+    flag a send-to-self could not be detected at all.
+  - The app: `SendMoneyScreen.kt` (two tabs — mobile number and Pochi), `Msisdn.kt` (Kenyan number
+    normalisation + the simulated agent-withdrawal tariff), `Favourites.kt` (device-local only).
+    `Routes.forAction` intercepts the `send_money` and `pochi` tiles, so all four places that render
+    them pick the new screen up at once.
+- **docs/58 is NOT reversed.** The app still never receives anyone's full number from the server,
+  the recipient's included — it receives a NAME, for a number the user already had and typed in.
+  A directory of marketers (names and numbers, or names alone) was offered to the owner and
+  declined for exactly that reason; see docs/63 §5.
+- **Rate-limit shape:** `by: "user"`, not `by: "ip"`. Every marketer is behind Kenyan carrier-grade
+  NAT, so an IP budget is shared by thousands of unrelated handsets — it throttles honest users and
+  barely inconveniences one account walking `07xx`. A per-marketer budget binds the attacker, who
+  must BE an authenticated active marketer of the brand being swept.
+- **NOT DONE — this is screen 1 of 2.** The Confirm step and the transfer itself are not built, so
+  **nothing here debits anybody yet**. What the transfer will need is listed in docs/63 §6: one RPC
+  that debits and credits in a single transaction behind the 0199 brand fence, idempotency on a
+  client ref, a ledger row on both sides, the sender's PIN, and a per-marketer daily cap.
+- **Tests:**
+  - `app.marketers.recipientlookup.test.ts` — 9 route tests: the name resolves from the DB; every
+    typed format (07../7../254../+254../spaced/dashed) folds to the same person; the body carries
+    `{name, self}` and the recipient's digits appear nowhere in it; send-to-self is flagged; a
+    sibling brand's marketer and a number nobody holds give **byte-identical** refusals; a suspended
+    marketer is not a destination; malformed input is a 400 that does not echo what was typed;
+    anonymous 401 / player 403 / admin 403 / suspended-caller 403; and 40 lookups in a minute start
+    being refused.
+  - `MsisdnTest.kt` — 8 JVM tests. The normalisation cases are lifted from the SERVER's own
+    `normalizeMsisdn` test table, so the two implementations are pinned to the same table rather
+    than to each other's good intentions. Plus the tariff bands at their edges and a monotonicity
+    check (a tariff that dipped would let a sender pay less by sending more).
+- **Tariff provenance:** the KSh 11 band for KSh 50–100 — the band the owner's screenshot shows —
+  is confirmed on Safaricom's own M-PESA rates page. **The bands above KSh 100 are reported by
+  independent Kenyan tariff trackers and are NOT confirmed against Safaricom's own published table.**
+  Recorded as reported, not verified, in `Msisdn.kt` and docs/63.
+- **Docs:** docs/63-marketer-to-marketer-transfer.md.
+
+---
+
 ## #138 — The "someone just won" card covered up to 42.7% of the chart — FIXED (both trade shells)
 - **What:** reported by marketers demonstrating the app: *the activity notification blocks the
   waves*. `ActivityNotice` was a 288x73 card, absolutely positioned at `top-3` **inside** the wave

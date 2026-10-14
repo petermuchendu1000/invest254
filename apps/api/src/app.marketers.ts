@@ -3,7 +3,7 @@ import { assertSiteTarget } from "./scope.js";
 import type { ApiDeps } from "./app.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
 import { isTokenSessionValid } from "@invest254/engine";
-import { SECURITY_QUESTIONS, SECURITY_ANSWERS_REQUIRED, validatePassword, maskPhoneForDisplay } from "@invest254/shared";
+import { SECURITY_QUESTIONS, SECURITY_ANSWERS_REQUIRED, validatePassword, maskPhoneForDisplay, normalizeMsisdn } from "@invest254/shared";
 
 /**
  * Admin marketer routes (marketers = special players who RECEIVE payments and can withdraw).
@@ -188,6 +188,10 @@ const MARKETER_STATUS: Readonly<Record<string, number>> = {
   // DB brand-fence backstop (0199 / A1): a site-tier actor acting on another brand's marketer. The
   // route's marketerInScope already returns this 403 first; this maps the database's own raise.
   SITE_SCOPE_FORBIDDEN: 403,
+  // Marketer-to-marketer transfer: the typed number is not an active marketer on the caller's own
+  // brand. ONE code for every reason (no such number / another brand's / suspended / closed), so the
+  // response cannot be used to tell those apart. See the recipient-lookup route.
+  RECIPIENT_NOT_FOUND: 404,
 };
 
 function statusForMarketer(code: string): number {
@@ -400,6 +404,16 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   const securityLimit = rateLimit({ name: "marketer-security", by: "user", limit: Number(process.env.RATE_LIMIT_MFA_PER_MIN) || 10, windowMs: 60_000 });
   // Self-service demo top-up: modest abuse guard (the RPC is idempotent + capped, so this is belt-and-braces).
   const demoTopupLimit = rateLimit({ name: "marketer-demo-topup", by: "ip", limit: 30, windowMs: 60_000 });
+  /**
+   * Recipient lookup: the ONE budget that bounds how fast a marketer can sweep the number space.
+   *
+   * `by: "user"`, not `by: "ip"`, and that is the whole point. Every marketer on this app is on a
+   * Kenyan mobile network behind carrier-grade NAT, so an IP budget is shared by thousands of
+   * unrelated handsets — it would throttle honest users and barely inconvenience one account walking
+   * 07xx. A per-marketer budget is the one that actually binds the attacker, because the attacker
+   * has to BE an authenticated active marketer of the brand they are sweeping.
+   */
+  const recipientLookupLimit = rateLimit({ name: "marketer-recipient-lookup", by: "user", limit: Number(process.env.RATE_LIMIT_RECIPIENT_LOOKUP_PER_MIN) || 20, windowMs: 60_000 });
   // Policy ceiling for a marketer's SIMULATED (funny-money) wallet. Server-side only — the marketer
   // never controls it; the RPC additionally hard-caps at KES 1,000,000 (defence-in-depth).
   const DEMO_TOPUP_CAP_CENTS = Number(process.env.MARKETER_DEMO_TOPUP_CAP_CENTS) || 10_000_000; // KES 100,000
@@ -582,6 +596,62 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   router.post(`${BASE}/marketers/me/demo-topup`, auth, marketer, demoTopupLimit, async (ctx: Ctx) => {
     const balanceCents = await domain(() => deps.marketers.topupDemo(marketerCtx.get(ctx)!.id, DEMO_TOPUP_CAP_CENTS));
     return { balanceCents, capCents: DEMO_TOPUP_CAP_CENTS };
+  });
+
+  /**
+   * ── Who is this number? (marketer-app Send Money screen) ──────────────────────────────────────
+   *
+   * A marketer types a fellow marketer's number and sees the registered name before sending, which
+   * is the single check that stops funny money going to a typo. It exists because topping a
+   * marketer up no longer has to go through an admin: a marketer who has run out can now be sent
+   * some by a colleague they rang.
+   *
+   * IT RESOLVES ONLY WITHIN THE CALLER'S OWN BRAND. The site id comes from the authenticated
+   * marketer's own profile — never from the request — so there is no parameter to tamper with, and
+   * a marketer of brand A cannot learn anything about brand B. That is the same fence 0199 put in
+   * the database for the admin RPCs, applied to the one read this app needs.
+   *
+   * WHAT IT GIVES BACK, AND WHAT IT DELIBERATELY DOES NOT. Only `{ name, self }`. Not the phone
+   * (docs/58 — the full number of anyone but the caller never leaves the server on a marketer
+   * response, and this route must not be the hole in that), not the id, the balance, the status or
+   * the brand. One refusal, `RECIPIENT_NOT_FOUND`, covers "no such number", "another brand's
+   * marketer", "suspended" and "not a marketer at all", so the response cannot be used to tell
+   * those apart.
+   *
+   * `self` IS NOT A CONVENIENCE — it is load-bearing. `/me` masks the marketer's OWN number
+   * (docs/58) so the app holds `0798****061` and literally cannot compare a typed number with its
+   * own. Without this flag the client could not detect a send-to-self, so the server answers the
+   * question it is the only one able to answer.
+   *
+   * POST, for a read. The number is the thing being protected; a GET puts it in a URL, and URLs
+   * reach places a body does not — proxy and edge access logs, browser history, a Referer header.
+   * The app's own logger records `url.pathname` only (http.ts), but the hosting edge in front of it
+   * is not ours to promise about.
+   *
+   * It is a READ: it moves no money and creates nothing. The transfer itself is a separate route
+   * with its own guards — this one only answers "who would receive it?".
+   */
+  router.post(`${BASE}/marketers/recipients/lookup`, auth, marketer, recipientLookupLimit, async (ctx: Ctx) => {
+    const me = marketerCtx.get(ctx)!;
+    // Normalised to the house-canonical local form, so 07.., 7.., 254.. and +254.. (with spaces or
+    // dashes) are all the same person — the app sends the number exactly as it was typed.
+    // `normalizeMsisdn` throws with the input echoed in the message; it is caught here so that
+    // string can never reach a log or a response body.
+    let phone: string;
+    try {
+      phone = normalizeMsisdn(reqStr(bodyObj(ctx), "phone"));
+    } catch {
+      throw new ApiError("VALIDATION", "enter a valid phone number", 400);
+    }
+    const target = await deps.marketers.profileByPhone(phone, me.site_id ?? DEFAULT_SITE_ID);
+    // A suspended or closed marketer is not a destination: their wallet must not grow while they are
+    // off. Collapsed into the same refusal as "no such number" on purpose (see above).
+    if (!target || target.status !== "active") {
+      throw new ApiError("RECIPIENT_NOT_FOUND", "no active marketer on this number", 404);
+    }
+    // The stored name, as stored. The app upper-cases it for the screen; the API does not, because
+    // the same value is what a receipt and a confirmation will have to render.
+    return { name: target.name, self: target.id === me.id };
   });
 
   // Change own PIN (proves possession of the current PIN).
