@@ -14,7 +14,7 @@ import {
 } from "@invest254/engine";
 import { createApp, type ApiDeps, type WalletBalance, type Brand } from "./app.js";
 import { createLogger } from "@invest254/shared/logger";
-import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult, MarketerActor } from "./app.marketers.js";
+import type { MarketerRepo, TransferResult, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult, MarketerActor } from "./app.marketers.js";
 import type { ReferralRepo, CommissionPayoutRow, AdminCommissionPayoutRow } from "./app.referral.js";
 import type { SupportDeps, SupportStore, SupportConversation, SupportMessageRow } from "./app.support.js";
 import type { PlatformOnboardDeps, OnboardInput, OnboardResult, RegistrarConfigDeps } from "./app.platform.js";
@@ -171,6 +171,74 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       if (siteId) { const id = byPhone.get(pkey(phone, siteId)); const m = id ? byId.get(id) : undefined; return m ? profileOf(m) : null; }
       const m = [...byId.values()].find((r) => sig9(r.phone) === sig9(phone) && sig9(phone).length === 9);
       return m ? profileOf(m) : null;
+    },
+    /**
+     * Mirrors fn_marketer_transfer (0203) closely enough that a route test proves the ROUTE, not a
+     * convenient fiction: same refusal order, same opaque RECIPIENT_NOT_FOUND for "another brand /
+     * suspended / absent", same cash-only rule (Fuliza is never consulted), same `<ref>:out` /
+     * `<ref>:in` idempotency, same rolling-24h cap. What it cannot mirror is atomicity under
+     * concurrency — that is proven against real Postgres in
+     * packages/db/_testkit/e2e_marketer_transfer.py, which is where it belongs.
+     */
+    async transfer(fromId: string, toId: string, amountCents: number, ref: string | null, meta: unknown, dailyCapCents: number): Promise<TransferResult> {
+      if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("AMOUNT_MUST_BE_POSITIVE");
+      if (amountCents < 100) throw new Error("AMOUNT_BELOW_MINIMUM");
+      if (fromId === toId) throw new Error("TRANSFER_TO_SELF");
+
+      const refOut = ref ? `${ref}:out` : null;
+      const refIn = ref ? `${ref}:in` : null;
+      if (refOut) {
+        for (const [mid, rows] of ledgers) {
+          const hit = rows.find((r) => r.ref === refOut);
+          if (hit) {
+            return {
+              idempotent: true,
+              from_balance_cents: hit.balance_after_cents,
+              to_balance_cents: byId.get(toId)?.balance ?? 0,
+              out_ledger_id: hit.id,
+              in_ledger_id: [...ledgers.values()].flat().find((r) => r.ref === refIn)?.id ?? 0,
+              recipient_name: byId.get(toId)?.name ?? "",
+              sent_cents: -hit.amount_cents,
+            };
+            void mid;
+          }
+        }
+      }
+
+      const from = byId.get(fromId);
+      if (!from) throw new Error("MARKETER_NOT_FOUND");
+      if (from.status !== "active") throw new Error(`MARKETER_NOT_ACTIVE:${from.status}`);
+      const to = byId.get(toId);
+      // ONE refusal for absent / other-brand / suspended — see the RPC header.
+      if (!to || to.site_id !== from.site_id || to.status !== "active") throw new Error("RECIPIENT_NOT_FOUND");
+
+      if (dailyCapCents !== null && dailyCapCents >= 0) {
+        const since = Date.now() - 24 * 60 * 60 * 1000;
+        const sent = (ledgers.get(fromId) ?? [])
+          .filter((r) => r.entry_type === "transfer_out" && Date.parse(r.created_at) > since)
+          .reduce((acc, r) => acc - r.amount_cents, 0);
+        if (sent + amountCents > dailyCapCents) throw new Error(`TRANSFER_DAILY_CAP: sent ${sent}, cap ${dailyCapCents}`);
+      }
+
+      // CASH ONLY — `from.fuliza` is deliberately not consulted (0203 header).
+      if (from.balance < amountCents) throw new Error(`INSUFFICIENT_FUNDS: have ${from.balance}, need ${amountCents}`);
+
+      from.balance -= amountCents; from.updated_at = now();
+      to.balance += amountCents;   to.updated_at = now();
+      const baseMeta = (meta && typeof meta === "object" ? meta : {}) as Record<string, unknown>;
+      const outId = push(fromId, "transfer_out", -amountCents, from.balance, refOut,
+        { ...baseMeta, source: "marketer_transfer", name: to.name, counterparty_marketer_id: toId });
+      const inId = push(toId, "transfer_in", amountCents, to.balance, refIn,
+        { ...baseMeta, source: "marketer_transfer", name: from.name, counterparty_marketer_id: fromId });
+      return {
+        idempotent: false,
+        from_balance_cents: from.balance,
+        to_balance_cents: to.balance,
+        out_ledger_id: outId,
+        in_ledger_id: inId,
+        recipient_name: to.name,
+        sent_cents: amountCents,
+      };
     },
     async credit(id: string, amountCents: number, ref: string | null, meta: unknown, actor?: MarketerActor): Promise<number> {
       fence("credit", byId.get(id)?.site_id, actor);

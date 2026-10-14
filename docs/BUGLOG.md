@@ -5,7 +5,67 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
-## #140 — A marketer who ran out of funny money had to wait for an admin — FIXED (screen 1 of 2)
+## #142 — The PIN lock screen could NEVER succeed; every marketer was stranded on it — FIXED
+- **What:** found while wiring the PIN step of #140. The marketer app shows a PIN lock screen on
+  every launch and every return from the background (`AppState.authenticated` is cleared when the
+  app is backgrounded). That screen could not authenticate anybody.
+- **Evidence (route-level probe against the real API code):**
+  ```
+  login with the REAL number      -> OK
+  phone the app then persists     -> "0798****099"
+  login with the PERSISTED number -> HTTP 401 {"code":"INVALID_CREDENTIALS"}
+  ```
+  and on a live Postgres: `fn_phone_sig9('0798****061')` is `'0798061'`, **length 7**, while every
+  marketer lookup requires `length(fn_phone_sig9($1)) = 9`.
+- **Root cause:** docs/58 (Issue 2) masked the phone on `/marketers/me` and BOTH login responses, on
+  the stated reasoning that the marketer app "never uses the number functionally". **It does.** The
+  app persists the profile it is given (`MarketerSession.persistProfile` -> `savedPhone`;
+  `AppState.applyMarketer` -> `AppState.phone`), and `PinLoginScreen` defaults its `phone` argument
+  to `AppState.phone` and posts it to `/marketers/auth/login`. After the mask shipped, that is a
+  masked string on every attempt, so the PIN login was refused every time.
+- **Impact:** severe and live. A marketer could sign in with phone + password, but the moment the
+  app was backgrounded or relaunched they hit a PIN screen that always said the PIN was wrong. The
+  only way through was logout then retyping the password. It also blocked #140, since a money
+  transfer should be authorised by a PIN that works.
+- **Fix (mpesa_2):** the app keeps the number the marketer typed at sign-in — their OWN, which
+  docs/58 was never about — in `MarketerSession.savedLoginPhone`, persisted beside the token and
+  written on both successful sign-in paths. `PinLoginScreen` and the new `SendPinScreen`
+  authenticate with that; `AppState.phone` stays masked and is used only for display.
+  **docs/58 is untouched: the server still never sends this app a full number.**
+- **Upgrade path:** an install from before this fix holds a token and only the masked phone, and the
+  real number cannot be recovered from it. `MarketerSession.canPinLogin` is false for those, and
+  `AppNav` routes them to credential sign-in rather than to a PIN screen that cannot succeed — which
+  repairs the session in one pass.
+- **Note on docs/58:** its own safety argument — that a masked value provably fails
+  `normalizeMsisdn`, so it can never be mistaken for a dialable number — is exactly why it also
+  failed every login. The property held; the conclusion drawn from it did not.
+
+## #141 — A marketer wallet stops matching its own ledger once Fuliza pays part of a withdrawal — OPEN (pre-existing)
+- **What:** observed while proving the conservation invariant for #140's transfer RPC against real
+  Postgres. For every wallet, `balance_cents` equals the sum of its own `marketer_ledger` rows —
+  except any wallet that has made a Fuliza-funded withdrawal.
+- **Evidence:** `packages/db/_testkit/e2e_marketer_transfer.py`. A marketer with balance KES 10 and
+  a KES 300 Fuliza grant withdraws KES 50: `balance_cents` goes to 0, `available_fuliza_cents` to
+  26,000 cents, and the ledger records the FULL `-5000`. Ledger sum `-4000`, wallet `0`.
+- **Root cause:** `fn_marketer_withdraw` (0033) writes one ledger row for the whole amount but
+  splits the debit across two columns, so the ledger stops being a complete record of the wallet the
+  moment the overdraft is used. `meta.fuliza_used_cents` records the split, so the information is
+  not lost — but no reader reconstructs the balance from it.
+- **Impact:** any report or reconciliation that derives a marketer balance by summing the ledger is
+  wrong for those wallets. Nothing in the product does that today, which is why it has gone
+  unnoticed.
+- **Why it matters for #140:** it is the reason a transfer must not be able to spend Fuliza. The
+  same split on a transfer would open the hole on a path where the money is still inside the system,
+  so the two wallets would no longer sum to a constant. The transfer RPC is cash-only (0203), and
+  the e2e asserts the drift is confined to Fuliza withdrawals and never appears on a wallet that
+  transferred.
+- **Not fixed:** making the ledger whole means either a second row for the Fuliza portion or a
+  `fuliza_after_cents` column, plus a backfill. That is its own change with its own migration, and
+  it touches the withdrawal path that pays marketers.
+
+---
+
+## #140 — A marketer who ran out of funny money had to wait for an admin — FIXED (both screens)
 - **What:** owner report. The marketer till app runs on simulated money (docs/27). When a marketer
   ran out, the only ways to get more were an admin or platform admin crediting them
   (`POST /admin/marketers/:id/credit`) or the self top-up to a fixed cap
@@ -37,10 +97,27 @@ entry: what, evidence, root cause, impact, and resolution.
   NAT, so an IP budget is shared by thousands of unrelated handsets — it throttles honest users and
   barely inconveniences one account walking `07xx`. A per-marketer budget binds the attacker, who
   must BE an authenticated active marketer of the brand being swept.
-- **NOT DONE — this is screen 1 of 2.** The Confirm step and the transfer itself are not built, so
-  **nothing here debits anybody yet**. What the transfer will need is listed in docs/63 §6: one RPC
-  that debits and credits in a single transaction behind the 0199 brand fence, idempotency on a
-  client ref, a ledger row on both sides, the sender's PIN, and a per-marketer daily cap.
+- **SCREEN 2 (the transfer itself) — DONE, migration 0203.** `fn_marketer_transfer` does the debit,
+  the credit and both ledger rows in ONE transaction under row locks, with the two wallets locked in
+  a FIXED order (by marketer id) so two marketers sending to each other cannot deadlock. Idempotent
+  on a REQUIRED `ref` (stored as `<ref>:out` / `<ref>:in`, since `marketer_ledger.ref` is UNIQUE).
+  Refuses self-send, overdraw, dust and a negative amount, and — with ONE opaque
+  `RECIPIENT_NOT_FOUND` — an absent, other-brand or suspended recipient. Enforces a rolling-24h
+  per-sender cap. `POST /marketers/me/transfer` takes the sender from the TOKEN, never the body.
+- **Fuliza cannot fund a transfer**, although it funds a withdrawal. The overdraft is operator-
+  granted and repaid by nobody, so spending it into another live wallet would mint funny money
+  nobody granted (see #141 and docs/63 §7). The Send Money screen counts cash only for the same
+  reason and says so.
+- **Proven against real PostgreSQL 16 with all 203 migrations applied** — 12 parallel sends from a
+  wallet holding 5 sends' worth succeed exactly 5 times and never overdraw; 8 simultaneous requests
+  on one ref move money exactly once; 20 opposing transfers between the same pair never deadlock and
+  conserve the pair's total.
+- **Tests (screen 2):**
+  - `packages/db/_testkit/e2e_marketer_transfer.py` — 40 assertions against real Postgres; the
+    concurrency, atomicity and deadlock properties are not checkable any other way.
+  - `app.marketers.transfer.test.ts` — 13 route tests, including a forged
+    `from`/`fromMarketerId`/`marketerId` in the body leaving the named victim's wallet untouched,
+    and both wallets' statements naming each other with no number leaked into either feed.
 - **Tests:**
   - `app.marketers.recipientlookup.test.ts` — 9 route tests: the name resolves from the DB; every
     typed format (07../7../254../+254../spaced/dashed) folds to the same person; the body carries

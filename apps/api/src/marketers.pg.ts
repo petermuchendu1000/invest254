@@ -1,4 +1,4 @@
-import type { MarketerRepo, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
+import type { MarketerRepo, TransferResult, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
 
 /** Minimal query surface (node-postgres Pool/Client satisfy this). */
 export type Query = (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -81,6 +81,23 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
     async topupDemo(id, capCents): Promise<number> {
       const { rows } = await query("SELECT public.fn_marketer_topup_demo($1, $2) AS balance", [id, capCents]);
       return num(rows[0].balance);
+    },
+    async transfer(fromId, toId, amountCents, ref, meta, dailyCapCents): Promise<TransferResult> {
+      // ONE statement on purpose. The debit, the credit and both ledger rows live inside the RPC,
+      // so there is no window in which this process could die having moved half a transfer.
+      const { rows } = await query(
+        "SELECT public.fn_marketer_transfer($1, $2, $3, $4, $5::jsonb, $6) AS r",
+        [fromId, toId, amountCents, ref, JSON.stringify(meta ?? {}), dailyCapCents]);
+      const r = rows[0].r as Record<string, unknown>;
+      return {
+        idempotent: r.idempotent === true,
+        from_balance_cents: num(r.from_balance_cents),
+        to_balance_cents: num(r.to_balance_cents),
+        out_ledger_id: num(r.out_ledger_id),
+        in_ledger_id: num(r.in_ledger_id),
+        recipient_name: String(r.recipient_name ?? ""),
+        sent_cents: num(r.sent_cents),
+      };
     },
     async credit(id, amountCents, ref, meta, actor): Promise<number> {
       // 0199/A1: $5/$6 = the admin actor for the DB brand fence; NULL (internal/system path) => no-op.

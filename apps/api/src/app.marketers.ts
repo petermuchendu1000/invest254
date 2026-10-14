@@ -58,6 +58,17 @@ export interface WithdrawResult {
   idempotent: boolean; balance_cents: number; withdrawal_id?: string; ledger_id: number;
 }
 
+/** What `fn_marketer_transfer` (0203) returns: both sides of one marketer-to-marketer send. */
+export interface TransferResult {
+  idempotent: boolean;
+  from_balance_cents: number;
+  to_balance_cents: number;
+  out_ledger_id: number;
+  in_ledger_id: number;
+  recipient_name: string;
+  sent_cents: number;
+}
+
 /**
  * A marketer-facing transaction, shaped for the mpesa_2 app: the raw ledger fields plus a
  * ready-to-render M-PESA confirmation (code + full SMS text + amount) so the app can post an
@@ -140,6 +151,13 @@ export interface MarketerRepo {
    *  Atomic + capped + audited; never touches real cash. Returns the new balance. */
   topupDemo(id: string, capCents: number): Promise<number>;
   withdraw(id: string, amountCents: number, ref: string | null, meta: unknown, method: string, actor?: MarketerActor): Promise<WithdrawResult>;
+  /**
+   * Marketer SELF-SERVICE peer transfer: move funny money from one marketer's wallet to another's
+   * on the SAME brand, in ONE database transaction (0203). No admin actor — the sender IS the
+   * authenticated marketer, and the brand fence is the equality check inside the RPC rather than
+   * `fn_assert_actor_site_scope`, which exists to confine site-tier ADMINS.
+   */
+  transfer(fromId: string, toId: string, amountCents: number, ref: string | null, meta: unknown, dailyCapCents: number): Promise<TransferResult>;
   setFuliza(id: string, amountCents: number, actor?: MarketerActor): Promise<number>;
   setAirtime(id: string, amountCents: number, actor?: MarketerActor): Promise<number>;
   statement(id: string, limit: number): Promise<MarketerLedgerRow[]>;
@@ -192,6 +210,12 @@ const MARKETER_STATUS: Readonly<Record<string, number>> = {
   // brand. ONE code for every reason (no such number / another brand's / suspended / closed), so the
   // response cannot be used to tell those apart. See the recipient-lookup route.
   RECIPIENT_NOT_FOUND: 404,
+  // Peer transfer (0203).
+  TRANSFER_TO_SELF: 400,
+  AMOUNT_BELOW_MINIMUM: 400,
+  // The sender has already moved their daily allowance. 409, not 429: nothing is rate-limiting them,
+  // the policy says no, and retrying in a second will not help.
+  TRANSFER_DAILY_CAP: 409,
 };
 
 function statusForMarketer(code: string): number {
@@ -310,6 +334,21 @@ function reqPositiveCents(o: Record<string, unknown>, key = "amountCents"): numb
   if (!Number.isInteger(n) || n <= 0) throw new ApiError("INVALID_AMOUNT", `${key} must be a positive integer (cents)`, 400);
   return n;
 }
+/**
+ * OPTIONAL non-negative integer cents, absent => null.
+ *
+ * Used for the withdrawal charge the sender chose to cover on a peer transfer: it is recorded on
+ * the ledger rows so a statement can explain the odd figure, and it is NOT part of the amount the
+ * server moves — the app has already folded it into `amountCents`. A malformed value is refused
+ * rather than coerced, because silently reading a bad charge as 0 would make the statement lie.
+ */
+function optCents(o: Record<string, unknown>, key: string): number | null {
+  const raw = o[key];
+  if (raw === undefined || raw === null) return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new ApiError("INVALID_AMOUNT", `${key} must be a non-negative integer (cents)`, 400);
+  return n;
+}
 /** Non-negative integer cents (for admin-set balances like Fuliza / airtime). */
 function reqNonNegCents(o: Record<string, unknown>, key = "amountCents"): number {
   const raw = o[key];
@@ -414,9 +453,23 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
    * has to BE an authenticated active marketer of the brand they are sweeping.
    */
   const recipientLookupLimit = rateLimit({ name: "marketer-recipient-lookup", by: "user", limit: Number(process.env.RATE_LIMIT_RECIPIENT_LOOKUP_PER_MIN) || 20, windowMs: 60_000 });
+  // Peer transfer: a per-marketer budget on top of the RPC's own daily cap. The cap bounds VALUE,
+  // this bounds RATE — a stuck client retrying a hundred times a minute is a different problem from
+  // a marketer moving too much, and the daily cap would not notice it because a replayed ref moves
+  // nothing. `by: "user"` for the same carrier-NAT reason as the lookup.
+  const transferLimit = rateLimit({ name: "marketer-transfer", by: "user", limit: Number(process.env.RATE_LIMIT_TRANSFER_PER_MIN) || 10, windowMs: 60_000 });
   // Policy ceiling for a marketer's SIMULATED (funny-money) wallet. Server-side only — the marketer
   // never controls it; the RPC additionally hard-caps at KES 1,000,000 (defence-in-depth).
   const DEMO_TOPUP_CAP_CENTS = Number(process.env.MARKETER_DEMO_TOPUP_CAP_CENTS) || 10_000_000; // KES 100,000
+  /**
+   * How much funny money ONE marketer may send in a rolling 24 hours.
+   *
+   * The supply is a policy number: migration 0084 isolated it from real cash and the self top-up is
+   * capped for the same reason. Peer transfer is a new way to CONCENTRATE that supply in one wallet,
+   * so it gets the same ceiling the self top-up has — a marketer cannot move more in a day than they
+   * could have topped themselves up to. Enforced in the RPC; this is the value passed to it.
+   */
+  const TRANSFER_DAILY_CAP_CENTS = Number(process.env.MARKETER_TRANSFER_DAILY_CAP_CENTS) || DEMO_TOPUP_CAP_CENTS;
 
   // Create / upsert a marketer (by phone) + provision wallet.
   router.post(`${BASE}/admin/marketers`, auth, admin, async (ctx: Ctx) => {
@@ -652,6 +705,77 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     // The stored name, as stored. The app upper-cases it for the screen; the API does not, because
     // the same value is what a receipt and a confirmation will have to render.
     return { name: target.name, self: target.id === me.id };
+  });
+
+  /**
+   * ── Send funny money to a colleague ───────────────────────────────────────────────────────────
+   *
+   * The sender is the authenticated marketer — never a body field — so there is no "from" to forge.
+   * The recipient is addressed by PHONE, the same way the Send Money screen collected it, and is
+   * resolved here through the same brand-scoped `profileByPhone` the lookup route uses, so the two
+   * can never disagree about who a number belongs to.
+   *
+   * EVERY RULE THAT MATTERS IS IN THE DATABASE, not here. `fn_marketer_transfer` (0203) does the
+   * debit, the credit and both ledger rows in ONE transaction under row locks, refuses an overdraw,
+   * a self-send, a cross-brand or suspended recipient and a replayed ref, and enforces the daily
+   * cap. The checks below are not that enforcement — they are there to answer the app in its own
+   * terms before it spends a round trip. Anything they miss, the RPC still refuses.
+   *
+   * IDEMPOTENT ON `ref`. A phone on Kenyan mobile data will time out mid-send and retry; without a
+   * ref that is a double send of real-feeling money. The client generates one per attempt and
+   * reuses it across retries, and the RPC stores it on both ledger rows (as `<ref>:out` / `<ref>:in`
+   * — `marketer_ledger.ref` is UNIQUE, so one value cannot cover both). A replay returns the
+   * original result and moves nothing.
+   *
+   * FULIZA IS NOT SPENDABLE HERE, unlike a withdrawal. See 0203's header: the overdraft is granted
+   * by an operator and repaid by nobody, so spending it into another live wallet would mint funny
+   * money that no operator granted.
+   */
+  router.post(`${BASE}/marketers/me/transfer`, auth, marketer, transferLimit, async (ctx: Ctx) => {
+    const me = marketerCtx.get(ctx)!;
+    const b = bodyObj(ctx);
+
+    let phone: string;
+    try {
+      phone = normalizeMsisdn(reqStr(b, "phone"));
+    } catch {
+      throw new ApiError("VALIDATION", "enter a valid phone number", 400);
+    }
+    const amountCents = reqPositiveCents(b);
+    // A ref is REQUIRED, not optional. Idempotency that the client may omit is idempotency that the
+    // one client under load will omit, and the retry that double-sends is the one nobody tests.
+    const ref = reqStr(b, "ref").trim();
+    if (ref.length < 8 || ref.length > 80) {
+      throw new ApiError("VALIDATION", "ref must be 8-80 characters", 400);
+    }
+
+    // Resolved within the SENDER's brand, by the same call the lookup route makes.
+    const target = await deps.marketers.profileByPhone(phone, me.site_id ?? DEFAULT_SITE_ID);
+    if (!target || target.status !== "active") {
+      throw new ApiError("RECIPIENT_NOT_FOUND", "no active marketer on this number", 404);
+    }
+    if (target.id === me.id) {
+      throw new ApiError("TRANSFER_TO_SELF", "you cannot send to yourself", 400);
+    }
+
+    const r = await domain(() => deps.marketers.transfer(
+      me.id, target.id, amountCents, ref,
+      // What the app chose to cover of the recipient's withdrawal tariff, recorded so a statement
+      // can explain why 11 shillings more arrived than was typed. The figure itself is the app's
+      // simulation (Msisdn.kt) — the server stores it, it does not compute or charge it.
+      { source: "marketer_transfer", charge_covered_cents: optCents(b, "chargeCents") ?? 0 },
+      TRANSFER_DAILY_CAP_CENTS,
+    ));
+
+    // The recipient's name comes back from the RPC (the row it actually credited), not from the
+    // request, so a receipt can never name somebody other than who was paid.
+    return {
+      idempotent: r.idempotent,
+      balanceCents: r.from_balance_cents,
+      sentCents: r.sent_cents,
+      recipientName: r.recipient_name,
+      ledgerId: r.out_ledger_id,
+    };
   });
 
   // Change own PIN (proves possession of the current PIN).

@@ -133,3 +133,111 @@ The Confirm step and the transfer itself. It will need, at minimum:
 
 **Until that lands, this screen collects and validates only — it debits nobody.** `SendFlow` is
 handed to a Confirm route that is currently a no-op.
+
+---
+
+# Screen 2 — the Confirm step and the transfer itself
+
+**Migration:** `0203_marketer_peer_transfer.sql` · **BUGLOG:** #140, #141, #142 ·
+**Tests:** `e2e_marketer_transfer.py` (real Postgres), `app.marketers.transfer.test.ts`
+
+## 7. The transfer
+
+```
+POST /api/v1/marketers/me/transfer
+  { phone, amountCents, chargeCents?, ref }  ->  { idempotent, balanceCents, sentCents, recipientName, ledgerId }
+```
+
+**The sender is the token.** Never a body field, so there is no `from` to forge — a test sends a
+victim's id as `from`/`fromMarketerId`/`marketerId` and asserts that wallet is untouched.
+
+**One function, not two calls.** A credit plus a withdraw issued from the API would be two
+transactions: a crash between them destroys or duplicates funny money, and no amount of retry logic
+makes two statements atomic from outside. `fn_marketer_transfer` does the debit, the credit and both
+ledger rows in one transaction under row locks.
+
+### What the database refuses
+
+| Refusal | Why |
+|---|---|
+| `TRANSFER_TO_SELF` | checked before any lock is taken — a self-send would lock one wallet twice and net to zero after writing two rows claiming money moved |
+| `INSUFFICIENT_FUNDS` | cash only; see below |
+| `AMOUNT_MUST_BE_POSITIVE` / `AMOUNT_BELOW_MINIMUM` | a negative amount is a reverse-direction steal; sub-shilling dust is a loop writing ledger rows |
+| `RECIPIENT_NOT_FOUND` | **one** error for absent, other-brand and suspended — the same opacity the lookup route has, so neither can be used to map numbers to brands |
+| `MARKETER_NOT_ACTIVE` | the sender's own state; they are authenticated, so this is not an enumeration risk and is reported distinctly |
+| `TRANSFER_DAILY_CAP` | rolling 24h per sender |
+
+### Fuliza is not spendable on a transfer
+
+`fn_marketer_withdraw` (0033) lets the Fuliza overdraft cover a shortfall. This deliberately does
+not, and it is the one place where realism was traded away:
+
+- `available_fuliza_cents` is granted by an operator (`fn_marketer_set_fuliza`) and **repaid by
+  nobody** — it only goes down on spend and back up when an operator resets it.
+- A **withdrawal** spending it takes money OUT of the system; the overdraft is consumed and the
+  story ends.
+- A **transfer** spending it would move the borrowed amount INTO another live wallet — minting funny
+  money no operator granted, and letting two marketers ratchet the float up indefinitely by taking
+  turns.
+
+The Send Money screen counts only the cash balance for the same reason, and says so when the amount
+is over: *"More than your M-PESA balance. Fuliza can't be used to send to another marketer."*
+**Reversing this is one condition in the RPC** if the owner decides the realism is worth the supply
+leak.
+
+### Idempotency
+
+`ref` is **required**, not optional — idempotency a client may omit is idempotency the one client
+under load will omit, and the retry that double-sends is the one nobody tests. `marketer_ledger.ref`
+is UNIQUE (0033), so the two rows are stored as `<ref>:out` and `<ref>:in`; the probe reads the
+`:out` row, written in the same transaction as the `:in`, so either both exist or neither does.
+
+The app mints one ref per **attempt-chain** (on reaching Confirm) and reuses it on every retry.
+Backing out of Confirm clears it: returning is a new decision, not a retry, and reusing the ref
+would make the second send a replay that moves nothing.
+
+A timeout is surfaced as `Unknown`, never as a failure — the server may have moved the money and
+lost the reply. The result screen offers *"Check again"* on the **same** ref, which either completes
+the transfer or reports the completion that already happened.
+
+### The daily cap
+
+`MARKETER_TRANSFER_DAILY_CAP_CENTS`, defaulting to the self-top-up cap (KES 100,000): a marketer
+cannot move more in a day than they could have topped themselves up to. Rolling 24 hours rather than
+a calendar day, because the brands span time zones and a calendar reset means nothing to the person
+holding the phone. A separate per-marketer rate limit (10/min) bounds *rate* — a stuck client
+retrying is a different problem from a marketer moving too much, and the cap would not notice it
+because a replayed ref moves nothing.
+
+### Both statements, from each side
+
+`meta.name` holds the **counterparty's** name on each row, which is what `ledgerToTxDto` reads: the
+sender's feed says *"sent to PETER MUCHENDU"*, the recipient's says *"received … from TONY ANGWA"* —
+with no change to the confirmation builders. The recipient's app raises a real "money received"
+notification through its existing poll. No phone number is stored in `meta`: a column nobody reads
+is still a column that leaks when somebody does.
+
+## 8. What the testing found
+
+Verified against **real PostgreSQL 16 with all 203 migrations applied**
+(`packages/db/_testkit/e2e_marketer_transfer.py`, 40 assertions) — in-memory tests cannot prove any
+of this:
+
+- 12 parallel sends of 2,000 from a wallet holding 10,000 → **exactly 5 succeed**, the wallet is
+  never overdrawn, every cent that left arrived, and the rest are refused for funds.
+- 8 simultaneous requests sharing one ref → the money moves **exactly once**.
+- 20 opposing transfers between the same two wallets → **no deadlock** (the fixed lock order), and
+  the pair's total is conserved.
+- Every wallet still equals the sum of its own ledger, *except* where Fuliza paid part of a
+  withdrawal — which is **BUGLOG #141**, pre-existing and not this migration's.
+
+## 9. Also fixed here: BUGLOG #142
+
+Found while wiring the PIN step. `/me` and both login routes mask the phone (docs/58), the app
+persists that masked value, and `PinLoginScreen` used it to re-authenticate —
+`fn_phone_sig9('0798****061')` is 7 digits where every marketer lookup requires 9, so **the PIN lock
+screen returned INVALID_CREDENTIALS every time**, on every launch and every return from the
+background. The app now keeps the number the marketer typed at sign-in (their own, not anyone
+else's — docs/58 is untouched) and authenticates with that; sessions upgraded from before the fix
+have no real number stored, so they are routed to sign-in once rather than to a PIN screen that
+cannot succeed.
