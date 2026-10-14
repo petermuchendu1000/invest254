@@ -5,6 +5,38 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #143 — Two SECURITY DEFINER functions are callable with the public anon key — OPEN (pre-existing)
+- **What:** found while confirming migration 0203's own grants. `packages/db/_testkit/e2e_function_grants.py`
+  — the repo's own guard for exactly this — **fails on current main**:
+  ```
+  [FAIL] no SECURITY DEFINER public function is EXECUTE-able by anon
+         2 exposed: fn_marketer_in_practice(uuid,uuid), trg_billing_platform_addon_charge()
+  [FAIL] ... by authenticated   (same two)
+  ```
+- **Root cause:** migration 0153 closed this hole wholesale, but a NEW function is created with
+  `EXECUTE` granted to `PUBLIC` by default, and neither migration that added these revoked it:
+  `fn_marketer_in_practice` (0176) and `trg_billing_platform_addon_charge` (0172), both after 0153.
+  **The guard is never run in CI** (`grep e2e_function_grants .github/workflows` → nothing), which is
+  why it went unnoticed; it needs a local Postgres, like the rest of `_testkit`.
+- **Impact, measured not assumed:**
+  - `fn_marketer_in_practice(p_user, p_site_id)` is `stable` and read-only, but SECURITY DEFINER so
+    it reads `wallets` past RLS. With the public anon key it answers "is this user id a marketer
+    account in practice mode?" for any uuid — an identity-disclosure oracle, bounded by having to
+    guess a uuid. It moves no money.
+  - `trg_billing_platform_addon_charge()` is a trigger function; called directly it has no `TG_OP`
+    and errors out. Exposure is the defect, not a usable path.
+  So: real, but neither is a money mutation. The money RPCs 0199 recreated were checked at the same
+  time and are SECURITY INVOKER, so RLS still stands behind them.
+- **Fix (not applied — separate issue, owner's call):** a migration that revokes `EXECUTE` on both
+  from `public`/`anon`/`authenticated`, exactly as 0203 does for `fn_marketer_transfer`, plus wiring
+  `e2e_function_grants.py` into a CI job with a local Postgres service so the next one is caught.
+  That second half is the part worth doing: without it this recurs on the next SECURITY DEFINER
+  function anybody adds.
+- **0203 is clean:** `fn_marketer_transfer` revokes EXECUTE from public/anon/authenticated and keeps
+  it for `service_role`; verified with `has_function_privilege` on a real database.
+
+---
+
 ## #142 — The PIN lock screen could NEVER succeed; every marketer was stranded on it — FIXED
 - **What:** found while wiring the PIN step of #140. The marketer app shows a PIN lock screen on
   every launch and every return from the background (`AppState.authenticated` is cleared when the
