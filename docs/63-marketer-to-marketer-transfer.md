@@ -4,8 +4,13 @@
 App: `petermuchendu1000/mpesa_2` · **BUGLOG:** #140 ·
 **Tests:** `app.marketers.recipientlookup.test.ts`, `MsisdnTest.kt`
 
-> **Status: SCREEN 1 OF 2.** This covers the Send Money screen and the recipient lookup it needs.
-> The Confirm step, and the transfer RPC that actually moves the money, are not built yet — see §6.
+> **Status: BOTH SCREENS BUILT.** §1–6 cover the Send Money screen and the recipient lookup it
+> needs; §7 onward cover the Confirm step and the transfer RPC that moves the money. §6 is kept as
+> written — it is the specification screen 2 was built against, not a list of open work.
+>
+> **What happens AFTER the money moves — the PIN screen, the confirmation and the printed receipt —
+> is docs/64,** together with the server change (migration 0205) that gives a transfer a
+> confirmation code and a commit time.
 
 ---
 
@@ -117,7 +122,7 @@ one refuses to look up numbers the server would have resolved.
 | **Letting the app compare numbers to block self-sends** | It cannot: `/me` is masked (docs/58). |
 | **GET for the lookup** | Puts the number in a URL. See §3. |
 
-## 6. Not built yet (screen 2)
+## 6. What screen 2 had to provide (the specification it was built against)
 
 The Confirm step and the transfer itself. It will need, at minimum:
 
@@ -131,8 +136,7 @@ The Confirm step and the transfer itself. It will need, at minimum:
 - a **per-marketer daily transfer cap**, because the funny-money supply is a policy number and
   peer-to-peer transfer is a new way to concentrate it.
 
-**Until that lands, this screen collects and validates only — it debits nobody.** `SendFlow` is
-handed to a Confirm route that is currently a no-op.
+All of it landed — see §7 onward, and docs/64 for the screens that follow the send.
 
 ---
 

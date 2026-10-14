@@ -67,6 +67,10 @@ export interface TransferResult {
   in_ledger_id: number;
   recipient_name: string;
   sent_cents: number;
+  /** Commit time of the out-row, ISO-8601 UTC (0205). The receipt's date and half of its code.
+   *  OPTIONAL because the API must keep working against a database that has 0203 but not yet 0205 —
+   *  migrate runs before deploy, but a rollback must not take the send path down with it. */
+  out_created_at?: string;
 }
 
 /**
@@ -106,7 +110,17 @@ export function ledgerToTxDto(r: MarketerLedgerRow, brandName?: string | null): 
     ? brand
     : (typeof meta.name === "string" && meta.name.trim() ? meta.name.trim() : "M-PESA");
   const party = rawParty.toUpperCase();
-  const code = mpesaCode(createdAtMs, r.id);
+  // ONE TRANSACTION, ONE CODE. A peer transfer (0203) is two ledger rows, so deriving the code from
+  // each row's own id gave the payer and the payee different confirmation codes for the same
+  // transfer — something no real M-PESA transaction does, and a direct contradiction the moment two
+  // marketers compare phones. 0205 stamps the credited row with `pair_ledger_id` = the debited
+  // row's id, so both sides render the sender's code. The timestamps already agree: both rows take
+  // created_at from the same transaction's now(). Rows written before 0205 have no pair_ledger_id
+  // and fall back to their own id, exactly as before — nothing already rendered changes.
+  const pairId = typeof meta.pair_ledger_id === "number" && Number.isSafeInteger(meta.pair_ledger_id)
+    ? meta.pair_ledger_id
+    : r.id;
+  const code = mpesaCode(createdAtMs, pairId);
   const amountCents = Math.abs(r.amount_cents);
   const message = direction === "in"
     ? mpesaReceivedMessage({ code, amountCents, party, balanceCents: r.balance_after_cents, atMs: createdAtMs })
@@ -767,6 +781,21 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
       TRANSFER_DAILY_CAP_CENTS,
     ));
 
+    // THE RECEIPT IS THE SERVER'S TO ISSUE, not the phone's.
+    //
+    // `createdAtMs` is the out-row's commit time (0205), never this process's clock and never the
+    // handset's: on an idempotent retry the phone is asking about a transfer that completed minutes
+    // ago, and "now" would print a time the money did not move. `code` is derived from that time
+    // and the out-ledger id with the SAME mpesaCode() that renders the transaction list, so the ID
+    // on the receipt is the one the sender will later find in their statement — and, since 0205
+    // pairs the rows, the one the recipient's own confirmation carries too.
+    //
+    // Both survive a retry because both inputs do: the RPC's replay branch returns the stored row's
+    // id and created_at. The fallback to Date.now() exists only for a database still on 0203; it is
+    // the one case where the receipt time is approximate, and it cannot happen after migrate runs.
+    const createdAtMs = r.out_created_at && Number.isFinite(Date.parse(r.out_created_at))
+      ? Date.parse(r.out_created_at)
+      : Date.now();
     // The recipient's name comes back from the RPC (the row it actually credited), not from the
     // request, so a receipt can never name somebody other than who was paid.
     return {
@@ -775,6 +804,8 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
       sentCents: r.sent_cents,
       recipientName: r.recipient_name,
       ledgerId: r.out_ledger_id,
+      code: mpesaCode(createdAtMs, r.out_ledger_id),
+      createdAtMs,
     };
   });
 

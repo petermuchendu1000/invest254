@@ -97,6 +97,9 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
         in_ledger_id: num(r.in_ledger_id),
         recipient_name: String(r.recipient_name ?? ""),
         sent_cents: num(r.sent_cents),
+        // 0205. Absent on a database still at 0203 — the route falls back to its own clock rather
+        // than failing the send, which is what lets migrate and deploy happen in either order.
+        ...(typeof r.out_created_at === "string" ? { out_created_at: r.out_created_at } : {}),
       };
     },
     async credit(id, amountCents, ref, meta, actor): Promise<number> {

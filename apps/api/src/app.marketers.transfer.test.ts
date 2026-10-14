@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { startTestApi, type TestApi } from "./testutil.js";
+import { mpesaCode } from "./mpesa.js";
 
 /**
  * POST /marketers/me/transfer — one marketer sending funny money to another (docs/63, BUGLOG #140).
@@ -251,5 +252,104 @@ test("both wallets' statements tell the same story, from each side", async () =>
     const raw = JSON.stringify({ mine, theirs });
     assert.ok(!raw.includes("0798661071"), "the recipient's number leaked into a feed");
     assert.ok(!raw.includes("0722300015"), "the sender's number leaked into a feed");
+  } finally { await api.close(); }
+});
+
+// ── The receipt (0205) ────────────────────────────────────────────────────────────────────────────
+//
+// The app prints a confirmation screen and a downloadable M-PESA receipt from this response. Both
+// carry an ID and a timestamp, and the only acceptable source for either is the server: a handset
+// clock can be wrong or set deliberately, and a client-side code generator would mint a second name
+// for a transfer that already has one. These prove the two fields are the database's answer and
+// that they survive the retry that is the whole reason idempotency exists.
+
+test("the response carries a receipt: a server timestamp and a code derived from it", async () => {
+  const api = await startTestApi();
+  try {
+    const me = await marketer(api, "Tony Angwa", "0722300016", 50_000);
+    await marketer(api, "Peter Muchendu", "0798661072", 0);
+    const before = Date.now();
+    const r = await json(await req(api, "POST", XFER, { token: mtok(me), body: { phone: "0798661072", amountCents: 10_000, ref: newRef() } }));
+    const after = Date.now();
+
+    assert.equal(typeof r.createdAtMs, "number");
+    assert.ok(r.createdAtMs >= before - 1000 && r.createdAtMs <= after + 1000,
+      `createdAtMs ${r.createdAtMs} is not the commit time of this transfer`);
+    // Safaricom's shape: 10 characters, uppercase letters and digits only.
+    assert.match(r.code, /^[A-Z0-9]{10}$/);
+    assert.equal(r.code, mpesaCode(r.createdAtMs, r.ledgerId),
+      "the code must be a function of the commit time and the out-ledger id, not a random string");
+  } finally { await api.close(); }
+});
+
+test("a replay reprints the ORIGINAL receipt — same code, same time, not today's", async () => {
+  const api = await startTestApi();
+  try {
+    const me = await marketer(api, "Tony Angwa", "0722300017", 50_000);
+    await marketer(api, "Peter Muchendu", "0798661073", 0);
+    const ref = newRef();
+    const a = await json(await req(api, "POST", XFER, { token: mtok(me), body: { phone: "0798661073", amountCents: 10_000, ref } }));
+    // Long enough that a fresh clock reading would differ: this is the assertion's whole point.
+    await new Promise((res) => setTimeout(res, 30));
+    const b = await json(await req(api, "POST", XFER, { token: mtok(me), body: { phone: "0798661073", amountCents: 10_000, ref } }));
+
+    assert.equal(b.idempotent, true);
+    assert.equal(b.createdAtMs, a.createdAtMs, "the replay printed a time the money did not move");
+    assert.equal(b.code, a.code, "one transfer, one confirmation code");
+    assert.equal(b.ledgerId, a.ledgerId);
+  } finally { await api.close(); }
+});
+
+test("the code on the receipt is the code in the sender's own statement", async () => {
+  const api = await startTestApi();
+  try {
+    const me = await marketer(api, "Tony Angwa", "0722300018", 50_000);
+    await marketer(api, "Peter Muchendu", "0798661074", 0);
+    const r = await json(await req(api, "POST", XFER, { token: mtok(me), body: { phone: "0798661074", amountCents: 10_000, ref: newRef() } }));
+
+    const mine = (await json(await req(api, "GET", "/api/v1/marketers/me/transactions", { token: mtok(me) }))).items;
+    const out = mine.find((t: any) => t.entryType === "transfer_out");
+    assert.ok(out);
+    // A receipt whose ID cannot be found in the statement is a receipt nobody can act on.
+    assert.equal(out.mpesa.code, r.code);
+    assert.equal(out.id, r.ledgerId);
+  } finally { await api.close(); }
+});
+
+test("both sides of one transfer carry ONE confirmation code", async () => {
+  const api = await startTestApi();
+  try {
+    const me = await marketer(api, "Tony Angwa", "0722300019", 50_000);
+    const them = await marketer(api, "Peter Muchendu", "0798661075", 0);
+    const r = await json(await req(api, "POST", XFER, { token: mtok(me), body: { phone: "0798661075", amountCents: 10_000, ref: newRef() } }));
+
+    const mine = (await json(await req(api, "GET", "/api/v1/marketers/me/transactions", { token: mtok(me) }))).items;
+    const theirs = (await json(await req(api, "GET", "/api/v1/marketers/me/transactions", { token: mtok(them) }))).items;
+    const out = mine.find((t: any) => t.entryType === "transfer_out");
+    const inn = theirs.find((t: any) => t.entryType === "transfer_in");
+    assert.ok(out && inn);
+
+    // Real M-PESA gives the payer and the payee the same code. Before 0205 each side derived one
+    // from its own ledger id, so two marketers comparing phones saw two codes for one transfer.
+    assert.equal(inn.mpesa.code, out.mpesa.code, "the two halves of one transfer disagree on its code");
+    assert.equal(inn.mpesa.code, r.code);
+    // Both messages must quote the code they are stamped with, or the SMS and the receipt diverge.
+    assert.ok(out.mpesa.message.startsWith(r.code));
+    assert.ok(inn.mpesa.message.startsWith(r.code));
+    // Identical timestamps: in Postgres both rows take created_at from the same transaction's now().
+    assert.equal(inn.createdAtMs, out.createdAtMs);
+  } finally { await api.close(); }
+});
+
+test("a credit that is not a transfer still takes its code from its own row", async () => {
+  const api = await startTestApi();
+  try {
+    // The pairing is read from meta.pair_ledger_id. Rows that have none — every credit and
+    // withdrawal, and every transfer written before 0205 — must keep their existing code.
+    const me = await marketer(api, "Tony Angwa", "0722300020", 50_000);
+    const mine = (await json(await req(api, "GET", "/api/v1/marketers/me/transactions", { token: mtok(me) }))).items;
+    const credit = mine.find((t: any) => t.entryType === "credit");
+    assert.ok(credit);
+    assert.equal(credit.mpesa.code, mpesaCode(credit.createdAtMs, credit.id));
   } finally { await api.close(); }
 });

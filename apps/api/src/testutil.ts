@@ -136,8 +136,12 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
   const firstName = (n: string) => parts(n)[0] ?? "";
   const initials = (n: string) => { const p = parts(n); return p.length === 0 ? "" : p.length === 1 ? p[0]!.slice(0, 2).toUpperCase() : (p[0]![0]! + p[p.length - 1]![0]!).toUpperCase(); };
   const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES", site_id: m.site_id, brand_name: brandBySite.get(m.site_id) ?? null, sessions_valid_after: forceLogoutAt.has(m.id) ? new Date(forceLogoutAt.get(m.id)!).toISOString() : null });
-  const push = (id: string, entry_type: string, amount_cents: number, balance_after_cents: number, ref: string | null, meta: unknown): number => {
-    const row: MarketerLedgerRow = { id: ++lseq, entry_type, amount_cents, balance_after_cents, ref, meta: meta ?? {}, created_at: now() };
+  // `createdAt` is passed only by the transfer mirror, where both halves must carry the SAME
+  // timestamp: in Postgres they do, because created_at defaults to now() and now() is transaction
+  // start. Letting each row take its own clock reading here would quietly make the in-memory
+  // harness disagree with the database about whether the two sides of one transfer are simultaneous.
+  const push = (id: string, entry_type: string, amount_cents: number, balance_after_cents: number, ref: string | null, meta: unknown, createdAt?: string): number => {
+    const row: MarketerLedgerRow = { id: ++lseq, entry_type, amount_cents, balance_after_cents, ref, meta: meta ?? {}, created_at: createdAt ?? now() };
     (ledgers.get(id) ?? []).push(row);
     return row.id;
   };
@@ -199,6 +203,9 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
               in_ledger_id: [...ledgers.values()].flat().find((r) => r.ref === refIn)?.id ?? 0,
               recipient_name: byId.get(toId)?.name ?? "",
               sent_cents: -hit.amount_cents,
+              // The STORED row's time (0205) — a replay reprints the original receipt. Returning a
+              // fresh clock reading here is the exact bug the field exists to prevent.
+              out_created_at: hit.created_at,
             };
             void mid;
           }
@@ -226,10 +233,14 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       from.balance -= amountCents; from.updated_at = now();
       to.balance += amountCents;   to.updated_at = now();
       const baseMeta = (meta && typeof meta === "object" ? meta : {}) as Record<string, unknown>;
+      // One reading for both rows — see the note on `push`.
+      const at = now();
       const outId = push(fromId, "transfer_out", -amountCents, from.balance, refOut,
-        { ...baseMeta, source: "marketer_transfer", name: to.name, counterparty_marketer_id: toId });
+        { ...baseMeta, source: "marketer_transfer", name: to.name, counterparty_marketer_id: toId }, at);
+      // `pair_ledger_id` on the IN row only (0205): it is what makes the recipient's confirmation
+      // carry the sender's code instead of a second one for the same transfer.
       const inId = push(toId, "transfer_in", amountCents, to.balance, refIn,
-        { ...baseMeta, source: "marketer_transfer", name: from.name, counterparty_marketer_id: fromId });
+        { ...baseMeta, source: "marketer_transfer", name: from.name, counterparty_marketer_id: fromId, pair_ledger_id: outId }, at);
       return {
         idempotent: false,
         from_balance_cents: from.balance,
@@ -238,6 +249,7 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
         in_ledger_id: inId,
         recipient_name: to.name,
         sent_cents: amountCents,
+        out_created_at: at,
       };
     },
     async credit(id: string, amountCents: number, ref: string | null, meta: unknown, actor?: MarketerActor): Promise<number> {

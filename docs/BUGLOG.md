@@ -5,6 +5,53 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #146 — A docs/58 phone-leak guard failed 17.9% of runs for a reason unrelated to phone numbers — FIXED
+- **What (pre-existing, mine to find):** `packages/db/_testkit/e2e_marketer_transfer.py` asserts that
+  neither half of a transfer stores a phone number in `meta` (docs/58). Across six consecutive runs
+  of an otherwise unchanged script it failed once:
+  ```
+  [FAIL] ledger: no phone number is stored in meta (docs/58)
+  47/48 passed
+  ```
+- **Root cause:** the check was a SUBSTRING test over the whole blob —
+  `meta ? 'phone' or meta::text like '%07%'` — and `meta` contains `counterparty_marketer_id`, a
+  random UUID. **Measured over 200,000 `uuid4`s: 9.389% of UUID texts contain the digits "07"**, so
+  with two rows examined the assertion false-failed **17.9%** of runs.
+- **Why it matters more than a flake:** this is one of the guards whose entire value is being
+  believed. A security check that cries wolf one run in six trains the reader to re-run it until it
+  is quiet — the same failure mode as #144, and the state in which a genuine leak passes unnoticed.
+- **Fix:** asked per KEY/VALUE with `jsonb_each_text` instead: a phone-ish key
+  (`phone|msisdn|mobile|number`) or a value matching `(\+?254|\m0)[17][0-9]{8}`. Anchored on a WORD
+  boundary rather than a string start, so a number quoted mid-sentence is still caught while a
+  UUID's interior digits are not.
+- **Verification:** six probe rows run against real Postgres — `{"phone":"0798661061"}`,
+  `{"note":"paid 0798661061 today"}`, `{"note":"paid +254798661061 today"}`,
+  `{"note":"sent to 254712345678"}` and `{"recipient_number":"x"}` all flag; the UUID meta and
+  `{"pair_ledger_id":"1074"}` do not. **Nine consecutive clean runs** of the full script afterwards
+  (48/48 each). Residual false-positive rate ~1 in 5,000 (a 12-hex UUID segment would have to open
+  `0`, then `1` or `7`, then eight more digits).
+
+## #145 — The payer and the payee saw two different confirmation codes for one transfer — FIXED (migration 0205)
+- **What:** a marketer-to-marketer transfer produced one M-PESA code in the sender's transaction
+  feed and a different one in the recipient's, for the same transfer. No real M-PESA transaction
+  behaves this way, and the contradiction surfaces the first time two marketers compare phones —
+  which, in a till app whose users are in the same WhatsApp group, is immediately.
+- **Root cause:** `ledgerToTxDto` derives the code with `mpesaCode(createdAtMs, r.id)` — the row's
+  own ledger id. A transfer (0203) is **two** rows, so it produced two codes. The timestamps already
+  matched (both rows take `created_at` from the same transaction's `now()`); only the id differed.
+- **Found while** building the confirmation screen, which has to print one of the two.
+- **Impact:** cosmetic in the sense that no money is affected, and corrosive in the sense that the
+  confirmation code is the one string either party would quote to query a transfer.
+- **Fix:** 0205 stamps the credited row with `meta.pair_ledger_id` = the debited row's id, and
+  `ledgerToTxDto` prefers it. Both sides now render the sender's code, which is also the code the
+  API returns to the app for the receipt. Rows written before 0205 have no `pair_ledger_id` and keep
+  falling back to their own id, so nothing already rendered changes.
+- **Verification:** `app.marketers.transfer.test.ts` — "both sides of one transfer carry ONE
+  confirmation code" (**proven to fail** when the pairing is reverted), plus "a credit that is not a
+  transfer still takes its code from its own row" pinning the fallback. On real Postgres:
+  `e2e_marketer_transfer.py` asserts the credited row points at the debited row, the debited row
+  carries no self-referential pair, and both halves share one timestamp. See docs/64 §2.
+
 ## #144 — CI's migration-ledger gate races the deploy, so every migration merge shows red — FIXED (moved into deploy.yml)
 - **What:** merging 0203 turned CI red on `main` twice in a row, for a reason that had nothing to do
   with the change. Both runs failed the same job:

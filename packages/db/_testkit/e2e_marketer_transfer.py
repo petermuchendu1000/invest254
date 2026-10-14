@@ -16,7 +16,8 @@ move funny money between two live wallets:
 
 Run: PGCLIENTENCODING=UTF8 python3 packages/db/_testkit/e2e_marketer_transfer.py  (needs local PG on /tmp:5433)
 """
-import os, glob, uuid, threading
+import os, glob, uuid, threading, re
+import datetime as dt
 import psycopg2
 
 DSN  = dict(host="/tmp", port=5433, user="postgres", dbname="invest254_transfer_test")
@@ -111,8 +112,21 @@ check("ledger: sender row is a signed transfer_out naming the recipient",
       out == ("transfer_out", -10_000, "Peter Muchendu", "marketer_transfer"), str(out))
 check("ledger: recipient row is a signed transfer_in naming the sender",
       inn == ("transfer_in", 10_000, "Tony Angwa", "marketer_transfer"), str(inn))
-cur.execute("select meta ? 'phone' or meta::text like '%%07%%' from public.marketer_ledger where ref in ('tx-1:out','tx-1:in')")
-check("ledger: no phone number is stored in meta (docs/58)", not any(row[0] for row in cur.fetchall()))
+# docs/58: the app is never handed anyone's number but its own, so neither half of a transfer may
+# carry one. Asked per KEY/VALUE, not as a substring of the whole meta blob: the blob contains
+# counterparty_marketer_id, and a random UUID's text contains the digits "07" 9.4% of the time
+# (measured over 200,000 uuid4s), which made the substring form of this check fail 17.9% of runs
+# for a reason that had nothing to do with phone numbers. A guard that cries wolf one run in six is
+# a guard people re-run until it is quiet — the failure mode BUGLOG #144 was about. The value test
+# is anchored on a WORD boundary (\m0), not a string start, so a number quoted mid-sentence is still
+# caught while a UUID's interior digits are not; the residual false-positive rate is ~1 in 5,000
+# runs (a 12-hex segment would have to open with 0, then 1 or 7, then eight more digits).
+cur.execute("""
+  select count(*) from public.marketer_ledger l, jsonb_each_text(l.meta) kv
+   where l.ref in ('tx-1:out','tx-1:in')
+     and (kv.key ~* '(phone|msisdn|mobile|number)'
+          or kv.value ~ '(\\+?254|\\m0)[17][0-9]{8}')""")
+check("ledger: no phone number is stored in meta (docs/58)", cur.fetchone()[0] == 0)
 
 # ── idempotency ────────────────────────────────────────────────────────────────────────────────
 again = transfer(cur, a, b, 10_000, "tx-1")
@@ -120,6 +134,42 @@ check("replay: the same ref sends exactly once", bal(cur, a) == 40_000 and bal(c
       f"{bal(cur,a)}/{bal(cur,b)}")
 check("replay: says so", again["idempotent"] is True, str(again))
 check("replay: no extra ledger row", ledger_count(cur, a) == 2, ledger_count(cur, a))
+
+# ── the receipt (0205) ─────────────────────────────────────────────────────────────────────────
+# The app prints a confirmation screen and a downloadable M-PESA receipt from this function's
+# answer. Both carry a time and an ID, and both must come from HERE: the handset clock is not
+# evidence of when money moved, and on a replay it would be evidence of the wrong moment entirely.
+check("receipt: a fresh send returns the out-row's commit time",
+      re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", r.get("out_created_at") or "") is not None,
+      str(r.get("out_created_at")))
+cur.execute("select created_at, id from public.marketer_ledger where ref='tx-1:out'")
+out_at, out_id = cur.fetchone()
+# To the millisecond: to_char(...'MS') deliberately truncates the stored microseconds, because the
+# consumer is JavaScript's Date.parse, which has no finer resolution. Equality to the microsecond
+# would be asserting a precision the receipt cannot carry.
+returned = dt.datetime.strptime(r["out_created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc)
+check("receipt: that time IS the stored row's created_at, to the millisecond",
+      abs((out_at - returned).total_seconds()) < 0.001 and returned <= out_at,
+      f'{out_at} vs {r["out_created_at"]}')
+check("receipt: the returned out_ledger_id is the stored row's id", r["out_ledger_id"] == out_id, str(r))
+
+# Both halves share one timestamp because created_at defaults to now(), which in Postgres is
+# transaction start. The app relies on it: the two sides must not disagree about when it happened.
+cur.execute("select count(distinct created_at) from public.marketer_ledger where ref in ('tx-1:out','tx-1:in')")
+check("receipt: both halves of one transfer share one timestamp", cur.fetchone()[0] == 1)
+
+# pair_ledger_id is what makes the payer and the payee see ONE confirmation code. It belongs on the
+# credited row only: on the debited row it would point at itself, which is the fallback already.
+cur.execute("select (meta->>'pair_ledger_id')::bigint from public.marketer_ledger where ref='tx-1:in'")
+check("receipt: the credited row points at the debited row", cur.fetchone()[0] == out_id)
+cur.execute("select meta ? 'pair_ledger_id' from public.marketer_ledger where ref='tx-1:out'")
+check("receipt: the debited row carries no self-referential pair", cur.fetchone()[0] is False)
+
+# A replay must reprint the ORIGINAL receipt. A second code or today's date for a transfer that
+# completed minutes ago is how a sender is talked into sending again.
+check("receipt: a replay returns the original time, not now",
+      again.get("out_created_at") == r["out_created_at"], f'{again.get("out_created_at")} vs {r["out_created_at"]}')
+check("receipt: a replay returns the original ledger id", again["out_ledger_id"] == out_id, str(again))
 
 # ── refusals: each one atomic ──────────────────────────────────────────────────────────────────
 snap = (bal(cur, a), bal(cur, b), ledger_count(cur, a), ledger_count(cur, b))
