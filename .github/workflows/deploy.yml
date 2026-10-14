@@ -128,6 +128,49 @@ jobs:
           fi
           node --import tsx scripts/migrate.mts
 
+  # Gate: production's ledger matches the migration files — asked AFTER migrate, which is the only
+  # moment the question is answerable (BUGLOG #144).
+  #
+  # It used to live in ci.yml. One push starts BOTH workflows, and CI has nothing to wait for while
+  # Deploy runs typecheck + the full suite first, so the gate reached production ~9 minutes before
+  # `migrate` recorded the new row and reported it UNRECORDED. Measured on the 0203 merge: gate at
+  # 11:07:40, row recorded at 11:16:19. Every migration-bearing merge therefore turned `main` red
+  # until somebody re-ran the job — which trains people to ignore the one check whose entire value is
+  # being believed, and would hide a GENUINELY unrecorded migration behind an alarm everyone expects.
+  #
+  # Here it runs immediately after the step that records, so it asserts what `migrate` just claimed
+  # to have done: files present but unrecorded, ledger rows with no file, and — the one this is
+  # really for — a migration file EDITED after it was applied (CHANGED, checksum mismatch), which no
+  # amount of re-running would ever clear.
+  #
+  # Coverage is not lost by moving it: `deploy.yml` triggers on `packages/**`, which contains
+  # packages/db/migrations, so every push that adds or edits a migration runs this. It needs the
+  # same DATABASE_URL and skips the same way without it.
+  #
+  # It does NOT gate the deploys (`deploy` needs `migrate`, not this). A drift report must not stop
+  # the code that matches the schema from shipping — it is a report about state, and blocking the
+  # rollout on it would turn a stale checksum into an outage.
+  migrations-ledger:
+    name: migrations-ledger (post-migrate)
+    needs: migrate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Reconcile migrations against the ledger
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "No DATABASE_URL secret (non-prod mirror) — skipping migration-ledger gate."; exit 0
+          fi
+          node --import tsx scripts/migrations_status.mts
+
   deploy:
     name: deploy ${{ matrix.app }}
     needs: migrate

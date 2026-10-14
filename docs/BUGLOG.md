@@ -5,7 +5,7 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
-## #144 — CI's migration-ledger gate races the deploy, so every migration merge shows red — OPEN
+## #144 — CI's migration-ledger gate races the deploy, so every migration merge shows red — FIXED (moved into deploy.yml)
 - **What:** merging 0203 turned CI red on `main` twice in a row, for a reason that had nothing to do
   with the change. Both runs failed the same job:
   ```
@@ -25,13 +25,20 @@ entry: what, evidence, root cause, impact, and resolution.
   deploy's verify step, and the red clears only if somebody re-runs the job. That trains people to
   ignore a gate whose whole job is to be believed — and it hides a REAL unrecorded migration behind
   an alarm everybody expects.
-- **Fix (not applied — it is a workflow change, owner's call):** make the gate not fire while a
-  deploy for the same SHA is in flight. Either (a) have `migrations-ledger` tolerate files that are
-  unrecorded when a `Deploy (Fly)` run for the same commit has not finished, (b) move the gate into
-  the deploy workflow AFTER `migrate`, where it can assert what the deploy just claimed to do, or
-  (c) have it wait on the deploy's concurrency group. (b) is the smallest and says the most: the
-  question "is production's ledger complete?" is only meaningful once the deploy that completes it
-  has run.
+- **FIXED — option (b), owner's choice.** `migrations-ledger` moved out of `ci.yml` into
+  `deploy.yml` with `needs: migrate`, so it runs immediately after the step that records and asserts
+  what `migrate` just claimed to have done. The question "is production's ledger complete?" is only
+  answerable once the deploy that completes it has run.
+- **Nothing is weakened by the move.** It still reports all three conditions, and the one it is
+  really for — a migration file EDITED after it was applied (CHANGED, checksum mismatch) — is the
+  one that no amount of re-running would ever clear. Coverage is preserved because `deploy.yml`
+  triggers on `packages/**`, which contains `packages/db/migrations`, so every push that adds or
+  edits a migration runs it. Same `DATABASE_URL`, same graceful skip without it.
+- **It deliberately does NOT gate the deploys.** `deploy` needs `migrate`, not this, so the two run
+  in parallel. A drift report must not stop code that matches the schema from shipping: it is a
+  report about state, and blocking the rollout on it would turn a stale checksum into an outage.
+- `ci.yml` keeps a comment where the job was, saying where it went and why it must not come back —
+  CI has no step that records a migration, so re-adding it there would restore the race.
 
 ---
 

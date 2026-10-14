@@ -70,25 +70,11 @@ jobs:
           PGPASSWORD: postgres
         run: python3 packages/db/_testkit/e2e_function_grants.py
 
-  migrations-ledger:
-    name: migrations-ledger
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - name: Install
-        run: npm ci
-      - name: Reconcile migrations against the ledger
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "No DATABASE_URL secret (non-prod mirror) — skipping migration-ledger gate."; exit 0
-          fi
-          node --import tsx scripts/migrations_status.mts
+  # NOTE: `migrations-ledger` MOVED to .github/workflows/deploy.yml, where it runs after `migrate`
+  # (BUGLOG #144). It is not gone and it is not weakened — it is asked at the only moment it can be
+  # answered. Here it raced the deploy that records the rows and reported every new migration as
+  # UNRECORDED, so `main` went red on every migration merge until somebody re-ran it. Do not add it
+  # back to this workflow; CI has no step that records a migration, so the race would return.
 
   # Gate: provable-fairness reproducibility must hold (>= 98% of the clean recent sample reproduces).
   # Dry-run (no audit-row write; the nightly reproducibility.yml persists rows). Skips without DATABASE_URL.
