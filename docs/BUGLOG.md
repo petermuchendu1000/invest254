@@ -5,6 +5,94 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #138 — The "someone just won" card covered up to 42.7% of the chart — FIXED (both trade shells)
+- **What:** reported by marketers demonstrating the app: *the activity notification blocks the
+  waves*. `ActivityNotice` was a 288x73 card, absolutely positioned at `top-3` **inside** the wave
+  shell's chart box and centred on phones, for three seconds at a time.
+- **Evidence (Chromium 131, local dev build, feed served from a fixture — the method is now
+  `apps/web/e2e/activitynotice.e2e.mjs`):**
+
+  | Viewport | Card box | Chart box | Share of the chart covered |
+  |---|---|---|---|
+  | 320x568 | 272x73 @ (24,143) | 158px tall | **42.7%** |
+  | 360x640 | 288x73 @ (36,142) | 206px tall | **30.6%** |
+  | 390x844 | 288x73 @ (51,156) | 395px tall | 14.6% |
+  | 768x1024 | 288x73 | 623px tall | 4.6% |
+  | 1440x900 | 288x73 | 507px tall | 3.3% |
+
+- **Why a marketer saw it at all** — the component's own header says it is shown "never to a
+  MARKETER", and both shells do gate on `useMarketerSkin()`. That comment is **stale**:
+  `skinPolicy.ts` carries `NEUTRALISE_SHARED_UI = false`, so `marketerSkinOn()` collapses to
+  `playerBasic` alone. Since marketer unification (docs/29) a marketer gets the player interface
+  exactly, card included, and `useMarketerSkin().isMarketer` now means "this screen is on the Basic
+  skin". The comment is corrected in the same commit.
+- **Root cause:** the card was mounted inside the positioned chart box, so by construction it was
+  over the one surface a player reads to choose Higher or Lower — and it was sized for a desktop
+  (288px wide) while being centred on a 320px phone.
+- **Impact:** worst on the two phone classes the product sells into hardest. Not a money or data
+  bug; a usability one, on the screen that earns.
+- **Fix:** the notification is a **one-line ribbon** (~28-30px) carrying the same four facts, with
+  one placement per shell and no third:
+  - **wave/classic** — `placement="band"`: `absolute inset-0` inside a new `relative` wrapper that
+    holds `TickerStrip`, so for its three seconds the ribbon *is* the decorative ticker row and the
+    marquee returns underneath. `TickerStrip` is a client-side random walk (its own header says so),
+    the only purely decorative surface on the screen, so nothing of value is covered — and because
+    it is an overlay rather than a row, **the chart gives up no height and never resizes**.
+  - **candlestick** — `placement="ribbon"`: hangs flush off the quote band at the top-left of the
+    pane. That shell has no marquee to lend and no dead space in its chart, but `CandlestickTape`
+    sets `rightPriceScale.scaleMargins.top = 0.12`, so the top 12% of the plot holds no candle body
+    or wick at any zoom, and the bars run newest-at-the-right, so the left of that band is the
+    oldest ones. Bottom-left is unavailable: `attributionLogo: true` puts the TradingView mark there.
+- **Also fixed (#138b):** on the candlestick PHONE tree the card is mounted against `<main>`,
+  outside both trees, so it hung over the Chat, Top and Tours panes as well — and **Chat carries
+  these very rows as text**, so it was covering its own content with a duplicate of it. It is now
+  hidden there with `max-md:hidden`, **not unmounted**: unmounting drops the queue and the `seen`
+  set, and every event already shown would come round again on the next poll.
+- **Deliberately NOT fixed:** viewports under 640px tall show no ribbon, because the ticker row it
+  rides is hidden there (#129) and handing those 30px back would push the screen past `h-dvh` inside
+  an `overflow-hidden` shell — at 320x568 the chart measures 158px against #129's 160px floor. Those
+  are also the viewports where the card was doing the most damage. See docs/62 §5 for the reversal.
+- **Unchanged:** the feed, the gate, the selection and the timings — same endpoint, query key, limit
+  and 20s poll as `ChatPane` (React Query still dedupes them into one request), same `selectCards`,
+  same `SHOW_MS`/`EXIT_MS`/`GAP_MS`, same announcement cap. Still no client-side generator.
+- **Tests:**
+  - `apps/web/e2e/activitynotice.e2e.mjs` — 53 browser assertions over 8 viewport/shell/skin
+    combinations: zero chart overlap on the wave at every width, >=99% coverage of the ticker row it
+    borrows, no pointer events swallowed, chart height unchanged by the ribbon across its cycle,
+    nothing rendered under 640px tall or on the Basic skin, flush under the candlestick quote band,
+    inside the 12% candle-free band, >=40px clear of the price axis, hidden-but-mounted on the
+    phone's other tabs, and the live region's `aria-hidden` cap. Needs no DB, API or engine.
+  - `apps/web/src/components/game/activityNotice.guard.test.ts` — 5 source assertions that run in
+    `npm test`, where there is no browser: one mount per shell, the right placement each, nothing
+    inside the chart box, the ticker wrapper still `relative` and still carrying #129's rule, and no
+    other surface mounting it. Verified to FAIL when the mount is moved back into the chart box.
+- **Docs:** docs/62-activity-notice-placement.md (decision, measurements, rejected options,
+  the accepted trade-off).
+
+## #139 — The wave's chart jumps 23px whenever the price strip wraps — OPEN (pre-existing, not from #138)
+- **What:** found while asserting that #138's ribbon changes no layout. The classic shell's chart
+  box gains and loses 23px at runtime with nothing on screen being resized by the user.
+- **Evidence (Chromium 131, 390x844, 50s sample at 4Hz):** chart height alternates **397px <-> 374px**,
+  in perfect lockstep with `PriceHeader`'s own height, **36px <-> 59px**. Grouped by strip height the
+  mapping is exact and one-to-one (`strip=36 -> chart 397`, `strip=59 -> chart 374`). Reproduced
+  **identically on the commit before #138** with the card still in the chart box, so it is
+  pre-existing and unrelated.
+- **Root cause:** `PriceHeader`'s single row is `flex flex-wrap items-center justify-between`, and
+  its content width moves at runtime — the staleness label appears and flips between "syncing" and
+  "last known", and the price value and the % pill gain and lose digits. When the total crosses the
+  row width the right-hand group (H / L / Online) wraps to a second line, the strip grows 23px and
+  the chart, which is `flex-1` under it, loses exactly that.
+- **Impact:** `CurveCanvas` watches its canvas with a `ResizeObserver` and recomputes its geometry
+  on every change, so the wave visibly rescales — the chart "jumps" while a player is watching it,
+  with no action of theirs behind it. Worst on narrow phones, where the row is closest to wrapping.
+- **Not fixed here.** What should give way when the strip is tight is a UI decision on a live-data
+  surface (truncate the pair? drop H/L earlier? fix the row height and let the content truncate?),
+  and it is a different issue from #138. Raised with the owner rather than folded into this diff.
+- **Candidate fix:** take the row off `flex-wrap`, give the two groups `min-w-0` and let the
+  secondary stats truncate or drop by breakpoint, so the strip has ONE height at every width.
+
+---
+
 ## #137 — Brands were born UNTHEMED, so seven live sites rendered as the stock design system — FIXED (api onboarding + the 7 brands applied)
 - **What:** reported as "why are brand themes not taking effect?". Seven of eighteen live brands wore
   the generic dark/cyan look no matter what colour had been chosen for them.

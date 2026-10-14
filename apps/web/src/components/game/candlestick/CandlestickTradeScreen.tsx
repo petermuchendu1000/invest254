@@ -41,12 +41,33 @@ export function CandlestickTradeScreen() {
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-bg text-fg">
       {/*
-        Other players' wins, floating over the chart. One element, outside both trees, because it is
-        the same notification on a phone and a desktop and must not be mounted twice — two copies
-        would poll the same feed into two independent queues and show every event twice. It positions
-        itself against AppShell's <main>, takes no pointer events and changes nothing below it.
+        Other players' wins. ONE element, outside both trees, because it is the same notification on
+        a phone and a desktop and must not be mounted twice — two copies would poll the same feed
+        into two independent queues and show every event twice. It positions itself against
+        AppShell's <main>, takes no pointer events and changes nothing below it.
+
+        WHERE IT SITS, AND WHY THERE. It was a 288x73 card floating in the middle of the chart. This
+        screen has no marquee to lend it a row (the wave shell does, and gives it one), and it has no
+        dead space in the chart either: `CandlestickTape` right-aligns the bars and they fill the
+        pane edge to edge. The least-obstructed region is the TOP-LEFT, on two counts that both come
+        out of that file — `scaleMargins.top: 0.12` means the top 12% of the plot holds no candle
+        body or wick at any zoom, only grid lines, and the bars run newest-at-the-right, so the left
+        of that band is the oldest ones. The ribbon is ~28px, hangs flush off the quote band, keeps
+        a gutter clear of the price axis and stops well short of the live edge. The only other fixed
+        furniture in the pane is the TradingView attribution logo, bottom-left, which the free
+        lightweight-charts licence requires be left visible — so the bottom-left corner, otherwise
+        the obvious candidate, is not available.
+
+        HIDDEN, NOT UNMOUNTED, off the phone's trade tab. The ribbon is placed against <main>, so on
+        a phone it would otherwise hang over Chat, Top and Tours as well — and Chat shows these very
+        rows as text, so it was covering its own content with a duplicate. Unmounting it would drop
+        the queue and the `seen` set and replay every event already shown on the next poll, so the
+        phone tabs hide it with CSS and the desktop (where all three panes are visible at once
+        beside the chart, not under the ribbon) is untouched.
       */}
-      <ActivityNotice />
+      {/* Spread rather than `className={... : undefined}`: `exactOptionalPropertyTypes` is on, so an
+          explicit `undefined` is not the same as an absent prop. Same idiom as TradeSurface. */}
+      <ActivityNotice placement="ribbon" {...(phoneTab === 'trade' ? {} : { className: 'max-md:hidden' })} />
 
       {/* ── Phone: one pane at a time, four tabs ───────────────────────────── */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden">

@@ -207,25 +207,41 @@ export function TradeSurface() {
             rows of chrome the real thing does not have were the least MT5 part of this screen. */}
         {isMarketer || terminal ? null : <PriceHeader />}
         {isMarketer || terminal ? null : (
-          // short phones (SE): the decorative marquee gives its row to the chart
-          <div className="[@media(max-height:640px)]:hidden"><TickerStrip /></div>
-        )}
-        {/*
-          `relative` so the activity card below can be placed against the CHART rather than against
-          the screen: the furniture above it here (the price strip, the ticker) changes height with
-          the viewport and disappears entirely for a marketer, so a fixed offset from the top of
-          `<main>` would land the card on a different thing at every breakpoint.
-        */}
-        <div className="relative min-h-[160px] flex-1">
-          {/*
-            The same social-proof card the candlestick screen shows, from the same feed.
+          /*
+            THE TICKER ROW, AND THE WIN RIBBON THAT BORROWS IT.
 
-            Not for the TERMINAL: MetaTrader has no such surface, and a promotional card over a
-            broker's chart is the one thing that would break that illusion. Not for a MARKETER
-            either — the skin exists to remove exactly the win-and-payout language this card is
-            made of.
-          */}
-          {terminal || isMarketer ? null : <ActivityNotice className="top-3" />}
+            The social-proof notification used to float inside the chart box below, 288x73 and
+            centred on a phone, which measured 42.7% of the whole chart at 320x568 — over the curve
+            a player reads to choose Higher or Lower. That is what the marketers demonstrating the
+            app were reporting. It lives here now: `relative` makes this row the ribbon's
+            positioning parent, the ribbon fills it exactly (`placement="band"`, `inset-0`) for its
+            three seconds, and the marquee carries on underneath afterwards.
+
+            NOTHING OF VALUE IS COVERED AND NOTHING MOVES. `TickerStrip` is a client-side random
+            walk that says so in its own header — it is the one decorative surface on this screen —
+            and because the ribbon is an overlay rather than a row of its own, the chart gives up no
+            height and never resizes. A row that appeared and collapsed on the ribbon's ~6s cycle
+            would be the worse bug: `CurveCanvas` watches its canvas with a `ResizeObserver` and
+            would rescale the wave every time.
+
+            `overflow-hidden` so the ribbon's 8px entry slides out from under the top edge instead
+            of over the gap above. The radius matches `TickerStrip`'s own `rounded-xl`, so clipping
+            at this box changes nothing about how the marquee is drawn.
+
+            SHORT PHONES GET NEITHER. Under 640px tall this whole row is still hidden, so there is
+            no ribbon either — deliberately. BUGLOG #129 fought the chart up to a 160px floor at
+            320x568 and it measures 158px there today; handing 30px back would push the screen past
+            `h-dvh`, and `AppShell` is `overflow-hidden`. The card was doing its most damage on
+            exactly those phones, so dropping it there is the fix at its strongest, not a gap in it.
+          */
+          <div className="relative overflow-hidden rounded-xl [@media(max-height:640px)]:hidden">
+            <TickerStrip />
+            <ActivityNotice placement="band" />
+          </div>
+        )}
+        {/* `relative` is kept so this box stays the containing block for anything the chart overlays
+            on itself; the activity ribbon moved up into the ticker row above. */}
+        <div className="relative min-h-[160px] flex-1">
           {/* `levelStakeCents` is what a contract at the current volume risks, which is the money
               MetaTrader shows against a Stop Loss level. The desktop chart passed nothing, so even
               once the levels were drawn the stop had no figure. */}

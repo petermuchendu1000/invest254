@@ -10,42 +10,86 @@ import { cn } from '@/lib/cn';
 import { selectCards } from '@/lib/game/activityCards';
 
 /**
- * The floating "someone just won" card that pops over the chart.
+ * The "someone just won" notification: a one-line ribbon, OUT of the chart.
  *
  * Shown by the CANDLESTICK and WAVE shells. Not by the broker terminal, which is MetaTrader and has
- * no social-proof surface, and never to a MARKETER, whose whole skin exists to remove the financial
- * tells this card is made of.
+ * no social-proof surface, and not on a BASIC-skin screen, whose whole point is to remove the
+ * financial tells this ribbon is made of.
+ *
+ * IT USED TO BE A 288x73 CARD FLOATING OVER THE CHART, and that is the bug this shape fixes.
+ * Measured in Chromium against the wave shell with the feed mocked, the card covered **42.7% of
+ * the whole chart at 320x568** and 30.6% at 360x640 — centred, right over the curve a player is
+ * reading to choose Higher or Lower. Marketers demonstrating the app reported exactly that: the
+ * notification blocks the wave. (It reached them because the basic skin is no longer pinned to the
+ * marketer role — see `lib/marketer/skinPolicy` — so a marketer gets the player screen, card and
+ * all.) The ribbon is ~30px, carries the same four facts, and sits outside the plot entirely.
+ *
+ * WHY A LANE AND NOT A BETTER CORNER. Notifications that overlap the surface the user is acting on
+ * are measurably more distracting than the same notification further from the point of gaze
+ * (Hueber et al., MobileHCI '23, gaze-attentive notifications), and the trade screen has exactly
+ * one such surface: the curve plus the Higher/Lower buttons. The counter-pressure is banner
+ * blindness — a region learned as "where the adverts go" is filtered out (Benway & Lane, 1998) —
+ * so the ribbon does not get a slot of its own either. It borrows the row that already carries
+ * live-looking market data and that a player already glances at, which keeps it in the upper scan
+ * path without ever covering the decision.
  *
  * WHERE THE EVENTS COME FROM. The same place the Chat tab's system lines come from, and nowhere
  * else: `GET /api/v1/site/activity` (`api.siteActivity`), on the same query key, the same limit and
  * the same 20s poll as `ChatPane`. That is deliberate on two counts.
  *
  *  1. React Query dedupes it. Two components asking `['siteActivity', slug]` for 40 rows share one
- *     cache entry and one request, so this card costs the screen no extra traffic — it is a second
+ *     cache entry and one request, so this ribbon costs the screen no extra traffic — it is a second
  *     *view* of the feed the rail already holds, not a second feed.
  *  2. It inherits the server's gate for free. `activity.pg.ts` is the thing that decides what may
  *     appear here: settled deposits, paid withdrawals and winning positions, plus whatever rows the
  *     product owner seeded into `activity_seed` (0193) FOR THIS BRAND. A future reader will wonder
- *     whether a card this promotional needed its own "is this brand allowed social proof?" check —
+ *     whether something this promotional needed its own "is this brand allowed social proof?" check —
  *     it does not. A brand with no real activity and no seeds gets an empty list and this renders
  *     nothing. There is no client-side generator here, and there must never be one: every name and
- *     every figure on the card below came off the wire.
+ *     every figure on the ribbon below came off the wire.
  *
  * It is a notification, not a dialog, in exactly the sense `MT5CloseNotice` is one: it takes no
  * focus, it never swallows a pointer event, and the chart and the ticket stay live underneath it.
- * A card that could eat a tap on Higher/Lower would cost the player a trade.
+ * A ribbon that could eat a tap on Higher/Lower would cost the player a trade.
  */
-export function ActivityNotice({ className }: {
+export function ActivityNotice({ placement, className }: {
   /**
-   * Where the card sits, as positioning classes on the live region.
+   * WHICH LANE this instance lives in. The two shells have nothing in common above the chart, so
+   * each gets a placement rather than a pile of offset classes.
    *
-   * It is a prop because the two shells that show it have different furniture above the chart: the
-   * candlestick screen has one quote band of a known height, the wave has a price strip and a
-   * ticker whose heights vary with the viewport. The default is the candlestick placement; the
-   * wave passes an offset measured from the chart's own box instead of from the top of the screen.
+   *  - `'band'` — fills its positioned parent EXACTLY (`inset-0`). The wave shell wraps the
+   *    decorative ticker in a `relative` box and hands that box over: for its three seconds the
+   *    ribbon simply IS that row, and the marquee returns underneath afterwards. Nothing moves,
+   *    nothing is covered that carries information (`TickerStrip` is a client-side random walk and
+   *    says so in its own header), and the chart gives up no pixels — which it cannot afford to:
+   *    BUGLOG #129 fought the chart up to a 160px floor on a 320x568 phone and it measures 158px
+   *    there today. A row that appeared and collapsed every few seconds would be worse than the
+   *    overlap it replaced, because `CurveCanvas` has a `ResizeObserver` on its canvas and would
+   *    rescale the wave on every cycle.
+   *  - `'ribbon'` — hangs from the bottom edge of the quote band, flush, at the top-left of the
+   *    chart pane. The candlestick shell has no marquee to borrow, and its chart has no dead space
+   *    either: the bars are right-aligned and fill the pane edge to edge. The top band is the
+   *    nearest thing to empty — `CandlestickTape` sets `scaleMargins.top: 0.12`, so the top 12% of
+   *    the plot holds no candle body or wick at any zoom, only grid lines — and the left of it is
+   *    the oldest bars, the part of a chart nobody is reading. A right gutter keeps the ribbon off
+   *    the price axis, and it stops well short of the live edge on the right, which is the part
+   *    they ARE reading.
+   *
+   * REQUIRED, with no default. A default would let a new shell mount this and silently inherit a
+   * lane built for a screen it is not — which is the whole class of mistake that put it over the
+   * chart in the first place. Picking one forces a reading of the two notes above.
+   */
+  placement: Placement;
+  /**
+   * Extra classes for the live region. ADDITIVE only — `cn` is a plain join with no
+   * tailwind-merge, so anything that collides with a placement's own utilities would be decided by
+   * stylesheet order rather than by this argument. The candlestick shell uses it to hide the
+   * ribbon on a phone that has navigated off the trade tab, WITHOUT unmounting it: unmounting
+   * would drop the queue and the `seen` set, and every event already shown would come round again
+   * on the next poll.
    */
   className?: string;
-} = {}) {
+}) {
   const brand = useBrand();
 
   /**
@@ -152,10 +196,10 @@ export function ActivityNotice({ className }: {
   if (!current) return null;
 
   /**
-   * A screen reader hears the first few and then nothing. The card is ambient social proof: a
+   * A screen reader hears the first few and then nothing. The ribbon is ambient social proof: a
    * polite live region that re-announces every eight seconds for as long as the player keeps the
    * screen open is not information, it is an obstruction, and there is nothing here the player
-   * needs — the rail's Chat tab carries the same rows as readable text. After the cap the card is
+   * needs — the rail's Chat tab carries the same rows as readable text. After the cap it is
    * `aria-hidden` and purely decorative.
    */
   const announce = shown <= MAX_ANNOUNCEMENTS;
@@ -163,19 +207,16 @@ export function ActivityNotice({ className }: {
   return (
     <div
       /**
-       * `absolute`, not `fixed`: `AppShell`'s `<main>` is the positioned ancestor, so this is placed
-       * against the trade area itself and needs no arithmetic on the top bar — which varies in
-       * height and sits above a `NotificationBanners` strip of no fixed height at all.
+       * `absolute`, against whatever positioned ancestor the placement names — never `fixed`.
        *
-       * The offsets clear the QuoteBar (h-10 phone / h-16 desktop) and nothing else, which puts the
-       * card in empty chart space. On desktop it is pinned LEFT on purpose: the trading panel and
-       * its Higher/Lower buttons live in the right-hand rail, and the left of the chart is the one
-       * region of this screen with nothing to cover.
+       * `'band'` fills the wave shell's ticker wrapper. `'ribbon'` is measured from the top of
+       * `AppShell`'s `<main>`, which on the candlestick screen starts at the quote band: 40px of it
+       * on a phone (`QuoteBar compact`, `h-10`) and 64px on a desktop (`h-16`). Those two numbers
+       * are the only arithmetic here, they are the quote band's own fixed heights, and the e2e
+       * asserts the ribbon lands flush under it at five viewports.
        */
-      className={cn(
-        'pointer-events-none absolute inset-x-0 z-30 flex justify-center px-3 md:justify-start md:px-6',
-        className ?? 'top-11 md:top-[72px]',
-      )}
+      data-testid="activity-notice"
+      className={cn('pointer-events-none z-30 flex', POSITION[placement], className)}
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -183,40 +224,73 @@ export function ActivityNotice({ className }: {
       <div
         aria-hidden={announce ? undefined : true}
         className={cn(
-          // `max-w-[18rem]` plus the wrapper's `px-3` leaves a real gutter at 320px.
-          'relative w-full max-w-[18rem] rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.55)]',
-          // Never `pointer-events-auto`, unlike MT5CloseNotice: this card has nothing to press, so
+          'flex min-w-0 items-center gap-2 border-border bg-surface px-3 text-[11px] leading-none',
+          'shadow-[0_6px_18px_rgba(0,0,0,0.45)]',
+          // Never `pointer-events-auto`, unlike MT5CloseNotice: this ribbon has nothing to press, so
           // it has no reason to be in the way. It dismisses itself.
           'transition-all duration-300 ease-out motion-reduce:transition-none',
+          SHAPE[placement],
           visible ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0',
         )}
       >
-        {/* The mock's sparkle, top-right. Decorative, and offset outside the corner radius. */}
-        <Sparkle className="absolute -right-1 -top-1 h-3.5 w-3.5 text-warn" />
+        <Coin className="h-3.5 w-3.5 text-warn" />
 
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warn/15 ring-1 ring-warn/40">
-            <Coin className="h-5 w-5 text-warn" />
-          </div>
+        {/* `min-w-0` is what lets a long handle actually truncate: a flex child's default
+            `min-width: auto` refuses to shrink below its text, so `truncate` alone does nothing
+            here and the amount would be pushed out of the ribbon instead. */}
+        <span className="min-w-0 shrink truncate font-semibold text-fg">{current.name}</span>
+        <span className="shrink-0 text-muted">{VERB[current.kind]}</span>
+        {/* The figure never truncates and never wraps — it is the one thing on the ribbon that
+            would be a lie in part. */}
+        <span className="shrink-0 whitespace-nowrap font-bold tabular-nums text-up">
+          <Amount cents={current.amountCents} />
+        </span>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-baseline gap-1.5">
-              <span className="truncate text-xs font-semibold text-fg">{current.name}</span>
-              <span className="shrink-0 text-[10px] text-muted">{VERB[current.kind]}</span>
-            </div>
-            <div className="truncate text-base font-bold leading-tight tabular-nums text-up">
-              <Amount cents={current.amountCents} />
-            </div>
-            <div className="flex min-w-0 items-center gap-1 text-[10px] text-muted">
-              <Check className="h-2.5 w-2.5 shrink-0 text-accent" />
-              <span className="truncate">{PROOF[current.kind]}</span>
-            </div>
-          </div>
-        </div>
+        {/*
+          The proof, and the ONE part of the ribbon that is allowed to lose words.
+        
+          `PROOF` is a factual claim per kind, not decoration — a settled trade credited a balance,
+          a withdrawal was paid — so what survives a squeeze matters. Three things rank it:
+        
+            · The TICK is `shrink-0` and unconditional. It is 10px and it is the trust mark.
+            · The WORDS appear from `xs` (360px) and truncate from the END, so the head of the
+              claim — "Settled trade", "Verified withdrawal", "Confirmed deposit", the part that
+              distinguishes one kind from another — is the last thing to go. Below 360px there is
+              no room for any of it and the tick carries it alone.
+            · `shrink-[6]` makes this group give way six times faster than the handle beside it, so
+              a long name costs the proof its tail rather than the proof costing the name its
+              identity. The amount is `shrink-0` and never pays at all.
+        */}
+        <span className="ml-auto flex min-w-0 shrink-[6] items-center gap-1 pl-1 text-muted">
+          <Check className="h-2.5 w-2.5 text-accent" />
+          <span className="hidden truncate xs:block">{PROOF[current.kind]}</span>
+        </span>
       </div>
     </div>
   );
 }
+
+/** @see the `placement` prop. */
+export type Placement = 'band' | 'ribbon';
+
+/** Where the live region sits. Keyed by placement so the two shells share no offsets. */
+const POSITION: Record<Placement, string> = {
+  // Exactly the ticker row the wave shell hands over, so there is nothing to measure.
+  band: 'absolute inset-0',
+  // Flush under the candlestick quote band (h-10 phone / h-16 desktop), with a gutter on the right
+  // that clears the chart's price axis.
+  ribbon: 'absolute inset-x-0 top-10 pr-12 md:top-16 md:pr-16',
+};
+
+/** The ribbon's own box. Keyed by placement because one fills a row and the other hangs off a bar. */
+const SHAPE: Record<Placement, string> = {
+  // The row's height, and the row's own corners — `TickerStrip` is `rounded-xl border`.
+  band: 'h-full w-full rounded-xl border',
+  // A tab hanging off the quote band: no top edge, rounded only where it leaves the bar. `w-fit`
+  // so it covers its own text and not a pixel more, capped so a long handle on a wide pane can
+  // never run it out towards the live edge on the right.
+  ribbon: 'h-7 w-fit max-w-[26rem] rounded-br-xl border-b border-r',
+};
 
 /** The amount in the brand's own wallet formatter, so a foreign or marketer brand is not told KES. */
 function Amount({ cents }: { cents: number }) {
@@ -272,8 +346,8 @@ const SHOW_MS = 3_000;
 const EXIT_MS = 300;
 const GAP_MS = 2_500;
 
-/* The three glyphs the card needs. Inline rather than in `icons.tsx`, which is the tab-bar set and
-   draws to a different weight; these are solid marks at 10–20px. */
+/* The two glyphs the ribbon needs. Inline rather than in `icons.tsx`, which is the tab-bar set and
+   draws to a different weight; these are solid marks at 10–14px. */
 
 function Coin({ className }: { className: string }) {
   return (
@@ -292,10 +366,3 @@ function Check({ className }: { className: string }) {
   );
 }
 
-function Sparkle({ className }: { className: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={cn('shrink-0', className)} aria-hidden="true" focusable="false" fill="currentColor">
-      <path d="M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9L12 2.5Z" />
-    </svg>
-  );
-}
