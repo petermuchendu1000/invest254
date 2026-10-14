@@ -35,7 +35,7 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
-## #143 — Two SECURITY DEFINER functions are callable with the public anon key — OPEN (pre-existing)
+## #143 — Two SECURITY DEFINER functions are callable with the public anon key — FIXED (migration 0204 + CI gate)
 - **What:** found while confirming migration 0203's own grants. `packages/db/_testkit/e2e_function_grants.py`
   — the repo's own guard for exactly this — **fails on current main**:
   ```
@@ -64,6 +64,22 @@ entry: what, evidence, root cause, impact, and resolution.
   function anybody adds.
 - **0203 is clean:** `fn_marketer_transfer` revokes EXECUTE from public/anon/authenticated and keeps
   it for `service_role`; verified with `has_function_privilege` on a real database.
+- **FIXED, migration 0204** — revokes EXECUTE on both from `public`/`anon`/`authenticated`,
+  `service_role` keeps it. Idempotent (a REVOKE of an absent privilege is a no-op), re-applied 3x.
+  Revoking a TRIGGER function's PUBLIC EXECUTE cannot break the trigger: it fires as the table
+  owner, not the caller — the trigger is still bound after the revoke, and
+  `e2e_addon_entitlements.py` passes 26/26.
+- **AND the half that matters: the guard now runs in CI.** `e2e_function_grants.py` existed and was
+  never called by any workflow, which is the only reason 0172 and 0176 survived. A `function-grants`
+  job now runs it on every push and PR against a THROWAWAY Postgres built from the shim + every
+  migration (`pgvector/pgvector:pg16`, because 0057 needs that extension), so it needs no secret and
+  gates forks too. The script now reads the standard `PG*` env vars so it is runnable over TCP — a
+  check nobody can run is how this survived.
+- **Verified both ways:** the guard FAILS (11 pass / 2 fail, naming both functions) with 0204 removed
+  and PASSES (13/13) with it. `e2e_billing.py` independently corroborates: 110 pass / 2 fail before,
+  111 pass / 1 fail after — one of its two failures was this exposure.
+- **Separate pre-existing failure, untouched:** `e2e_billing.py`'s "free add-ons are typed 'free',
+  paid ones 'one_off' by default" fails identically with and without 0204. Not investigated here.
 
 ---
 

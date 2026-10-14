@@ -32,6 +32,44 @@ jobs:
   # Gate: the migrations/ directory must exactly match the applied-ledger (schema_migrations, 0091).
   # Fails on any UNRECORDED (file added but not applied+recorded) or CHANGED (file edited after apply).
   # Skips gracefully when DATABASE_URL is absent (e.g. the mirrored template CI has no DB secret).
+  # Gate: no public function is reachable with the Supabase ANON key (BUGLOG #143, migrations 0153/0204).
+  #
+  # Postgres grants EXECUTE to PUBLIC on every newly created function, so a migration that adds a
+  # SECURITY DEFINER function and forgets to revoke it silently re-opens the hole 0153 closed. That
+  # is exactly what happened twice (0172 and 0176) and went unnoticed BECAUSE THIS CHECK ALREADY
+  # EXISTED BUT WAS NEVER RUN: it lives in packages/db/_testkit, needs a database, and nothing in CI
+  # ever called it. Wiring it in is the half of #143 that stops the next one.
+  #
+  # Runs against a THROWAWAY Postgres built from the shim + every migration, so it needs no secret
+  # and gates forks and PRs too. pgvector is in the image because migration 0057 creates that
+  # extension and the stock postgres image cannot apply the chain without it.
+  function-grants:
+    name: function-grants (anon surface)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install psycopg2
+        run: pip install --quiet psycopg2-binary
+      - name: Every public function is closed to anon / authenticated
+        env:
+          PGCLIENTENCODING: UTF8
+          PGHOST: 127.0.0.1
+          PGPORT: '5433'
+          PGPASSWORD: postgres
+        run: python3 packages/db/_testkit/e2e_function_grants.py
+
   migrations-ledger:
     name: migrations-ledger
     runs-on: ubuntu-latest
