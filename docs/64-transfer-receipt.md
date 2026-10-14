@@ -4,7 +4,7 @@
 App: `petermuchendu1000/mpesa_2` (`SendPinScreen`, `SendResultScreen`, `SendReceiptScreen`,
 `data/Receipts.kt`) · **BUGLOG:** #145, #146 ·
 **Tests:** `app.marketers.transfer.test.ts` (5 new), `packages/db/_testkit/e2e_marketer_transfer.py`
-(7 new), `ReceiptsTest.kt` (10)
+(8 new), `ReceiptsTest.kt` (10)
 
 > Continues docs/63, which built the Send Money screen, the recipient lookup, the transfer RPC and
 > the Confirm step. This covers the three screens AFTER the money moves.
@@ -126,7 +126,7 @@ layout weight and loses its click.
 | Claim | How |
 |---|---|
 | Code and time are the server's, and survive a replay | `app.marketers.transfer.test.ts` ×5; **proven to fail** on the regression (reverting the pairing fails "both sides… ONE confirmation code"; replacing `out_created_at` with `Date.now()` fails "a replay reprints the ORIGINAL receipt") |
-| Holds on real Postgres with all 205 migrations | `e2e_marketer_transfer.py` — **48/48**, 9 consecutive clean runs |
+| Holds on real Postgres with all 205 migrations | `e2e_marketer_transfer.py` — **48/48** (40 before this change), **7 consecutive clean runs of the final script**; 13 clean runs across both revisions of the #146 fix |
 | Dates are EAT regardless of device zone | `ReceiptsTest.kt` — asserts under UTC, America/New_York, Asia/Tokyo, Pacific/Kiritimati |
 | Nothing else regressed | full API suite **2296 tests, 0 failures, 10 skipped** |
 | The screens render as the reference | **NOT VERIFIED.** No emulator has run: the build container has no KVM. Every claim above is code and test evidence, not a screenshot. |
