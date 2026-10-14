@@ -5,6 +5,36 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #144 — CI's migration-ledger gate races the deploy, so every migration merge shows red — OPEN
+- **What:** merging 0203 turned CI red on `main` twice in a row, for a reason that had nothing to do
+  with the change. Both runs failed the same job:
+  ```
+  UNRECORDED  0203_marketer_peer_transfer.sql  (file present, not in ledger)
+  204 migration files, 203 ledger rows, 1 problem(s).
+  ```
+- **Root cause — a timing race, not a defect in the migration.** One push starts BOTH workflows:
+  `CI` (whose `migrations-ledger` job compares the repo's migration files with the ledger rows in
+  PRODUCTION) and `Deploy (Fly)` (whose `migrate` job applies the new migration and records it). CI
+  has nothing to wait for and wins; Deploy has to run typecheck + the full test suite first.
+  Measured on this merge: the ledger gate started **11:07:40**, `migrate` recorded the row at
+  **11:16:19** — nine minutes later. The gate was asking production a question whose answer was
+  still eight minutes away.
+- **Evidence it is only the race:** re-running the failed job after `migrate` completed turned it
+  green with no code change (`migrations-ledger` ✓, and the whole run ✓).
+- **Impact:** every merge that adds a migration shows a red `main` for roughly the length of the
+  deploy's verify step, and the red clears only if somebody re-runs the job. That trains people to
+  ignore a gate whose whole job is to be believed — and it hides a REAL unrecorded migration behind
+  an alarm everybody expects.
+- **Fix (not applied — it is a workflow change, owner's call):** make the gate not fire while a
+  deploy for the same SHA is in flight. Either (a) have `migrations-ledger` tolerate files that are
+  unrecorded when a `Deploy (Fly)` run for the same commit has not finished, (b) move the gate into
+  the deploy workflow AFTER `migrate`, where it can assert what the deploy just claimed to do, or
+  (c) have it wait on the deploy's concurrency group. (b) is the smallest and says the most: the
+  question "is production's ledger complete?" is only meaningful once the deploy that completes it
+  has run.
+
+---
+
 ## #143 — Two SECURITY DEFINER functions are callable with the public anon key — OPEN (pre-existing)
 - **What:** found while confirming migration 0203's own grants. `packages/db/_testkit/e2e_function_grants.py`
   — the repo's own guard for exactly this — **fails on current main**:
