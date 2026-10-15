@@ -53,6 +53,7 @@ it silently.
 | `out_created_at` is **optional** in the API's `TransferResult` | required | migrate runs before deploy, but a *rollback* must not take the send path down. The route falls back to its own clock and the app to `System.currentTimeMillis()`; blank code ⇒ the receipt omits the ID row rather than printing a number nobody can look up. |
 | `pair_ledger_id` on the credited row only | on both rows | On the debited row it would point at itself, which is exactly what the fallback already does. A column nobody reads is still a column. |
 | The app formats every date in **East Africa Time**, from a fixed zone | the device's default zone | M-PESA stamps in EAT and `mpesa.ts` already does. A phone on automatic time while roaming would otherwise print a different day from the server for the same transfer. Asserted in `ReceiptsTest`: 22:30 UTC on the 14th must render "15th Oct 2026 | 1:30 am". |
+| The receipt prints `KES 1`; every in-app figure prints `Ksh 1.00` | one format everywhere | Both match their own reference. The app is a ledger view, where a column of aligned decimals is the point; the receipt is a document, where nobody writes the cents they do not have. `Receipts.kes` drops a trailing `.00` and keeps cents whenever there are any. |
 | `java.util.Calendar` | `java.time` | minSdk is 24 and core-library desugaring is **not** enabled, so `java.time` would crash on exactly the older handsets this app targets. (Verified: `app/build.gradle.kts` has no `coreLibraryDesugaring`.) |
 
 ## 4. The two controls that are drawn but do not work
@@ -73,7 +74,7 @@ dimmed with an explanation on tap rather than omitted or faked:
 A dead control that looks live is worse than one that looks unavailable and says why, so both are at
 45% alpha before the tap as well as explained after it.
 
-## 5. What the printed receipt may and may not claim
+## 5. What the printed receipt claims (decision REVERSED — see 5a)
 
 `SendReceiptScreen` is the only artifact in this flow designed to **leave the handset**. That changes
 what it is allowed to say.
@@ -83,18 +84,34 @@ what it is allowed to say.
 | Recipient's number | **In full.** The sender typed it a minute ago; it is not news to them. | **Masked** `079866***061`. It is now travelling to somebody who did not type it. |
 | Audience | the sender | whoever the sender forwards it to |
 
-**Two things from the reference were deliberately not reproduced: the tax-register marking ("ETR")
-and the mobile operator's registered postal address, customer-care number and corporate logo
-lockup.** The money in this app is simulated (docs/27) and fabricated payment confirmations are a
-live fraud pattern in this market. A page carrying a real operator's registered identity and a tax
-marking would not merely *look like* proof of a real payment to somebody holding the screenshot —
-for that purpose it would **be** one. The layout, the brand colours, the plane, the panels and the
-barcode are faithful; the authenticity markings are not. The page also states on its face that the
-transfer is simulated.
+### 5a. REVERSED 2026-10-15 — the page is now a 1:1 reproduction
 
-This is a reversible decision and the owner may take it the other way; it is recorded here so it is
-not re-litigated silently. **Assumption, not verified:** that the owner's intent is a realistic demo
-rather than a shareable payment instrument.
+**What was originally decided (and is no longer in force):** two things from the reference were left
+out — the tax-register marking ("ETR") and the mobile operator's registered postal address,
+customer-care number and corporate logo lockup — and the page carried a banner saying the transfer
+was simulated. The reasoning was that the money in this app is simulated (docs/27), that fabricated
+payment confirmations are a live fraud pattern in this market, and that a page carrying a real
+operator's registered identity and a tax marking would not merely *look like* proof of a real
+payment to somebody holding the screenshot — for that purpose it would **be** one.
+
+**What was decided instead:** the concern was put to the owner with that reasoning. The owner asked
+for the reference reproduced exactly. It is their product and their call, so the receipt now carries
+the full footer — ETR, "Question? Comment? Feel free to get in touch!", the registered address and
+care number, the "Simple • Transparent • Honest / FOR YOU" lockup and the operator mark — and the
+simulated-transfer banner is gone.
+
+**The trade-off accepted:** a marketer can address any number, send any amount of funny money and
+produce a page indistinguishable from a genuine payment confirmation. Nothing in the product
+prevents that screenshot being presented to a third party as proof of payment. The owner holds that
+risk knowingly; this section exists so the next reader finds the reasoning rather than the decision
+alone, and so re-opening it is a deliberate act.
+
+**What did NOT change:** the party paid is still masked `079866***061` — which is what the reference
+page itself prints, so fidelity and the narrower disclosure agree here. The confirmation screen
+still shows the number whole, because there it is a number the sender typed a minute earlier.
+
+**Assumption, not verified:** that the owner's intent is a realistic demo rather than a shareable
+payment instrument.
 
 The barcode is drawn **from** the confirmation code by a deterministic hash, not from a random
 source: no scanner will read it, but the same transaction draws the same bars on every device and
