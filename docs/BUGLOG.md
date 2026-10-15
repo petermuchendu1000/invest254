@@ -42,6 +42,13 @@ entry: what, evidence, root cause, impact, and resolution.
   a z-index at or above the gates. Bumping three numbers fixes today; the test is what stops the
   next `z-[110]` modal from putting it back. **Proven to fail when `StepUpGate` is reverted to
   `z-[62]`** — both assertions go red.
+- **Tailwind scans comments.** `content: ['./src/**/*.{ts,tsx}']` feeds every source file to an
+  extractor that is a regex over raw text, so writing an arbitrary value in Tailwind's bracket form
+  inside a COMMENT emits a real rule. The first version of this fix shipped a dead `z-index:62` from
+  the explanatory comment in `StepUpGate.tsx`, and a dead `z-index:110` onto invest254.com from a
+  sentence in `gates.z.test.ts` — dead CSS from a test file, in the production bundle. Harmless to
+  render, but it defeats reading the shipped CSS to tell which build is live, which is exactly how
+  this bug was confirmed in production. Arbitrary z-indexes are now written as prose in comments.
 - **Two bugs inside the guard itself, worth recording:** the first version matched `z-50` and
   nothing else, because the trailing `\b` in `/\bz-(?:\[(\d+)\]|(\d+))\b/` cannot match after
   `z-[70]` — `]` and the following space are both non-word, so there is no boundary. It reported

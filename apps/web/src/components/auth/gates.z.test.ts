@@ -19,9 +19,17 @@ import { fileURLToPath } from 'node:url';
  * panel gates its buttons on that shared `isPending`: one stuck reject disabled approve and reject
  * on every row until the operator reloaded. BUGLOG #152.
  *
- * Bumping three numbers fixes today. This test is what stops the next `z-[110]` modal from quietly
- * putting it back: the invariant is checked against the source, so it holds for overlays nobody has
- * written yet.
+ * Bumping three numbers fixes today. This test is what stops the next higher-numbered modal from
+ * quietly putting it back: the invariant is checked against the source, so it holds for overlays
+ * nobody has written yet.
+ *
+ * NOTE THE PROSE. Arbitrary z-indexes are written here as "z-index 110" and never in Tailwind's
+ * bracket form, because `content: ['./src/**\/*.{ts,tsx}']` scans this file too and Tailwind's
+ * extractor is a regex over raw text that does not skip comments. Writing the bracket form in a
+ * comment emits a real, dead rule into the production bundle — a first draft of this file put
+ * `z-index:110` on invest254.com from a sentence in a TEST. Harmless to render, but it defeats
+ * reading the shipped CSS to tell which build is live, which is how this bug was confirmed in
+ * production in the first place.
  *
  * WHY EVERY `fixed` ELEMENT AND NOT JUST FULL-SCREEN SCRIMS. A positioned overlay that covers only
  * part of the viewport can still land on the gate's inputs or its Cancel link, and deciding which
