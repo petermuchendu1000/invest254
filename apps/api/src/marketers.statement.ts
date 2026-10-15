@@ -61,6 +61,13 @@ export interface StatementDetailRow {
   entryType: string;
   /** The human line: who was paid, who paid, or what was adjusted. */
   details: string;
+  /**
+   * Always "Completed", and that is a statement about this system rather than a placeholder: the
+   * ledger records settled movements only — a row exists because money moved. There is no pending,
+   * reversed-in-flight or failed state to report. It is carried per-row so the printed page and
+   * the in-app table cannot each hardcode a different answer if one ever appears.
+   */
+  status: string;
   paidInCents: number;
   withdrawnCents: number;
   balanceCents: number;
@@ -73,6 +80,8 @@ export interface StatementDto {
   customerName: string;
   /** MASKED (docs/58). The app prints its own real number from the one it signed in with. */
   mobileNumber: string;
+  /** The address on file (0207), printed in the header. null when the marketer has not set one. */
+  emailAddress: string | null;
   periodFrom: string;          // YYYY-MM-DD, inclusive
   periodTo: string;            // YYYY-MM-DD, inclusive
   periodLabel: string;         // "01 Jun 2026 - 15 Oct 2026"
@@ -131,7 +140,21 @@ export function eatDayLabel(day: { y: number; m: number; d: number }): string {
   return `${String(day.d).padStart(2, "0")} ${MONTHS[day.m - 1]} ${day.y}`;
 }
 
-/** "15 Oct 2026, 9:03 PM" — a detail row's completion time, in EAT. */
+/**
+ * "2026-10-14 21:24:50" — a detail row's completion time, in EAT.
+ *
+ * Sortable, 24-hour, seconds included: this is a column of timestamps in a table that can run to
+ * hundreds of pages, where "9:03 PM" beside "10:14 AM" is unreadable and two rows a second apart
+ * are indistinguishable. The receipt, which is addressed to a person, keeps its friendlier form.
+ */
+export function eatTimestamp(ms: number): string {
+  const d = new Date(ms + EAT_OFFSET_MS);
+  const p = (n: number, w = 2): string => String(n).padStart(w, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+/** "15 Oct 2026, 9:03 PM" — the friendlier form, used where a date is read rather than scanned. */
 export function eatStamp(ms: number): string {
   const d = new Date(ms + EAT_OFFSET_MS);
   const h24 = d.getUTCHours();
@@ -198,6 +221,7 @@ export function toDetailRow(r: MarketerLedgerRow, brandName: string | null): Sta
     atMs,
     entryType: r.entry_type,
     details: detailsFor(r, brandName),
+    status: "Completed",
     paidInCents: Math.max(r.amount_cents, 0),
     withdrawnCents: Math.max(-r.amount_cents, 0),
     balanceCents: r.balance_after_cents,
@@ -266,7 +290,13 @@ export function statementQr(d: {
 const EMAIL_RE = /^[^\s@,;]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
 export const isDeliverableEmail = (s: string): boolean => s.length <= 254 && EMAIL_RE.test(s);
 
-/** Detail rows the emailed statement carries. Beyond this the mail becomes a document nobody opens. */
+/**
+ * Detail rows the emailed copy carries.
+ *
+ * Raised to the full statement cap once the email gained a PDF attachment: the 400-row limit was
+ * there because an HTML table of thousands of rows is a mail nobody opens, and a paginated document
+ * has no such problem. The HTML body still shows the last 400 as a preview — see buildStatementEmail.
+ */
 export const STATEMENT_EMAIL_DETAIL_CAP = 400;
 
 const esc = (s: string): string =>
@@ -301,8 +331,9 @@ export function buildStatementEmail(s: StatementDto): { subject: string; html: s
   const detailRowsHtml = shown.map((r) => `
       <tr>
         <td style="padding:6px 10px;border-bottom:1px solid #e8eaed;font-family:monospace">${esc(r.code)}</td>
-        <td style="padding:6px 10px;border-bottom:1px solid #e8eaed">${esc(eatStamp(r.atMs))}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e8eaed">${esc(eatTimestamp(r.atMs))}</td>
         <td style="padding:6px 10px;border-bottom:1px solid #e8eaed">${esc(r.details)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e8eaed">${esc(r.status)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid #e8eaed;text-align:right">${r.paidInCents ? money(r.paidInCents) : ""}</td>
         <td style="padding:6px 10px;border-bottom:1px solid #e8eaed;text-align:right">${r.withdrawnCents ? money(r.withdrawnCents) : ""}</td>
         <td style="padding:6px 10px;border-bottom:1px solid #e8eaed;text-align:right">${money(r.balanceCents)}</td>
@@ -316,8 +347,12 @@ export function buildStatementEmail(s: StatementDto): { subject: string; html: s
     <tr><td style="color:#2fa84f;padding:3px 0">Mobile Number:</td><td>${esc(s.mobileNumber)}</td></tr>
     <tr><td style="color:#2fa84f;padding:3px 0">Statement Period:</td><td>${esc(s.periodLabel)}</td></tr>
     <tr><td style="color:#2fa84f;padding:3px 0">Request Date:</td><td>${esc(eatStamp(s.generatedAtMs))}</td></tr>
+    <tr><td style="color:#2fa84f;padding:3px 0">Email Address:</td><td>${esc(s.emailAddress ?? "Not set")}</td></tr>
     <tr><td style="color:#2fa84f;padding:3px 0">Reference:</td><td style="font-family:monospace">${esc(s.ref)}</td></tr>
   </table>
+  <p style="font-size:12px;color:#1a1a1a;background:#eef7f0;border:1px solid #cde6d4;border-radius:4px;padding:10px 12px">
+    The full statement is attached as a PDF. What follows is a preview of it.
+  </p>
 
   <h2 style="font-size:14px;color:#2fa84f;text-align:center;margin:0 0 8px">SUMMARY</h2>
   <table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff">
@@ -340,6 +375,7 @@ export function buildStatementEmail(s: StatementDto): { subject: string; html: s
       <th style="padding:7px 10px;text-align:left">RECEIPT NO.</th>
       <th style="padding:7px 10px;text-align:left">COMPLETION TIME</th>
       <th style="padding:7px 10px;text-align:left">DETAILS</th>
+      <th style="padding:7px 10px;text-align:left">STATUS</th>
       <th style="padding:7px 10px;text-align:right">PAID IN</th>
       <th style="padding:7px 10px;text-align:right">WITHDRAWN</th>
       <th style="padding:7px 10px;text-align:right">BALANCE</th>
@@ -353,9 +389,12 @@ export function buildStatementEmail(s: StatementDto): { subject: string; html: s
 
   const text = [
     "M-PESA STATEMENT",
+    "The full statement is attached as a PDF. What follows is a preview of it.",
+    "",
     `Customer Name: ${s.customerName}`,
     `Mobile Number: ${s.mobileNumber}`,
     `Statement Period: ${s.periodLabel}`,
+    `Email Address: ${s.emailAddress ?? "Not set"}`,
     `Request Date: ${eatStamp(s.generatedAtMs)}`,
     `Reference: ${s.ref}`,
     "",
@@ -366,7 +405,7 @@ export function buildStatementEmail(s: StatementDto): { subject: string; html: s
     "DETAILED STATEMENT",
     ...(shown.length === 0
       ? ["  No transactions in this period."]
-      : shown.map((r) => `  ${r.code}  ${eatStamp(r.atMs)}  ${r.details}  in ${money(r.paidInCents)}  out ${money(r.withdrawnCents)}  bal ${money(r.balanceCents)}`)),
+      : shown.map((r) => `  ${r.code}  ${eatTimestamp(r.atMs)}  ${r.details}  ${r.status}  in ${money(r.paidInCents)}  out ${money(r.withdrawnCents)}  bal ${money(r.balanceCents)}`)),
     ...(omitted > 0 ? ["", `Showing the most recent ${shown.length} of ${s.txnCount} transactions. The totals cover all ${s.txnCount}.`] : []),
   ].join("\n");
 

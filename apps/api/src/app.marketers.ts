@@ -2,6 +2,7 @@ import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, rateLimit
 import { assertSiteTarget } from "./scope.js";
 import type { ApiDeps } from "./app.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
+import { buildStatementPdf } from "./marketers.statement.pdf.js";
 import {
   STATEMENT_DETAIL_CAP, STATEMENT_MAX_DAYS, parseDay, eatDayStartMs, eatDayEndExclusiveMs,
   eatDayLabel, summaryRows, statementRef, statementQr, toDetailRow,
@@ -830,6 +831,7 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
       ref,
       customerName: me.name,
       mobileNumber,
+      emailAddress: me.email ?? null,
       periodFrom: rawFrom,
       periodTo: rawTo,
       periodLabel,
@@ -883,7 +885,13 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     }
     const dto = await buildStatement(ctx, me);
     const mail = buildStatementEmail(dto);
-    const res = await sender.send({ to: [to], subject: mail.subject, html: mail.html, text: mail.text });
+    // The PDF is the deliverable; the HTML body is a preview of it. Built from the SAME dto, so the
+    // two cannot disagree about a figure.
+    const pdf = await buildStatementPdf(dto, { mobileNumber: me.phone });
+    const res = await sender.send({
+      to: [to], subject: mail.subject, html: mail.html, text: mail.text,
+      attachments: [{ filename: `M-PESA-Statement-${dto.ref}.pdf`, content: pdf.toString("base64") }],
+    });
     if (!res.ok) throw new ApiError("EMAIL_SEND_FAILED", "the statement could not be sent", 502);
     // The statement itself is deliberately NOT echoed: the caller asked for it to be emailed, and
     // returning it here would make the "email" path a second way to read one at a looser budget.

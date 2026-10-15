@@ -429,3 +429,43 @@ test("a counterparty name containing markup cannot inject into the emailed HTML"
     assert.ok(mail.html.includes("&lt;SCRIPT&gt;"), "the name should be present, escaped");
   } finally { await api.close(); }
 });
+
+test("the email carries the statement as a PDF attachment, and the body is a preview of it", async () => {
+  const mailer = fakeMailer();
+  const api = await startTestApi({ depsOverrides: { email: mailer } });
+  try {
+    const me = await marketer(api, "Faith Mutiso", "0748057165", 50_000);
+    await req(api, "POST", "/api/v1/marketers/me/email", { token: mtok(me), body: { email: "faith@example.com" } });
+    await req(api, "POST", "/api/v1/marketers/me/statement/email", { token: mtok(me), body: { from: d(-2), to: d(2) } });
+
+    const mail = mailer.sent[0]! as any;
+    assert.equal(mail.attachments?.length, 1, "no PDF was attached");
+    const att = mail.attachments[0];
+    assert.match(att.filename, /^M-PESA-Statement-[A-Z0-9]{10}\.pdf$/);
+    const pdf = Buffer.from(att.content, "base64");
+    assert.equal(pdf.subarray(0, 5).toString("latin1"), "%PDF-");
+    assert.ok(pdf.length > 3_000, `attachment is only ${pdf.length} bytes`);
+
+    // The body says the attachment is the deliverable rather than leaving it to be noticed.
+    assert.match(mail.text, /attached as a PDF/);
+    assert.match(mail.html, /attached as a PDF/);
+    // Both halves name the address the statement is on file against.
+    assert.match(mail.text, /Email Address: faith@example\.com/);
+  } finally { await api.close(); }
+});
+
+test("the statement reports an address and a status for every row", async () => {
+  const api = await startTestApi();
+  try {
+    const me = await marketer(api, "Faith Mutiso", "0748057166", 50_000);
+    const before = await json(await req(api, "GET", STMT(), { token: mtok(me) }));
+    assert.equal(before.emailAddress, null, "no address is on file yet");
+
+    await req(api, "POST", "/api/v1/marketers/me/email", { token: mtok(me), body: { email: "faith@example.com" } });
+    const after = await json(await req(api, "GET", STMT(), { token: mtok(me) }));
+    assert.equal(after.emailAddress, "faith@example.com");
+    // Every row settled, because the ledger records nothing else.
+    assert.ok(after.detail.length > 0);
+    for (const r of after.detail) assert.equal(r.status, "Completed");
+  } finally { await api.close(); }
+});

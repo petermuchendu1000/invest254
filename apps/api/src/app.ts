@@ -158,7 +158,7 @@ export interface ApiDeps {
    * without RESEND_API_KEY + EMAIL_FROM). Optional ON PURPOSE: every route that uses it must cope
    * with its absence by SAYING so, never by reporting a delivery that did not happen.
    */
-  email?: { send(msg: { to: string[]; subject: string; html: string; text: string }): Promise<{ ok: boolean; id?: string | undefined; error?: string | undefined }> } | null;
+  email?: { send(msg: { to: string[]; subject: string; html: string; text: string; attachments?: Array<{ filename: string; content: string }> }): Promise<{ ok: boolean; id?: string | undefined; error?: string | undefined }> } | null;
   /** JWT verifier for player/admin routes; null → DEV header auth (see requireAuth). */
   verifier: Verifier | null;
   /** Self-managed phone+password auth + basic-KYC profile (G3/G4/H1). */

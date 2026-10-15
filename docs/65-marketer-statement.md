@@ -3,7 +3,7 @@
 **Migration:** `0206_marketer_statement_range.sql` · API: `apps/api/src/marketers.statement.ts`,
 `app.marketers.ts` · App: `petermuchendu1000/mpesa_2`
 (`ExportStatementsScreen`, `StatementScreen`, `data/Statements.kt`) ·
-**Tests:** `app.marketers.statement.test.ts` (22), `packages/db/_testkit/e2e_marketer_statement.py`
+**Tests:** `app.marketers.statement.test.ts` (24), `marketers.statement.pdf.test.ts` (14), `packages/db/_testkit/e2e_marketer_statement.py`
 (23), `YmdTest.kt` (10)
 
 > Follows docs/63 (the transfer) and docs/64 (its receipt). Those record single transactions; this
@@ -93,8 +93,57 @@ not a line in this one.
 |---|---|---|
 | The marketer **types** an address when they choose email | add an email column + a collection flow | Bigger, and it would have to be collected somewhere before this screen is useful. The field says *"We don't have an address on file, so tell us where to send it."* |
 | `POST /marketers/me/statement/email` | `deliver=email` on the GET | A GET that sends mail is a GET a retry, a prefetch or a crawler can fire. |
-| **HTML + plain text**, no attachment | a password-protected PDF, as the real product sends | There is no PDF renderer here and the `EmailSender` port carries no attachments. The recipient gets the same figures in the same order, readable anywhere. Stated as a limitation rather than hidden. |
+| ~~**HTML + plain text**, no attachment~~ **REVERSED — see §5a** | — | The original reasoning was that there is no PDF renderer here and the `EmailSender` port carries no attachments. Both were fixable, and the owner supplied the reference. |
 | 503 `EMAIL_NOT_CONFIGURED` when no sender | report success | `makeResendSender()` returns null without `RESEND_API_KEY` + `EMAIL_FROM`. A delivery that silently does nothing is the worst of the three outcomes. |
+
+### 5a. REVERSED 2026-10-15 — the email carries a PDF
+
+The owner supplied the reference the exported statement should look like, and it is a **PDF**. The
+original decision (HTML and plain text only) rested on two things that turned out to be fixable:
+
+- **"There is no PDF renderer here."** There is now: `pdfkit@0.20.2`, pure JavaScript, so the API
+  image gains no native dependency. **Rejected:** rendering HTML with a headless browser — that
+  means shipping Chromium for one document. **Rejected:** `pdf-lib` — fewer dependencies, but this
+  page is a fixed-width multi-page table, which is the layout pdfkit's text and graphics API is
+  actually good at.
+- **"The `EmailSender` port carries no attachments."** It does now: `EmailMessage.attachments`,
+  base64, passed straight through to Resend and omitted entirely when empty (Resend rejects an
+  empty array).
+
+**The PDF is the deliverable; the HTML body is a preview of it**, built from the same DTO so the two
+cannot disagree about a figure. The body says so in its first line rather than leaving the
+attachment to be noticed.
+
+**What the reference added to the document**, now in both the PDF and the in-app page:
+
+| | |
+|---|---|
+| **Email Address** header field | the address on file (0207), or "Not set" |
+| **Transaction Status** column | always `Completed`, and that is a statement about this system: the ledger records settled movements only — a row exists because money moved. Carried per-row so the page and the PDF cannot each hardcode a different answer if a pending state ever appears. |
+| **Completion Time** as `2026-10-14 21:24:50` | sortable, 24-hour, seconds included. The receipt keeps its friendlier "14th Oct 2026 \| 9:03 pm" — a receipt is addressed to a person, a statement column is scanned. |
+| **Page N of M**, and the approval seal | — |
+
+**Two passes over the pages.** "Page 1 of 255" cannot be written until the last page exists, so the
+document is built with `bufferPages` and every page is revisited to stamp its header. Pinned by a
+test that asserts the same M on every page — it fails the moment a single pass writes "of 1".
+
+**Row heights are measured before anything is drawn.** The Details column wraps, and a row that
+would not fit starts the next page whole. Without it pdfkit reaches the bottom mid-row and adds a
+page *by itself* — a page this code never knew about and so never gave column headers to. That is
+the precise signature the test asserts: one header per page.
+
+**The marketer's own number is printed in full**, as the reference prints it, and is passed in
+explicitly rather than read from the DTO (whose copy is masked for the app, docs/58). This document
+is generated on the server and addressed to the marketer or an inbox they nominated; the in-app page
+already shows it whole. No counterparty number appears anywhere, because none is stored.
+
+**Scale, measured:** 2,000 detail rows — the cap — render to **52 pages, 167 KB, in ~1.1 s**. The
+emailed detail is no longer capped at 400 rows; that limit existed because an HTML table of
+thousands of rows is a mail nobody opens, and a paginated document has no such problem. The HTML
+preview still shows the last 400.
+
+The approval seal reproduces the reference's operator identity, consistent with the decision
+recorded in docs/64 §5a.
 
 **The residual risk, stated:** an authenticated marketer can send a fixed document to a chosen
 address at 3/min. The body is not attacker-controlled — it is their own statement and nothing else —

@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
     "@types/qrcode-generator": "^1.0.6",
     "@types/ws": "^8.18.1",
