@@ -21,6 +21,12 @@
 -- whatever the plan produces. Descending now, so the pair reads the same way round as before
 -- relative to its neighbours.
 --
+-- A NOTE ON 0206'S HEADER. Its comment still writes the summary bucket as "LIPA NA M-PESA
+-- (PAY BILL)"; the reference prints "(PAYBILL)", one word, and the code was corrected to match.
+-- The comment is NOT corrected, because the migration ledger checksums the whole file and an
+-- already-applied migration is immutable down to its comments — editing one aborts the deploy with
+-- "ledger checksum != file". Recorded here instead, which is where a reader of 0206 will be sent.
+--
 -- ix_marketer_ledger_mkt_created (marketer_id, created_at) from 0206 serves this unchanged.
 -- Idempotent, read-only, and safe in any deploy order: it changes a sort, not a result set.
 
