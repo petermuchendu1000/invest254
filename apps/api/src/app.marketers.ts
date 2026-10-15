@@ -50,6 +50,9 @@ export interface MarketerProfile {
   /** Force-logout epoch (0198): a marketer token minted before this is refused by requireMarketer.
    *  ISO timestamp, or null/undefined when the marketer has never been forced out. */
   sessions_valid_after?: string | null;
+  /** Where this marketer's statements are emailed (0207). null until they set one; NOT masked,
+   *  because it is their own address and the only responses carrying it are their own. */
+  email?: string | null;
 }
 
 /** One stored marketer security answer (0198): catalog key + the app-layer scrypt hash of the
@@ -62,6 +65,15 @@ export interface MarketerLedgerRow {
 }
 export interface WithdrawResult {
   idempotent: boolean; balance_cents: number; withdrawal_id?: string; ledger_id: number;
+}
+
+/** What `fn_marketer_buy_airtime` (0207) returns: money moved between two buckets of one wallet. */
+export interface AirtimeResult {
+  idempotent: boolean;
+  balance_cents: number;
+  airtime_balance_cents: number;
+  ledger_id: number;
+  created_at?: string;
 }
 
 /** What `fn_marketer_transfer` (0203) returns: both sides of one marketer-to-marketer send. */
@@ -186,6 +198,10 @@ export interface MarketerRepo {
   statementSummary(id: string, fromIso: string, toIso: string): Promise<RawStatementSummary>;
   /** Statement DETAIL rows: the newest `cap` of the range, oldest-first. */
   statementRange(id: string, fromIso: string, toIso: string, cap: number): Promise<MarketerLedgerRow[]>;
+  /** Marketer SELF-SERVICE: set (or clear, with null) their own statement email (0207). */
+  setEmail(id: string, email: string | null): Promise<string | null>;
+  /** Marketer SELF-SERVICE: buy airtime out of the wallet balance (0207). Cash only. */
+  buyAirtime(id: string, amountCents: number, ref: string | null, meta: unknown, minCents: number): Promise<AirtimeResult>;
   // ── auth / lifecycle ──
   /** Set/reset the marketer PIN. `actor` (admin route) engages the DB brand fence (0199); omit it for
    *  the self-service reset (identity proven by security answers, no admin actor). */
@@ -483,6 +499,9 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   // a marketer moving too much, and the daily cap would not notice it because a replayed ref moves
   // nothing. `by: "user"` for the same carrier-NAT reason as the lookup.
   const transferLimit = rateLimit({ name: "marketer-transfer", by: "user", limit: Number(process.env.RATE_LIMIT_TRANSFER_PER_MIN) || 10, windowMs: 60_000 });
+  // The smallest airtime purchase worth a ledger row. A sub-shilling top-up is not a thing a
+  // person does; it is a loop. KES 5 is the app's policy floor, not a claim about any operator's.
+  const AIRTIME_MIN_CENTS = Number(process.env.MARKETER_AIRTIME_MIN_CENTS) || 500;
   // Policy ceiling for a marketer's SIMULATED (funny-money) wallet. Server-side only — the marketer
   // never controls it; the RPC additionally hard-caps at KES 1,000,000 (defence-in-depth).
   const DEMO_TOPUP_CAP_CENTS = Number(process.env.MARKETER_DEMO_TOPUP_CAP_CENTS) || 10_000_000; // KES 100,000
@@ -669,6 +688,91 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
   });
 
   /**
+   * ── The marketer's own email, set on their dashboard (0207, docs/66) ──────────────────────────
+   *
+   * It exists so a statement can be emailed without being asked for an address every time. Before
+   * this there was nowhere at all to read one from: `marketers` had no email column and `profiles`
+   * has none either.
+   *
+   * SELF ONLY. There is no id in the route; the subject is the token. A marketer can set their own
+   * address and nobody else's, and an admin route to set it deliberately does not exist — an
+   * operator who could point a marketer's statements at their own inbox is a worse problem than a
+   * marketer who has to type their address once.
+   *
+   * Sending `null` clears it, which is the only way to stop statements reaching an inbox somebody
+   * has lost access to.
+   */
+  const emailLimit = rateLimit({ name: "marketer-set-email", by: "user", limit: 10, windowMs: 60_000 });
+  router.post(`${BASE}/marketers/me/email`, auth, marketer, emailLimit, async (ctx: Ctx) => {
+    const b = bodyObj(ctx);
+    const raw = b.email;
+    if (raw === null) {
+      return { email: await domain(() => deps.marketers.setEmail(marketerCtx.get(ctx)!.id, null)) };
+    }
+    const addr = reqStr(b, "email").toLowerCase();
+    if (!isDeliverableEmail(addr)) throw new ApiError("VALIDATION", "enter a valid email address", 400);
+    return { email: await domain(() => deps.marketers.setEmail(marketerCtx.get(ctx)!.id, addr)) };
+  });
+
+  /**
+   * ── Buy airtime out of the wallet (0207, docs/66) ─────────────────────────────────────────────
+   *
+   * The app's airtime screen used to be local only — it added to a number in handset memory and
+   * wrote nothing, so the wallet said one thing and the statement said nothing at all (docs/65 §4).
+   * This is what makes "bought which credit" answerable.
+   *
+   * The money moves between two buckets of the SAME wallet: out of balance_cents, into
+   * airtime_balance_cents, with one debit row on the ledger. CASH ONLY — Fuliza cannot buy airtime,
+   * because this overdraft is never repaid and spending it here would mint airtime nobody granted.
+   *
+   * THE TARGET NUMBER IS MASKED BEFORE IT IS STORED. The marketer typed it, so it is theirs to
+   * spend on; but it lands on a statement that gets forwarded, and this ledger stores no full
+   * counterparty number anywhere (docs/58). The masked form answers "who was this credit for?"
+   * without the ledger becoming a directory.
+   */
+  const airtimeLimit = rateLimit({ name: "marketer-airtime", by: "user", limit: Number(process.env.RATE_LIMIT_AIRTIME_PER_MIN) || 10, windowMs: 60_000 });
+  router.post(`${BASE}/marketers/me/airtime`, auth, marketer, airtimeLimit, async (ctx: Ctx) => {
+    const me = marketerCtx.get(ctx)!;
+    const b = bodyObj(ctx);
+    const amountCents = reqPositiveCents(b);
+    // Compulsory, for the same reason the transfer's is: idempotency a client MAY omit is
+    // idempotency the one client under load will omit.
+    const ref = reqStr(b, "ref").trim();
+    if (ref.length < 8 || ref.length > 80) throw new ApiError("VALIDATION", "ref must be 8-80 characters", 400);
+
+    // Optional: airtime for somebody else's line. Normalised so a typo is refused here rather than
+    // stored, then MASKED — the full number never reaches the ledger.
+    const rawTarget = optStr(b, "phone");
+    let targetMasked: string | null = null;
+    let forSelf = true;
+    if (rawTarget) {
+      let normalized: string;
+      try { normalized = normalizeMsisdn(rawTarget); }
+      catch { throw new ApiError("VALIDATION", "enter a valid phone number", 400); }
+      forSelf = normalized === me.phone;
+      targetMasked = maskPhoneForDisplay(normalized);
+    }
+
+    const r = await domain(() => deps.marketers.buyAirtime(
+      me.id, amountCents, ref,
+      { for_self: forSelf, ...(targetMasked ? { target_masked: targetMasked } : {}) },
+      AIRTIME_MIN_CENTS,
+    ));
+    const createdAtMs = r.created_at && Number.isFinite(Date.parse(r.created_at))
+      ? Date.parse(r.created_at)
+      : Date.now();
+    return {
+      idempotent: r.idempotent,
+      balanceCents: r.balance_cents,
+      airtimeBalanceCents: r.airtime_balance_cents,
+      ledgerId: r.ledger_id,
+      // Same code the statement and the transaction feed will show for this row.
+      code: mpesaCode(createdAtMs, r.ledger_id),
+      createdAtMs,
+    };
+  });
+
+  /**
    * ── The wallet STATEMENT (docs/65) ────────────────────────────────────────────────────────────
    *
    * Not the feed with a bigger limit. The feed above answers "what happened lately" and renders as
@@ -768,7 +872,10 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
    */
   router.post(`${BASE}/marketers/me/statement/email`, auth, marketer, statementMailLimit, async (ctx: Ctx) => {
     const me = marketerCtx.get(ctx)!;
-    const to = reqStr(bodyObj(ctx), "email");
+    // The address on file (0207) is the default; a body address overrides it for this one send.
+    // Falling back rather than requiring one is the whole point of having stored it.
+    const to = (optStr(bodyObj(ctx), "email") ?? me.email ?? "").trim().toLowerCase();
+    if (!to) throw new ApiError("NO_EMAIL_ON_FILE", "set an email address first, or give one here", 400);
     if (!isDeliverableEmail(to)) throw new ApiError("VALIDATION", "enter a valid email address", 400);
     const sender = deps.email ?? null;
     if (!sender) {

@@ -172,6 +172,13 @@ export function detailsFor(r: MarketerLedgerRow, brandName: string | null): stri
       }
       if (source === "self_service_demo") return "Demo top-up";
       return "Deposit of Funds";
+    case "airtime": {
+      // What was bought, and — when it was not for their own line — the masked number it went to.
+      // 0207 stores only the mask, so this prints only the mask.
+      const target = typeof meta.target_masked === "string" ? meta.target_masked.trim() : "";
+      const self = meta.for_self !== false;
+      return self || !target ? "Airtime Purchase" : `Airtime Purchase for - ${target}`;
+    }
     case "adjustment": return "Balance Adjustment";
     case "reversal":   return "Reversal";
     default:           return r.entry_type.replace(/_/g, " ").toUpperCase();

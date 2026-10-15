@@ -1,4 +1,4 @@
-import type { MarketerRepo, TransferResult, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult } from "./app.marketers.js";
+import type { MarketerRepo, TransferResult, MarketerRow, MarketerProfile, MarketerLedgerRow, WithdrawResult, AirtimeResult } from "./app.marketers.js";
 
 /** Minimal query surface (node-postgres Pool/Client satisfy this). */
 export type Query = (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -22,6 +22,7 @@ function toProfile(r: any): MarketerProfile {
     brand_name: r.brand_name ?? null,
     affiliate_user_id: r.affiliate_user_id ?? null,
     sessions_valid_after: r.sessions_valid_after ?? null,
+    email: r.email ?? null,
   };
 }
 
@@ -129,6 +130,27 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
       const { rows } = await query("SELECT public.fn_marketer_set_airtime($1, $2, $3, $4) AS v",
         [id, amountCents, actor?.id ?? null, actor?.role ?? null]);
       return num(rows[0].v);
+    },
+
+    async setEmail(id, email): Promise<string | null> {
+      const { rows } = await query("SELECT public.fn_marketer_set_email($1, $2) AS v", [id, email]);
+      return (rows[0].v as string | null) ?? null;
+    },
+
+    async buyAirtime(id, amountCents, ref, meta, minCents): Promise<AirtimeResult> {
+      // ONE statement: the debit, the airtime credit and the ledger row are inside the RPC, so no
+      // crash can leave a wallet that paid for airtime it did not receive.
+      const { rows } = await query(
+        "SELECT public.fn_marketer_buy_airtime($1, $2, $3, $4::jsonb, $5) AS r",
+        [id, amountCents, ref, JSON.stringify(meta ?? {}), minCents]);
+      const r = rows[0].r as Record<string, unknown>;
+      return {
+        idempotent: r.idempotent === true,
+        balance_cents: num(r.balance_cents),
+        airtime_balance_cents: num(r.airtime_balance_cents),
+        ledger_id: num(r.ledger_id),
+        ...(typeof r.created_at === "string" ? { created_at: r.created_at } : {}),
+      };
     },
 
     async statementSummary(id, fromIso, toIso) {

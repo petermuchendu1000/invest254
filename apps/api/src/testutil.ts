@@ -94,7 +94,7 @@ export interface InMemoryMarketerRepo extends MarketerRepo {
 }
 
 export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
-  interface Rec { id: string; name: string; phone: string; status: string; created_at: string; updated_at: string; balance: number; fuliza: number; airtime: number; site_id: string; }
+  interface Rec { id: string; name: string; phone: string; status: string; created_at: string; updated_at: string; balance: number; fuliza: number; airtime: number; site_id: string; email?: string | null; }
   const byId = new Map<string, Rec>();
   // Keyed by phone WITHIN a brand: a phone is only unique per site, so two brands may each own a
   // marketer with the same number (mirrors the SQL `marketers (phone, site_id)` scoping).
@@ -135,7 +135,7 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
   const parts = (n: string) => n.trim().split(/\s+/).filter(Boolean);
   const firstName = (n: string) => parts(n)[0] ?? "";
   const initials = (n: string) => { const p = parts(n); return p.length === 0 ? "" : p.length === 1 ? p[0]!.slice(0, 2).toUpperCase() : (p[0]![0]! + p[p.length - 1]![0]!).toUpperCase(); };
-  const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES", site_id: m.site_id, brand_name: brandBySite.get(m.site_id) ?? null, sessions_valid_after: forceLogoutAt.has(m.id) ? new Date(forceLogoutAt.get(m.id)!).toISOString() : null });
+  const profileOf = (m: Rec): MarketerProfile => ({ id: m.id, name: m.name, first_name: firstName(m.name), initials: initials(m.name), phone: m.phone, status: m.status, balance_cents: m.balance, available_fuliza_cents: m.fuliza, airtime_balance_cents: m.airtime, currency: "KES", site_id: m.site_id, brand_name: brandBySite.get(m.site_id) ?? null, sessions_valid_after: forceLogoutAt.has(m.id) ? new Date(forceLogoutAt.get(m.id)!).toISOString() : null, email: m.email ?? null });
   // `createdAt` is passed only by the transfer mirror, where both halves must carry the SAME
   // timestamp: in Postgres they do, because created_at defaults to now() and now() is transaction
   // start. Letting each row take its own clock reading here would quietly make the in-memory
@@ -151,7 +151,7 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       const existing = byPhone.get(pkey(phone, site));
       if (existing) { const m = byId.get(existing)!; m.name = name; m.updated_at = now(); return { id: m.id, name: m.name, phone: m.phone, status: m.status, created_at: m.created_at, updated_at: m.updated_at }; }
       const id = `m-${++mseq}`; const ts = now();
-      const m: Rec = { id, name, phone, status: "active", created_at: ts, updated_at: ts, balance: 0, fuliza: 0, airtime: 0, site_id: site };
+      const m: Rec = { id, name, phone, status: "active", created_at: ts, updated_at: ts, balance: 0, fuliza: 0, airtime: 0, site_id: site, email: null };
       byId.set(id, m); byPhone.set(pkey(phone, site), id); ledgers.set(id, []);
       return { id, name, phone, status: "active", created_at: ts, updated_at: ts };
     },
@@ -277,9 +277,18 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       if (ref && refs.has(ref)) { const e = refs.get(ref)!; return { idempotent: true, balance_cents: e.balance, ledger_id: e.ledgerId }; }
       const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
       if (m.status !== "active") throw new Error(`MARKETER_NOT_ACTIVE:${m.status}`);
-      if (m.balance < amountCents) throw new Error(`INSUFFICIENT_FUNDS: have ${m.balance}, need ${amountCents}`);
-      m.balance -= amountCents; m.updated_at = now();
-      const lid = push(id, "withdrawal", -amountCents, m.balance, ref, meta);
+      // FULIZA COVERS A SHORTFALL ON A WITHDRAWAL, exactly as fn_marketer_withdraw (0033) does.
+      // This mirror used to refuse at `m.balance < amountCents` and never touch m.fuliza, so every
+      // route test about a withdrawal was testing behaviour the database does not have — and the
+      // `fuliza_used_cents` branch of ledgerToTxDto had never been exercised by anything. BUGLOG #147.
+      const spendable = m.balance + m.fuliza;
+      if (spendable < amountCents) throw new Error(`INSUFFICIENT_FUNDS: have ${spendable}, need ${amountCents}`);
+      const fromFuliza = Math.max(amountCents - m.balance, 0);
+      m.balance = Math.max(m.balance - amountCents, 0);
+      m.fuliza -= fromFuliza;
+      m.updated_at = now();
+      const wMeta = (meta && typeof meta === "object" ? meta : {}) as Record<string, unknown>;
+      const lid = push(id, "withdrawal", -amountCents, m.balance, ref, { ...wMeta, fuliza_used_cents: fromFuliza });
       if (ref) refs.set(ref, { balance: m.balance, ledgerId: lid });
       return { idempotent: false, balance_cents: m.balance, withdrawal_id: `w-${lid}`, ledger_id: lid };
     },
@@ -291,6 +300,53 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
      * that game-winnings credits are OTHERS and not an AGENT DEPOSIT. If these two ever disagree,
      * the route tests are proving a convenient fiction rather than the product.
      */
+    async setEmail(id: string, email: string | null): Promise<string | null> {
+      // Mirrors fn_marketer_set_email: trimmed, lower-cased, empty becomes null.
+      const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
+      if (m.status !== "active") throw new Error(`MARKETER_NOT_ACTIVE:${m.status}`);
+      const clean = (email ?? "").trim().toLowerCase() || null;
+      if (clean !== null && (clean.length < 6 || clean.length > 254 || !/.+@.+\..{2,}/.test(clean))) {
+        throw new Error("INVALID_EMAIL");
+      }
+      m.email = clean;
+      return clean;
+    },
+
+    /** Mirrors fn_marketer_buy_airtime (0207): cash only, one debit row, idempotent on ref. */
+    async buyAirtime(id: string, amountCents: number, ref: string | null, meta: unknown, minCents: number) {
+      if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("AMOUNT_MUST_BE_POSITIVE");
+      if (amountCents < Math.max(minCents, 1)) throw new Error(`AMOUNT_BELOW_MINIMUM: min ${Math.max(minCents, 1)}`);
+      if (ref) {
+        const hit = [...ledgers.values()].flat().find((r) => r.ref === ref);
+        if (hit) {
+          return {
+            idempotent: true,
+            balance_cents: hit.balance_after_cents,
+            airtime_balance_cents: byId.get(id)?.airtime ?? 0,
+            ledger_id: hit.id,
+            created_at: hit.created_at,
+          };
+        }
+      }
+      const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND");
+      if (m.status !== "active") throw new Error(`MARKETER_NOT_ACTIVE:${m.status}`);
+      // CASH ONLY — `m.fuliza` is deliberately not consulted (0207 header).
+      if (m.balance < amountCents) throw new Error(`INSUFFICIENT_FUNDS: have ${m.balance}, need ${amountCents}`);
+      m.balance -= amountCents;
+      m.airtime += amountCents;
+      m.updated_at = now();
+      const baseMeta = (meta && typeof meta === "object" ? meta : {}) as Record<string, unknown>;
+      const lid = push(id, "airtime", -amountCents, m.balance, ref, { ...baseMeta, source: "airtime_purchase" });
+      const row = (ledgers.get(id) ?? []).find((r) => r.id === lid)!;
+      return {
+        idempotent: false,
+        balance_cents: m.balance,
+        airtime_balance_cents: m.airtime,
+        ledger_id: lid,
+        created_at: row.created_at,
+      };
+    },
+
     async statementSummary(id: string, fromIso: string, toIso: string) {
       const from = Date.parse(fromIso), to = Date.parse(toIso);
       const rows = (ledgers.get(id) ?? []).filter((r) => {

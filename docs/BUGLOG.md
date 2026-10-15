@@ -5,6 +5,42 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #148 — A refused transaction still announced itself as "Successful" — FIXED (mpesa_2)
+- **What (pre-existing):** `ReceiptScreen` printed `"${TxFlow.title} Successful"` with a green tick
+  unconditionally. `TxFlow.success` had always been SET — `AppState.performTransaction` returns
+  false when the wallet cannot cover the amount — and was **never read**. So a transaction the app
+  itself had declined showed the success icon, the success wording, a receipt card and a Download
+  Receipt button.
+- **Found while** wiring the first flow on that screen that can be refused by the SERVER (airtime,
+  0207): a declined purchase would have told the marketer their money was spent.
+- **Impact before 0207:** limited to the local sample flows, where nothing is at stake. **After
+  0207 it would have been a real debit the marketer was told had happened when it had not.**
+- **Fix:** the screen branches on `TxFlow.success` — error icon, "… Not Completed", and the reason
+  in place of the amount (`TxFlow.failure`, new). The receipt card and the download button are not
+  drawn at all when there is nothing to receipt, and the button reads "Close" rather than "Done".
+- **Verification:** `assembleDebug` green; the failure path is reachable from both the local
+  insufficient-funds case and every server refusal the airtime route can return.
+
+## #147 — The test harness's withdrawal disagreed with the database about Fuliza — FIXED
+- **What (pre-existing):** `testutil.ts`'s in-memory `withdraw` refused outright at
+  `m.balance < amountCents`, never consulted `m.fuliza`, and never wrote `fuliza_used_cents` into
+  the ledger meta. The database's `fn_marketer_withdraw` (0033) does all three: spending power is
+  `balance + available_fuliza`, the overdraft covers the shortfall, and the amount drawn is
+  recorded on the row.
+- **Evidence:** a new airtime test asserted the contrast the 0207 header rests on — *Fuliza cannot
+  buy airtime, although it funds a withdrawal* — and the withdrawal half returned 409 against the
+  harness while succeeding against real Postgres (`e2e_marketer_airtime.py`, same scenario).
+- **Impact:** every route test touching a withdrawal was pinning behaviour production does not
+  have, and the `fuliza_used_cents` branch of `ledgerToTxDto` — and now `detailsFor`, which prints
+  "Customer Withdrawal (Fuliza X)" on a statement — had **never been exercised by anything**. It
+  also made BUGLOG #141 (wallet drifts from its ledger once Fuliza pays part of a withdrawal)
+  unreproducible in the fast suite, which is where it would have been noticed.
+- **Fix:** the mirror now does the same arithmetic as the RPC — `spendable = balance + fuliza`, the
+  shortfall drawn from the overdraft, `fuliza_used_cents` stamped on the row.
+- **Verification:** full API suite **2331 tests, 0 failures** after the change — no existing test
+  depended on the wrong behaviour, which is the good news and the bad news. The contrast is now
+  asserted in both suites: `app.marketers.airtime.test.ts` and `e2e_marketer_airtime.py`.
+
 ## #146 — A docs/58 phone-leak guard failed 17.9% of runs for a reason unrelated to phone numbers — FIXED
 - **What (pre-existing, mine to find):** `packages/db/_testkit/e2e_marketer_transfer.py` asserts that
   neither half of a transfer stores a phone number in `meta` (docs/58). Across six consecutive runs
