@@ -389,8 +389,12 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
         const t = Date.parse(r.created_at);
         return t >= from && t < to;
       });
+      // Mirrors fn_marketer_statement_range (0209): take the NEWEST `cap` rows, then hand them back
+      // newest-first. The two steps are separate on purpose — sorting descending and then slicing
+      // the head would look equivalent and would be, but doing it in one step invites the inverse
+      // mistake of slicing the OLDEST rows, which is silent and wrong.
       inRange.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
-      return inRange.slice(-Math.max(cap, 1));
+      return inRange.slice(-Math.max(cap, 1)).reverse();
     },
     async setPin(id: string, pin: string, actor?: MarketerActor): Promise<void> { fence("setPin", byId.get(id)?.site_id, actor); if (!/^\d{4,6}$/.test(pin)) throw new Error("INVALID_PIN"); if (!byId.has(id)) throw new Error("MARKETER_NOT_FOUND"); pins.set(id, pin); },
     async login(phone: string, pin: string, siteId?: string): Promise<string | null> {

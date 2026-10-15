@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import { formatAmount } from "./mpesa.js";
 import { eatTimestamp, type StatementDto } from "./marketers.statement.js";
@@ -5,42 +6,134 @@ import { eatTimestamp, type StatementDto } from "./marketers.statement.js";
 /**
  * The statement as a PDF — the artifact the emailed export actually carries.
  *
- * Built with pdfkit rather than rendered from HTML: a headless browser would mean shipping Chromium
- * in the API image for one document, and this page is a fixed-width table, which is the one layout
- * hand-drawing is good at. pdfkit is pure JavaScript, so the image gains no native dependency.
+ * GEOMETRY IS MEASURED, NOT GUESSED. Every coordinate below was read off a reference statement with
+ * `pdftotext -bbox-layout`, which reports each line's glyph box in PDF points. The page is 595x848,
+ * the ruled table box runs x=36..559 and text x=38..557, and the seven detail columns fall on
+ * 36 / 105.73 / 175.47 / 280.07 / 349.80 / 419.54 / 489.27 / 559 with 2pt cell padding — a split
+ * that reproduces all seven measured header centres to within 0.01pt, which is how we know the
+ * padding is 2 and not 0. See docs/67.
+ *
+ * TEXT IS PLACED BY ITS CAP TOP. The measurements are glyph-box tops, so every call goes through
+ * `cap()`, which converts a cap top to a baseline using Jost's cap height of exactly 0.700em and
+ * passes `baseline: "alphabetic"` so pdfkit treats the y it is given as the baseline. Positioning by
+ * pdfkit's default (line-box top) would bake the font's ascender into every coordinate and drift the
+ * moment a size changed.
+ *
+ * WHAT THIS DOCUMENT CLAIMS. It is an invest254 marketer-wallet statement and says so: the title,
+ * the issue seal and the verification block carry invest254's name and a verification route that
+ * actually resolves against this API. The layout is the reference's; the attestation is ours. A
+ * document that asserted it was issued or verifiable by a mobile-money operator would be false —
+ * these balances are invest254's own and no operator can confirm them. See docs/67 §3.
  *
  * TWO PASSES OVER THE PAGES. "Page 1 of 255" cannot be written until the last page exists, so the
- * document is built with `bufferPages`, then every page is revisited to stamp its header. Writing
- * "Page 1" and hoping is the alternative, and it is wrong on every page but the first.
+ * document is built with `bufferPages`, then every page is revisited for the furniture that repeats:
+ * the page number, the watermark, the disclaimer, the verification panel and the footer.
  *
  * EVERY FIGURE IS THE SERVER'S. Nothing is summed here — the summary covers rows the detail does
  * not carry (docs/65 §2), so a total recomputed from what is printed would disagree with itself the
  * moment the cap bit.
  */
 
-const GREEN = "#2FA84F";
-const HEADER_GREEN = "#3FAE5A";
-const INK = "#2B2B2B";
-const GRID = "#9BC7A6";
-const LABEL = "#2FA84F";
+// ── Assets ────────────────────────────────────────────────────────────────────────────────────────
 
-const PAGE_MARGIN = 40;
-const PAGE_WIDTH = 595.28;          // A4 portrait
-const PAGE_HEIGHT = 841.89;
-const CONTENT_W = PAGE_WIDTH - PAGE_MARGIN * 2;
+const ASSET = (rel: string): string => fileURLToPath(new URL(`../assets/${rel}`, import.meta.url));
 
-/** The detail table's columns, in the reference's order. Widths sum to CONTENT_W. */
-const DETAIL_COLS: Array<{ key: string; label: string; w: number; align: "left" | "right" }> = [
-  { key: "code", label: "Receipt No.", w: 62, align: "left" },
-  { key: "time", label: "Completion Time", w: 92, align: "left" },
-  { key: "details", label: "Details", w: 132, align: "left" },
-  // Wide enough for "Transaction Status" on ONE line at the header size — it is the widest string
-  // in the header row and wrapping it pushed the rule through the middle of the words.
-  { key: "status", label: "Transaction Status", w: 70, align: "left" },
-  { key: "in", label: "Paid In", w: 50, align: "right" },
-  { key: "out", label: "Withdrawn", w: 52, align: "right" },
-  { key: "bal", label: "Balance", w: 57, align: "right" },
+const STAMP_FRAME = ASSET("stamp-frame.png");
+
+/**
+ * pdfkit font handles.
+ *
+ * TWO FAMILIES, BECAUSE THE REFERENCE USES TWO. `pdffonts` on the reference lists an embedded
+ * DejaVuSans subset and an embedded FuturaBT-Medium subset, and measuring settles which is which:
+ * DejaVu Sans at 6pt reproduces "2026-10-14 21:24:50" as 63.72pt against the reference's 63.68, and
+ * the same 6pt/7pt pair lands every other body and label string within ~0.3%. So the body is DejaVu
+ * — which we ship — and only the display type is Futura, which we do not: Futura BT is a licensed
+ * Bitstream face and is replaced by Jost (SIL OFL), a geometric sans drawn to the same proportions.
+ */
+const BODY = "body";            // DejaVu Sans — values, table data, disclaimer, footer
+const BODY_B = "bodyB";         // DejaVu Sans Bold — the TOTAL row
+const DISPLAY = "display";      // Jost Medium — title, section headings, the verification code
+const DISPLAY_B = "displayB";   // Jost Bold — the seal
+
+const FONT_FILE: Record<string, string> = {
+  [BODY]: ASSET("fonts/DejaVuSans.ttf"),
+  [BODY_B]: ASSET("fonts/DejaVuSans-Bold.ttf"),
+  [DISPLAY]: ASSET("fonts/Jost-Medium.ttf"),
+  [DISPLAY_B]: ASSET("fonts/Jost-Bold.ttf"),
+};
+
+/**
+ * Baseline offset from a measured glyph-box top, as a fraction of the font size.
+ *
+ * The measurements are `pdftotext -bbox` tops, and that tool reports a box derived from the font
+ * descriptor rather than the actual glyph extents — so the offset differs per family and cannot be
+ * assumed. These two numbers were calibrated by rendering probes at known baselines and measuring
+ * the ink back off the raster at 200dpi; `__cal` in the repo history is the harness. Getting this
+ * wrong shifts every row by a fraction of a point, which compounds down a 40-row table.
+ */
+const TOP_TO_BASELINE: Record<string, number> = {
+  [BODY]: 0.762,
+  [BODY_B]: 0.762,
+  [DISPLAY]: 0.751,
+  [DISPLAY_B]: 0.751,
+};
+
+// ── Palette, sampled from the reference ───────────────────────────────────────────────────────────
+
+const GREEN = "#43B02A";        // (67,176,42) — headings, header bands, rules, labels
+const INK = "#000000";
+const NAVY = "#2B2B70";         // (43,43,112) — the seal
+const PANEL = "#F0F7EC";        // (240,247,236) — the verification panel's tint
+
+// ── Page geometry ─────────────────────────────────────────────────────────────────────────────────
+
+const PAGE_W = 595;
+const PAGE_H = 848;
+const RULE_L = 36;              // ruled table box
+const RULE_R = 559;
+const TEXT_L = 38;              // text margins (= rule box inset by the 2pt cell padding)
+const TEXT_R = 557;
+const RULE_W = RULE_R - RULE_L; // 523
+const TEXT_W = TEXT_R - TEXT_L; // 519
+const CENTRE = PAGE_W / 2;      // 297.5
+
+const PAD = 2;                  // cell padding
+const RULE_WEIGHT = 0.5;
+
+/** Where the detail table must stop to clear the disclaimer. */
+const TABLE_BOTTOM = 718;
+
+/** Detail column boundaries. Widths: 69.73, 69.74, 104.60, 69.73, 69.74, 69.73, 69.73 (sum 523). */
+const COL_X = [36, 105.73, 175.47, 280.07, 349.8, 419.54, 489.27, 559] as const;
+
+const DETAIL_COLS: Array<{ key: string; label: string; align: "left" | "right" }> = [
+  { key: "code", label: "Receipt No.", align: "left" },
+  { key: "time", label: "Completion Time", align: "left" },
+  { key: "details", label: "Details", align: "left" },
+  { key: "status", label: "Transaction Status", align: "left" },
+  { key: "in", label: "Paid In", align: "right" },
+  { key: "out", label: "Withdrawn", align: "right" },
+  { key: "bal", label: "Balance", align: "right" },
 ];
+
+/** Summary column boundaries — the same grid: the two amount columns are 104.60 wide. */
+const SUM_X = [36, 349.8, 454.4, 559] as const;
+
+// ── Type sizes, derived from the measured cap heights ─────────────────────────────────────────────
+
+const SZ_TITLE = 14;
+const SZ_HEADING = 11;
+const SZ_LABEL = 7;             // field labels, table headers, TOTAL, disclaimer, footer
+const SZ_BODY = 6;              // field values, table data
+const SZ_CODE = 20.9;           // the verification code (sized so its ink spans the reference's 100.8pt)
+
+// ── Row metrics ───────────────────────────────────────────────────────────────────────────────────
+
+const BAND_H = 11.1;            // green header band
+const BAND_TEXT = 3.89;         // cap top, relative to the band's top
+const ROW_H = 10;               // a single-line data row
+const ROW_TEXT = 3.65;          // cap top, relative to the row's top
+const LINE_H = 6;               // pitch between wrapped lines inside one cell
 
 const money = (cents: number): string => formatAmount(cents);
 
@@ -64,15 +157,17 @@ export interface StatementPdfOptions {
   mobileNumber: string;
 }
 
+type Doc = PDFKit.PDFDocument;
+
 export function buildStatementPdf(s: StatementDto, opts: StatementPdfOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
-      size: "A4",
-      margin: PAGE_MARGIN,
+      size: [PAGE_W, PAGE_H],
+      margin: 0,
       bufferPages: true,
       info: {
-        Title: `M-PESA Statement ${s.periodLabel}`,
-        Author: "M-PESA",
+        Title: `Marketer Wallet Statement ${s.periodLabel}`,
+        Author: "invest254",
         Subject: `Statement ${s.ref}`,
         CreationDate: new Date(s.generatedAtMs),
       },
@@ -83,15 +178,13 @@ export function buildStatementPdf(s: StatementDto, opts: StatementPdfOptions): P
     doc.on("error", reject);
 
     try {
-      // Leave room at the top of every page for the "Page N of M" header stamped in pass two.
-      const TOP = PAGE_MARGIN + 26;
-      doc.y = TOP;
+      for (const [name, file] of Object.entries(FONT_FILE)) doc.registerFont(name, file);
 
       drawTitle(doc);
       drawHeaderBand(doc, s, opts);
       drawSummary(doc, s);
-      drawDetail(doc, s, TOP);
-      stampPageHeaders(doc);
+      drawDetail(doc, s);
+      drawPageFurniture(doc, s);
       doc.end();
     } catch (e) {
       reject(e instanceof Error ? e : new Error(String(e)));
@@ -99,27 +192,62 @@ export function buildStatementPdf(s: StatementDto, opts: StatementPdfOptions): P
   });
 }
 
-// ── Sections ──────────────────────────────────────────────────────────────────────────────────────
+// ── Text helper ───────────────────────────────────────────────────────────────────────────────────
 
-type Doc = PDFKit.PDFDocument;
+interface CapOpts {
+  size?: number;
+  font?: string;
+  color?: string;
+  width?: number;
+  align?: "left" | "center" | "right";
+  /** Allow wrapping. Off by default: almost every string here is placed, not flowed. */
+  wrap?: boolean;
+  lineGap?: number;
+}
+
+/**
+ * Draw `text` with its CAP TOP at `capTop`.
+ *
+ * Every y in this file is a cap top, because that is what `pdftotext -bbox` reports and therefore
+ * what the reference was measured in. Converting here, once, keeps the call sites in the same units
+ * as the measurements.
+ */
+function cap(doc: Doc, text: string, x: number, capTop: number, o: CapOpts = {}): void {
+  const size = o.size ?? SZ_BODY;
+  const font = o.font ?? BODY;
+  doc.font(font).fontSize(size).fillColor(o.color ?? INK);
+  // `lineGap` here is a PITCH: callers ask for the distance between wrapped lines, and pdfkit wants
+  // the gap to add on top of its own line height, so the difference is taken once, here.
+  const gap = o.lineGap === undefined ? undefined : o.lineGap - doc.currentLineHeight(false);
+  doc.text(text, x, capTop + (TOP_TO_BASELINE[font] ?? 0.762) * size, {
+    baseline: "alphabetic",
+    lineBreak: o.wrap ?? false,
+    ...(o.width !== undefined ? { width: o.width } : {}),
+    ...(o.align !== undefined ? { align: o.align } : {}),
+    ...(gap !== undefined ? { lineGap: gap } : {}),
+  });
+}
+
+/** A horizontal rule in the table green. */
+function rule(doc: Doc, x0: number, y: number, x1: number): void {
+  doc.moveTo(x0, y).lineTo(x1, y).lineWidth(RULE_WEIGHT).strokeColor(GREEN).stroke();
+}
+
+function vrule(doc: Doc, x: number, y0: number, y1: number): void {
+  doc.moveTo(x, y0).lineTo(x, y1).lineWidth(RULE_WEIGHT).strokeColor(GREEN).stroke();
+}
+
+// ── Page 1 ────────────────────────────────────────────────────────────────────────────────────────
 
 function drawTitle(doc: Doc): void {
-  doc.font("Helvetica-Bold").fontSize(17).fillColor(GREEN)
-    .text("M-PESA STATEMENT", PAGE_MARGIN, doc.y, { width: CONTENT_W, align: "center" });
-  doc.moveDown(1.2);
+  // The reference titles this "M-PESA STATEMENT". This document is not one and does not say it is:
+  // the balances are invest254's own simulated marketer wallet, not an operator's record.
+  cap(doc, "MARKETER WALLET STATEMENT", TEXT_L, 59.37, {
+    size: SZ_TITLE, font: DISPLAY, color: GREEN, width: TEXT_W, align: "center",
+  });
 }
 
 function drawHeaderBand(doc: Doc, s: StatementDto, opts: StatementPdfOptions): void {
-  const top = doc.y;
-  const qrSide = 112;
-  const qrX = PAGE_MARGIN + CONTENT_W - qrSide;
-  const sealW = 180;
-  const sealX = qrX - sealW - 12;
-
-  // Left: the labelled fields.
-  // Sized so a full Gmail address fits on one line: the first version wrapped
-  // "faithmwende40130@gmail.com" after the "co", which looks like a truncated address.
-  const labelW = 80;
   const rows: Array<[string, string]> = [
     ["Customer Name:", s.customerName],
     ["Mobile Number:", opts.mobileNumber],
@@ -127,45 +255,54 @@ function drawHeaderBand(doc: Doc, s: StatementDto, opts: StatementPdfOptions): v
     ["Statement Period:", s.periodLabel],
     // When the statement was ASKED for, which is not the end of the period it covers — a statement
     // pulled in December for the year to October has an October end and a December request date.
-    // Printed in the period's own form ("15 Oct 2026"), not ISO: it sits directly under a row that
-    // reads "01 Jan 2024 - 15 Oct 2026" and two date formats in one four-row block is a mistake.
     ["Request Date:", requestDate(s.generatedAtMs)],
   ];
-  let y = top;
-  for (const [label, value] of rows) {
-    doc.font("Helvetica").fontSize(7.5).fillColor(LABEL).text(label, PAGE_MARGIN, y, { width: labelW });
-    doc.font("Helvetica").fontSize(7.5).fillColor(INK)
-      .text(value, PAGE_MARGIN + labelW + 6, y, { width: sealX - PAGE_MARGIN - labelW - 16 });
-    y += 17;
-  }
+  rows.forEach(([label, value], i) => {
+    cap(doc, label, TEXT_L, 95.19 + 17 * i, { size: SZ_LABEL, color: GREEN });
+    cap(doc, value, 194.9, 94.95 + 17 * i, { size: SZ_BODY, color: INK });
+  });
 
-  drawSeal(doc, s, sealX, top, sealW);
-  drawQr(doc, s, qrX, top, qrSide);
-
-  doc.y = Math.max(y, top + qrSide) + 14;
+  drawSeal(doc, s, 290, 91.46, 130);
+  drawQr(doc, s, 457, 84, 100);
 }
 
-/** The approval box the reference prints between the fields and the QR. */
+/**
+ * The issue seal: a distressed rounded band with the issue date, the issuer and the period.
+ *
+ * `w` is the artwork width; the height follows the reference's 677:409 proportion. Drawn from
+ * assets/stamp-frame.png (see assets/make-stamp-frame.py) plus live text, because the two date
+ * lines change per statement and a flat image would freeze them.
+ */
 function drawSeal(doc: Doc, s: StatementDto, x: number, y: number, w: number): void {
-  const h = 104;
+  const h = (w * 409) / 677;
+  const k = w / 677;                       // scale from reference-artwork px to points
+
   doc.save();
-  doc.roundedRect(x, y, w, h, 3).lineWidth(0.8).strokeColor(GRID).stroke();
-  let ty = y + 8;
-  const line = (text: string, size: number, color: string, bold = false): void => {
-    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor(color)
-      .text(text, x + 6, ty, { width: w - 12, align: "center" });
-    ty = doc.y + 1.5;
+  doc.image(STAMP_FRAME, x, y, { width: w, height: h });
+
+  const line = (text: string, top: number, size: number, color: string, font: string): void => {
+    cap(doc, text, x, y + top * k, { size: size * k, font, color, width: w, align: "center" });
   };
-  line(`Approved - ${s.approvalDate}`, 8, GREEN, true);
-  line("SAFARICOM CUSTOMER CARE", 6, INK, true);
-  line("M-PESA Statement Period:", 6, INK);
-  line(s.periodOrdinal, 6.5, INK, true);
-  line("www.safaricom.co.ke", 6, GREEN);
-  line("P.O BOX 66827 - 00800, NAIROBI", 5.5, INK);
-  line("Simple · Transparent · Honest   FOR YOU", 5.5, GREEN, true);
-  drawOperatorMark(doc, x + w - 62, y + h - 16);
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GREEN)
-    .text("Safaricom", x + 6, y + h - 14, { width: w - 12, align: "right" });
+  // Tops and sizes in reference-artwork px, scaled by k, so the seal can be drawn at any size
+  // without re-deriving the stack. Each top is the ink top of the corresponding band in the
+  // reference artwork, and each size is that band's measured ink height over the glyph class's
+  // em fraction (0.70 for a caps/figures line, ~0.97 where the line has both an ascender and a
+  // descender). Measured, not eyeballed: the first attempt used roughly half these sizes and the
+  // seal read as a crowded label rather than a stamp.
+  line(`Issued - ${s.approvalDate}`, 59, 35, NAVY, DISPLAY_B);
+  line("INVEST254 MARKETER WALLET", 112, 20, NAVY, DISPLAY_B);
+  line("Statement Period:", 150, 26, NAVY, DISPLAY);
+  line(s.periodOrdinal, 196, 33, NAVY, DISPLAY);
+  line("invest254.com", 240, 21, GREEN, DISPLAY);
+  line("SIMULATED MARKETER FUNDS", 266, 24, NAVY, DISPLAY);
+  line("Not a mobile-money statement", 303, 17.5, GREEN, DISPLAY);
+
+  // The foot: a rule running out from the left, with the wordmark sitting on its right-hand end.
+  doc.moveTo(x + 40 * k, y + 362 * k).lineTo(x + 455 * k, y + 362 * k)
+    .lineWidth(Math.max(0.25, 2.5 * k)).strokeColor(GREEN).stroke();
+  cap(doc, "invest254", x, y + 337 * k, {
+    size: 42 * k, font: DISPLAY_B, color: GREEN, width: w - 28 * k, align: "right",
+  });
   doc.restore();
 }
 
@@ -189,62 +326,73 @@ function drawQr(doc: Doc, s: StatementDto, x: number, y: number, side: number): 
 }
 
 function drawSummary(doc: Doc, s: StatementDto): void {
-  doc.font("Helvetica-Bold").fontSize(12).fillColor(GREEN)
-    .text("SUMMARY", PAGE_MARGIN, doc.y, { width: CONTENT_W, align: "center" });
-  doc.moveDown(0.5);
+  cap(doc, "SUMMARY", TEXT_L, 199.15, {
+    size: SZ_HEADING, font: DISPLAY, color: GREEN, width: TEXT_W, align: "center",
+  });
 
-  const cols = [CONTENT_W - 190, 95, 95];
-  const rowH = 13;
-  let y = doc.y;
+  const bandTop = 212.2;
+  doc.rect(RULE_L, bandTop, RULE_W, BAND_H).fillColor(GREEN).fill();
+  const headers = ["TRANSACTION TYPE", "PAID IN", "PAID OUT"];
+  headers.forEach((label, i) => {
+    const x0 = SUM_X[i]!;
+    const x1 = SUM_X[i + 1]!;
+    if (i === 0) cap(doc, label, x0 + PAD, bandTop + BAND_TEXT, { size: SZ_LABEL, color: "#FFFFFF" });
+    else {
+      cap(doc, label, x0, bandTop + BAND_TEXT, {
+        size: SZ_LABEL, color: "#FFFFFF", width: x1 - x0, align: "center",
+      });
+    }
+  });
 
-  const cells = (values: string[], opts: { bg?: string; color: string; bold: boolean }): void => {
-    if (opts.bg) doc.rect(PAGE_MARGIN, y, CONTENT_W, rowH).fillColor(opts.bg).fill();
-    let x = PAGE_MARGIN;
-    values.forEach((v, i) => {
-      doc.font(opts.bold ? "Helvetica-Bold" : "Helvetica").fontSize(7).fillColor(opts.color)
-        .text(v, x + 4, y + 3.5, { width: cols[i]! - 8, align: i === 0 ? "left" : "right" });
-      x += cols[i]!;
+  const top = bandTop + BAND_H;                       // 223.3
+  const body: Array<[string, string, string, boolean]> = s.summary.map((r) => [
+    `${r.type}:`, money(r.paidInCents), money(r.paidOutCents), false,
+  ]);
+  body.push(["TOTAL:", money(s.totalPaidInCents), money(s.totalPaidOutCents), true]);
+
+  let y = top;
+  for (const [label, paidIn, paidOut, isTotal] of body) {
+    const h = isTotal ? BAND_H : ROW_H;
+    const size = isTotal ? SZ_LABEL : SZ_BODY;
+    const font = isTotal ? BODY_B : BODY;
+    const capTop = y + (isTotal ? BAND_TEXT : ROW_TEXT);
+    cap(doc, label, SUM_X[0]! + PAD, capTop, { size, font });
+    [paidIn, paidOut].forEach((v, i) => {
+      const x0 = SUM_X[i + 1]!;
+      cap(doc, v, x0, capTop, { size, font, width: SUM_X[i + 2]! - x0, align: "center" });
     });
-    doc.rect(PAGE_MARGIN, y, CONTENT_W, rowH).lineWidth(0.4).strokeColor(GRID).stroke();
-    y += rowH;
-  };
-
-  cells(["TRANSACTION TYPE", "PAID IN", "PAID OUT"], { bg: HEADER_GREEN, color: "#FFFFFF", bold: true });
-  for (const r of s.summary) {
-    cells([`${r.type}:`, money(r.paidInCents), money(r.paidOutCents)], { color: INK, bold: false });
+    y += h;
+    rule(doc, RULE_L, y, RULE_R);
   }
-  cells(["TOTAL:", money(s.totalPaidInCents), money(s.totalPaidOutCents)], { color: INK, bold: true });
-
-  doc.y = y + 16;
+  rule(doc, RULE_L, bandTop, RULE_R);
+  for (const x of SUM_X) vrule(doc, x, bandTop, y);
 }
 
-function drawDetail(doc: Doc, s: StatementDto, topY: number): void {
-  doc.font("Helvetica-Bold").fontSize(12).fillColor(GREEN)
-    .text("DETAILED STATEMENT", PAGE_MARGIN, doc.y, { width: CONTENT_W, align: "center" });
-  doc.moveDown(0.5);
+// ── The detail table ──────────────────────────────────────────────────────────────────────────────
+
+/** Where the detail table starts on each page: under the summary on page 1, near the top after. */
+const DETAIL_TOP_FIRST = 330.8;
+const DETAIL_TOP_REST = 53.8;
+
+function drawDetail(doc: Doc, s: StatementDto): void {
+  cap(doc, "DETAILED STATEMENT", TEXT_L, 317.65, {
+    size: SZ_HEADING, font: DISPLAY, color: GREEN, width: TEXT_W, align: "center",
+  });
 
   if (s.detail.length === 0) {
-    doc.font("Helvetica").fontSize(8).fillColor(INK)
-      .text("No transactions in this period.", PAGE_MARGIN, doc.y, { width: CONTENT_W, align: "center" });
+    cap(doc, "No transactions in this period.", TEXT_L, 345, { width: TEXT_W, align: "center" });
     return;
   }
 
-  const BOTTOM = PAGE_HEIGHT - PAGE_MARGIN;
-  let y = doc.y;
+  let bandTop = DETAIL_TOP_FIRST;
+  let y = header(doc, bandTop);
+  let tableTop = bandTop;
 
-  const header = (): void => {
-    doc.rect(PAGE_MARGIN, y, CONTENT_W, 14).fillColor(HEADER_GREEN).fill();
-    let x = PAGE_MARGIN;
-    for (const c of DETAIL_COLS) {
-      doc.font("Helvetica-Bold").fontSize(6).fillColor("#FFFFFF")
-        .text(c.label, x + 3, y + 4.5, { width: c.w - 6, align: "left" });
-      x += c.w;
-    }
-    doc.rect(PAGE_MARGIN, y, CONTENT_W, 14).lineWidth(0.4).strokeColor(GRID).stroke();
-    y += 14;
+  const closePage = (): void => {
+    rule(doc, RULE_L, tableTop, RULE_R);
+    for (const x of COL_X) vrule(doc, x, tableTop, y);
   };
 
-  header();
   for (const r of s.detail) {
     const values: Record<string, string> = {
       code: r.code,
@@ -257,63 +405,146 @@ function drawDetail(doc: Doc, s: StatementDto, topY: number): void {
     };
     // Measured BEFORE anything is drawn: the Details column wraps, and a row half on one page and
     // half on the next is the classic table-in-a-PDF bug.
-    const detailsCol = DETAIL_COLS[2]!;
-    doc.font("Helvetica").fontSize(6.2);
-    const textH = doc.heightOfString(values.details ?? "", { width: detailsCol.w - 6 });
-    const rowH = Math.max(13, textH + 6);
+    const lines = wrapCount(doc, values.details ?? "", COL_X[3]! - COL_X[2]! - PAD * 2);
+    const h = Math.max(ROW_H, 4 + LINE_H * lines);
 
-    if (y + rowH > BOTTOM) {
+    if (y + h > TABLE_BOTTOM) {
+      closePage();
       doc.addPage();
-      y = topY;
-      header();
+      bandTop = DETAIL_TOP_REST;
+      tableTop = bandTop;
+      y = header(doc, bandTop);
     }
 
-    let x = PAGE_MARGIN;
-    for (const c of DETAIL_COLS) {
-      doc.font("Helvetica").fontSize(6.2).fillColor(INK)
-        .text(values[c.key] ?? "", x + 3, y + 3, { width: c.w - 6, align: c.align });
-      x += c.w;
-    }
-    doc.rect(PAGE_MARGIN, y, CONTENT_W, rowH).lineWidth(0.3).strokeColor(GRID).stroke();
-    y += rowH;
+    DETAIL_COLS.forEach((c, i) => {
+      const x0 = COL_X[i]!;
+      const w = COL_X[i + 1]! - x0 - PAD * 2;
+      const v = values[c.key] ?? "";
+      if (c.key === "details") {
+        cap(doc, v, x0 + PAD, y + ROW_TEXT, {
+          width: w, wrap: true, lineGap: LINE_H,
+        });
+      } else if (c.align === "right") {
+        cap(doc, v, x0 + PAD, y + ROW_TEXT, { width: w, align: "right" });
+      } else {
+        cap(doc, v, x0 + PAD, y + ROW_TEXT, { width: w });
+      }
+    });
+
+    y += h;
+    rule(doc, RULE_L, y, RULE_R);
   }
+  closePage();
 
   if (s.truncated) {
-    if (y + 20 > BOTTOM) { doc.addPage(); y = topY; }
-    doc.font("Helvetica-Oblique").fontSize(6.5).fillColor(INK)
-      .text(
-        `Showing the most recent ${s.detail.length} of ${s.txnCount} transactions. ` +
-          `The summary above covers all ${s.txnCount}.`,
-        PAGE_MARGIN, y + 6, { width: CONTENT_W, align: "center" },
-      );
+    cap(
+      doc,
+      `Showing the most recent ${s.detail.length} of ${s.txnCount} transactions. ` +
+        `The summary above covers all ${s.txnCount}.`,
+      TEXT_L, Math.min(y + 4, TABLE_BOTTOM), { width: TEXT_W, align: "center" },
+    );
+  }
+}
+
+/** Draw the green column-header band at `bandTop`; returns the y the first row starts at. */
+function header(doc: Doc, bandTop: number): number {
+  doc.rect(RULE_L, bandTop, RULE_W, BAND_H).fillColor(GREEN).fill();
+  DETAIL_COLS.forEach((c, i) => {
+    const x0 = COL_X[i]!;
+    cap(doc, c.label, x0, bandTop + BAND_TEXT, {
+      size: SZ_LABEL, color: "#FFFFFF", width: COL_X[i + 1]! - x0, align: "center",
+    });
+  });
+  const y = bandTop + BAND_H;
+  rule(doc, RULE_L, y, RULE_R);
+  return y;
+}
+
+/**
+ * How many lines `text` wraps to in `width` at the body size.
+ *
+ * Asks pdfkit rather than re-implementing its line breaker. A hand-rolled word-wrap was the first
+ * version and it under-counted — pdfkit breaks on more than spaces — so rows were given too little
+ * height and the table drew each row over the one above it.
+ */
+function wrapCount(doc: Doc, text: string, width: number): number {
+  if (!text) return 1;
+  doc.font(BODY).fontSize(SZ_BODY);
+  const gap = LINE_H - doc.currentLineHeight(false);
+  return Math.max(1, Math.round(doc.heightOfString(text, { width, lineGap: gap }) / LINE_H));
+}
+
+// ── Furniture repeated on every page ──────────────────────────────────────────────────────────────
+
+const DISCLAIMER =
+  "Disclaimer: Any personal information shared with you should be handled in accordance with the " +
+  "Data Protection Act and only used for the purpose for which it was provided.";
+
+const FOOTER =
+  "invest254 marketer wallet | Web: invest254.com | These are simulated marketer funds, not a " +
+  "mobile-money account";
+
+function drawPageFurniture(doc: Doc, s: StatementDto): void {
+  const range = doc.bufferedPageRange();
+  for (let i = 0; i < range.count; i++) {
+    doc.switchToPage(range.start + i);
+
+    cap(doc, `Page ${i + 1} of ${range.count}`, TEXT_L, 39.45, {
+      size: SZ_BODY, width: TEXT_W, align: "right",
+    });
+
+    // The watermark, on every page but the first — which carries the upright seal instead.
+    if (i > 0) drawWatermark(doc, s);
+
+    cap(doc, DISCLAIMER, TEXT_L, 725.19, { size: SZ_LABEL, width: TEXT_W, wrap: true, lineGap: 10.5 });
+
+    drawVerifyPanel(doc, s);
+
+    cap(doc, FOOTER, TEXT_L, 820.56, {
+      size: SZ_LABEL, width: TEXT_W, align: "center", wrap: true, lineGap: 7,
+    });
   }
 }
 
 /**
- * Pass two: "Page N of M" on every page, now that M is known.
+ * The seal again, rotated 45 degrees across the middle of the page.
  *
- * Also the rule under it, which is drawn here rather than in pass one so it cannot be missed on a
- * page the detail table added for itself.
+ * 45 is not an approximation: the reference's watermark is a square raster, and a rotated rectangle
+ * has a square bounding box only at 45 degrees. Measuring the extreme points of its alpha mask gives
+ * 45.00 / 44.85 / 44.82 on the three edges, which is that same answer back through the rounding.
  */
-function stampPageHeaders(doc: Doc): void {
-  const range = doc.bufferedPageRange();
-  for (let i = 0; i < range.count; i++) {
-    doc.switchToPage(range.start + i);
-    doc.font("Helvetica").fontSize(7).fillColor(INK)
-      .text(`Page ${i + 1} of ${range.count}`, PAGE_MARGIN, PAGE_MARGIN - 4,
-        { width: CONTENT_W, align: "right" });
-    doc.moveTo(PAGE_MARGIN, PAGE_MARGIN + 8).lineTo(PAGE_MARGIN + CONTENT_W, PAGE_MARGIN + 8)
-      .lineWidth(0.6).strokeColor(GRID).stroke();
-  }
+function drawWatermark(doc: Doc, s: StatementDto): void {
+  // 134.7 x 81.4 turned 45 degrees has a 152.75pt square bounding box — the reference's exactly.
+  const w = 134.7;
+  const h = (w * 409) / 677;
+  doc.save();
+  // Negative: pdfkit's y axis points down, so a positive angle turns clockwise and the reference
+  // reads bottom-left to top-right.
+  doc.rotate(-45, { origin: [CENTRE, PAGE_H / 2] });
+  drawSeal(doc, s, CENTRE - w / 2, PAGE_H / 2 - h / 2, w);
+  doc.restore();
 }
 
-/** The operator's ribbon mark, drawn beside the wordmark in the seal. Two arcs, as the brand has. */
-function drawOperatorMark(doc: Doc, x: number, y: number): void {
-  doc.save();
-  doc.lineCap("round");
-  doc.moveTo(x, y + 10).bezierCurveTo(x + 1, y - 1, x + 8, y - 4, x + 15, y + 10)
-    .lineWidth(2.6).strokeColor(GREEN).stroke();
-  doc.moveTo(x + 4, y + 12).bezierCurveTo(x + 5, y + 4, x + 9, y + 3, x + 12, y + 12)
-    .lineWidth(2.2).strokeColor("#E1251B").stroke();
-  doc.restore();
+/**
+ * The verification panel.
+ *
+ * The reference tells the reader to dial an operator short code to confirm the statement is genuine.
+ * Ours cannot be confirmed that way and does not claim to be: it points at this API's own lookup,
+ * which resolves the reference printed beside it. A verification instruction that does not resolve
+ * is worse than none — it borrows an assurance the document has not got.
+ */
+function drawVerifyPanel(doc: Doc, s: StatementDto): void {
+  const top = 747;
+  doc.rect(RULE_L, top, RULE_W, 68).fillColor(PANEL).fill();
+
+  cap(doc, "Statement Verification Code", 44, 754.69, { size: SZ_LABEL });
+  cap(doc, s.ref, 45, 768.07, { size: SZ_CODE, font: DISPLAY, color: GREEN });
+
+  cap(doc,
+    "To verify this statement, open invest254.com/verify and enter the code, or scan the QR on page 1.",
+    230.76, 754.69,
+    { size: SZ_LABEL, width: 553 - 230.76, align: "right", wrap: true, lineGap: 7 });
+
+  doc.moveTo(45, 793.5).lineTo(418, 793.5).lineWidth(0.8).strokeColor(GREEN).stroke();
+  cap(doc, "invest254", RULE_L, 782, { size: 16, font: DISPLAY_B, color: GREEN, width: 551 - RULE_L, align: "right" });
 }

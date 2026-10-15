@@ -32,7 +32,7 @@ export const SUMMARY_ROWS = [
   "RECEIVED MONEY",
   "AGENT DEPOSIT",
   "AGENT WITHDRAWAL",
-  "LIPA NA M-PESA (PAY BILL)",
+  "LIPA NA M-PESA (PAYBILL)",
   "LIPA NA M-PESA (BUY GOODS)",
   "OTHERS",
 ] as const;
@@ -48,7 +48,7 @@ export const SUMMARY_ROWS = [
  * latter.
  */
 export const UNRECORDED_ROWS: ReadonlySet<string> = new Set([
-  "LIPA NA M-PESA (PAY BILL)",
+  "LIPA NA M-PESA (PAYBILL)",
   "LIPA NA M-PESA (BUY GOODS)",
 ]);
 

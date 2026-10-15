@@ -32,7 +32,7 @@
 -- agent — they are the platform paying out. Filing them under AGENT DEPOSIT would make that row
 -- mean two different things. OTHERS is the honest bucket, and the detail rows say which is which.
 --
--- LIPA NA M-PESA (PAY BILL) and (BUY GOODS) are returned as ZERO by the route, not by this
+-- LIPA NA M-PESA (PAYBILL) and (BUY GOODS) are returned as ZERO by the route, not by this
 -- function, because NOTHING IN THE SYSTEM RECORDS SUCH A SPEND YET: the app's airtime, bundle,
 -- paybill and buy-goods screens are local-only and never reach the server (see docs/65 §4). The
 -- rows are printed so the table matches the reference, and they will stay zero until those flows

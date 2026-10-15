@@ -170,19 +170,24 @@ test("the detail names the counterparty and carries the feed's own confirmation 
   } finally { await api.close(); }
 });
 
-test("the detail reads oldest-first, which is the direction a statement is read", async () => {
+test("the detail reads newest-first, as the reference statement does", async () => {
+  // 0208 ordered this ascending on the argument that a reader follows the Balance column downward.
+  // The reference artifact settles it the other way: its first page opens on the most recent
+  // transaction and walks backwards. A statement is read to see what happened lately, and on a long
+  // one the alternative is paging to the end to find today. See docs/67 §4 and migration 0209.
   const api = await startTestApi();
   try {
     const me = await marketer(api, "Tony Angwa", "0722400006", 90_000);
     await req(api, "POST", `/api/v1/admin/marketers/${me}/withdraw`, { token: ADMIN_A, body: { amountCents: 1_000, ref: newRef() } });
     await req(api, "POST", `/api/v1/admin/marketers/${me}/withdraw`, { token: ADMIN_A, body: { amountCents: 2_000, ref: newRef() } });
     const s = await json(await req(api, "GET", STMT(), { token: mtok(me) }));
-    assert.equal(s.detail.length, 3);                       // seed credit, then the two withdrawals
-    assert.equal(s.detail[0].details, "Deposit of Funds");
+    assert.equal(s.detail.length, 3);                       // the two withdrawals, then the seed credit
+    assert.equal(s.detail[0].withdrawnCents, 2_000);
     assert.equal(s.detail[1].withdrawnCents, 1_000);
-    assert.equal(s.detail[2].withdrawnCents, 2_000);
-    // The running balance is the ledger's, not recomputed here.
-    assert.equal(s.detail[2].balanceCents, 87_000);
+    assert.equal(s.detail[2].details, "Deposit of Funds");
+    // The running balance is the ledger's, not recomputed here — so the NEWEST row carries the
+    // latest balance, and reading upward from the bottom is what retraces how it got there.
+    assert.equal(s.detail[0].balanceCents, 87_000);
   } finally { await api.close(); }
 });
 

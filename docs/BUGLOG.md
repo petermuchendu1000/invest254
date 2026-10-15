@@ -5,6 +5,57 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #151 — The PDF text extractor silently rewrote the document it was checking — FIXED
+- **What:** `pdfText()` in `marketers.statement.pdf.test.ts` decodes the document's text so the
+  assertions can read it. Switching the statement from the standard-14 fonts to embedded DejaVu and
+  Jost subsets changed the encoding from single-byte WinAnsi to Identity-H — 16-bit glyph IDs — so
+  the helper was rewritten to map each CID through the font's `/ToUnicode` CMap. Two bugs in that
+  rewrite, each of which produced *plausible* text rather than obvious garbage.
+- **Bug A — the contiguous-range pattern matched inside the array form.** A CMap `bfrange` entry is
+  either `<lo> <hi> <dstStart>` or `<lo> <hi> [<u0> <u1> ...]`. Scanning for both with two
+  independent regexes looks equivalent to scanning once; it is not, because `<a> <b> <c>` also
+  matches any three consecutive destinations *inside* an array, overwriting real mappings with
+  values derived from their neighbours.
+- **Bug B — ligature destinations were skipped entirely.** The CMap writes the "ff" ligature as
+  `<0066 0066>`, with a space inside the brackets. The destination pattern `<([0-9a-fA-F]*)>` does
+  not match that, so the entry was skipped — which did not lose one glyph, it shifted **every**
+  mapping after it by one.
+- **Evidence:** the extracted text read `Disclaimer: An* personal information ... proKided` and
+  `To Kerif* this statement, open inKest254.comkKerif*` — `y`→`*`, `v`→`K`, `/`→`k`, `fi`→`Q`.
+- **Impact:** test-only, and caught before it could mislead. But the failure mode is the dangerous
+  one: a helper that returns *almost* the right text makes some assertions fail for the wrong reason
+  and lets others pass for the wrong reason. The two tests that failed pointed at the document, not
+  at the helper.
+- **Resolution:** one sequential pass over each `bfrange` block handling both entry forms in order,
+  and `\s` admitted into every destination character class, with whitespace stripped before the hex
+  is paired off. Full suite green.
+- **Lesson:** when a decoder's output is readable, "readable" is not "correct". Both bugs would have
+  been invisible had the sample text not contained a `y`.
+
+---
+
+## #150 — The statement was printed in the wrong direction — FIXED (migration 0209)
+- **What:** `fn_marketer_statement_range` returned the detail **oldest-first**. The reference
+  statement supplied as the artifact to reproduce runs **newest-first**: its first page opens on
+  `2026-10-14 21:24:50` and walks backwards, and every page after continues down.
+- **Root cause:** not a coding error — a reasoning error, made in `0208` while fixing #149. Having
+  corrected the ordering *column* (`created_at`, which the statement prints, not `id`, which it does
+  not), 0208 chose ascending so a reader could follow the Balance column downward as a running
+  total. That argument is sound in the abstract and was made **in place of looking at the artifact**,
+  which was available.
+- **Impact:** on a long statement — the reference is 255 pages — the most recent transactions land
+  on the last page. A report produced for accountability buries the thing it is consulted for.
+- **Resolution:** `0209` reverses the final `order by` to `created_at desc, id desc`. The column fix
+  from 0208 stands and is the load-bearing part; only the direction changed. The cap still selects
+  the NEWEST `p_cap` rows — the migration and the in-memory mirror each do the select and the
+  reverse as two explicit steps, because collapsing them is how one silently returns the oldest.
+- **Also corrected alongside:** the summary label `LIPA NA M-PESA (PAY BILL)` → `(PAYBILL)`, one
+  word, as the reference prints it; and the disclaimer, verification panel and footer now repeat on
+  every page rather than the last, which is what the reference does.
+- See `docs/67` §4.
+
+---
+
 ## #149 — The statement sorted by one column and printed another — FIXED (migration 0208)
 - **What:** `fn_marketer_statement_range` (0206) ordered the detail rows by **`id`**. The statement
   PRINTS **`created_at`**. 0206's own header asserted the two were interchangeable — *"both columns

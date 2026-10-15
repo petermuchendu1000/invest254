@@ -240,7 +240,7 @@ test("the purchase lands in OTHERS, which is where a real statement counts airti
     assert.equal(others.paidInCents, 0);
     // It is not a till, not a pay bill, and not a withdrawal at an agent.
     assert.equal(s.summary.find((r: any) => r.type === "AGENT WITHDRAWAL").paidOutCents, 0);
-    assert.equal(s.summary.find((r: any) => r.type === "LIPA NA M-PESA (PAY BILL)").paidOutCents, 0);
+    assert.equal(s.summary.find((r: any) => r.type === "LIPA NA M-PESA (PAYBILL)").paidOutCents, 0);
     assert.equal(s.summary.find((r: any) => r.type === "LIPA NA M-PESA (BUY GOODS)").paidOutCents, 0);
     assert.equal(s.totalPaidOutCents, 10_000);
 

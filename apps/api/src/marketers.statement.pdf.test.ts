@@ -12,33 +12,160 @@ import { sealDate, sealPeriod, statementQr, type StatementDto, type StatementDet
  * produced an uncompressed document would be testing a file nobody receives.
  */
 
-/**
- * The visible text of the document.
- *
- * Each page is a deflated content stream, and pdfkit shows text as a KERNED TJ array of hex
- * strings — `[<4d2d5045534120 ...> 90 <41> ...] TJ` — so the hex runs of one operator are
- * reassembled into the word they spell and the kerning numbers between them dropped. Reading the
- * streams raw (the first version of this helper) finds nothing at all, which looked exactly like a
- * PDF with no text in it.
- */
-function pdfText(pdf: Buffer): string {
+interface PdfObj { dict: string; stream?: Buffer }
+
+/** Index every `N 0 obj`, skipping past stream bodies so binary data cannot be mistaken for one. */
+function parseObjects(pdf: Buffer): Map<number, PdfObj> {
   const raw = pdf.toString("latin1");
-  const re = /stream\r?\n([\s\S]*?)endstream/g;
-  let out = "";
+  const out = new Map<number, PdfObj>();
+  const re = /(\d+) 0 obj\b/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) {
-    let page: string;
-    try { page = inflateSync(Buffer.from(m[1]!, "latin1")).toString("latin1"); } catch { continue; }
-    out += page.replace(/\[([^\]]*)\]\s*TJ/g, (_all, arr: string) => {
-      let word = "";
-      for (const hex of arr.matchAll(/<([0-9a-fA-F]*)>/g)) {
-        word += Buffer.from(hex[1]!, "hex").toString("latin1");
-      }
-      return `${word}\n`;
-    });
+    const start = m.index + m[0].length;
+    const sIdx = raw.indexOf("stream", start);
+    const eIdx = raw.indexOf("endobj", start);
+    if (sIdx !== -1 && (eIdx === -1 || sIdx < eIdx)) {
+      const from = raw[sIdx + 6] === "\r" ? sIdx + 8 : sIdx + 7;
+      const to = raw.indexOf("endstream", from);
+      out.set(Number(m[1]), { dict: raw.slice(start, sIdx), stream: Buffer.from(raw.slice(from, to), "latin1") });
+      re.lastIndex = to;
+    } else {
+      out.set(Number(m[1]), { dict: raw.slice(start, eIdx === -1 ? undefined : eIdx) });
+    }
   }
   return out;
 }
+
+/**
+ * `<0041>` -> "A". A destination may hold SEVERAL code units, and a CMap may space them out —
+ * `<0066 0066>` is the "ff" ligature — so the whitespace is stripped before pairing off the digits.
+ */
+const utf16be = (hex: string): string => {
+  const h = hex.replace(/\s+/g, "");
+  let s = "";
+  for (let i = 0; i + 4 <= h.length; i += 4) s += String.fromCharCode(parseInt(h.slice(i, i + 4), 16));
+  return s;
+};
+
+/** A font's CID -> text mapping, read from the `/ToUnicode` CMap pdfkit embeds beside each subset. */
+function toUnicode(stream: Buffer): Map<number, string> {
+  const map = new Map<number, string>();
+  let txt: string;
+  try { txt = inflateSync(stream).toString("latin1"); } catch { txt = stream.toString("latin1"); }
+  for (const block of txt.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+    for (const p of block[1]!.matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F\s]+)>/g)) {
+      map.set(parseInt(p[1]!, 16), utf16be(p[2]!));
+    }
+  }
+  // ONE pass, consuming each entry in order. Two independent regexes — array form, then contiguous
+  // form — look equivalent and are not: the contiguous pattern `<a> <b> <c>` also matches any three
+  // consecutive destinations INSIDE an array, so it overwrote real mappings with garbage derived
+  // from its neighbours. The symptom was a document that decoded almost perfectly, with "*" coming
+  // out as "v" and "verify" as "Kerify" — close enough to look like an encoding quirk rather than a
+  // parser bug.
+  for (const block of txt.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+    const entry = /<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*(?:\[([\s\S]*?)\]|<([0-9a-fA-F]+)>)/g;
+    let p: RegExpExecArray | null;
+    while ((p = entry.exec(block[1]!)) !== null) {
+      const lo = parseInt(p[1]!, 16);
+      if (p[3] !== undefined) {
+        // `<lo> <hi> [<u0> <u1> ...]` — one destination per CID. This is what pdfkit writes for a
+        // subset, whose glyph order has nothing to do with codepoint order.
+        let c = lo;
+        // NOTE the \s in the class: a ligature destination is written `<0066 0066>`, and a class
+        // without it skips that entry entirely — which does not lose one glyph, it shifts every
+        // mapping after it by one and quietly rewrites the rest of the document.
+        for (const d of p[3].matchAll(/<([0-9a-fA-F\s]*)>/g)) map.set(c++, utf16be(d[1]!));
+      } else {
+        const hi = parseInt(p[2]!, 16), dst = parseInt(p[4]!, 16);
+        for (let c = lo; c <= hi; c++) map.set(c, String.fromCodePoint(dst + (c - lo)));
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * The visible text of the document.
+ *
+ * Asserted against the REAL artifact rather than a build with compression turned off: pdfkit
+ * deflates its content streams, so the text is recovered by inflating them here. A test seam that
+ * produced an uncompressed document would be testing a file nobody receives.
+ *
+ * THE BYTES ARE GLYPH IDS, NOT CHARACTERS. The document embeds subsets of DejaVu Sans and Jost with
+ * Identity-H encoding, so `<0024 0048>` is a pair of 16-bit glyph indices into one font's subset,
+ * and the same index means a different letter in the other font. An earlier version of this helper
+ * decoded the hex as latin1 — which was right while the document used the standard-14 fonts and
+ * silently returned mojibake the moment it did not. So: track `/Fn <size> Tf` to know which font is
+ * live, and map each CID through that font's own `/ToUnicode` CMap.
+ */
+function pdfText(pdf: Buffer): string {
+  const objs = parseObjects(pdf);
+
+  const cmaps = new Map<number, Map<number, string>>();
+  for (const [num, o] of objs) {
+    const tu = /\/ToUnicode (\d+) 0 R/.exec(o.dict);
+    const s = tu && objs.get(Number(tu[1]))?.stream;
+    if (s) cmaps.set(num, toUnicode(s));
+  }
+
+  let out = "";
+  for (const o of objs.values()) {
+    if (!/\/Type\s*\/Page[^s]/.test(o.dict)) continue;
+
+    // `/Resources` is an indirect reference, not an inline dict — pdfkit shares one resource object
+    // across the pages that use the same fonts, so the font names must be read from THERE.
+    const rr = /\/Resources (\d+) 0 R/.exec(o.dict);
+    const res = rr ? objs.get(Number(rr[1]))?.dict ?? o.dict : o.dict;
+
+    const fonts = new Map<string, Map<number, string>>();
+    const fd = /\/Font\s*<<([^>]*)>>/.exec(res);
+    if (fd) {
+      for (const p of fd[1]!.matchAll(/\/(\w+)\s+(\d+)\s+0\s+R/g)) {
+        const cm = cmaps.get(Number(p[2]));
+        if (cm) fonts.set(p[1]!, cm);
+      }
+    }
+
+    const nums: number[] = [];
+    const cm = /\/Contents\s+(?:\[([^\]]*)\]|(\d+)\s+0\s+R)/.exec(o.dict);
+    if (cm?.[1]) for (const r of cm[1].matchAll(/(\d+)\s+0\s+R/g)) nums.push(Number(r[1]));
+    else if (cm?.[2]) nums.push(Number(cm[2]));
+
+    let live: Map<number, string> | undefined;
+    for (const n of nums) {
+      const st = objs.get(n)?.stream;
+      if (!st) continue;
+      let content: string;
+      try { content = inflateSync(st).toString("latin1"); } catch { continue; }
+      const tok = /\/(\w+)\s+[\d.]+\s+Tf|\[([^\]]*)\]\s*TJ|<([0-9a-fA-F]*)>\s*Tj/g;
+      let t: RegExpExecArray | null;
+      while ((t = tok.exec(content)) !== null) {
+        if (t[1] !== undefined) { live = fonts.get(t[1]); continue; }
+        const runs = t[2] !== undefined
+          ? [...t[2].matchAll(/<([0-9a-fA-F]*)>/g)].map((h) => h[1]!)
+          : [t[3]!];
+        let word = "";
+        for (const hex of runs) {
+          for (let i = 0; i + 4 <= hex.length; i += 4) {
+            word += live?.get(parseInt(hex.slice(i, i + 4), 16)) ?? "";
+          }
+        }
+        out += `${word}\n`;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The document's text with line breaks flattened, for strings the layout may WRAP.
+ *
+ * A cell that wraps is drawn as one text run per line, so "Customer Transfer to - PETER MUCHENDU"
+ * legitimately arrives as three runs. Matching the wrapped form would make the assertion a test of
+ * the column width rather than of the content.
+ */
+const flat = (t: string): string => t.replace(/\s+/g, " ");
 
 const pageCount = (pdf: Buffer): number => (pdf.toString("latin1").match(/\/Type \/Page[^s]/g) ?? []).length;
 
@@ -74,7 +201,7 @@ function dto(over: Partial<StatementDto> = {}): StatementDto {
       { type: "RECEIVED MONEY", paidInCents: 93_124_595, paidOutCents: 0 },
       { type: "AGENT DEPOSIT", paidInCents: 668_000, paidOutCents: 0 },
       { type: "AGENT WITHDRAWAL", paidInCents: 0, paidOutCents: 8_557_100 },
-      { type: "LIPA NA M-PESA (PAY BILL)", paidInCents: 2_562_500, paidOutCents: 16_237_813 },
+      { type: "LIPA NA M-PESA (PAYBILL)", paidInCents: 2_562_500, paidOutCents: 16_237_813 },
       { type: "LIPA NA M-PESA (BUY GOODS)", paidInCents: 4_585_539, paidOutCents: 13_341_800 },
       { type: "OTHERS", paidInCents: 197_401_675, paidOutCents: 36_974_200 },
     ],
@@ -105,7 +232,7 @@ test("it is a PDF, and a well-formed one", async () => {
 
 test("the header band prints every field the reference prints", async () => {
   const text = pdfText(await buildStatementPdf(dto(), OPTS));
-  assert.match(text, /M-PESA STATEMENT/);
+  assert.match(text, /MARKETER WALLET STATEMENT/);
   assert.match(text, /Customer Name:/);
   assert.match(text, /Faith Mwende Mutiso/);
   assert.match(text, /Mobile Number:/);
@@ -140,20 +267,33 @@ test("an unset email says so rather than printing an empty row", async () => {
   assert.match(text, /Not set/);
 });
 
-test("the approval seal carries its own ordinal dates", async () => {
+test("the issue seal carries its own ordinal dates", async () => {
   const text = pdfText(await buildStatementPdf(dto(), OPTS));
-  assert.match(text, /Approved - 15th October 2026/);
-  assert.match(text, /SAFARICOM CUSTOMER CARE/);
+  assert.match(text, /Issued - 15th October 2026/);
+  assert.match(text, /INVEST254 MARKETER WALLET/);
   assert.match(text, /1st Jan 2024 - 15th Oct 2026/);
-  assert.match(text, /www\.safaricom\.co\.ke/);
-  assert.match(text, /P\.O BOX 66827 - 00800, NAIROBI/);
+  assert.match(text, /invest254\.com/);
+  assert.match(text, /SIMULATED MARKETER FUNDS/);
+});
+
+test("the document does not present itself as an operator's statement", async () => {
+  // The layout is copied from an M-PESA statement; the ATTESTATION is not, and must not drift back.
+  // These balances are invest254's own simulated marketer wallet, and no operator can confirm them,
+  // so a seal, a verification route or a footer carrying an operator's name would be a false claim
+  // about who issued the document and who stands behind it. See docs/67 §3.
+  const text = pdfText(await buildStatementPdf(dto(), OPTS));
+  for (const claim of [/SAFARICOM/i, /M-PESA STATEMENT/, /\*334#/, /safaricom\.co\.ke/i, /Approved -/]) {
+    assert.ok(!claim.test(text), `the document claims ${claim} — see docs/67 §3`);
+  }
+  assert.match(text, /invest254\.com\/verify/);
+  assert.match(text, /simulated marketer funds/i);
 });
 
 test("the summary prints all eight rows with a colon, and the totals", async () => {
   const text = pdfText(await buildStatementPdf(dto(), OPTS));
   assert.match(text, /SUMMARY/);
   for (const t of ["SEND MONEY:", "RECEIVED MONEY:", "AGENT DEPOSIT:", "AGENT WITHDRAWAL:",
-                   "LIPA NA M-PESA \\(PAY BILL\\):", "LIPA NA M-PESA \\(BUY GOODS\\):", "OTHERS:", "TOTAL:"]) {
+                   "LIPA NA M-PESA \\(PAYBILL\\):", "LIPA NA M-PESA \\(BUY GOODS\\):", "OTHERS:", "TOTAL:"]) {
     assert.match(text, new RegExp(t), `missing summary row ${t}`);
   }
   // The figures themselves, grouped as the reference groups them.
@@ -169,7 +309,7 @@ test("the detail table has the reference's seven columns, Transaction Status inc
     assert.match(text, new RegExp(h.replace(/\./g, "\\.")), `missing column ${h}`);
   }
   assert.match(text, /UJEJ0AN000/);
-  assert.match(text, /Customer Transfer to - PETER MUCHENDU/);
+  assert.match(flat(text), /Customer Transfer to - PETER MUCHENDU/);
   assert.match(text, /Completed/);
   // Sortable 24-hour timestamps, not the receipt's friendlier "9:24 PM" form.
   assert.match(text, /2026-10-14 21:24:50/);
@@ -238,7 +378,7 @@ test("a truncated statement says what the detail is short of", async () => {
 
 test("the document's own metadata names the statement", async () => {
   const raw = (await buildStatementPdf(dto(), OPTS)).toString("latin1");
-  assert.match(raw, /M-PESA Statement 01 Jan 2024 - 15 Oct 2026/);
+  assert.match(raw, /Marketer Wallet Statement 01 Jan 2024 - 15 Oct 2026/);
   assert.match(raw, /Statement UJEJ0ANPDS/);
 });
 
