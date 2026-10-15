@@ -5,6 +5,53 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #152 — Admin payout decisions deadlocked behind an unreachable security prompt — FIXED
+- **Reported as:** *"I can't accept or reject."* The Reject dialog sat on **"Rejecting…"** forever,
+  with the "Confirm it's you" step-up prompt visible but greyed out BEHIND it.
+- **What:** `StepUpGate` rendered at **`z-[62]`**; `RejectDialog` renders at **`z-[70]`**. Rejecting
+  a commission payout is an action launched *from* a dialog, so the 403 `STEP_UP_REQUIRED` it
+  provoked raised a challenge that painted **underneath the dialog that triggered it**. The reject
+  dialog's own container is `fixed inset-0`, so it swallowed every click aimed at the prompt.
+- **Why it hangs rather than errors:** the gate is deliberately non-dismissible — no backdrop click,
+  no Esc — because a refused call is parked behind it and `apiFetch` replays that call only once the
+  challenge settles (`client.ts:97`). Unreachable + non-dismissible = the promise never settles, so
+  the mutation never leaves `isPending`.
+- **Why BOTH buttons died, not just reject:** `ReferralPayouts` gated every row's controls on the
+  SHARED `action.isPending`. One permanently-pending mutation therefore disabled approve *and*
+  reject on **every row in the panel** until the operator reloaded. The reported symptom is the
+  amplification, not the cause.
+- **It is worse than one panel.** `requestStepUp` keeps ONE global `pending` slot and has no
+  timeout (`stepUp.ts:75`): while a challenge is outstanding, a later gated call either joins that
+  same promise or resolves `false` immediately. So the stuck reject did not just freeze the payout
+  queue — until the tab was reloaded, every other gated admin action in the app either hung on the
+  same unreachable prompt or failed with its raw 403.
+- **Impact:** no commission payout could be approved or rejected from the moment anyone clicked
+  Reject once. Not data loss — the payout stayed `requested` and nothing was dispatched — but the
+  queue was unworkable, and the obvious operator response (reload, click Reject again) reproduced it
+  every time.
+- **Resolution, two parts:**
+  1. The three security gates move to the top of the stack — `SecurityQuestionsGate` `z-[100]`,
+     `MfaEnrolmentGate` `z-[101]`, `StepUpGate` `z-[102]`, above the app's previous ceiling of
+     `z-[91]`. They are the only overlays with a blocked request behind them, so they outrank
+     everything by definition.
+  2. `busyId = action.isPending ? action.variables?.id : undefined` — the in-flight lock now names
+     WHICH row is being decided instead of WHETHER one is. Applied to `ReferralPayouts` and
+     `Advances`. (`AffiliatePayoutsPanel` already calls `usePayoutAction()` per row, so it was
+     never affected.)
+- **Regression guard:** `gates.z.test.ts` reads the source and fails if ANY `fixed` overlay is given
+  a z-index at or above the gates. Bumping three numbers fixes today; the test is what stops the
+  next `z-[110]` modal from putting it back. **Proven to fail when `StepUpGate` is reverted to
+  `z-[62]`** — both assertions go red.
+- **Two bugs inside the guard itself, worth recording:** the first version matched `z-50` and
+  nothing else, because the trailing `\b` in `/\bz-(?:\[(\d+)\]|(\d+))\b/` cannot match after
+  `z-[70]` — `]` and the following space are both non-word, so there is no boundary. It reported
+  "no z-index at all" for the gates rather than a failed comparison. The second was the className
+  scanner desynchronising on apostrophes inside comments, which made it find zero overlays. Both
+  are the same hazard: **a checker that silently examines nothing looks exactly like a passing
+  test.** Hence the explicit `zs.length > 0` assertion per gate file.
+
+---
+
 ## #151 — The PDF text extractor silently rewrote the document it was checking — FIXED
 - **What:** `pdfText()` in `marketers.statement.pdf.test.ts` decodes the document's text so the
   assertions can read it. Switching the statement from the standard-14 fonts to embedded DejaVu and

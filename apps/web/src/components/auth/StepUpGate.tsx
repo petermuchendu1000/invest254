@@ -30,6 +30,13 @@ import type { SecurityQuestionDto, StepUpStatusDto } from '@/lib/api/types';
  * not an interruption to be flicked away: a refused call is waiting behind it. Cancel is explicit,
  * and rejects that call with its original error.
  *
+ * IT MUST OUTRANK EVERY OTHER OVERLAY (z-[102]). Non-dismissible and unreachable is a deadlock, and
+ * that is exactly what shipped: the gate sat at z-[62] while RejectDialog sat at z-[70], so a reject
+ * launched FROM a dialog raised a challenge that rendered underneath it. The challenge promise never
+ * settled, the mutation never finished, and because the panel disables its buttons on the shared
+ * `isPending`, one stuck reject disabled approve AND reject on every row until a reload. See
+ * BUGLOG #152. `gates.z.test.ts` fails if any `fixed` overlay is given a z at or above the gates.
+ *
  * Privileged roles only. A player or marketer never mounts this: they have no privileged surface,
  * the server never answers them STEP_UP_REQUIRED, and they are most of the traffic.
  *
@@ -270,7 +277,7 @@ export function StepUpGate() {
 
   return (
     <div
-      className="fixed inset-0 z-[62] flex items-stretch justify-center overflow-y-auto sm:items-center"
+      className="fixed inset-0 z-[102] flex items-stretch justify-center overflow-y-auto sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label="Confirm this action"

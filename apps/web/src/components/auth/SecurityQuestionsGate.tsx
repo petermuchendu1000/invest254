@@ -142,7 +142,7 @@ export function SecurityQuestionsGate() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-stretch justify-center overflow-y-auto sm:items-center"
+      className="fixed inset-0 z-[100] flex items-stretch justify-center overflow-y-auto sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label="Set up your security questions"

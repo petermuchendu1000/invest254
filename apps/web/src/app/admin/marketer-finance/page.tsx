@@ -116,6 +116,15 @@ function ReferralPayouts() {
   const action = useCommissionPayoutAction();
   const rows: AdminCommissionPayoutRow[] = q.data?.items ?? [];
   const [rejecting, setRejecting] = useState<AdminCommissionPayoutRow | null>(null);
+  /*
+   * WHICH ROW is in flight, not WHETHER one is (BUGLOG #152).
+   *
+   * These buttons were gated on the shared `action.isPending`, so one slow or stuck decision
+   * disabled approve AND reject on every other row too. That turned an unreachable step-up prompt
+   * into a dead panel: nothing on the page could be actioned until a reload. React Query already
+   * carries the variables of the call in flight, so the row it belongs to needs no extra state.
+   */
+  const busyId = action.isPending ? action.variables?.id : undefined;
 
   const markPaid = (r: AdminCommissionPayoutRow, password: string) => {
     const input = window.prompt('M-Pesa / bank reference (optional):');
@@ -157,13 +166,13 @@ function ReferralPayouts() {
                 <span className="flex justify-end gap-1.5">
                   {r.status === 'requested' ? (
                     <>
-                      <PasswordConfirmButton label="Approve" confirmLabel="Authorize" variant="up" busy={action.isPending} onConfirm={(pw) => action.mutate({ id: r.id, action: 'approve', password: pw }, { onError: (e) => fail(e) })} />
-                      <Button size="sm" variant="down" disabled={action.isPending} onClick={() => setRejecting(r)}>Reject</Button>
+                      <PasswordConfirmButton label="Approve" confirmLabel="Authorize" variant="up" busy={busyId === r.id} onConfirm={(pw) => action.mutate({ id: r.id, action: 'approve', password: pw }, { onError: (e) => fail(e) })} />
+                      <Button size="sm" variant="down" disabled={busyId === r.id} onClick={() => setRejecting(r)}>Reject</Button>
                     </>
                   ) : r.status === 'approved' ? (
                     <>
-                      <PasswordConfirmButton label="Mark paid" confirmLabel="Authorize" variant="up" busy={action.isPending} onConfirm={(pw) => markPaid(r, pw)} />
-                      <Button size="sm" variant="down" disabled={action.isPending} onClick={() => setRejecting(r)}>Reject</Button>
+                      <PasswordConfirmButton label="Mark paid" confirmLabel="Authorize" variant="up" busy={busyId === r.id} onConfirm={(pw) => markPaid(r, pw)} />
+                      <Button size="sm" variant="down" disabled={busyId === r.id} onClick={() => setRejecting(r)}>Reject</Button>
                     </>
                   ) : (
                     <span className="text-xs text-muted">-</span>
@@ -295,6 +304,7 @@ function Advances() {
   const decide = useDecideAdvance();
   const rows: AdminAdvanceDto[] = q.data?.items ?? [];
   const [rejecting, setRejecting] = useState<AdminAdvanceDto | null>(null);
+  const busyId = decide.isPending ? decide.variables?.id : undefined;   // per row, see ReferralPayouts
   const pending = rows.filter((r) => r.status === 'requested').length;
 
   const approve = (r: AdminAdvanceDto) => {
@@ -343,8 +353,8 @@ function Advances() {
                 <span className="flex justify-end gap-1.5">
                   {r.status === 'requested' ? (
                     <>
-                      <Button size="sm" variant="up" disabled={decide.isPending} onClick={() => approve(r)}>Approve</Button>
-                      <Button size="sm" variant="down" disabled={decide.isPending} onClick={() => setRejecting(r)}>Reject</Button>
+                      <Button size="sm" variant="up" disabled={busyId === r.id} onClick={() => approve(r)}>Approve</Button>
+                      <Button size="sm" variant="down" disabled={busyId === r.id} onClick={() => setRejecting(r)}>Reject</Button>
                     </>
                   ) : (
                     <span className="text-xs text-muted">-</span>
