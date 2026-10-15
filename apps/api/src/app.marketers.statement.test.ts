@@ -469,3 +469,16 @@ test("the statement reports an address and a status for every row", async () => 
     for (const r of after.detail) assert.equal(r.status, "Completed");
   } finally { await api.close(); }
 });
+
+test("the statement carries the stamp's two dates, formatted by the SERVER", async () => {
+  const api = await startTestApi();
+  try {
+    // Both strings exist so the in-app page and the emailed PDF print the same stamp. Deriving
+    // them in two places is how a mirror quietly stops agreeing with the thing it mirrors (#147).
+    const me = await marketer(api, "Faith Mutiso", "0748057167", 50_000);
+    const s = await json(await req(api, "GET", STMT("2026-06-01", "2026-10-15"), { token: mtok(me) }));
+    assert.equal(s.periodLabel, "01 Jun 2026 - 15 Oct 2026");
+    assert.equal(s.periodOrdinal, "1st Jun 2026 - 15th Oct 2026");
+    assert.match(s.approvalDate, /^\d{1,2}(st|nd|rd|th) [A-Z][a-z]+ \d{4}$/);
+  } finally { await api.close(); }
+});

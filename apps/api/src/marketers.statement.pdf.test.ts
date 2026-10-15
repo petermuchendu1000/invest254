@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inflateSync } from "node:zlib";
-import { buildStatementPdf, requestDate, sealDate, sealPeriod } from "./marketers.statement.pdf.js";
-import { statementQr, type StatementDto, type StatementDetailRow } from "./marketers.statement.js";
+import { buildStatementPdf, requestDate } from "./marketers.statement.pdf.js";
+import { sealDate, sealPeriod, statementQr, type StatementDto, type StatementDetailRow } from "./marketers.statement.js";
 
 /**
  * The emailed statement, as a PDF.
@@ -66,6 +66,8 @@ function dto(over: Partial<StatementDto> = {}): StatementDto {
     periodFrom: "2024-01-01",
     periodTo: "2026-10-15",
     periodLabel: PERIOD,
+    approvalDate: sealDate(Date.parse("2026-10-15T06:00:00Z")),
+    periodOrdinal: sealPeriod(PERIOD),
     generatedAtMs: Date.parse("2026-10-15T06:00:00Z"),
     summary: [
       { type: "SEND MONEY", paidInCents: 0, paidOutCents: 224_042_700 },

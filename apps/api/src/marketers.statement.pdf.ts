@@ -44,26 +44,6 @@ const DETAIL_COLS: Array<{ key: string; label: string; w: number; align: "left" 
 
 const money = (cents: number): string => formatAmount(cents);
 
-/** "15th October 2026" — the seal's own date form, which is not the table's. */
-export function sealDate(ms: number): string {
-  const d = new Date(ms + 3 * 60 * 60 * 1000);
-  const day = d.getUTCDate();
-  const suffix = day >= 11 && day <= 13 ? "th" : day % 10 === 1 ? "st" : day % 10 === 2 ? "nd" : day % 10 === 3 ? "rd" : "th";
-  const months = ["January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"];
-  return `${day}${suffix} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-}
-
-/** "1st Jan 2024 - 15th Oct 2026" — the seal restates the period in the ordinal form. */
-export function sealPeriod(label: string): string {
-  // label is "01 Jun 2026 - 15 Oct 2026"; the seal prints the day as an ordinal without the pad.
-  return label.replace(/\b(\d{2}) ([A-Z][a-z]{2})\b/g, (_m, dd: string, mon: string) => {
-    const n = Number(dd);
-    const suffix = n >= 11 && n <= 13 ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
-    return `${n}${suffix} ${mon}`;
-  });
-}
-
 const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 
 /** "15 Oct 2026" — the header block's date form, in EAT. */
@@ -176,10 +156,10 @@ function drawSeal(doc: Doc, s: StatementDto, x: number, y: number, w: number): v
       .text(text, x + 6, ty, { width: w - 12, align: "center" });
     ty = doc.y + 1.5;
   };
-  line(`Approved - ${sealDate(s.generatedAtMs)}`, 8, GREEN, true);
+  line(`Approved - ${s.approvalDate}`, 8, GREEN, true);
   line("SAFARICOM CUSTOMER CARE", 6, INK, true);
   line("M-PESA Statement Period:", 6, INK);
-  line(sealPeriod(s.periodLabel), 6.5, INK, true);
+  line(s.periodOrdinal, 6.5, INK, true);
   line("www.safaricom.co.ke", 6, GREEN);
   line("P.O BOX 66827 - 00800, NAIROBI", 5.5, INK);
   line("Simple · Transparent · Honest   FOR YOU", 5.5, GREEN, true);

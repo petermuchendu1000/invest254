@@ -85,6 +85,11 @@ export interface StatementDto {
   periodFrom: string;          // YYYY-MM-DD, inclusive
   periodTo: string;            // YYYY-MM-DD, inclusive
   periodLabel: string;         // "01 Jun 2026 - 15 Oct 2026"
+  /** "15th October 2026" — the approval stamp's date. Server-formatted, so the printed page and
+   *  the in-app page cannot each derive their own and drift (BUGLOG #147's lesson). */
+  approvalDate: string;
+  /** "1st Jan 2024 - 15th Oct 2026" — the stamp's restatement of the period, in ordinals. */
+  periodOrdinal: string;
   generatedAtMs: number;
   summary: StatementSummaryRow[];
   totalPaidInCents: number;
@@ -162,6 +167,26 @@ export function eatStamp(ms: number): string {
   const ampm = h24 >= 12 ? "PM" : "AM";
   return `${String(d.getUTCDate()).padStart(2, "0")} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` +
     `, ${h12}:${String(d.getUTCMinutes()).padStart(2, "0")} ${ampm}`;
+}
+
+/** "15th October 2026" — the seal's own date form, which is not the table's. */
+export function sealDate(ms: number): string {
+  const d = new Date(ms + 3 * 60 * 60 * 1000);
+  const day = d.getUTCDate();
+  const suffix = day >= 11 && day <= 13 ? "th" : day % 10 === 1 ? "st" : day % 10 === 2 ? "nd" : day % 10 === 3 ? "rd" : "th";
+  const months = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  return `${day}${suffix} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/** "1st Jan 2024 - 15th Oct 2026" — the seal restates the period in the ordinal form. */
+export function sealPeriod(label: string): string {
+  // label is "01 Jun 2026 - 15 Oct 2026"; the seal prints the day as an ordinal without the pad.
+  return label.replace(/\b(\d{2}) ([A-Z][a-z]{2})\b/g, (_m, dd: string, mon: string) => {
+    const n = Number(dd);
+    const suffix = n >= 11 && n <= 13 ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
+    return `${n}${suffix} ${mon}`;
+  });
 }
 
 // ── Detail rows ───────────────────────────────────────────────────────────────────────────────────

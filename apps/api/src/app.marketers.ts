@@ -5,7 +5,7 @@ import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.
 import { buildStatementPdf } from "./marketers.statement.pdf.js";
 import {
   STATEMENT_DETAIL_CAP, STATEMENT_MAX_DAYS, parseDay, eatDayStartMs, eatDayEndExclusiveMs,
-  eatDayLabel, summaryRows, statementRef, statementQr, toDetailRow,
+  eatDayLabel, summaryRows, statementRef, statementQr, toDetailRow, sealDate, sealPeriod,
   buildStatementEmail, isDeliverableEmail,
   type RawStatementSummary, type StatementDto,
 } from "./marketers.statement.js";
@@ -835,6 +835,8 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
       periodFrom: rawFrom,
       periodTo: rawTo,
       periodLabel,
+      approvalDate: sealDate(generatedAtMs),
+      periodOrdinal: sealPeriod(periodLabel),
       generatedAtMs,
       summary: summaryRows(raw),
       totalPaidInCents: raw.paid_in_cents,
