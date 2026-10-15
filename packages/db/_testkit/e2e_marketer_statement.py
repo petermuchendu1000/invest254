@@ -46,14 +46,15 @@ def reset_and_migrate():
     return conn
 
 _n = [720000000]
-def new_marketer(cur, name):
+def new_marketer(cur, name, balance=0):
     _n[0] += 1
     cur.execute("select id from public.fn_marketer_create(%s, %s, %s)", (name, "0" + str(_n[0]), SITE_A))
     mid = cur.fetchone()[0]
     # fn_marketer_create (0158) seeds a random social-proof float and an 'adjustment' ledger row.
     # Both would pollute every total below, so the slate is wiped rather than worked around.
     cur.execute("delete from public.marketer_ledger where marketer_id=%s", (mid,))
-    cur.execute("update public.marketer_wallets set balance_cents=0 where marketer_id=%s", (mid,))
+    cur.execute("""update public.marketer_wallets
+                      set balance_cents=%s, available_fuliza_cents=0 where marketer_id=%s""", (balance, mid))
     return mid
 
 def put(cur, mid, entry_type, cents, at, meta="{}", bal=0):
@@ -150,6 +151,39 @@ check("an uncapped read returns everything, oldest-first",
       [r[0] for r in detail(cur, big, *WIDE)] == ids)
 # A cap of 0 or a negative cap must not mean "no rows" by accident — greatest(...,1) floors it.
 check("a nonsense cap still returns one row rather than silently none", len(detail(cur, big, *WIDE, cap=0)) == 1)
+
+# ── ordering: by the column the statement PRINTS (0208, BUGLOG #149) ───────────────────────────
+# `id` is drawn at INSERT; `created_at` defaults to now(), which is TRANSACTION START. A transaction
+# that begins early and inserts late takes a higher id with an earlier timestamp, so the two orders
+# can disagree — and 0206 ordered by id while the statement prints created_at. Rows are inserted
+# here in deliberately the wrong order to reproduce exactly that.
+ord_m = new_marketer(cur, "Out Of Order")
+ids = []
+for day, in_order in [(5, 3), (1, 1), (9, 5), (3, 2), (7, 4)]:
+    ids.append((in_order, put(cur, ord_m, "credit", 100 * in_order, f"2026-06-{day:02d}T09:00:00Z")))
+cur.execute("""select created_at from public.fn_marketer_statement_range(%s,%s::timestamptz,%s::timestamptz,2000)""",
+            (ord_m, *WIDE))
+stamps = [r[0] for r in cur.fetchall()]
+check("ordering: the detail is chronological, not insertion order",
+      stamps == sorted(stamps), str(stamps))
+# Insertion order was 5th, 1st, 9th, 3rd, 7th; printed order must be 1st, 3rd, 5th, 7th, 9th.
+check("ordering: specifically, the days come out ascending",
+      [s.day for s in stamps] == [1, 3, 5, 7, 9], str([s.day for s in stamps]))
+# The cap keeps the LATEST BY TIME, not the last inserted.
+cur.execute("""select created_at from public.fn_marketer_statement_range(%s,%s::timestamptz,%s::timestamptz,2)""",
+            (ord_m, *WIDE))
+capped = [r[0].day for r in cur.fetchall()]
+check("ordering: a capped read keeps the latest BY TIME", capped == [7, 9], str(capped))
+
+# Two rows sharing a timestamp to the microsecond — the two halves of a transfer do — keep a stable
+# order, with the debit before the credit it produced.
+pair_a = new_marketer(cur, "Pair A", balance=50_000)
+pair_b = new_marketer(cur, "Pair B", balance=0)
+cur.execute("select public.fn_marketer_transfer(%s,%s,%s,%s)", (pair_a, pair_b, 10_000, "ord-pair"))
+cur.execute("""select l.entry_type from public.marketer_ledger l
+                where l.ref like 'ord-pair:%' order by l.created_at asc, l.id asc""")
+check("ordering: the two halves of a transfer keep the debit first",
+      [r[0] for r in cur.fetchall()] == ["transfer_out", "transfer_in"])
 
 # ── a statement is one marketer's, and only theirs ─────────────────────────────────────────────
 check("one marketer's range never includes another's rows",

@@ -36,9 +36,17 @@ totals are aggregated in the database over every qualifying row and the detail i
 bounded read. The response carries `truncated`, and both the app and the emailed copy print *"the
 summary above covers all N"*.
 
-The capped detail keeps the **newest** rows and prints them **oldest-first** — `order by id desc
-limit N` inside, `order by id asc` outside. A plain ascending `LIMIT` would truncate the newest end,
-which is exactly the activity the reader opened the statement to see.
+The capped detail keeps the **newest** rows and prints them **oldest-first** — `order by created_at
+desc, id desc limit N` inside, `order by created_at asc, id asc` outside. A plain ascending `LIMIT`
+would truncate the newest end, which is exactly the activity the reader opened the statement to see.
+
+**Corrected 2026-10-15 (BUGLOG #149):** this originally sorted by `id` alone, on the stated
+reasoning that `id` and `created_at` are "both monotonic in practice". They are not. `id` is drawn
+at INSERT; `created_at` defaults to `now()`, which is **transaction start** — so a transaction that
+begins early and inserts late carries a higher id with an earlier timestamp, and this system takes
+row locks under concurrency as a matter of course. The statement printed `created_at` while sorting
+by `id`, so rows came out of time order and the running Balance column read as nonsense. `id`
+remains the tie-breaker, because the two halves of a transfer share a timestamp to the microsecond.
 
 ## 3. The reading: which ledger entry is which M-PESA category
 

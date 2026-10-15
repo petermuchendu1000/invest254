@@ -5,6 +5,34 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #149 — The statement sorted by one column and printed another — FIXED (migration 0208)
+- **What:** `fn_marketer_statement_range` (0206) ordered the detail rows by **`id`**. The statement
+  PRINTS **`created_at`**. 0206's own header asserted the two were interchangeable — *"both columns
+  are monotonic in practice"* — which is the kind of claim that holds until it does not.
+- **Why they diverge:** `id` is drawn from the identity sequence at INSERT time; `created_at`
+  defaults to `now()`, which in PostgreSQL is **transaction START** time. A transaction that begins
+  at 10:00 and inserts at 10:05 takes a HIGHER id than one that began at 10:02 and inserted at
+  10:03, while carrying the EARLIER timestamp. This system runs exactly that shape of concurrency —
+  the transfer and airtime RPCs take row locks and are proven against eight simultaneous
+  connections — so a transaction waiting on a lock is the ordinary case, not a contrived one.
+- **Evidence:** a statement rendered for review printed Completion Times
+  `2026-09-17, 09-21, 09-28, 09-23, 09-25, 09-30, 10-06, 10-09, 09-24 …`. **Found by looking at the
+  output, not by reading the code.**
+- **Impact:** rows out of time order, and — worse — a Balance column that steps up and down for no
+  visible reason. `balance_after_cents` is correct per row and only reads as a running balance when
+  the rows are in time order, so an out-of-order statement makes correct data look like corruption.
+  Exactly the opposite of what a statement produced for accountability is for.
+- **Fix:** 0208 orders by `(created_at, id)` at both ends — inside the cap (`desc`) and outside it
+  (`asc`). `id` stays as the TIE-BREAKER rather than being dropped: the two halves of a transfer
+  (0203) are written in one transaction and share a timestamp to the microsecond, so without it
+  their order is whatever the plan produces, and a statement showing the credit before the debit it
+  came from is its own small lie. The cap still keeps the newest rows; what changes is the
+  definition of "newest", from *last inserted* to *last to happen*.
+- **Verification:** four assertions in `e2e_marketer_statement.py`, inserting rows whose id order is
+  deliberately not their timestamp order — **proven to fail** when the ordering is reverted to `id`
+  (3 of the 4 fail, including the capped read keeping the wrong rows). 27/27 on real Postgres.
+  `ix_marketer_ledger_mkt_created` from 0206 already serves the new sort.
+
 ## #148 — A refused transaction still announced itself as "Successful" — FIXED (mpesa_2)
 - **What (pre-existing):** `ReceiptScreen` printed `"${TxFlow.title} Successful"` with a green tick
   unconditionally. `TxFlow.success` had always been SET — `AppState.performTransaction` returns

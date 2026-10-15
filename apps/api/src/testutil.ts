@@ -375,13 +375,21 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
       const paid_out_cents = Object.values(buckets).reduce((a, b) => a + b.out, 0);
       return { buckets, txn_count: rows.length, paid_in_cents, paid_out_cents };
     },
-    /** Newest `cap` rows of the range, returned oldest-first — the shape 0206 guarantees. */
+    /**
+     * Newest `cap` rows of the range, returned oldest-first — the shape 0206/0208 guarantee.
+     *
+     * Sorted by (created_at, id), not by insertion order: `id` and `created_at` can disagree,
+     * because now() is transaction START time while the id is drawn at INSERT time (BUGLOG #149).
+     * `id` remains the tie-breaker so the two halves of a transfer, which share a timestamp to the
+     * microsecond, keep the debit before the credit.
+     */
     async statementRange(id: string, fromIso: string, toIso: string, cap: number): Promise<MarketerLedgerRow[]> {
       const from = Date.parse(fromIso), to = Date.parse(toIso);
       const inRange = (ledgers.get(id) ?? []).filter((r) => {
         const t = Date.parse(r.created_at);
         return t >= from && t < to;
       });
+      inRange.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
       return inRange.slice(-Math.max(cap, 1));
     },
     async setPin(id: string, pin: string, actor?: MarketerActor): Promise<void> { fence("setPin", byId.get(id)?.site_id, actor); if (!/^\d{4,6}$/.test(pin)) throw new Error("INVALID_PIN"); if (!byId.has(id)) throw new Error("MARKETER_NOT_FOUND"); pins.set(id, pin); },
