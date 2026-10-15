@@ -2,6 +2,12 @@ import { Router, ApiError, requireAuth, requireRole, requireSiteAdmin, rateLimit
 import { assertSiteTarget } from "./scope.js";
 import type { ApiDeps } from "./app.js";
 import { mpesaCode, mpesaReceivedMessage, mpesaSentMessage, ksh } from "./mpesa.js";
+import {
+  STATEMENT_DETAIL_CAP, STATEMENT_MAX_DAYS, parseDay, eatDayStartMs, eatDayEndExclusiveMs,
+  eatDayLabel, summaryRows, statementRef, statementQr, toDetailRow,
+  buildStatementEmail, isDeliverableEmail,
+  type RawStatementSummary, type StatementDto,
+} from "./marketers.statement.js";
 import { isTokenSessionValid } from "@invest254/engine";
 import { SECURITY_QUESTIONS, SECURITY_ANSWERS_REQUIRED, validatePassword, maskPhoneForDisplay, normalizeMsisdn } from "@invest254/shared";
 
@@ -175,6 +181,11 @@ export interface MarketerRepo {
   setFuliza(id: string, amountCents: number, actor?: MarketerActor): Promise<number>;
   setAirtime(id: string, amountCents: number, actor?: MarketerActor): Promise<number>;
   statement(id: string, limit: number): Promise<MarketerLedgerRow[]>;
+  /** Statement TOTALS over the whole range (0206). Aggregated in the database, never from the
+   *  capped detail — a summary computed from a truncated list under-reports the moment it bites. */
+  statementSummary(id: string, fromIso: string, toIso: string): Promise<RawStatementSummary>;
+  /** Statement DETAIL rows: the newest `cap` of the range, oldest-first. */
+  statementRange(id: string, fromIso: string, toIso: string, cap: number): Promise<MarketerLedgerRow[]>;
   // ── auth / lifecycle ──
   /** Set/reset the marketer PIN. `actor` (admin route) engages the DB brand fence (0199); omit it for
    *  the self-service reset (identity proven by security answers, no admin actor). */
@@ -655,6 +666,121 @@ export function registerMarketerRoutes(router: Router, deps: ApiDeps): void {
     const brandName = marketerCtx.get(ctx)?.brand_name ?? null;
     const rows = await domain(() => deps.marketers.statement(ctx.claims!.userId, limitOf(ctx)));
     return { items: rows.map((r) => ledgerToTxDto(r, brandName)) };
+  });
+
+  /**
+   * ── The wallet STATEMENT (docs/65) ────────────────────────────────────────────────────────────
+   *
+   * Not the feed with a bigger limit. The feed above answers "what happened lately" and renders as
+   * M-PESA confirmation messages; this answers "what happened between these two dates and what does
+   * it add up to", because the owner needs to see how a marketer has been using the funny money.
+   *
+   * THE SUMMARY IS AGGREGATED IN THE DATABASE OVER EVERY ROW IN THE RANGE; the detail is a separate,
+   * capped read. Computing the totals from the capped detail would silently under-report them the
+   * moment the cap bit, and a statement whose own totals are wrong is worse than no statement.
+   * `truncated` says when the detail is short of the count the summary counted.
+   *
+   * The period is bounded in EAST AFRICA TIME, inclusive at both ends, because that is the day the
+   * marketer means and the zone every timestamp on the page is printed in.
+   *
+   * It returns the marketer's MASKED number (docs/58), like every other marketer response. The app
+   * prints the real one from the number it signed in with — it is the app's own number, so it is
+   * the one party that already has it.
+   */
+  const statementLimit = rateLimit({ name: "marketer-statement", by: "user", limit: Number(process.env.RATE_LIMIT_STATEMENT_PER_MIN) || 6, windowMs: 60_000 });
+  // Emailing one costs an outbound send on somebody else's quota, so it gets a tighter budget than
+  // reading one. Still `by: "user"` — see the recipient-lookup note on carrier-grade NAT.
+  const statementMailLimit = rateLimit({ name: "marketer-statement-email", by: "user", limit: Number(process.env.RATE_LIMIT_STATEMENT_EMAIL_PER_MIN) || 3, windowMs: 60_000 });
+
+  /** Builds the statement both routes serve, so the emailed figures cannot drift from the shown ones. */
+  const buildStatement = async (ctx: Ctx, me: MarketerProfile): Promise<StatementDto> => {
+    const rawFrom = (ctx.query.get("from") ?? (bodyObj(ctx).from as string | undefined) ?? "").trim();
+    const rawTo = (ctx.query.get("to") ?? (bodyObj(ctx).to as string | undefined) ?? "").trim();
+    const from = parseDay(rawFrom);
+    const to = parseDay(rawTo);
+    if (!from || !to) throw new ApiError("VALIDATION", "from and to must be real YYYY-MM-DD dates", 400);
+
+    const fromMs = eatDayStartMs(from);
+    const toMs = eatDayEndExclusiveMs(to);
+    if (toMs <= fromMs) throw new ApiError("VALIDATION", "the end date cannot be before the start date", 400);
+    const days = Math.round((toMs - fromMs) / 86_400_000);
+    if (days > STATEMENT_MAX_DAYS) {
+      throw new ApiError("PERIOD_TOO_LONG", `a statement covers at most ${STATEMENT_MAX_DAYS} days`, 400);
+    }
+
+    const fromIso = new Date(fromMs).toISOString();
+    const toIso = new Date(toMs).toISOString();
+    const [raw, rows] = await Promise.all([
+      domain(() => deps.marketers.statementSummary(me.id, fromIso, toIso)),
+      domain(() => deps.marketers.statementRange(me.id, fromIso, toIso, STATEMENT_DETAIL_CAP)),
+    ]);
+
+    const brandName = me.brand_name ?? null;
+    const generatedAtMs = Date.now();
+    const periodLabel = `${eatDayLabel(from)} - ${eatDayLabel(to)}`;
+    const mobileNumber = maskPhoneForDisplay(me.phone);
+    const ref = statementRef(me.id, rawFrom, rawTo, generatedAtMs);
+    const txnCount = raw.txn_count;
+
+    return {
+      ref,
+      customerName: me.name,
+      mobileNumber,
+      periodFrom: rawFrom,
+      periodTo: rawTo,
+      periodLabel,
+      generatedAtMs,
+      summary: summaryRows(raw),
+      totalPaidInCents: raw.paid_in_cents,
+      totalPaidOutCents: raw.paid_out_cents,
+      txnCount,
+      detail: rows.map((r) => toDetailRow(r, brandName)),
+      truncated: txnCount > rows.length,
+      qr: statementQr({
+        ref, mobileNumber, periodLabel,
+        totalPaidInCents: raw.paid_in_cents,
+        totalPaidOutCents: raw.paid_out_cents,
+        txnCount,
+      }),
+    };
+  };
+
+  router.get(`${BASE}/marketers/me/statement`, auth, marketer, statementLimit, async (ctx: Ctx) =>
+    buildStatement(ctx, marketerCtx.get(ctx)!));
+
+  /**
+   * ── Email the same statement ──────────────────────────────────────────────────────────────────
+   *
+   * POST, not a `deliver=email` flag on the GET above: this sends mail, and a GET that sends mail
+   * is a GET a retry, a prefetch or a crawler can fire.
+   *
+   * THE RECIPIENT IS TYPED BY THE MARKETER, which is a departure from the reference screen — it has
+   * the address on file and this system has none. `marketers` has no email column and neither does
+   * `profiles`, so there is nowhere to read one from (docs/65 §5).
+   *
+   * That makes this an authenticated, rate-limited way to send a fixed document to a chosen
+   * address. The BODY is not attacker-controlled — it is the sender's own statement and nothing
+   * else — so the only lever is the recipient, and 3/min per marketer makes that uninteresting.
+   *
+   * When no sender is configured it says so (503 EMAIL_NOT_CONFIGURED) rather than reporting a
+   * success nobody received. A delivery that silently does nothing is the worst of the three
+   * possible outcomes.
+   */
+  router.post(`${BASE}/marketers/me/statement/email`, auth, marketer, statementMailLimit, async (ctx: Ctx) => {
+    const me = marketerCtx.get(ctx)!;
+    const to = reqStr(bodyObj(ctx), "email");
+    if (!isDeliverableEmail(to)) throw new ApiError("VALIDATION", "enter a valid email address", 400);
+    const sender = deps.email ?? null;
+    if (!sender) {
+      throw new ApiError("EMAIL_NOT_CONFIGURED", "email delivery is not set up on this server", 503);
+    }
+    const dto = await buildStatement(ctx, me);
+    const mail = buildStatementEmail(dto);
+    const res = await sender.send({ to: [to], subject: mail.subject, html: mail.html, text: mail.text });
+    if (!res.ok) throw new ApiError("EMAIL_SEND_FAILED", "the statement could not be sent", 502);
+    // The statement itself is deliberately NOT echoed: the caller asked for it to be emailed, and
+    // returning it here would make the "email" path a second way to read one at a looser budget.
+    return { sent: true, ref: dto.ref, periodLabel: dto.periodLabel, txnCount: dto.txnCount };
   });
 
   // Marketer SELF-SERVICE demo top-up (autonomy — removes waiting on an admin to credit funny money).

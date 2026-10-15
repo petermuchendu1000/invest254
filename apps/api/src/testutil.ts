@@ -286,6 +286,48 @@ export function makeInMemoryMarketerRepo(): InMemoryMarketerRepo {
     async setFuliza(id: string, amountCents: number, actor?: MarketerActor): Promise<number> { fence("setFuliza", byId.get(id)?.site_id, actor); if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.fuliza = amountCents; m.updated_at = now(); return amountCents; },
     async setAirtime(id: string, amountCents: number, actor?: MarketerActor): Promise<number> { fence("setAirtime", byId.get(id)?.site_id, actor); if (amountCents < 0) throw new Error("AMOUNT_MUST_BE_NONNEGATIVE"); const m = byId.get(id); if (!m) throw new Error("MARKETER_NOT_FOUND"); m.airtime = amountCents; m.updated_at = now(); return amountCents; },
     async statement(id: string, limit: number): Promise<MarketerLedgerRow[]> { return (ledgers.get(id) ?? []).slice().reverse().slice(0, limit); },
+    /**
+     * Mirrors fn_marketer_statement_summary (0206) — SAME bucket mapping, including the reading
+     * that game-winnings credits are OTHERS and not an AGENT DEPOSIT. If these two ever disagree,
+     * the route tests are proving a convenient fiction rather than the product.
+     */
+    async statementSummary(id: string, fromIso: string, toIso: string) {
+      const from = Date.parse(fromIso), to = Date.parse(toIso);
+      const rows = (ledgers.get(id) ?? []).filter((r) => {
+        const t = Date.parse(r.created_at);
+        return t >= from && t < to;
+      });
+      const buckets: Record<string, { in: number; out: number }> = {
+        "SEND MONEY": { in: 0, out: 0 }, "RECEIVED MONEY": { in: 0, out: 0 },
+        "AGENT DEPOSIT": { in: 0, out: 0 }, "AGENT WITHDRAWAL": { in: 0, out: 0 },
+        OTHERS: { in: 0, out: 0 },
+      };
+      for (const r of rows) {
+        const meta = (r.meta && typeof r.meta === "object" ? r.meta : {}) as Record<string, unknown>;
+        const source = typeof meta.source === "string" ? meta.source : "";
+        const bucket =
+          r.entry_type === "transfer_out" ? "SEND MONEY"
+          : r.entry_type === "transfer_in" ? "RECEIVED MONEY"
+          : r.entry_type === "withdrawal" ? "AGENT WITHDRAWAL"
+          : r.entry_type === "credit" && source !== "game_withdrawal" && source !== "game_withdrawal_approved"
+            ? "AGENT DEPOSIT"
+            : "OTHERS";
+        buckets[bucket]!.in += Math.max(r.amount_cents, 0);
+        buckets[bucket]!.out += Math.max(-r.amount_cents, 0);
+      }
+      const paid_in_cents = Object.values(buckets).reduce((a, b) => a + b.in, 0);
+      const paid_out_cents = Object.values(buckets).reduce((a, b) => a + b.out, 0);
+      return { buckets, txn_count: rows.length, paid_in_cents, paid_out_cents };
+    },
+    /** Newest `cap` rows of the range, returned oldest-first — the shape 0206 guarantees. */
+    async statementRange(id: string, fromIso: string, toIso: string, cap: number): Promise<MarketerLedgerRow[]> {
+      const from = Date.parse(fromIso), to = Date.parse(toIso);
+      const inRange = (ledgers.get(id) ?? []).filter((r) => {
+        const t = Date.parse(r.created_at);
+        return t >= from && t < to;
+      });
+      return inRange.slice(-Math.max(cap, 1));
+    },
     async setPin(id: string, pin: string, actor?: MarketerActor): Promise<void> { fence("setPin", byId.get(id)?.site_id, actor); if (!/^\d{4,6}$/.test(pin)) throw new Error("INVALID_PIN"); if (!byId.has(id)) throw new Error("MARKETER_NOT_FOUND"); pins.set(id, pin); },
     async login(phone: string, pin: string, siteId?: string): Promise<string | null> {
       // Mirrors fn_marketer_login (0093): a phone is unique only within a brand, so match the PIN

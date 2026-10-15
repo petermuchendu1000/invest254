@@ -1210,6 +1210,10 @@ async function buildDeps(): Promise<ApiDeps> {
       log: (m: string) => log.warn(m),
     }),
     addons,
+    // Transactional email. Already built above for the payout alerts; passing the SAME sender into
+    // the app means the marketer statement cannot be emailed by a path the alerts are not, and
+    // leaves exactly one place where "is email configured?" is answered.
+    email: emailSender,
   };
 }
 

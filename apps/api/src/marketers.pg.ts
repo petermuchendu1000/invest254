@@ -131,6 +131,40 @@ export function makePgMarketerRepo(query: Query): MarketerRepo {
       return num(rows[0].v);
     },
 
+    async statementSummary(id, fromIso, toIso) {
+      // Aggregated in SQL over the WHOLE range — see 0206's header on why this is not derived from
+      // the capped detail below.
+      const { rows } = await query(
+        "SELECT public.fn_marketer_statement_summary($1, $2::timestamptz, $3::timestamptz) AS r",
+        [id, fromIso, toIso]);
+      const r = rows[0].r as Record<string, unknown>;
+      const buckets: Record<string, { in: number; out: number }> = {};
+      for (const [k, v] of Object.entries((r.buckets ?? {}) as Record<string, { in: number; out: number }>)) {
+        buckets[k] = { in: num(v.in), out: num(v.out) };
+      }
+      return {
+        buckets,
+        txn_count: num(r.txn_count),
+        paid_in_cents: num(r.paid_in_cents),
+        paid_out_cents: num(r.paid_out_cents),
+      };
+    },
+
+    async statementRange(id, fromIso, toIso, cap): Promise<MarketerLedgerRow[]> {
+      const { rows } = await query(
+        "SELECT * FROM public.fn_marketer_statement_range($1, $2::timestamptz, $3::timestamptz, $4)",
+        [id, fromIso, toIso, cap]);
+      return rows.map((r) => ({
+        id: num(r.id),
+        entry_type: r.entry_type,
+        amount_cents: num(r.amount_cents),
+        balance_after_cents: num(r.balance_after_cents),
+        ref: r.ref ?? null,
+        meta: r.meta ?? {},
+        created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      }));
+    },
+
     async statement(id, limit): Promise<MarketerLedgerRow[]> {
       const { rows } = await query("SELECT * FROM public.fn_marketer_statement($1, $2)", [id, limit]);
       return rows.map((r) => ({

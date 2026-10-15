@@ -2,7 +2,7 @@
   "name": "invest254",
   "private": true,
   "version": "0.1.0",
-  "description": "Invest254 \u2014 authoritative real-money trade-prediction game engine (monorepo)",
+  "description": "Invest254 — authoritative real-money trade-prediction game engine (monorepo)",
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -21,6 +21,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/pg": "^8.20.0",
+    "@types/qrcode-generator": "^1.0.6",
     "@types/ws": "^8.18.1",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0"
