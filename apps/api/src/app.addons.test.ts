@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startTestApi, TEST_ADMIN, SITE_A, type TestApi } from "./testutil.js";
+import { startTestApi, TEST_ADMIN, SITE_A, PLATFORM_A, type TestApi } from "./testutil.js";
 
 /**
  * Issue 2 — add-on API surface: reads/requests open to operators (admin+), and price/decide/grant/
@@ -78,5 +78,50 @@ test("ADDON-1 API: catalog edits are owner-only and shaped; brands switch owned 
     assert.equal((await reqf(api, "POST", "/api/v1/addons/requests/abc/cancel", SITE_ADMIN)).status, 400);
     assert.equal((await reqf(api, "GET", "/api/v1/addons/brands", SITE_ADMIN)).status, 403, "brand admins get no matrix");
     assert.equal((await reqf(api, "GET", "/api/v1/addons/brands", PA)).status, 200);
+  } finally { await api.close(); }
+});
+
+/**
+ * 0172's fn_platform_addon_grant / fn_platform_addon_revoke had no API caller until 0213: a platform
+ * could only be granted a gateway by hand in SQL, which is how `mugo` came to own none and `dakafx`
+ * served "Deposits are temporarily unavailable" for 5h45m. These are the routes that close that.
+ */
+test("platform add-ons API: the matrix is platform tier, grant/revoke are owner-only, grandfathered is explicit", async () => {
+  const api = await startTestApi();
+  const path = (a: string) => `/api/v1/addons/platform/${a}`;
+  const body = { platform: PLATFORM_A, category: "payment_gateway", key: "megapay" };
+  try {
+    // Read: a platform admin sees its own platform, a brand admin and a player see nothing.
+    assert.equal((await reqf(api, "GET", "/api/v1/addons/platforms", PLAYER)).status, 403);
+    assert.equal((await reqf(api, "GET", "/api/v1/addons/platforms", SITE_ADMIN)).status, 403, "brand admins get no matrix");
+    const pa = await reqf(api, "GET", "/api/v1/addons/platforms", PA);
+    assert.equal(pa.status, 200);
+    const rows = (await json(pa)).platforms;
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].owned, ["payment_gateway:mpesa"], "what the platform owns, inherited by its brands");
+    assert.equal(rows[0].scope_active, true);
+    assert.deepEqual(rows[0].live_rails, [], "owns only mpesa, which is globally off => nothing serves deposits");
+
+    // Writes: SYSTEM owner only, in the route and again in the RPC.
+    for (const t of [PLAYER, SITE_ADMIN, PA]) {
+      assert.equal((await reqf(api, "POST", path("grant"), t, body)).status, 403, "only the system owner may grant");
+      assert.equal((await reqf(api, "POST", path("revoke"), t, body)).status, 403, "only the system owner may revoke");
+    }
+
+    // grandfathered is never inferred: absent => false (the platform IS charged), true => recognised
+    // as already owned, so 0172's billing trigger raises nothing.
+    const billed = await reqf(api, "POST", path("grant"), SYS, body);
+    assert.equal(billed.status, 200);
+    assert.equal((await json(billed)).grandfathered, false, "absent means the platform is charged");
+    const free = await reqf(api, "POST", path("grant"), SYS, { ...body, grandfathered: true });
+    assert.equal((await json(free)).grandfathered, true);
+    assert.equal((await reqf(api, "POST", path("grant"), SYS, { ...body, grandfathered: "yes" })).status, 400, "no truthy strings on a billing flag");
+
+    // Shape + existence.
+    assert.equal((await reqf(api, "POST", path("grant"), SYS, { category: "payment_gateway", key: "megapay" })).status, 400, "platform is required");
+    assert.equal((await reqf(api, "POST", path("grant"), SYS, { ...body, category: "weapons" })).status, 404, "unknown category");
+    assert.equal((await reqf(api, "POST", path("grant"), SYS, { ...body, platform: "plat-nope" })).status, 404, "unknown platform");
+    assert.equal((await reqf(api, "POST", path("revoke"), SYS, { ...body, platform: "plat-nope" })).status, 404);
+    assert.equal((await reqf(api, "POST", path("revoke"), SYS, body)).status, 200);
   } finally { await api.close(); }
 });

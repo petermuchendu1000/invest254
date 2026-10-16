@@ -28,6 +28,20 @@ export interface AddonBrandRow {
 export interface AddonPatch {
   displayName?: string; description?: string; billingType?: BillingType; priceCents?: number; setupFeeCents?: number; active?: boolean;
 }
+/**
+ * A platform and what it OWNS (0213). Add-ons are bought by the platform; every one of its brands
+ * inherits them, so `sites` is the blast radius of a grant or a revoke.
+ *  - `owned` / `grandfathered`: "category:key" refs, as in AddonBrandRow.
+ *  - `scope_active`: the platform runs on its own payment accounts, so a brand's deposit rails are
+ *    narrowed to what this platform owns with no fallback to the System's M-Pesa.
+ *  - `live_rails`: owned gateways that are ALSO switched on globally — what actually serves deposits
+ *    today. Empty while `scope_active` is the dakafx state: the deposit sheet has nothing to offer.
+ */
+export interface AddonPlatformRow {
+  platform_id: string; slug: string; name: string; status: string;
+  plan_key: string | null; billing_exempt: boolean; sites: number;
+  owned: string[]; grandfathered: string[]; scope_active: boolean; live_rails: string[];
+}
 
 /** Add-on catalog / entitlements / requests API (Issue 2). Cross-surface: platform console + /admin. */
 export const addonApi = {
@@ -51,4 +65,11 @@ export const addonApi = {
   activate: (t: string, body: { site?: string; category: string; key: string }) =>
     apiFetch('/addons/activate', { method: 'POST', token: t, body }),
   brands: (t: string) => apiFetch<{ brands: AddonBrandRow[] }>('/addons/brands', { token: t }),
+  // ── Platform-owned add-ons (0172 grant/revoke, 0213 matrix) ──
+  platforms: (t: string) => apiFetch<{ platforms: AddonPlatformRow[] }>('/addons/platforms', { token: t }),
+  /** `grandfathered: true` recognises it as already owned, so no charge is raised. */
+  platformGrant: (t: string, body: { platform: string; category: string; key: string; grandfathered?: boolean }) =>
+    apiFetch('/addons/platform/grant', { method: 'POST', token: t, body }),
+  platformRevoke: (t: string, body: { platform: string; category: string; key: string }) =>
+    apiFetch('/addons/platform/revoke', { method: 'POST', token: t, body }),
 };

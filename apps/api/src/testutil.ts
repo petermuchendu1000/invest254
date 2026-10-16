@@ -610,6 +610,8 @@ export const TEST_ADMIN = "u-admin";
 /** Two brands on one deployment, for site-scoping tests (docs/22 Task E). */
 export const SITE_A = "00000000-0000-0000-0000-000000000001";
 export const SITE_B = "22222222-2222-2222-2222-222222222222";
+/** The one platform the add-on stub knows about (0213 matrix / 0172 grant+revoke route tests). */
+export const PLATFORM_A = "plat-1";
 export const TEST_BRANDS: Record<string, Brand> = {
   "invest254.com": {
     siteId: SITE_A, slug: "invest254", name: "Invest254", wordmarkText: "invest254.com",
@@ -867,6 +869,28 @@ export async function startTestApi(opts: TestApiOptions = {}): Promise<TestApi> 
       return { site_id: site, category, key, active: true };
     },
     async brands() { return []; },
+    // Platform-owned add-ons (0172 writes / 0213 read). The real scope + billing rules are proven by
+    // e2e_addon_entitlements.py; here one platform is seeded so the route guards and the grandfathered
+    // flag can be asserted. PLATFORM_NOT_FOUND mirrors the RPC for any other id.
+    async platforms(_a, role) {
+      if (role !== "platform_superadmin" && role !== "platform_admin") return [];
+      return [{
+        platform_id: PLATFORM_A, slug: "alpha", name: "Alpha", status: "active",
+        plan_key: "business", billing_exempt: false, sites: 2,
+        owned: ["payment_gateway:mpesa"], grandfathered: ["payment_gateway:mpesa"],
+        scope_active: true, live_rails: [],
+      }];
+    },
+    async platformGrant(_a, role, platformId, category, key, grandfathered) {
+      if (role !== "platform_superadmin") throw new Error("NOT_AUTHORIZED");
+      if (platformId !== PLATFORM_A) throw new Error("PLATFORM_NOT_FOUND");
+      return { platform_id: platformId, category, key, entitled: true, grandfathered: grandfathered === true };
+    },
+    async platformRevoke(_a, role, platformId, category, key) {
+      if (role !== "platform_superadmin") throw new Error("NOT_AUTHORIZED");
+      if (platformId !== PLATFORM_A) throw new Error("PLATFORM_NOT_FOUND");
+      return { platform_id: platformId, category, key, entitled: false };
+    },
   };
 
   const referralRepo = makeInMemoryReferralRepo();

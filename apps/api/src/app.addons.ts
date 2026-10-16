@@ -4,7 +4,7 @@ import type { ApiDeps } from "./app.js";
 const BASE = "/api/v1";
 const STATUS: Record<string, number> = {
   NOT_AUTHORIZED: 403, SITE_SCOPE_FORBIDDEN: 403, PLATFORM_SCOPE_FORBIDDEN: 403,
-  ADDON_NOT_FOUND: 404, SITE_NOT_FOUND: 404, REQUEST_NOT_FOUND: 404,
+  ADDON_NOT_FOUND: 404, SITE_NOT_FOUND: 404, REQUEST_NOT_FOUND: 404, PLATFORM_NOT_FOUND: 404,
   ADDON_INACTIVE: 400, INVALID_AMOUNT: 400, INVALID_DECISION: 400,
   ALREADY_ENTITLED: 409, REQUEST_NOT_OPEN: 409, CANNOT_REVOKE_DEFAULT: 400,
   INVALID_PATCH: 400, INVALID_BILLING_TYPE: 400, INVALID_NAME: 400, INVALID_DESCRIPTION: 400, FREE_HAS_PRICE: 400,
@@ -51,6 +51,9 @@ export interface AddonDeps {
   cancelRequest(actorId: string, actorRole: string, requestId: number): Promise<unknown>;
   activate(actorId: string, actorRole: string, siteId: string, category: string, key: string): Promise<unknown>;
   brands(actorId: string, actorRole: string): Promise<unknown[]>;
+  platforms(actorId: string, actorRole: string): Promise<unknown[]>;
+  platformGrant(actorId: string, actorRole: string, platformId: string, category: string, key: string, grandfathered?: boolean): Promise<unknown>;
+  platformRevoke(actorId: string, actorRole: string, platformId: string, category: string, key: string): Promise<unknown>;
 }
 
 const CATEGORIES = new Set(["chart", "trade_ui", "payment_gateway"]);
@@ -182,5 +185,37 @@ export function registerAddonRoutes(router: Router, deps: ApiDeps): void {
     const category = str(b, "category"), key = str(b, "key"), site = str(b, "site");
     if (!site || !category || !key) throw new ApiError("VALIDATION", "site, category and key are required", 400);
     return domain(() => addons.revoke(ctx.claims!.userId, ctx.claims!.role ?? "player", site, category, key));
+  });
+
+  // ── PLATFORM-owned add-ons (0172 writes, 0213 read) ───────────────────────────────────────────
+  // A gateway belongs to the PLATFORM and every one of its brands inherits it, so this is where a
+  // platform's gateways are actually bought. fn_platform_addon_grant/revoke shipped with 0172 but had
+  // no caller until now: a platform could only be granted a gateway by hand in SQL, which is how `mugo`
+  // came to own none and `dakafx` served "Deposits are temporarily unavailable" for 5h45m.
+  //
+  // The matrix is readable by a platform admin too (scoped to its own platform in the RPC) so it can
+  // see what it owns and what is missing; granting and revoking are SYSTEM-owner-only, in both layers.
+  router.get(`${BASE}/addons/platforms`, auth, requireRole("platform_admin"), async (ctx: Ctx) =>
+    ({ platforms: await domain(() => addons.platforms(ctx.claims!.userId, ctx.claims!.role ?? "player")) }));
+
+  router.post(`${BASE}/addons/platform/grant`, auth, system, async (ctx: Ctx) => {
+    const b = asObject(ctx.body);
+    const category = str(b, "category"), key = str(b, "key"), platform = str(b, "platform");
+    if (!platform || !category || !key) throw new ApiError("VALIDATION", "platform, category and key are required", 400);
+    if (!CATEGORIES.has(category)) throw new ApiError("ADDON_NOT_FOUND", "unknown category", 404);
+    // `grandfathered` recognises an add-on as ALREADY owned, so 0172's billing trigger raises no
+    // charge. It changes what the platform is invoiced, so it is never inferred — absent means false.
+    if (b.grandfathered !== undefined && typeof b.grandfathered !== "boolean") {
+      throw new ApiError("VALIDATION", "grandfathered must be true or false", 400);
+    }
+    return domain(() => addons.platformGrant(ctx.claims!.userId, ctx.claims!.role ?? "player", platform, category, key,
+      b.grandfathered === true));
+  });
+
+  router.post(`${BASE}/addons/platform/revoke`, auth, system, async (ctx: Ctx) => {
+    const b = asObject(ctx.body);
+    const category = str(b, "category"), key = str(b, "key"), platform = str(b, "platform");
+    if (!platform || !category || !key) throw new ApiError("VALIDATION", "platform, category and key are required", 400);
+    return domain(() => addons.platformRevoke(ctx.claims!.userId, ctx.claims!.role ?? "player", platform, category, key));
   });
 }

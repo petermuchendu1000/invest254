@@ -75,4 +75,26 @@ export class AddonService {
     const r = await this.q.query("select fn_addon_revoke($1,$2,$3,$4,$5) as v", [actorId, actorRole, siteId, category, key]);
     return r.rows[0]?.v ?? null;
   }
+
+  // ── PLATFORM-owned add-ons (0172; the matrix is 0213) ─────────────────────────────────────────
+  // A gateway is bought by the PLATFORM and inherited by all of its brands. These three are the back
+  // office for that: before them, fn_platform_addon_grant/revoke had no caller at all and a platform
+  // could only be granted a gateway by hand in SQL — which is how `mugo` ended up owning none and
+  // `dakafx` could not take a deposit. Authorization (superadmin-only writes) stays in the RPCs.
+  async platforms(actorId: string, actorRole: string): Promise<unknown[]> {
+    const r = await this.q.query("select fn_addon_platforms($1,$2) as v", [actorId, actorRole]);
+    return (r.rows[0]?.v ?? []) as unknown[];
+  }
+  /** `grandfathered` = recognise as already owned: no billing_charges row is raised (0172). */
+  async platformGrant(actorId: string, actorRole: string, platformId: string, category: string, key: string,
+    grandfathered = false): Promise<unknown> {
+    const r = await this.q.query("select fn_platform_addon_grant($1,$2,$3,$4,$5,$6) as v",
+      [actorId, actorRole, platformId, category, key, grandfathered]);
+    return r.rows[0]?.v ?? null;
+  }
+  async platformRevoke(actorId: string, actorRole: string, platformId: string, category: string, key: string): Promise<unknown> {
+    const r = await this.q.query("select fn_platform_addon_revoke($1,$2,$3,$4,$5) as v",
+      [actorId, actorRole, platformId, category, key]);
+    return r.rows[0]?.v ?? null;
+  }
 }

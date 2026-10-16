@@ -16,10 +16,13 @@ import { useToast } from '@/lib/toast/ToastProvider';
 import { formatDate } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { parseKes } from '@/lib/billing/labels';
-import { useAddonBrands, useAddonCatalog, useAddonRequests, useDecideAddonRequest, useUpdateAddon } from '@/lib/addons/hooks';
-import type { AddonCategory, AddonRequestRow, BillingType, CatalogItem } from '@/lib/addons/endpoints';
 import {
-  AddonPreview, CATEGORY, NoteField, RequestHistory, RequestSummary, errMsg, priceText,
+  useAddonBrands, useAddonCatalog, useAddonPlatforms, useAddonRequests, useDecideAddonRequest,
+  useGrantPlatformAddon, useRevokePlatformAddon, useUpdateAddon,
+} from '@/lib/addons/hooks';
+import type { AddonCategory, AddonPlatformRow, AddonRequestRow, BillingType, CatalogItem } from '@/lib/addons/endpoints';
+import {
+  AddonPreview, CATEGORY, NoteField, RequestHistory, RequestSummary, billingSentence, errMsg, priceText,
 } from '@/components/addons/Marketplace';
 
 /**
@@ -35,6 +38,7 @@ export default function AddonsPage() {
 const TABS = [
   { id: 'requests', label: 'Requests', hint: 'What brands asked for' },
   { id: 'catalog', label: 'Catalog', hint: 'Prices, pricing model, what is offered' },
+  { id: 'platforms', label: 'Platforms', hint: 'What each platform owns — gateways are bought here' },
   { id: 'brands', label: 'Brands', hint: 'What each brand owns and uses' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
@@ -58,7 +62,10 @@ function OwnerAddons() {
         <StatCard label="Offered" value={`${items.filter((i) => i.active).length} of ${items.length}`} hint="Add-ons brands can request" />
       </div>
       <PageTabs tabs={TABS.map((t) => (t.id === 'requests' && pending ? { ...t, label: `Requests (${pending})` } : t))} value={tab} onChange={setTab} label="Add-on sections" />
-      {tab === 'requests' ? <RequestsInbox /> : tab === 'catalog' ? <Catalog items={items} loading={cat.isLoading} /> : <BrandsMatrix items={items} />}
+      {tab === 'requests' ? <RequestsInbox />
+        : tab === 'catalog' ? <Catalog items={items} loading={cat.isLoading} />
+        : tab === 'platforms' ? <PlatformsMatrix items={items} />
+        : <BrandsMatrix items={items} />}
     </div>
   );
 }
@@ -240,6 +247,229 @@ function EditAddon({ item, onClose }: { item: CatalogItem | null; onClose: () =>
   );
 }
 
+/**
+ * What each PLATFORM owns, and the only place a platform's add-ons are granted or removed.
+ *
+ * Add-ons are bought by the platform and every one of its brands inherits them, so this is the tier
+ * where a gateway purchase actually lives — the Brands tab below shows what that inheritance produced.
+ * Until this screen existed, fn_platform_addon_grant / fn_platform_addon_revoke (migration 0172) had no
+ * caller at all and a platform could only be granted a gateway by hand in SQL. That is how platform
+ * MUGO came to own no gateway while running on its own payment accounts, and why its brand `dakafx`
+ * showed "Deposits are temporarily unavailable" to its first player for 5h45m.
+ *
+ * The "Deposits" column is the warning that was missing: a platform on its own accounts whose owned
+ * gateways are all switched off globally has NOTHING to offer its brands' players.
+ */
+function PlatformsMatrix({ items }: { items: CatalogItem[] }) {
+  const q = useAddonPlatforms();
+  const [search, setSearch] = React.useState('');
+  const [manage, setManage] = React.useState<AddonPlatformRow | null>(null);
+  const name = (ref: string) => items.find((i) => `${i.category}:${i.key}` === ref)?.display_name ?? ref.split(':')[1];
+  if (q.isLoading) return <Skeleton className="h-60 w-full" />;
+  const rows = (q.data?.platforms ?? []).filter((p) => !search || `${p.name} ${p.slug}`.toLowerCase().includes(search.toLowerCase()));
+  // Keep the open modal in step with a refetch after a grant / revoke.
+  const current = manage ? rows.find((r) => r.platform_id === manage.platform_id) ?? manage : null;
+  return (
+    <div className="flex flex-col gap-3">
+      <SearchInput value={search} onChange={setSearch} placeholder="Find a platform" />
+      {!rows.length ? <Empty title="No platforms" description="Platforms own the add-ons their brands inherit." /> : (
+        <TableWrap>
+          <thead className="border-b border-border"><tr><Th>Platform</Th><Th numeric>Brands</Th><Th>Gateways owned</Th><Th>Deposits</Th><Th className="w-px" /></tr></thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((p) => {
+              const gateways = p.owned.filter((o) => o.startsWith('payment_gateway:'));
+              // The dakafx state: live on its own accounts with no globally-enabled gateway to serve.
+              const stranded = p.scope_active && p.live_rails.length === 0;
+              return (
+                <tr key={p.platform_id} className={cn(p.status !== 'active' && 'opacity-60')}>
+                  <Td>
+                    <div className="font-medium">{p.name}</div>
+                    <div className="text-xs text-muted">{p.slug}{p.plan_key ? ` · ${p.plan_key}` : ''}{p.billing_exempt ? ' · not billed' : ''}</div>
+                  </Td>
+                  <Td numeric>{p.sites}</Td>
+                  <Td>
+                    <div className="flex flex-wrap gap-1">
+                      {gateways.length ? gateways.map((o) => (
+                        <span key={o} className="rounded-full bg-accent/15 px-2 py-0.5 text-xs text-accent"
+                          title={p.grandfathered.includes(o) ? 'Recognised as already owned — never billed' : 'Purchased'}>
+                          {name(o)}{p.grandfathered.includes(o) ? '*' : ''}
+                        </span>
+                      )) : <span className="text-muted">None</span>}
+                    </div>
+                  </Td>
+                  <Td>
+                    {stranded ? (
+                      <span className="font-medium text-down" title="This platform is live on its own payment accounts, but none of the gateways it owns is switched on globally — its brands have no way to deposit.">
+                        No live rail
+                      </span>
+                    ) : p.scope_active ? (
+                      <span className="text-sm">Own accounts<span className="block text-xs text-muted">{p.live_rails.map((r) => name(`payment_gateway:${r}`)).join(', ')}</span></span>
+                    ) : <span className="text-sm text-muted">System accounts</span>}
+                  </Td>
+                  <Td><Button size="sm" variant="outline" onClick={() => setManage(p)} aria-label={`Manage ${p.name} add-ons`}>Manage</Button></Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </TableWrap>
+      )}
+      <p className="text-xs text-muted">* Recognised as already owned, so it was never billed.</p>
+      <ManagePlatform platform={current} items={items} onClose={() => setManage(null)} />
+    </div>
+  );
+}
+
+/**
+ * Grant / remove one platform's add-ons. Both writes are system-owner-only in the route AND in the RPC.
+ * Two things are stated before confirming, because both are easy to get wrong and expensive:
+ *   - a grant either raises a charge or is recognised as already owned (grandfathered);
+ *   - a removal can strand every brand on the platform with no way to deposit.
+ */
+function ManagePlatform({ platform, items, onClose }: { platform: AddonPlatformRow | null; items: CatalogItem[]; onClose: () => void }) {
+  const grant = useGrantPlatformAddon();
+  const revoke = useRevokePlatformAddon();
+  const toast = useToast();
+  const [confirm, setConfirm] = React.useState<{ item: CatalogItem; mode: 'grant' | 'revoke' } | null>(null);
+  const [asOwned, setAsOwned] = React.useState(false);
+  React.useEffect(() => { setAsOwned(false); }, [confirm]);
+  if (!platform) return null;
+  const owned = new Set(platform.owned);
+  const busy = grant.isPending || revoke.isPending;
+
+  const act = () => {
+    if (!confirm) return;
+    const { item, mode } = confirm;
+    const base = { platform: platform.platform_id, category: item.category, key: item.key };
+    const done = (title: string, description: string) => {
+      toast.push({ tone: 'success', title, description });
+      setConfirm(null);
+    };
+    const fail = (e: unknown) => toast.push({ tone: 'error', title: 'Not saved', description: errMsg(e) });
+    if (mode === 'grant') {
+      grant.mutate({ ...base, grandfathered: asOwned }, {
+        onSuccess: () => done(`${item.display_name} added to ${platform.name}`,
+          `All ${platform.sites} brand${platform.sites === 1 ? '' : 's'} on this platform can use it now.`
+          + (asOwned ? ' Nothing was billed.' : '')),
+        onError: fail,
+      });
+    } else {
+      revoke.mutate(base, {
+        onSuccess: () => done(`${item.display_name} removed from ${platform.name}`,
+          'Brands that were granted it individually keep it.'),
+        onError: fail,
+      });
+    }
+  };
+
+  return (
+    <>
+      <Modal open onClose={onClose} size="lg" title={`${platform.name} — add-ons`}
+        description={`Owned by the platform and inherited by all ${platform.sites} of its brand${platform.sites === 1 ? '' : 's'}.`}
+        footer={<Button variant="outline" onClick={onClose}>Done</Button>}>
+        <div className="flex flex-col gap-5">
+          {platform.scope_active && platform.live_rails.length === 0 ? (
+            <p className="rounded-xl border border-down/40 bg-down/10 p-3 text-sm">
+              <b>Its brands cannot deposit.</b> {platform.name} is live on its own payment accounts, but none of the
+              gateways it owns is switched on globally, so the deposit sheet has nothing to offer. Add a gateway it can
+              actually use, or switch this platform back to the System accounts.
+            </p>
+          ) : null}
+          {(Object.keys(CATEGORY) as AddonCategory[]).map((c) => {
+            const list = items.filter((i) => i.category === c);
+            if (!list.length) return null;
+            return (
+              <Section key={c} title={CATEGORY[c].title}>
+                <ul className="flex flex-col gap-2">
+                  {list.map((i) => {
+                    const ref = `${i.category}:${i.key}`;
+                    const has = owned.has(ref);
+                    const p = priceText(i.billing_type, i.price_cents, i.setup_fee_cents);
+                    return (
+                      <li key={i.key} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 p-3 text-sm">
+                        <div className="min-w-0">
+                          <div className="font-medium">
+                            {i.display_name}
+                            {i.is_default ? <span className="ml-2 rounded-full bg-up/15 px-2 py-0.5 text-[10px] font-semibold text-up">FREE FOR ALL</span> : null}
+                            {has && platform.grandfathered.includes(ref) ? <span className="ml-2 text-xs font-normal text-muted">already owned</span> : null}
+                          </div>
+                          <div className="text-xs text-muted">{p.main}{p.extra ? ` ${p.extra}` : ''}{!i.active ? ' · hidden from brands' : ''}</div>
+                        </div>
+                        {i.is_default ? (
+                          <span className="shrink-0 text-xs text-muted" title="Every platform and brand gets this one free, whether or not a row exists.">Always included</span>
+                        ) : has ? (
+                          <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirm({ item: i, mode: 'revoke' })}>Remove</Button>
+                        ) : (
+                          <Button size="sm" disabled={busy || !i.active} onClick={() => setConfirm({ item: i, mode: 'grant' })}
+                            title={i.active ? undefined : 'Hidden add-ons cannot be granted. Offer it in the Catalog first.'}>Add</Button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Section>
+            );
+          })}
+        </div>
+      </Modal>
+
+      {confirm ? (
+        <Modal open onClose={() => setConfirm(null)} size="sm"
+          title={confirm.mode === 'grant' ? `Add ${confirm.item.display_name} to ${platform.name}?` : `Remove ${confirm.item.display_name} from ${platform.name}?`}
+          footer={<><Button variant="outline" onClick={() => setConfirm(null)}>Cancel</Button>
+            <Button variant={confirm.mode === 'grant' ? 'primary' : 'down'} disabled={busy} onClick={act}>
+              {confirm.mode === 'grant' ? 'Add to platform' : 'Remove'}
+            </Button></>}>
+          <div className="flex flex-col gap-3 text-sm">
+            <p className="text-muted">
+              Every one of {platform.name}&apos;s {platform.sites} brand{platform.sites === 1 ? '' : 's'}{' '}
+              {confirm.mode === 'grant' ? 'will be able to use this.' : 'loses this, unless it was granted the add-on on its own.'}
+            </p>
+            {confirm.mode === 'grant' ? (
+              <>
+                <p className="rounded-xl bg-surface-2 p-3">
+                  {asOwned ? 'Recognised as already owned. Nothing is billed.'
+                    : billingSentence(confirm.item.billing_type, confirm.item.price_cents, confirm.item.setup_fee_cents)}
+                  {platform.billing_exempt ? ' This platform is marked not billed, so no charge is raised either way.' : ''}
+                </p>
+                <label className="flex items-center justify-between gap-3">
+                  <span>
+                    <span className="font-medium">Already owned</span>
+                    <span className="block text-xs text-muted">They already had it under an earlier arrangement — never raise a charge.</span>
+                  </span>
+                  <Switch checked={asOwned} onChange={setAsOwned} label="Recognise as already owned" />
+                </label>
+              </>
+            ) : (
+              <RemoveWarning platform={platform} item={confirm.item} />
+            )}
+          </div>
+        </Modal>
+      ) : null}
+    </>
+  );
+}
+
+/** Removing a gateway can leave a platform's brands unable to deposit. Say so before it happens. */
+function RemoveWarning({ platform, item }: { platform: AddonPlatformRow; item: CatalogItem }) {
+  if (item.category !== 'payment_gateway') return <p className="text-muted">Nothing is refunded. You can add it back at any time.</p>;
+  const remaining = platform.live_rails.filter((r) => r !== item.key);
+  const wasLive = platform.live_rails.includes(item.key);
+  if (platform.scope_active && wasLive && remaining.length === 0) {
+    return (
+      <p className="rounded-xl border border-down/40 bg-down/10 p-3">
+        <b>This stops deposits.</b> {platform.name} is live on its own payment accounts and {item.display_name} is the
+        only gateway it owns that is switched on, so removing it leaves all {platform.sites} brand
+        {platform.sites === 1 ? '' : 's'} with no way to deposit — their deposit sheet will read
+        &ldquo;Deposits are temporarily unavailable&rdquo;.
+      </p>
+    );
+  }
+  if (platform.scope_active && wasLive) {
+    return <p className="rounded-xl bg-surface-2 p-3">Deposits keep working on {remaining.join(', ')}. Nothing is refunded.</p>;
+  }
+  return <p className="text-muted">It is not serving deposits right now, so nothing changes for players. Nothing is refunded.</p>;
+}
+
 function BrandsMatrix({ items }: { items: CatalogItem[] }) {
   const q = useAddonBrands();
   const [search, setSearch] = React.useState('');
@@ -305,9 +535,56 @@ function PlatformAddons() {
           })}
         </ul>
       )}
+      <OwnedByYourPlatform items={items} />
       <Section title="Requests from your brands">
         <RequestHistory emptyText="Requests you or your brand admins send, and the System owner's answers, show here." />
       </Section>
     </div>
+  );
+}
+
+/**
+ * Read-only: what the admin's OWN platform owns, and whether its brands can actually deposit.
+ *
+ * A platform admin cannot grant itself an add-on — gateways are sold by the System owner — but it could
+ * previously not even SEE that its platform owned none, which is the gap that let MUGO go live on its
+ * own payment accounts with nothing its brands could use. The warning here is the one that would have
+ * caught `dakafx` before its players did.
+ */
+function OwnedByYourPlatform({ items }: { items: CatalogItem[] }) {
+  const q = useAddonPlatforms();
+  const mine = q.data?.platforms?.[0];
+  if (q.isLoading) return <Skeleton className="h-28 w-full" />;
+  if (!mine) return null;
+  const name = (ref: string) => items.find((i) => `${i.category}:${i.key}` === ref)?.display_name ?? ref.split(':')[1];
+  const gateways = mine.owned.filter((o) => o.startsWith('payment_gateway:'));
+  const stranded = mine.scope_active && mine.live_rails.length === 0;
+  return (
+    <Section title="What your platform owns">
+      <div className="flex flex-col gap-3 text-sm">
+        {stranded ? (
+          <p className="rounded-xl border border-down/40 bg-down/10 p-3">
+            <b>Your brands cannot deposit.</b> {mine.name} is live on its own payment accounts, but none of the gateways
+            it owns is switched on, so the deposit sheet has nothing to offer. Ask the System owner for a gateway you can
+            use, or switch back to the System accounts in Payment accounts.
+          </p>
+        ) : null}
+        <div>
+          <span className="text-muted">Payment gateways: </span>
+          {gateways.length ? (
+            <span className="inline-flex flex-wrap gap-1">
+              {gateways.map((o) => <span key={o} className="rounded-full bg-accent/15 px-2 py-0.5 text-xs text-accent">{name(o)}</span>)}
+            </span>
+          ) : <span className="text-muted">none beyond the free M-Pesa every platform gets</span>}
+        </div>
+        <div className="text-muted">
+          {mine.scope_active
+            ? <>Deposits run on your own payment accounts{mine.live_rails.length ? <> via {mine.live_rails.map((r) => name(`payment_gateway:${r}`)).join(', ')}</> : null}.</>
+            : <>Deposits run on the System owner&apos;s accounts.</>}
+          {' '}Inherited by all {mine.sites} of your brand{mine.sites === 1 ? '' : 's'}.
+        </div>
+        <p className="text-xs text-muted">Add-ons are bought per platform. Request one below and the System owner assigns it.</p>
+      </div>
+    </Section>
   );
 }

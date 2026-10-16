@@ -132,7 +132,13 @@ export default function PlatformsPage() {
                     <Td className="text-right tabular-nums">{p.siteAdmins}</Td>
                     <Td className="text-right tabular-nums">{p.platformAdmins}</Td>
                     <Td className="text-right">
-                      <Button size="sm" variant="outline" onClick={() => { setEdit(p); setEditName(p.name); setEditStatus(p.status); }}>Edit</Button>
+                      <div className="flex justify-end gap-2">
+                        {/* Gateways and other add-ons are owned by the PLATFORM and inherited by its
+                            brands; they are granted on the Add-ons page's Platforms tab (0172/0213). */}
+                        <Link href="/platform/addons?tab=platforms"
+                          className="inline-flex h-8 items-center rounded-brand border border-border px-3 text-sm font-medium hover:bg-surface-2">Add-ons</Link>
+                        <Button size="sm" variant="outline" onClick={() => { setEdit(p); setEditName(p.name); setEditStatus(p.status); }}>Edit</Button>
+                      </div>
                     </Td>
                   </tr>
                 ))}

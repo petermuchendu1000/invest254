@@ -73,3 +73,33 @@ export function useActivateAddon() {
   const t = useTok(); const inv = useAll();
   return useMutation({ mutationFn: (b: { site?: string; category: string; key: string }) => addonApi.activate(t, b), onSuccess: inv });
 }
+
+// ── Platform-owned add-ons (0172 grant/revoke, 0213 matrix) ──
+export function useAddonPlatforms(enabled = true) {
+  const t = useTok();
+  return useQuery({ queryKey: ['addons', 'platforms'], queryFn: () => addonApi.platforms(t), enabled: !!t && enabled });
+}
+/** A platform grant changes what EVERY brand under it may surface, so the brand views refresh too. */
+function useAllPlatform() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ['addons'] });
+    void qc.invalidateQueries({ queryKey: ['platform'] });        // payment scopes + sites read entitlement
+    void qc.invalidateQueries({ queryKey: ['billing'] });          // a non-grandfathered grant raises a charge
+    void qc.invalidateQueries({ queryKey: ['deposits', 'providers'] });
+  };
+}
+export function useGrantPlatformAddon() {
+  const t = useTok(); const inv = useAllPlatform();
+  return useMutation({
+    mutationFn: (b: { platform: string; category: string; key: string; grandfathered?: boolean }) => addonApi.platformGrant(t, b),
+    onSuccess: inv,
+  });
+}
+export function useRevokePlatformAddon() {
+  const t = useTok(); const inv = useAllPlatform();
+  return useMutation({
+    mutationFn: (b: { platform: string; category: string; key: string }) => addonApi.platformRevoke(t, b),
+    onSuccess: inv,
+  });
+}
