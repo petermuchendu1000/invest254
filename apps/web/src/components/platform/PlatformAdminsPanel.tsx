@@ -14,10 +14,11 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useToast } from '@/lib/toast/ToastProvider';
+import { useSession } from '@/lib/auth/session';
 import { ApiError } from '@/lib/api/client';
 import { ROLE_LABELS } from '@/lib/roles';
 import { maskPhoneForDisplay } from '@invest254/shared/payments';
-import { usePlatformAdmins, useUserSearch, useAppointPlatformAdmin, useRevokePlatformAdmin } from '@/lib/platform/hooks';
+import { usePlatformAdmins, useUserSearch, useAppointPlatformAdmin, useRevokePlatformAdmin, useResetSecurityAnswers } from '@/lib/platform/hooks';
 import type { DirectoryUserDto, PlatformAdminDto, PlatformDto } from '@/lib/platform/endpoints';
 
 const ROLE_LABEL = ROLE_LABELS;
@@ -33,6 +34,22 @@ export function appointBlocker(u: DirectoryUserDto, platformId: string): string 
   if (u.role === 'platform_superadmin') return 'The System owner cannot be appointed.';
   if (u.isDefaultMarketer) return "A brand's default marketer: reassign that brand's default marketer first.";
   if (platformId && u.role === 'platform_admin' && u.platformId === platformId) return 'Already runs this platform.';
+  return null;
+}
+
+/**
+ * Why this person's security answers cannot be reset here (mirrors fn_admin_reset_security_answers,
+ * 0210), or null. Shown on the row so the refusal is explained before it is attempted, which is the
+ * same contract `appointBlocker` keeps above.
+ *
+ * `selfId` matters as much as the role rules: the RPC refuses a self-reset, because an operator who
+ * could clear their OWN knowledge factor from inside a live session could simply re-enrol one, and
+ * step-up would be protecting nothing.
+ */
+export function resetBlocker(u: DirectoryUserDto, selfId: string | null): string | null {
+  if (selfId && u.userId === selfId) return 'You cannot reset your own answers — ask another operator above you.';
+  if (u.role === 'platform_superadmin') return 'The System owner is recovered out-of-band, not from here.';
+  if (u.role === 'player' || u.role === 'marketer') return 'Only operator accounts use security questions.';
   return null;
 }
 
@@ -58,6 +75,34 @@ export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] })
   const debounced = useDebounced(query);
   const searchQ = useUserSearch(debounced);
   const results = searchQ.data?.users ?? [];
+
+  // The reset flow keeps its OWN search state. Sharing the appoint box would mean one box whose
+  // result list means two different things depending on which button you press next.
+  const self = useSession((x) => x.user);
+  const resetMut = useResetSecurityAnswers();
+  const [resetQuery, setResetQuery] = useState('');
+  const resetDebounced = useDebounced(resetQuery);
+  const resetSearchQ = useUserSearch(resetDebounced);
+  const resetResults = resetSearchQ.data?.users ?? [];
+  const [resetPicked, setResetPicked] = useState<DirectoryUserDto | null>(null);
+
+  async function doReset() {
+    if (!resetPicked) return;
+    try {
+      const out = await resetMut.mutateAsync({ userId: resetPicked.userId });
+      toast.push({
+        tone: 'success',
+        title: 'Security answers cleared',
+        description: out.cleared > 0
+          ? `${who(resetPicked)} must set a new set at next sign-in. ${out.cleared} answer${out.cleared === 1 ? '' : 's'} discarded, and their sessions were ended.`
+          : `${who(resetPicked)} had none stored, so there was nothing to discard. Their sessions were ended and they will be asked to set a new set.`,
+      });
+      setResetPicked(null);
+      setResetQuery('');
+    } catch (e) {
+      toast.push({ tone: 'error', title: 'Could not reset', description: e instanceof ApiError ? e.message : 'Try again.' });
+    }
+  }
   const [picked, setPicked] = useState<DirectoryUserDto | null>(null);
   const [revoking, setRevoking] = useState<PlatformAdminDto | null>(null);
   const [newRole, setNewRole] = useState('admin');
@@ -172,6 +217,71 @@ export function PlatformAdminsPanel({ platforms }: { platforms: PlatformDto[] })
               <strong>{platformName(platformId)}</strong> and leave their current role.
             </p>
             <div><Button onClick={appoint} disabled={appointMut.isPending}>{appointMut.isPending ? 'Appointing…' : 'Appoint platform admin'}</Button></div>
+          </div>
+        ) : null}
+      </section>
+
+      {/*
+        Forgotten security answers (0210, docs/68).
+        Separate section rather than a per-row button on the list above, because the person who gets
+        locked out is usually a BRAND admin — for whom the answers are the step-up factor itself —
+        and brand admins never appear in the platform-admins list. Searching covers both.
+      */}
+      <section className="flex flex-col gap-3 border-t border-border pt-4" aria-labelledby="pa-reset">
+        <h3 id="pa-reset" className="text-sm font-semibold">Reset someone&apos;s security answers</h3>
+        <p className="text-xs text-muted">
+          For an operator who has forgotten the answers they set. The answers are stored hashed and
+          cannot be read or chosen for them — this clears the set so they pick three new questions at
+          next sign-in. Their current sessions end immediately.
+        </p>
+        <Input
+          label="Find the person"
+          placeholder="Username or phone (any brand)"
+          value={resetQuery}
+          onChange={(e) => { setResetQuery(e.target.value); setResetPicked(null); }}
+          hint="At least 2 characters. Searches every brand."
+        />
+        {resetDebounced.trim().length >= 2 ? (
+          resetSearchQ.isLoading ? <p className="text-sm text-muted">Searching…</p>
+            : resetResults.length === 0 ? <p className="text-sm text-muted">No one matches &ldquo;{resetDebounced.trim()}&rdquo;.</p>
+            : (
+            <ul className="flex max-h-64 flex-col divide-y divide-border overflow-y-auto rounded-xl border border-border" role="listbox" aria-label="Reset search results">
+              {resetResults.map((u) => {
+                const blocker = resetBlocker(u, self?.userId ?? null);
+                const selected = resetPicked?.userId === u.userId;
+                return (
+                  <li key={u.userId}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      disabled={!!blocker}
+                      onClick={() => setResetPicked(u)}
+                      className={`flex w-full flex-col items-start gap-0.5 p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60 ${selected ? 'bg-accent/10' : 'hover:bg-surface-2'}`}
+                    >
+                      <span className="font-medium">{who(u)} <span className="text-xs font-normal text-muted">· {ROLE_LABEL[u.role] ?? u.role}</span></span>
+                      <span className="text-xs text-muted">{maskPhoneForDisplay(u.phone) || '-'} · {u.siteName ?? 'no brand'}{u.platformName ? ` · ${u.platformName}` : ''}</span>
+                      {blocker ? <span className="text-xs text-warn">{blocker}</span> : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>)
+        ) : null}
+        {resetPicked ? (
+          <div className="flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn/5 p-3 text-sm">
+            <p>
+              <strong>{who(resetPicked)}</strong> ({ROLE_LABEL[resetPicked.role] ?? resetPicked.role}
+              {resetPicked.siteName ? `, ${resetPicked.siteName}` : ''}) will be signed out everywhere and asked to
+              set three new security questions the next time they sign in. Nothing else about their
+              account changes.
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" variant="down" onClick={doReset} disabled={resetMut.isPending}>
+                {resetMut.isPending ? 'Resetting…' : 'Reset their answers'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setResetPicked(null)} disabled={resetMut.isPending}>Cancel</Button>
+            </div>
           </div>
         ) : null}
       </section>

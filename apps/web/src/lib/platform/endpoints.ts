@@ -305,6 +305,15 @@ export const platformApi = {
     apiFetch<{ admins: PlatformAdminDto[] }>('/platform/platform-admins', { token: t, query: { platform: platformId } }),
   searchUsers: (t: string, q: string) =>
     apiFetch<{ users: DirectoryUserDto[] }>('/platform/users/search', { token: t, query: { q } }),
+  /**
+   * Clear a subordinate operator's security answers so they must enrol a fresh set (0210, docs/68).
+   *
+   * Lives under /admin because the subject is a user, not a platform; the GATE is platform tier.
+   * `cleared` is how many answers were discarded — 0 is a legitimate result for someone who never
+   * finished setup, not a failure.
+   */
+  resetSecurityAnswers: (t: string, userId: string) =>
+    apiFetch<{ userId: string; cleared: number }>(`/admin/users/${userId}/reset-security-answers`, { method: 'POST', token: t }),
 };
 
 /** Platform tier (Issue 1). */

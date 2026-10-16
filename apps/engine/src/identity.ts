@@ -979,6 +979,17 @@ export class InMemoryIdentityRepository implements IdentityRepository, Affiliate
     const u = this.byId.get(userId);
     if (u) u.status = status;
   }
+  /**
+   * Test/admin seam: discard every stored security answer for a user, returning how many went.
+   *
+   * Mirrors the DELETE in fn_admin_reset_security_answers (0210). The admin repo enforces the RPC's
+   * guards before calling this — nothing here checks who the actor is.
+   */
+  adminClearSecurityAnswers(userId: string): number {
+    const n = this.securityAnswers.get(userId)?.size ?? 0;
+    this.securityAnswers.delete(userId);
+    return n;
+  }
   /** Test/admin seam: set a user's role (role management is a DB concern in production). */
   adminSetRole(userId: string, role: string): void {
     const u = this.byId.get(userId);
