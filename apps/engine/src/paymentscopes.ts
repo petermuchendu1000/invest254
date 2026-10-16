@@ -138,6 +138,12 @@ export interface PaymentScopeRepository {
   /** Authorization-only probe (raises NOT_AUTHORIZED / PLATFORM_SCOPE_FORBIDDEN / SCOPE_NOT_FOUND). */
   assertScope(actorId: string, role: string, type: ScopeType, id: string): Promise<void>;
   stampTransaction(txId: string, scope: PaymentScopeRef): Promise<void>;
+  /**
+   * Deposit gateways ANY brand routing through this scope is entitled to (0212 — union, mpesa always).
+   * `null` means the lookup is unavailable and the caller must NOT restrict: activate() fails open on
+   * it, matching the read path (listDepositProviders) it protects.
+   */
+  entitledGateways(type: ScopeType, id: string): Promise<Set<string> | null>;
 }
 
 function mapView(v: Record<string, unknown>, type: ScopeType, id: string, code: string): ScopedConfigView {
@@ -194,6 +200,13 @@ export class PgPaymentScopeRepository implements PaymentScopeRepository {
   async stampTransaction(txId: string, scope: PaymentScopeRef) {
     await this.q.query("select public.fn_set_transaction_payment_scope($1,$2)", [txId, scope]);
   }
+  async entitledGateways(type: ScopeType, id: string): Promise<Set<string> | null> {
+    // 0212. A deployment whose DB predates that migration throws here; activate() treats the failure
+    // as "unknown" and falls back to the readiness-only gate rather than blocking a legitimate go-live.
+    const r = await this.q.query("select public.fn_scope_entitled_gateways($1,$2) as v", [type, id]);
+    const v = r.rows[0]?.v as string[] | null | undefined;
+    return Array.isArray(v) ? new Set(v) : null;
+  }
 }
 
 /** In-memory double with the same authorization rules (actor/site -> platform maps seeded by tests). */
@@ -205,6 +218,9 @@ export class InMemoryPaymentScopeRepository implements PaymentScopeRepository {
   readonly configs = new Map<string, { settings: Record<string, string>; ciphertext: string | null; meta: Record<string, { set: boolean; last4: string }>; encVersion: number; updatedAt: string }>();
   readonly scopes = new Map<string, { active: boolean; payoutsEnabled: boolean; activatedAtMs: number | null }>();
   readonly stamps = new Map<string, PaymentScopeRef>();
+  /** `${type}:${id}` -> entitled gateways (0212). UNSEEDED = no restriction, so tests that do not care
+   *  about entitlement keep the pre-0212 readiness-only behaviour. */
+  readonly entitlements = new Map<string, Set<string>>();
   readonly audit: Array<{ actorId: string; action: string; scope: string }> = [];
   private key(code: string, type: ScopeType, id: string) { return `${code}|${type}:${id}`; }
   private platformOf(type: ScopeType, id: string): string {
@@ -260,6 +276,9 @@ export class InMemoryPaymentScopeRepository implements PaymentScopeRepository {
     const ps = p ? this.scopes.get(`platform:${p}`) : undefined;
     if (p && ps?.active) return { scope: scopeRef("platform", p), payoutsEnabled: ps.payoutsEnabled };
     return { scope: "global", payoutsEnabled: true };
+  }
+  async entitledGateways(type: ScopeType, id: string): Promise<Set<string> | null> {
+    return this.entitlements.get(`${type}:${id}`) ?? null;   // unseeded => no restriction
   }
   async listScopes(actorId: string, role: string, platformId: string): Promise<ScopeState[]> {
     await this.assertScope(actorId, role, "platform", platformId);
@@ -491,6 +510,21 @@ export class PaymentScopeService implements GatewayRouter {
     const st = await this.statusInternal(type, id);
     const rails = Object.entries(st).filter(([c, s]) => PLAYER_DEPOSIT_RAILS.has(c) && s.depositsReady).map(([c]) => c);
     if (!rails.length) throw new Error("NO_DEPOSIT_RAIL_READY");
+    // READY IS NOT ENOUGH — IT MUST ALSO BE OWNED (0212). listDepositProviders intersects the effective
+    // providers with the brand's entitlements and, on a NON-global scope, returns that intersection with
+    // no M-Pesa fallback (its `if (!rails.length)` guard sits after the early return). So going live on
+    // a rail nobody here owns leaves every brand on this scope with ZERO deposit methods and only the
+    // sheet's "temporarily unavailable" copy to show for it — where `dakafx` sat for 5h45m after a green
+    // Mega Pay probe (0211/0212 headers carry the full account). This is the only place that catches it:
+    // a working rail is both ready AND entitled, and the probe only ever answered the first.
+    // The message names the rails because the remedy is not the operator's to apply — a purchased
+    // gateway is granted by the SYSTEM owner (fn_platform_addon_grant) — so it must say what to ask for.
+    // Fails OPEN on an unavailable lookup (null, or a DB predating 0212), like the path it guards.
+    const entitled = await this.repo.entitledGateways(type, id).catch(() => null);
+    if (entitled && !rails.some((c) => entitled.has(c))) {
+      throw new Error(`NO_ENTITLED_DEPOSIT_RAIL: ${rails.join(", ")} ready but not entitled to this ${type}`
+        + ` (entitled: ${[...entitled].sort().join(", ") || "none"}) — the system owner must grant it`);
+    }
     if (payoutsEnabled && !st.mpesa?.payoutsReady) throw new Error("PAYOUTS_NOT_CONFIGURED");
     await this.repo.setActive(actorId, role, type, id, true, payoutsEnabled);
     this.invalidate();

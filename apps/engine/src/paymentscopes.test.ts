@@ -64,6 +64,9 @@ function setup() {
 }
 const FULL_MPESA = { environment: "production", shortcode: "600111", consumer_key: "PLAT_KEY", consumer_secret: "PLAT_SECRET", passkey: "PLAT_PK",
   b2c_initiator: "platop", b2c_security_credential: "cred==", b2c_shortcode: "3000111" };
+/** A COMPLETE Mega Pay account: depositsReady, would pass its connectivity probe. Owner-only fields
+ *  (api_base, callback_allowed_cidrs) omitted so a platform admin may save it. */
+const FULL_MEGAPAY = { env: "production", email: "ops@brand.test", api_key: "MGPY-PLAT-KEY" };
 
 test("PAY-1: with no active scope every brand stays on the System accounts (no behaviour change)", async () => {
   const { payments, global, repo } = setup();
@@ -162,6 +165,35 @@ test("PAY-1: go-live needs a complete deposit rail; configs stay drafts until th
   await svc.setConfig(PA, "platform_admin", "mpesa", "platform", PLATFORM, FULL_MPESA);   // saved, NOT active
   await payments.initiateDeposit("player", 100_000, "0712345678", SITE);
   assert.deepEqual(global.used, ["stkPush"], "a draft never takes live traffic");
+});
+
+test("PAY-1: go-live is refused on a READY but UNENTITLED rail (0212 — the dakafx outage)", async () => {
+  const { svc, scopes, payments, global } = setup();
+  // Mega Pay is complete here: depositsReady is true and the connectivity probe would come back green.
+  await svc.setConfig(PA, "platform_admin", "megapay", "platform", PLATFORM, FULL_MEGAPAY);
+  // But this platform owns only the free Daraja entitlement, so NO brand on it could ever surface
+  // Mega Pay — listDepositProviders would intersect it away and, on a non-global scope, return []. That
+  // is the state dakafx shipped to players for 5h45m: a green probe, an active scope, zero methods.
+  scopes.entitlements.set(`platform:${PLATFORM}`, new Set(["mpesa"]));
+  await assert.rejects(svc.activate(PA, "platform_admin", "platform", PLATFORM, false),
+    /NO_ENTITLED_DEPOSIT_RAIL: megapay ready but not entitled to this platform \(entitled: mpesa\)/,
+    "readiness alone must not open a rail the scope does not own");
+  assert.equal((await svc.ownerScope(SITE)).scope, "global", "the refusal left the brand on the System accounts");
+  await payments.initiateDeposit("player", 100_000, "0712345678", SITE);
+  assert.deepEqual(global.used, ["stkPush"], "and deposits kept working there meanwhile");
+
+  // Granting it — what fn_platform_addon_grant does — lets the SAME scope go live, unchanged.
+  scopes.entitlements.set(`platform:${PLATFORM}`, new Set(["mpesa", "megapay"]));
+  await svc.activate(PA, "platform_admin", "platform", PLATFORM, false);
+  assert.equal((await svc.ownerScope(SITE)).scope, scopeRef("platform", PLATFORM));
+});
+
+test("PAY-1: an unknown entitlement set never blocks go-live (0212 fails open, like the read path)", async () => {
+  const { svc, scopes } = setup();
+  await svc.setConfig(PA, "platform_admin", "megapay", "platform", PLATFORM, FULL_MEGAPAY);
+  assert.equal(scopes.entitlements.size, 0, "nothing seeded => the lookup answers 'unknown'");
+  await svc.activate(PA, "platform_admin", "platform", PLATFORM, false);   // readiness-only, as before 0212
+  assert.equal((await svc.ownerScope(SITE)).scope, scopeRef("platform", PLATFORM));
 });
 
 test("PAY-1: a brand's own active scope wins over its platform's", async () => {
