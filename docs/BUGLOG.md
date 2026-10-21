@@ -5,6 +5,39 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #154 — The PayHero ledger sweep wrote ~10 Postgres ERRORs a minute, forever — FIXED (engine)
+- **Reported as:** a wall of red `P0001 TX_NOT_FOUND` rows in the Supabase Postgres log.
+- **Measured, from a 96-minute export (1,000 rows, 2026-10-21 13:01–14:37 UTC):** 954 `TX_NOT_FOUND`
+  errors — **every single error line in the database log**. Exactly 10 per minute, in all 96 minutes
+  covered, in bursts ~0.39s apart separated by ~53s gaps. That cadence is a 60-second timer, not a
+  user: `PAYHERO_LEDGER_RECONCILE_INTERVAL_MS` defaults to 60s (`server.ts:1303`). The other 46 rows
+  were checkpoints and health probes. ~14,400 error rows a day.
+- **Root cause, and it was deliberate:** `reconcilePayHeroLedger` discovers whether a ledger row
+  belongs to us by calling `fn_complete_deposit` and catching the `TX_NOT_FOUND` it raises
+  (`paymentservice.ts:632`). PayHero's ledger is ONE SHARED ACCOUNT, so most rows carry references
+  written by something else; each one raised a plpgsql exception, which Postgres records as an ERROR.
+  The sweep re-reads page 1 every minute and the page barely changes, so the SAME ~10 misses were
+  re-raised every minute indefinitely. The money path was never wrong — the exception is caught and
+  the payment falls through to claimable-by-code, which is what it should do.
+- **Why it is worth fixing rather than filtering:** `TX_NOT_FOUND` is also raised by
+  `fn_complete_withdrawal`, `fn_reject_withdrawal` and `fn_admin_mark_withdrawal_paid`, where it means
+  an operator acted on a transaction that is not there — a real failure. One noisy caller at 10/min
+  made that signal unfindable, in the same log and under the same code. A log nobody can read is a log
+  nobody reads.
+- **Fix:** `PaymentRepository.ownedDepositRefs(refs)` — one indexed lookup per sweep (idx_tx_checkout,
+  0005) answering which references belong to a deposit of ours, using the SAME predicate
+  fn_complete_deposit uses (`checkout_request_id` + `kind='deposit'`). The loop then calls the RPC only
+  for references we own. N exceptions become one query, and the round trip per foreign row goes away.
+- **The money RPC was NOT touched.** `fn_complete_deposit` is shared by Daraja, Mega Pay, PayHero and
+  Paynicorn, and for those callers the raise is correct. No migration; engine-only change.
+- **Semantics unchanged, deliberately:** a reference we own still goes through the same idempotent RPC;
+  one we do not still becomes claimable-by-code, so a payment is still EITHER credited to its tx OR
+  claimable, never both. The `TX_NOT_FOUND` catch stays as the race fallback (a tx vanishing between
+  the batch lookup and the call), so even that path behaves exactly as before.
+- **Verification:** a new test asserts a foreign reference never reaches the deposit RPC while our own
+  still does — **proven to fail** against the old code (`a foreign reference must not be sent to the
+  deposit RPC at all`). 8/8 PayHero tests, full suite 2370 tests, 0 failures, `tsc -b` clean.
+
 ## #153 — "Sign-in failed. Please try again." was the console's answer to five different failures — FIXED (web)
 - **Reported as:** a screenshot of the operator sign-in — phone and password filled, a six-digit
   authenticator code typed in, and **"Sign-in failed. Please try again."** under it. Nothing in the

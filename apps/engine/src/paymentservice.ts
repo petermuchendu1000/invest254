@@ -620,9 +620,25 @@ export class PaymentService {
     try { rows = await (await this.payheroForScope(null)).listInboundPayments({ page: opts.page ?? 1 }); }
     catch { return { scanned: 0, settled: 0, ingested: 0, errors: 1 }; }
     let settled = 0, ingested = 0, errors = 0;
+    // WHICH references are ours, asked once for the whole page before the loop.
+    //
+    // Most rows here are not ours — PayHero's ledger is ONE SHARED ACCOUNT, so it carries references
+    // written by whatever else uses it. The loop below used to find that out the only way available:
+    // call fn_complete_deposit and catch the TX_NOT_FOUND it raises. Correct, and the fallback below
+    // still handles it, but a raised plpgsql exception reaches Postgres as an ERROR — and this sweep
+    // runs every 60 seconds over a page that barely changes, so the SAME misses were re-raised every
+    // minute forever: measured at ~10 a minute, 954 in 96 minutes, every error line in the database
+    // log. That buries the TX_NOT_FOUND that is a REAL failure (fn_complete_withdrawal,
+    // fn_reject_withdrawal, fn_admin_mark_withdrawal_paid all raise it when an operator acts on a
+    // transaction that is not there) in noise nobody can filter.
+    //
+    // One indexed lookup per sweep replaces N exceptions. Money semantics are unchanged: a reference
+    // we own still goes through the same idempotent RPC, and one we do not still falls through to
+    // claimable-by-code, so a payment is still EITHER credited to its tx OR claimable, never both.
+    const owned = await this.repo.ownedDepositRefs(rows.map((p) => p.externalReference).filter((r): r is string => r !== null));
     for (const p of rows) {
       try {
-        if (p.externalReference) {
+        if (p.externalReference && owned.has(p.externalReference)) {
           try {
             const res = await this.repo.completeDeposit(p.externalReference, 0, "ledger:payhero", p.mpesaCode,
               { ledger: true, provider: "payhero", mpesaCode: p.mpesaCode, at: new Date().toISOString() });
@@ -630,7 +646,10 @@ export class PaymentService {
             continue; // a tx owns this reference (credited now, or already terminal) — never also ingest it
           } catch (err) {
             if (!/TX_NOT_FOUND/.test((err as Error).message)) throw err; // real error -> count it, don't lose the payment
-            // else: reference we don't own -> fall through to claimable-by-code so nothing is stranded
+            // Kept as the race fallback: the tx could vanish between the batch lookup above and this
+            // call. Behaviour is then exactly what it always was — fall through to claimable-by-code
+            // so nothing is stranded. (The reverse race, a tx created in that window, is credited by
+            // the next sweep, which is also what happened before.)
           }
         }
         const stored = await this.repo.ingestC2b({
