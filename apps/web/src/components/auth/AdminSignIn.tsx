@@ -5,6 +5,7 @@ import { useAuthActions } from '@/lib/auth/useAuthActions';
 import { ApiError } from '@/lib/api/client';
 import { useSessionEnd } from '@/lib/auth/operatorSession';
 import { phoneDisplay, isMaskedValue } from '@/lib/auth/phoneMask';
+import { signInFailure, type SignInFailure } from '@/lib/auth/signInError';
 
 /**
  * Operator sign-in. Deliberately MINIMAL: brand + credentials only. It states nothing about who the
@@ -48,11 +49,12 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   const [password, setPassword] = React.useState('');
   const [totp, setTotp] = React.useState('');
   const [needsTotp, setNeedsTotp] = React.useState(false);
+  const [useRecovery, setUseRecovery] = React.useState(false);   // authenticator lost: spend a recovery code
   const [showPw, setShowPw] = React.useState(false);
   const [showPhone, setShowPhone] = React.useState(false);     // live-stream safety (see the phone Field)
   const [phoneFocused, setPhoneFocused] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<SignInFailure | null>(null);
   // Why this screen appeared without being asked for (0196): a five-minute idle timeout ended the
   // session. Said plainly and without alarm, because the operator did nothing wrong — the alternative
   // is a console that looks like it dropped their work for no reason.
@@ -66,14 +68,15 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
     setEndedReason(null);   // they are signing in again: the explanation has served its purpose
     setBusy(true);
     try {
-      await adminLogin(phone.trim(), password, needsTotp ? totp.trim() : undefined);
+      const second = useRecovery ? { recoveryCode: totp.trim() } : { totp: totp.trim() };
+      await adminLogin(phone.trim(), password, needsTotp ? second : undefined);
       onSignedIn?.();
     } catch (err) {
-      const code = err instanceof ApiError ? err.code : '';
-      if (code === 'MFA_REQUIRED') { setNeedsTotp(true); setError('Enter your 6-digit code.'); }
-      else if (code === 'MFA_INVALID') setError('Incorrect or expired code.');
-      else if (code === 'INVALID_CREDENTIALS') setError('Incorrect credentials.');
-      else setError('Sign-in failed. Please try again.');
+      // MFA_REQUIRED is the server ASKING for the second factor, not refusing one: reveal the field.
+      if (err instanceof ApiError && err.code === 'MFA_REQUIRED') setNeedsTotp(true);
+      // Everything else is named rather than flattened into one sentence — lib/auth/signInError.ts
+      // says why: five unrelated causes wearing the same words is a console nobody can debug.
+      setError(signInFailure(err, { usingRecovery: useRecovery }));
     } finally { setBusy(false); }
   }
 
@@ -145,13 +148,39 @@ export function AdminSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
               trailing={eyeFor(showPhone, () => setShowPhone((v) => !v), showPhone ? 'phone number' : 'the hidden digits')} required />
             <Field label="Password" type={showPw ? 'text' : 'password'} name="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={setPassword} trailing={eye} required />
             {needsTotp ? (
-              <Field label="Authentication code" type="text" name="totp" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={totp} onChange={setTotp} required />
+              <div className="flex flex-col gap-1.5">
+                <Field
+                  label={useRecovery ? 'Recovery code' : 'Authentication code'}
+                  type="text" name="totp" autoComplete="one-time-code" required
+                  inputMode={useRecovery ? 'text' : 'numeric'}
+                  placeholder={useRecovery ? 'XXXX-XXXX' : '123456'}
+                  value={totp}
+                  /* Digits only for a TOTP code: a pasted code carrying a space is refused as
+                     MFA_INVALID, which reads as "wrong code" for a code that was right. */
+                  onChange={(v) => setTotp(useRecovery ? v.slice(0, 32) : v.replace(/[^0-9]/g, '').slice(0, 6))}
+                />
+                {/* The API has always accepted `recovery_code` on this route; only the form never
+                    offered one, so an operator whose authenticator was gone had no way in at all —
+                    and a recovery code typed into the 6-digit box could only ever fail. */}
+                <button
+                  type="button"
+                  onClick={() => { setUseRecovery((v) => !v); setTotp(''); setError(null); }}
+                  className="self-start rounded-lg px-1 py-1 text-left text-[12px] font-medium text-muted transition hover:text-fg"
+                >
+                  {useRecovery ? 'Use the authenticator code instead' : 'Lost your authenticator? Use a recovery code'}
+                </button>
+              </div>
             ) : null}
 
             {error ? (
-              <div role="alert" className="flex items-center gap-2 rounded-xl border border-down/40 bg-down/10 px-3 py-2.5 text-[13px] text-down">
-                <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" strokeLinecap="round" /></svg>
-                <span>{error}</span>
+              <div role="alert" className="flex items-start gap-2 rounded-xl border border-down/40 bg-down/10 px-3 py-2.5 text-[13px] text-down">
+                <svg viewBox="0 0 24 24" className="mt-[2px] h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" strokeLinecap="round" /></svg>
+                <span className="min-w-0">
+                  <span className="block">{error.message}</span>
+                  {/* The code and status, for the failures whose real answer is in the API log rather
+                      than in this form. An operator reading their own console is who this is for. */}
+                  {error.detail ? <span className="mt-0.5 block break-words font-mono text-[11px] text-down/70">{error.detail}</span> : null}
+                </span>
               </div>
             ) : null}
 

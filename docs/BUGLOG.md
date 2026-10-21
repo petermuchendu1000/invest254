@@ -5,6 +5,46 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #153 — "Sign-in failed. Please try again." was the console's answer to five different failures — FIXED (web)
+- **Reported as:** a screenshot of the operator sign-in — phone and password filled, a six-digit
+  authenticator code typed in, and **"Sign-in failed. Please try again."** under it. Nothing in the
+  screenshot said what went wrong, which is the bug reported here.
+- **What:** `AdminSignIn` translated three codes — `MFA_REQUIRED`, `MFA_INVALID`,
+  `INVALID_CREDENTIALS` — and sent everything else to one sentence. "Everything else" is the half
+  that matters at an operator door: `RATE_LIMITED` (429 from the per-IP throttle),
+  `ACCOUNT_SUSPENDED` / `ACCOUNT_BANNED`, any 5xx out of the API, a `fetch` that never reached it
+  (DNS, CORS, a sleeping machine — no `ApiError` at all, so the code read as `''`), and the one that
+  is not a sign-in failure: the `GET /auth/me` that `adminLogin` runs *after* a successful login
+  (`useAuthActions.ts:40`) being refused by the token gate, which `requireAuth` flattens to
+  `AUTH_INVALID` (`http.ts:514`) whether the cause was the force-logout epoch, a non-active profile
+  or the idle gate.
+- **Why that last one matters most:** the token is already in `localStorage` by then. The operator is
+  told their sign-in failed while holding a valid session, and the thing they retry — the code — was
+  never the problem. The same sentence appears when the code was *right* and the server 500'd.
+- **Impact:** no failed console sign-in could be diagnosed from what the operator saw, and no
+  screenshot of one could be diagnosed by anyone else either. Nothing was unauthorised; the console
+  was simply undebuggable from the outside.
+- **Fix:** `lib/auth/signInError.ts` — one pure mapper, unit-tested, returning a sentence that says
+  what happened and what to do, plus `code · HTTP status` for the failures whose real answer is in
+  the API log. A player must never be shown an error code, so this is deliberately *not* shared with
+  `lib/auth/errors.ts`; an operator debugging their own console is exactly who needs one.
+- **Second gap, closed with it:** the form offered no recovery-code field, though
+  `/auth/admin/login` has always accepted `recovery_code` and `#135` closed with "if that
+  authenticator is gone, a recovery code is needed". There was nowhere to type one — and a recovery
+  code typed into the 6-digit box went up as `totp` and could only ever come back `MFA_INVALID`.
+  `adminLogin` now takes the same `{ totp | recoveryCode }` second argument `login` takes, and the
+  code field toggles between the two. TOTP input is digits-only (a pasted code carrying a space was
+  refused as a wrong code).
+- **NOT fixed by this, and worth saying plainly:** this does not make the reported sign-in succeed.
+  It makes the next attempt name its own cause. The candidates for that screenshot, in order:
+  migration `0196`'s `user_mfa.last_totp_step` missing on the deployed database (the replay guard
+  `update` is what runs on a CORRECT code — `identity.ts:576` — so a correct code is exactly what
+  would 500); the `/auth/me` refusal above, with clock skew between the API host (`iat`) and
+  Postgres (`stampForceLogout` uses the database's `now()`) as the mechanism; the 429; or the API
+  not being reached at all.
+- **Verification:** 9 new unit tests pin each branch (including "a correct code that meets a server
+  error does not read as a bad code"). 2368 tests pass, `tsc -b` and the web typecheck clean.
+
 ## #152 — Admin payout decisions deadlocked behind an unreachable security prompt — FIXED
 - **Reported as:** *"I can't accept or reject."* The Reject dialog sat on **"Rejecting…"** forever,
   with the "Confirm it's you" step-up prompt visible but greyed out BEHIND it.
