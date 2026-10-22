@@ -27,6 +27,7 @@ jobs:
     # After a deploy, only check when it succeeded (a failed deploy may have stopped before migrate).
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       reference:
         image: pgvector/pgvector:pg17

@@ -5,6 +5,34 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #155 — A hung deploy job with no timeout ran for six hours and left the API five days behind main — FIXED (CI)
+- **What it looked like from the product:** the platform console's "Reset someone's security answers"
+  answered **"Could not reset / not found"** for every target. The route was missing from the deployed
+  API (`http.ts:386`'s unmatched-route 404), because the API had been running `bb76bf3` since 15 Oct
+  while `main` carried the 0210 work. `/api/v1/health` named the stale commit.
+- **Root cause:** the `deploy invest254-api` job of the 16 Oct run stalled at `#17 exporting to image`
+  on Fly's remote builder and was still sitting there **six hours and twelve minutes** later
+  (`run_duration_ms: 22418000`), when GitHub's own 6-hour ceiling cancelled it. No job in any of the
+  ten workflows had a `timeout-minutes`, so GitHub's ceiling was the only limit in play.
+- **Why one stuck job mattered so much:** `deploy.yml` holds `concurrency: { group: fly-deploy,
+  cancel-in-progress: false }` — correct, since cancelling a deploy mid-flight is worse than waiting.
+  But a job that never ends holds that group for as long as it lives, so the hang did not just lose
+  its own deploy; it blocked the queue. The engine deployed (separate matrix leg, succeeded in 63s)
+  and the migration applied, so the DB and the engine moved while the API did not: a split release
+  nobody was told about. The deploy's own verification step, which checks the live release carries
+  this commit, was skipped along with the job that would have failed it.
+- **Fix:** a `timeout-minutes` on every job in all ten workflows, sized to observed runtimes (CI's
+  four jobs finish inside 8m16s wall; the deploy's own `--wait-timeout` is 5m). A build that stalls
+  now fails in minutes with a red job, releasing the concurrency group, instead of occupying a runner
+  for a working day and reporting nothing.
+- **Also:** `ci.yml` gained `concurrency` with `cancel-in-progress` for every ref EXCEPT `main` — a
+  superseded PR run is work nobody will read, while on main each commit's result is the record of
+  whether that commit was green.
+- **NOT the cause of the billing block that surfaced alongside this** (see the note below): this
+  repository is PUBLIC, so GitHub-hosted standard runners are free. The usage API confirms it —
+  `billable.UBUNTU.total_ms: 0` for every job of both the CI and deploy runs, the six-hour one
+  included. Whatever exhausted the account's Actions budget was spent somewhere other than here.
+
 ## #154 — The PayHero ledger sweep wrote ~10 Postgres ERRORs a minute, forever — FIXED (engine)
 - **Reported as:** a wall of red `P0001 TX_NOT_FOUND` rows in the Supabase Postgres log.
 - **Measured, from a 96-minute export (1,000 rows, 2026-10-21 13:01–14:37 UTC):** 954 `TX_NOT_FOUND`

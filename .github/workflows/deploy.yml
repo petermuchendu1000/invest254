@@ -49,6 +49,7 @@ jobs:
   verify:
     name: verify (typecheck + tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -69,6 +70,7 @@ jobs:
     # Production repo only: the mirror template has no secrets, so everything after verify is skipped there.
     if: github.repository == 'petermuchendu1000/invest254'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
         with:
@@ -110,6 +112,7 @@ jobs:
     name: migrate (apply + record)
     needs: fly-auth
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -154,6 +157,7 @@ jobs:
     name: migrations-ledger (post-migrate)
     needs: migrate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -175,6 +179,7 @@ jobs:
     name: deploy ${{ matrix.app }}
     needs: migrate
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false          # one app failing must not abort the other mid-rollout
       matrix:
