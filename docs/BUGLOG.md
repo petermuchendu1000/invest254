@@ -5,6 +5,53 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #158 — A candle test compared two windows fetched up to 25 seconds apart, so CI went red whenever a run straddled the hour — FIXED (test)
+- **Caught by:** the CI `build` job of PR #178 failing on `WS candles: naming a symbol returns THAT
+  instrument's bars, not the default's rescaled`, on a branch whose diff touched only workflows,
+  docs and a workflow guard test. Nothing in the change could reach the engine, which is what made
+  it worth reading rather than re-running.
+- **What the failure said** (`multiengine.candles.test.ts:278`, `assert.deepEqual`): the two bar
+  windows were identical except that the actual one was shifted **one bar — exactly 3600s —**
+  later at both ends. Decoded, the expected window ended **2026-10-22T09:00:00Z** and the actual
+  ended **10:00:00Z**.
+- **Root cause.** The test makes **two sequential requests**:
+```
+  const gold = await c.ask("candles", { tf: "H1", count: 24 }, "candles");
+  const euro = await c.ask("candles", { tf: "H1", count: 24, symbol: "EURUSD" }, "candles");
+```
+  Each reply is the most recent 24 H1 buckets **as of the moment that request was served**, and this
+  file's own header says warming a second symbol on an already-ticking brand costs up to 24s — the
+  client's ceiling is `WARM_MS = 25_000`. So the gap between the two asks is seconds to tens of
+  seconds, and an H1 boundary falling inside it slides the second window forward by one bar. The
+  assertion then compared a 10:00-ending window against a 09:00-ending one and failed. It is a
+  **clock-boundary race with a deterministic trigger**, not a random flake: roughly 25s of every
+  3600 is a losing window, which at ~380 CI runs a month is a handful of red builds — invisible
+  individually, and each one an invitation to re-run rather than read.
+- **A second instance of the same assumption, three lines down.** `shape()` indexed the two series
+  **positionally** (`b[i]`), so a shifted window also compared bar *i* of one symbol against a
+  different hour of the other. That one did not fail loudly; it silently compared the wrong bars.
+- **Fix.** Compare the buckets the two replies **share**, and align the shape comparison **by time**
+  instead of by index. The assertion's purpose is to prove the two symbols bucket alike and are not
+  one series on two axes; it was never about them being sampled at the same instant. The new form is
+  also stricter in a way the old one was not: each series must be a **contiguous** 3600s grid, and
+  the two must overlap by at least `count - 1` bars, so one bar of boundary slack is allowed and a
+  genuine grid disagreement still fails.
+- **Proven, not assumed** (`scratchpad` harness, three synthetic cases):
+  | case | old assertion | new assertion |
+  |---|---|---|
+  | one H1 boundary crossed between the asks (the CI failure, gold→09:00 / euro→10:00) | **FAIL** | **PASS** |
+  | the grids genuinely differ (M30 against H1) | — | **FAIL**, as it must |
+  | the same series rescaled (both rising, never opposite directions) | — | **FAIL**, as it must |
+  So the fix accepts the boundary and still rejects both faults the assertion exists to catch.
+  `multiengine.candles.test.ts` 18/18; full suite 2366/2376.
+- **Worth generalising:** this file has five other cross-request comparisons (lines 172, 176, 206,
+  319, 320) and all of them are keyed by **trade DATE** rather than by hour, so their losing window
+  is a day boundary rather than an hour — the same bug with a ~24x smaller target. They are left
+  alone deliberately; the pattern to watch for is any assertion that two separately-served replies
+  describe the same slice of a moving window.
+
+---
+
 ## #157 — The deploy hangs were never a slow builder: the two matrix legs race each other on one Fly builder — FIXED (`max-parallel: 1`)
 - **What #155 and #156 saw:** one `deploy` leg occupying a runner until something killed it (six
   hours under GitHub's default, 25 minutes under #155's cap), while the other leg shipped in about a
