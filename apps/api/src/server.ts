@@ -1325,3 +1325,40 @@ if (deps.billing && Number.isFinite(BILLING_RECONCILE_MS) && BILLING_RECONCILE_M
   }, BILLING_RECONCILE_MS);
   billTimer.unref();
 }
+
+// Ticket auto-escalation (migration 0139): an open level-0 ticket past its urgency SLA is escalated
+// to the System admin, logged in ticket_escalations, and notified.
+//
+// This used to be a GitHub Actions cron (`.github/workflows/ticket-escalation.yml`, */15) — 96
+// runners a day, each cold-booting node and `npm ci`ing a monorepo to run one `select`, and each one
+// a production database connection opened from GitHub's network. The work is a single idempotent
+// statement and this process is already up and already holds the pool, so it belongs here with the
+// other sweeps. The workflow remains, schedule commented out, for a manual run.
+//
+// SAFE ON MORE THAN ONE MACHINE. fn_ticket_auto_escalate is ONE `update ... returning` over
+// `escalation_level = 0`: concurrent callers take row locks, and under READ COMMITTED the loser
+// re-evaluates the predicate after the winner commits, finds level 1, and does not return the row.
+// So a second machine cannot double-escalate or double-notify, and no advisory lock is needed.
+// `min_machines_running = 1` (fly.api.toml) is what guarantees somebody is awake to run it at all —
+// the same thing the deposit sweeps above already depend on.
+//
+// The first run is 30 seconds after boot rather than one full interval, so a deploy does not reset
+// the clock and a backlog (this was off entirely while the cron was disabled) clears on the next
+// release instead of waiting. Idempotent, so an extra run costs one `select`. 0 disables.
+const TICKET_ESCALATE_MS = Number(process.env.TICKET_ESCALATE_INTERVAL_MS ?? 900_000);   // 15 min, the cron's cadence
+const TICKET_ESCALATE_FIRST_MS = Number(process.env.TICKET_ESCALATE_FIRST_RUN_MS ?? 30_000);
+if (deps.tickets && Number.isFinite(TICKET_ESCALATE_MS) && TICKET_ESCALATE_MS > 0) {
+  const tickets = deps.tickets;
+  const tkLog = (deps.logger ?? log).child({ module: "tickets.escalate" });
+  const sweep = (): void => {
+    void tickets
+      .autoEscalate()
+      .then((n) => { if (n > 0) tkLog.info("tickets auto-escalated", { escalated: n }); })
+      .catch((err: unknown) => tkLog.error("ticket auto-escalation failed", err as Error));
+  };
+  const first = setTimeout(sweep, Math.max(0, TICKET_ESCALATE_FIRST_MS));
+  first.unref();
+  const tkTimer = setInterval(sweep, TICKET_ESCALATE_MS);
+  tkTimer.unref();
+  log.info("ticket auto-escalation armed", { everyMinutes: Math.round(TICKET_ESCALATE_MS / 60_000) });
+}

@@ -4,17 +4,20 @@ name: Ticket Auto-Escalation
 # (fn_ticket_auto_escalate, migration 0139). Requires repo secret DATABASE_URL (Supabase
 # session-pooler URL, :5432).
 #
-# THE SCHEDULE IS OFF (2026-10-22, owner's call). It ran `*/15 * * * *` — 96 runs a day, each one a
-# fresh runner, an `npm ci` and a connection to production, to ask a question that is usually
-# answered "nothing to escalate". Manual runs still work: Actions -> Ticket Auto-Escalation -> Run
-# workflow.
+# THE SCHEDULE IS OFF, AND NOTHING IS LOST BY IT (2026-10-22): escalation now runs inside the API
+# process, on the same 15-minute cadence, beside the deposit reconcile sweeps
+# (apps/api/src/server.ts, TICKET_ESCALATE_INTERVAL_MS). This workflow ran `*/15 * * * *` — 96
+# runners a day, each cold-booting node and `npm ci`-ing a monorepo to run one `select`, each opening
+# a production database connection from GitHub's network.
 #
-# WHAT IS OFF WHILE THIS IS: an overdue level-0 ticket is no longer escalated to the System admin on
-# its own. The SLA is still recorded and fn_ticket_auto_escalate is unchanged — nothing calls it
-# until someone runs this, so breaches accumulate silently and are escalated in a batch whenever it
-# next runs. Re-enable by restoring the `schedule:` block below. The cheaper long-term home is the
-# API process, which already runs interval timers on Fly (see the reconcile sweeps in server.ts) at
-# no cost and with no dependency on GitHub.
+# It is kept, dispatch-only, as the manual lever: Actions -> Ticket Auto-Escalation -> Run workflow.
+# That is worth having when the API is down, mid-rollback, or when you want to force a pass without
+# waiting for the timer. Running it while the API is also running is harmless — fn_ticket_auto_escalate
+# is one `update ... returning` over escalation_level = 0, so whichever caller gets there first takes
+# the rows and the other finds nothing.
+#
+# Restoring the `schedule:` block would double up with the in-process timer. Harmless, but pointless:
+# change the interval in the API instead.
 on:
   # schedule:
   #   - cron: "*/15 * * * *"
