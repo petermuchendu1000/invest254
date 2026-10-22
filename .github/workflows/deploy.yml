@@ -222,7 +222,16 @@ jobs:
     name: deploy ${{ matrix.app }}
     needs: [gate, migrate]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Raised from 25 (BUGLOG #156). #155 set a cap to stop the 6-hour hang, which was right; this
+    # widens it because the measured healthy distribution turned out to reach further than the cap.
+    # Over the last 60 Deploy runs every matrix leg finished in 1-2 minutes EXCEPT run 38137608432,
+    # where `deploy invest254-api` took 22 minutes and SUCCEEDED (a cold Fly remote builder), and
+    # the three hangs, which were 275, 361 and 361. Nothing lands between 22 and 275. A 25-minute
+    # cap therefore sat 3 minutes above a known-good run: a builder 15% colder than that one would
+    # have failed a real deploy of the money backend, and because `cancel-in-progress: false` holds
+    # the `fly-deploy` group, recovering would need a human to notice and re-run. 45 is twice the
+    # slowest healthy run and still an order of magnitude under the hang it exists to catch.
+    timeout-minutes: 45
     strategy:
       fail-fast: false          # one app failing must not abort the other mid-rollout
       matrix:
@@ -245,10 +254,17 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           SHA: ${{ needs.gate.outputs.sha }}
         run: flyctl deploy --config ${{ matrix.config }} --remote-only --image-label "git-${SHA}" --build-arg GIT_SHA="${SHA}" --wait-timeout 5m
-      - name: Explain a failed deploy
-        if: failure()
+      # `failure()` alone does not cover a CANCELLED job, and that is how this job ended three times
+      # (BUGLOG #155, #156): `fly deploy` hung, GitHub killed it, the conclusion was `cancelled`, so
+      # this step was SKIPPED and `Verify the live release is this commit` never ran. The matrix is
+      # `fail-fast: false`, so the sibling app shipped and the hung one did not — a split release
+      # with no annotation anywhere, which is the silent half-deploy #48 was meant to have ended.
+      # An explicit `timeout-minutes` should now report as a failure rather than a cancellation, but
+      # the step that tells an operator production is half-deployed must not depend on which.
+      - name: Explain a failed, timed-out or cancelled deploy
+        if: failure() || cancelled()
         run: |
-          echo "::error title=${{ matrix.app }} deploy failed::The token passed preflight, so check (1) Fly billing — an overdue invoice blocks builds/releases (BUGLOG #48, 2026-09-23), (2) the remote builder, (3) the release health checks. Then re-run: Actions → Deploy (Fly) → Run workflow."
+          echo "::error title=${{ matrix.app }} deploy did not complete::THIS app may not have shipped while the other one did — confirm both apps carry git-${{ needs.gate.outputs.sha }} before assuming the release is whole. The token passed preflight, so check (1) whether this job hit its timeout-minutes ceiling (a hung remote build), (2) Fly billing — an overdue invoice blocks builds/releases (BUGLOG #48, 2026-09-23), (3) the remote builder, (4) the release health checks. Then re-run: Actions → Deploy (Fly) → Run workflow."
       - name: Verify the live release is this commit
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
