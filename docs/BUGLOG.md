@@ -5,6 +5,155 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #156 — The Actions "consumption" these two repositories bill is zero; what they do waste is a mirror's worth of runners and one permanently red gate — FIXED (branch `claude/busy-pascal-x44fkv`)
+- **Reported as:** *"we need to fix the issue with the CI actions high consumption rate"*, after an
+  Actions payment had to be made.
+- **The first thing to say, because it changes what the rest of this is for: NEITHER REPOSITORY HAS
+  EVER BILLED A MINUTE.** Both are public, so GitHub-hosted standard runners are free. Checked
+  directly against `GET /actions/runs/{id}/timing` rather than inferred: `billable.UBUNTU.total_ms`
+  is **0** for every job of every run sampled in both repositories — CI runs, deploy runs, and the
+  374-minute hung deploy of #155 included (`{"UBUNTU":{"total_ms":0,"jobs":6,...}}`). #155 reached
+  the same conclusion independently; this is a second, separate confirmation of it.
+  **So whatever exhausted the account's Actions budget was spent somewhere other than here**, and
+  nothing in these two repositories can reduce it. The owner's billing breakdown is the only place
+  that answer lives (another, private repository; an organisation; or a different line item —
+  Packages, LFS, Codespaces, Copilot — all of which arrive on the same invoice as "Actions").
+  This session is scoped to these two repositories and the billing endpoints are blocked to it, so
+  that check could not be made from here.
+- **What IS being wasted, measured (GitHub REST, 30 days to 2026-10-22, `ceil` per job, which is how
+  GitHub would charge a private repository):** `invest254` **14,501 runner-min**,
+  `invest254-platform-template` **750**. CI 7,353 (19.3/run x 381) · Deploy 6,679 (56.6 x 118) ·
+  the eight crons 469. Of the Deploy figure, **three hung jobs are 997 of the 1,086 minutes the
+  deploy matrix has ever used — 92%** (#155's six-hour stall is one of them).
+- **#155 and the commits around it already fixed the two biggest items** (a `timeout-minutes` on all
+  17 jobs; `ci.yml` concurrency that spares `main`; ticket escalation moved into the API process, so
+  `*/15` stopped being 96 cold runners a day). **This entry is what was left after that**, found by
+  measuring the same thing from a different angle.
+
+### Fixed here
+1. **The mirror template was running production's ops crons — six workflows with no repository
+   guard.** The two repositories share one byte-identical tree (docs/30), so every fire allocated a
+   runner in a repository that **can never hold `DATABASE_URL`**; each then installed the whole
+   workspace and exited 0 on its script's first line. The proof that a guard is the right shape is
+   already in the tree: `mirror-drift.yml`'s job-level `if` measured **0 minutes across 223 runs**,
+   while a step that no-ops bills a full minute, because GitHub rounds **each job** up.
+   `pool-health` (`*/30`), `pool-distribute`, `subscription-lifecycle`, `reproducibility`,
+   `schema-drift`, `ticket-escalation` and `ci.yml`'s `reproducibility` job now carry
+   `if: github.repository != '<template>'`. **~390 runner-minutes in the measured window, ~1,600 a
+   month at the crons' nominal cadence.**
+   - Written as **"not the mirror"**, never "is production", and that is the whole design: the
+     template is a mirror and never a running brand, but a brand repo forked *from* it is a running
+     system and must keep every ops cron the moment it sets the secret. `== production` would have
+     silently disabled ticket escalation and pool distribution for every future brand.
+2. **`reproducibility.yml` had been red every single night in the template — 26 runs of 26.**
+   Pre-existing, and found only by counting the bill. Unlike every other DB cron its step has no
+   `[ -z "$DATABASE_URL" ] && exit 0` guard, so it did not skip; it failed on
+   `DATABASE_URL is required` (exit 2). The loud failure is **correct** for a provable-fairness audit
+   in a repository that is supposed to hold the secret — silence must never read as a pass — so it is
+   kept, and the guard above removes the one place it was guaranteed to fire. A gate that is always
+   red is how a real one stops being believed, which is #144's lesson restated.
+3. **`deploy`'s ceiling raised from 25 to 45 minutes.** #155 was right to cap it; the cap landed
+   inside the healthy distribution. Over the last 60 Deploy runs every matrix leg finished in 1-2
+   minutes **except run `38137608432`, where `deploy invest254-api` took 22 minutes and SUCCEEDED**
+   (a cold Fly remote builder), and the three hangs at 275, 361 and 361. Nothing lands between 22
+   and 275. A 25-minute cap therefore sat three minutes above a known-good run: a builder 15% colder
+   would have failed a real deploy of the money backend, and since `concurrency: cancel-in-progress:
+   false` holds the `fly-deploy` group, recovering needs a human to notice and re-run. 45 is twice
+   the slowest healthy run and still an order of magnitude below the hang it exists to catch.
+4. **The step that tells an operator production is half-deployed was skipped exactly when it was
+   needed.** `Explain a failed deploy` was `if: failure()`, and all three hangs concluded
+   **`cancelled`** — so the annotation never printed, and `Verify the live release is this commit`
+   never ran either. With `fail-fast: false` the sibling app shipped and the hung one did not: a
+   split release with nothing anywhere saying so, which is the silent half-deploy #48 was supposed
+   to have ended, arriving through a different door. Now `if: failure() || cancelled()`, and the
+   message leads with "THIS app may not have shipped while the other one did".
+5. **`mirror-drift.yml` now serialises itself.** A correctness fix, not a cost one: its rolling-issue
+   bookkeeping is a non-atomic `gh issue list` -> `gh issue create`, and the nightly check collides
+   with the push `mirror-sync` makes every 3h, so two runs would each find no open issue and each
+   open one. `mirror-sync` already serialises itself for exactly this reason.
+- **Regression guard: `scripts/workflows.guard.test.mts`** (in `npm test`, so CI's own `build` job
+  runs it). It reads the workflow text and asserts: every job declares `timeout-minutes`; none
+  exceeds 60, because a 300-minute "cap" is the same hang with extra steps; every job reading
+  `secrets.DATABASE_URL` is inert in the mirror, either by its own `if` or transitively through
+  `needs`; every scheduled job has a job-level `if`; and `ci.yml` cancels superseded runs but never
+  one on `main`. **#155's timeouts had nothing asserting them** — this is what stops the next
+  refactor quietly dropping one.
+  - **Mutation-checked six ways**, each turning it red: removing one CI cap; raising `deploy`'s to
+    300; deleting `pool-health`'s mirror guard; deleting `fly-auth`'s production guard (which is
+    what makes `migrate` and `deploy` transitively inert); making CI cancel `main`; removing the
+    concurrency block. A harmless comment edit leaves it green, so it is not merely brittle.
+  - It parses the YAML itself rather than importing a parser: the only one on disk is a transitive
+    hoist no `package.json` declares, and a guard that vanishes with a lockfile bump is not a guard.
+    It therefore also asserts **how much it found** (>=10 files, >=17 jobs, >=6 `DATABASE_URL` jobs,
+    >=7 scheduled workflows) and spot-checks the two hardest shapes, a matrix job and a folded
+    multi-line `if` — a checker that silently examines nothing looks exactly like a passing test
+    (#152). The first version proved that on itself: it matched `/^\d+$/` against
+    `"30            # measured avg 11.0"` and reported all sixteen capped jobs as uncapped.
+
+### Deliberately not changed, with the measurement that decided it
+- **`npm test` (553s on a runner, 282s locally) is ~52% of CI's job-minutes and is left alone.**
+  2,360 tests, of which **1,973 finish inside 100ms while 25 are 51% of all test CPU**: the
+  Monte-Carlo fairness proofs (`no stopping rule a trader can choose beats the house`, 56s; the
+  three `EXPLOIT:` edge tests, 50s) and the WS market-data integration tests. They are exhaustive
+  because the exploits they rule out were real (#15, #18, docs/25 §16). Cheapening them is the one
+  saving this repository must not take.
+- **Raising `--test-concurrency` above Node's default (`cores - 1` = 3 on a 4-vCPU runner).**
+  Measured on an identical 4-core/16GB box: 285s at 3, and **still unfinished at 513s at 4** — the
+  runner process plus four workers oversubscribe four cores. Not memory (15.5GB free). It would also
+  put the soak and real-timer tests under CPU contention, and a flaky suite costs far more in
+  re-runs than it saves.
+- **Node's native type stripping instead of `tsx`**, which would remove the ~34% of suite CPU spent
+  re-transpiling each file's import graph in each of 321 child processes. Blocked by the source:
+  parameter properties in at least ten classes (`constructor(private readonly q: ...)`), 13
+  extensionless relative imports, one `@/` alias — none of which native stripping supports.
+- **Caching the headless browser** in `web roles e2e`: 29s of a 318s job, most of it the
+  `--with-deps` apt step a cache cannot skip. ~60 minutes a month for another moving part inside a
+  security gate.
+
+### Raised, not fixed here
+1. **The mirror has been dead for 23 days, and that is what stops half of the above from landing.**
+   `invest254-platform-template@main` is `04ade0f` of **2026-09-29**; production is 23 days ahead.
+   Every `mirror-sync` run since has failed, all at the same place: `actions/checkout@v4` with
+   `fatal: could not read Username for 'https://github.com': terminal prompts disabled`. Because
+   `token: ${{ secrets.MIRROR_PAT || github.token }}` falls back only when the secret is *unset*,
+   that message means **`MIRROR_PAT` is set but expired** — the non-empty bad value wins the `||`.
+   So the template is still running the OLD workflows — and `04ade0f` predates **#155 entirely**:
+   checked against its live `main`, **no job in any of its ten workflows has a `timeout-minutes`**,
+   and `ticket-escalation.yml` is still on `*/15` there rather than dispatch-only. Every fix in
+   #155 and in this entry is therefore absent from it, including the one that stops a six-hour hang,
+   and will stay absent until the secret is rotated. **Owner action, and it cannot be done from code:** mint a fine-grained PAT on
+   the template with `contents:write` + `workflows:write` and update the `MIRROR_PAT` secret
+   (docs/30 §A). The workflow already opens a `🔴 Mirror sync blocked` issue saying this.
+2. **Production carries a function the migrations do not create.** `schema-drift` has been red since
+   2026-10-14 (green through 10-13) with one unchanging report:
+   `only-production function fn_pool_auto_settings_seed()` / `function-exec [prod=false/false]`.
+   Nothing in the tree creates, calls or even names it; `pool_auto_settings` itself comes from 0164.
+   An out-of-band object — exactly the class #57 built this gate to catch, and the gate worked. Not
+   reconciled here because the right fix (docs/30 §C: a migration) depends on what its body does,
+   and its name says it seeds **money configuration**; dropping something a dashboard or an ops
+   script still calls is a production break. Read the body first, then write the migration.
+3. **The crons were firing at about 2% of their schedule.** `*/15` should fire 672 times a week; it
+   fired **10**. `*/30` should fire 336; it fired **9**. Daily crons fired 2 of 7. GitHub
+   de-prioritises and drops `schedule` events, and Actions was additionally interrupted over payment
+   in this window. Ticket escalation moving in-process (#155 era) is the right answer and already
+   landed; `pool-health` (`*/30`) is the remaining one whose value depends on actually running, and
+   it is a monitor — `pg_cron` or the API process would make it reliable as well as free. Not done
+   here: this sandbox cannot reach Postgres (only port 443 egresses), so a `pg_cron` migration could
+   not be verified against the real database, and an unverified change to production scheduling is
+   not one to make blind.
+4. **`actions/checkout@v4` and `actions/setup-node@v4` are being force-run on Node 24** — every run
+   logs `Node.js 20 is deprecated`. Not a bug yet; it becomes one in all ten workflows at once when
+   GitHub drops the shim. A version bump deserves its own verification pass.
+5. **The live engine's release label names a commit that is not on `main`.** `invest254-api` runs
+   `git-f29b59c`; `invest254-engine-pm` runs `git-936a0ed`, a branch commit reached by a manual
+   `workflow_dispatch`. Harmless this time — `936a0ed..f29b59c` is one line of `.gitattributes` and
+   `git diff --name-only -- apps/engine packages Dockerfile` between them is empty, so the running
+   code is identical. But labelling images `git-<sha>` (#48) exists so `flyctl releases --image` can
+   be matched against `main`'s history, and a label off `main` cannot be. The habit to avoid is
+   dispatching Deploy from a branch.
+
+---
+
 ## #155 — A hung deploy job with no timeout ran for six hours and left the API five days behind main — FIXED (CI)
 - **What it looked like from the product:** the platform console's "Reset someone's security answers"
   answered **"Could not reset / not found"** for every target. The route was missing from the deployed
