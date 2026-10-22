@@ -1,11 +1,23 @@
 name: Ticket Auto-Escalation
 
 # Escalates overdue level-0 tickets to the System admin once their urgency SLA is breached
-# (fn_ticket_auto_escalate, migration 0139). Runs every 15 minutes. Requires repo secret
-# DATABASE_URL (Supabase session-pooler URL, :5432). Trigger manually via "Run workflow".
+# (fn_ticket_auto_escalate, migration 0139). Requires repo secret DATABASE_URL (Supabase
+# session-pooler URL, :5432).
+#
+# THE SCHEDULE IS OFF (2026-10-22, owner's call). It ran `*/15 * * * *` — 96 runs a day, each one a
+# fresh runner, an `npm ci` and a connection to production, to ask a question that is usually
+# answered "nothing to escalate". Manual runs still work: Actions -> Ticket Auto-Escalation -> Run
+# workflow.
+#
+# WHAT IS OFF WHILE THIS IS: an overdue level-0 ticket is no longer escalated to the System admin on
+# its own. The SLA is still recorded and fn_ticket_auto_escalate is unchanged — nothing calls it
+# until someone runs this, so breaches accumulate silently and are escalated in a batch whenever it
+# next runs. Re-enable by restoring the `schedule:` block below. The cheaper long-term home is the
+# API process, which already runs interval timers on Fly (see the reconcile sweeps in server.ts) at
+# no cost and with no dependency on GitHub.
 on:
-  schedule:
-    - cron: "*/15 * * * *"
+  # schedule:
+  #   - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 concurrency:
