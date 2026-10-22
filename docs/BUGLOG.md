@@ -5,6 +5,37 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #159 — An EXPIRED MIRROR_PAT is worse than no MIRROR_PAT: the mirror failed on its FIRST step for 23 days — PARTIALLY FIXED (needs the owner to replace the token)
+- **What:** `mirror-sync` in the template has failed every run since 2026-09-29 — 23 days, ~180 runs on
+  a 3-hourly cron, each one appending to the same blocker issue (template #32). The template sits at
+  `invest254@0405bb9` while production is 100+ commits past it.
+- **Where it fails, and this is the whole point:** `actions/checkout`, the FIRST step, with
+  `fatal: could not read Username for 'https://github.com': terminal prompts disabled`. Not the push.
+  The job never reaches the drift check, the typecheck, or the push it exists to perform.
+- **Root cause:** the token expression is `${{ secrets.MIRROR_PAT || github.token }}`. `||` falls back
+  when the secret is **empty**, not when it is **rejected**. So a set-but-dead PAT is handed to
+  checkout, which authenticates with it, is refused, and falls through to prompting for a username on
+  a runner that has no terminal. An ABSENT PAT would have mirrored everything except
+  `.github/workflows/`; an EXPIRED one mirrors nothing. The failure mode gets worse as the credential
+  gets worse, which is backwards.
+- **Why nobody saw it for 23 days:** the blocker issue says "Common cause: MIRROR_PAT missing/expired"
+  — a guess printed on every failure, correct this time, and indistinguishable from the same guess
+  printed when the cause is something else. ~180 identical comments on one issue is not a signal.
+- **Fixed here (the part that is code):** a preflight step, modelled on `deploy.yml`'s `fly-auth`,
+  asks `GET /repos/{this repo}` with the PAT before anything uses it. 200 → use it. Anything else →
+  annotate with the HTTP code and what to do, and fall back to `GITHUB_TOKEN`, with
+  `.github/workflows/` held at the template's current content so the refused paths cannot lose the
+  whole push. A workflow-only drift then commits nothing and says so rather than dying on
+  `nothing to commit`.
+- **NOT fixed here (the part that is a credential):** the PAT itself. A fine-grained PAT on
+  `petermuchendu1000/invest254-platform-template` with **Contents: read and write** AND **Workflows:
+  read and write**, stored as the `MIRROR_PAT` secret in the TEMPLATE repo's Actions secrets. Nobody
+  but the owner can mint it, and this change cannot reach the template until it exists — the mirror
+  is how it would get there. First sync after the fix carries this file.
+- **Consequence while it was broken, worth stating:** every one of #155's timeouts, #156's mirror
+  guards and #157's `max-parallel: 1` is absent from the template. Its jobs still inherit GitHub's
+  360-minute default, which is the exact condition #155 was written about.
+
 ## #158 — A candle test compared two windows fetched up to 25 seconds apart, so CI went red whenever a run straddled the hour — FIXED (test)
 - **Caught by:** the CI `build` job of PR #178 failing on `WS candles: naming a symbol returns THAT
   instrument's bars, not the default's rescaled`, on a branch whose diff touched only workflows,
