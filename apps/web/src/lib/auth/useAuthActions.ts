@@ -31,11 +31,14 @@ export function useAuthActions() {
   /**
    * Operator sign-in for the unified admin entry point (Issue 1). Unlike `login`, it does NOT send a
    * brand — the operator console is one entry point for every brand, so the server resolves the
-   * account by identity and binds the session to the account's own site/platform. `totp` is passed
-   * only when the account has MFA enabled (the form reveals it after an MFA_REQUIRED response).
+   * account by identity and binds the session to the account's own site/platform. The second factor
+   * — an authenticator code, or one of the recovery codes saved at enrolment — is sent only when the
+   * account has MFA enabled (the form reveals the field after an MFA_REQUIRED response). Shaped like
+   * `login`'s second argument above, so neither door has a factor the other cannot pass.
    */
-  async function adminLogin(phone: string, password: string, totp?: string) {
-    const res = await api.adminLogin({ phone, password, ...(totp ? { totp } : {}) });
+  async function adminLogin(phone: string, password: string, second?: { totp?: string; recoveryCode?: string }) {
+    const res = await api.adminLogin({ phone, password,
+      ...(second?.totp ? { totp: second.totp } : {}), ...(second?.recoveryCode ? { recovery_code: second.recoveryCode } : {}) });
     setToken(res.token);
     setUser(await api.me(res.token));
     return res;

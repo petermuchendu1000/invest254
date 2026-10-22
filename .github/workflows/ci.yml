@@ -6,10 +6,18 @@ on:
   pull_request:
   workflow_dispatch: {}
 
+# One run per ref: a new push to a PR cancels the run it supersedes, because nobody reads the result
+# of a commit that is already history. NOT on main — there each commit's result is the record of
+# whether THAT commit was green, and deploy.yml's gate reads it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
     name: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,6 +54,7 @@ jobs:
   function-grants:
     name: function-grants (anon surface)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -81,6 +90,7 @@ jobs:
   reproducibility:
     name: reproducibility
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -104,6 +114,7 @@ jobs:
   web-roles-e2e:
     name: web roles e2e
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

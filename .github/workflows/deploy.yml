@@ -9,7 +9,7 @@ name: Deploy (Fly)
 # A restart does NOT pick up new code (HOSTING.md §2.5) — only a `fly deploy` does; that is what this
 # runs. The engine is restart-safe: on boot it deterministically recovers open positions (recovery.ts).
 #
-# Order: verify → fly-auth → migrate → deploy (api + engine, in parallel).
+# Order: gate → fly-auth → migrate → deploy (api + engine, in parallel).
 #   fly-auth runs BEFORE migrate so a rejected/expired FLY_API_TOKEN stops the run with a clear error
 #   instead of migrating the DB and then silently failing to ship the code (BUGLOG #48 — six merges on
 #   2026-09-23 migrated production but never deployed).
@@ -17,21 +17,21 @@ name: Deploy (Fly)
 # commit is live; each deploy then verifies that label and (API) the health endpoint.
 
 on:
-  push:
+  # CHAINED TO CI, not to the push. Both used to start on the same commit, and the `verify` job here
+  # re-ran the typecheck and the full suite that CI's `build` job was running at that same moment —
+  # identical work, twice, on every merge to main. Waiting for CI's verdict is the same gate ("never
+  # deploy a broken main") for none of the work.
+  #
+  # `branches: [main]` filters on the CI run's HEAD branch, and the gate below additionally requires
+  # that the CI run was a push (never a pull_request run) and that it passed.
+  #
+  # NOTE for whoever edits this next: a workflow_run trigger is read from the DEFAULT BRANCH's copy
+  # of this file. Changes here do nothing until they are merged to main — testing on a branch will
+  # not fire it.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    # Only deploy when something the backend image actually ships is touched (skip docs-only merges).
-    paths:
-      - 'apps/api/**'
-      - 'apps/engine/**'
-      - 'packages/**'
-      - 'Dockerfile'
-      - '.dockerignore'
-      - 'fly.api.toml'
-      - 'fly.engine.toml'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig*.json'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch: {}   # manual deploy of current main from the Actions tab (e.g. after rotating the token)
 
 # Never run two deploys at once, and never cancel a deploy mid-flight.
@@ -44,31 +44,72 @@ env:
   FLYCTL_VERSION: 0.4.106
 
 jobs:
-  # Gate: don't deploy a broken main. Mirrors the backend half of the CI 'build' job (typecheck + tests).
-  # npm test is DB-independent (in-memory harness), so no DATABASE_URL is needed here.
-  verify:
-    name: verify (typecheck + tests)
+  # What replaced `verify`. It answers three questions, none of which needs a test suite:
+  #   1. did CI pass — on a PUSH to main, never a pull_request run (the job-level `if`);
+  #   2. which commit is this (the CI run's head_sha — NOT github.sha, which in a workflow_run means
+  #      the default branch's tip at event time and can have moved on);
+  #   3. does production actually need it?
+  #
+  # (3) replaces the `paths:` filter the push trigger used to carry, and is strictly better than one:
+  # it diffs the commit against WHAT IS ACTUALLY RUNNING (/api/v1/health reports the GIT_SHA baked
+  # into the live image), so it is self-correcting. A deploy that is ever skipped or lost leaves the
+  # live commit behind, and the next green CI sees the whole gap rather than one merge's worth of it.
+  # A paths filter cannot do that: it judges one push in isolation, which is how the API sat five days
+  # behind main (BUGLOG #155) with nothing in the deploy history saying so.
+  #
+  # Fail-OPEN by design: if the live commit cannot be read or is not a commit we can diff, deploy.
+  # The cost of a redundant deploy is a few minutes; the cost of a skipped one is a split release.
+  gate:
+    name: gate (CI green + backend changed)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.decide.outputs.sha }}
+      deploy: ${{ steps.decide.outputs.deploy }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - name: Install
-        run: npm ci
-      - name: Typecheck (shared + engine + api)
-        run: npx tsc -b packages/shared apps/engine apps/api
-      - name: Tests
-        run: npm test
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0        # the diff below reaches back to whatever is live, not just one commit
+      - name: Decide what to deploy
+        id: decide
+        env:
+          SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual run — deploying $SHA without asking what changed." >> "$GITHUB_STEP_SUMMARY"
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          live=$(curl -sf --max-time 20 https://invest254-api.fly.dev/api/v1/health | jq -r '.commit // ""' || true)
+          if [ -z "$live" ] || ! git cat-file -e "${live}^{commit}" 2>/dev/null; then
+            echo "Live commit reads '${live:-unknown}', which is not a commit I can diff — deploying rather than guessing." >> "$GITHUB_STEP_SUMMARY"
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only "$live" "$SHA")
+          if printf '%s\n' "$changed" | grep -qE '^(apps/api/|apps/engine/|packages/|Dockerfile$|\.dockerignore$|fly\.(api|engine)\.toml$|package(-lock)?\.json$|tsconfig.*\.json$|\.github/workflows/deploy\.yml$)'; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Live is ${live:0:7}; ${SHA:0:7} changes the backend image — deploying." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Live is ${live:0:7}; nothing between it and ${SHA:0:7} touches the backend image — skipping." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          printf '%s\n' "$changed" | head -40
+
 
   # Prove the Fly token can reach BOTH apps before anything touches production.
   fly-auth:
     name: fly token preflight
-    needs: verify
-    # Production repo only: the mirror template has no secrets, so everything after verify is skipped there.
-    if: github.repository == 'petermuchendu1000/invest254'
+    needs: gate
+    # Production repo only: the mirror template has no secrets, so everything after the gate is
+    # skipped there. `deploy == 'true'` is the gate's verdict; a false skips this and, through
+    # `needs`, everything below it.
+    if: needs.gate.outputs.deploy == 'true' && github.repository == 'petermuchendu1000/invest254'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: superfly/flyctl-actions/setup-flyctl@master
         with:
@@ -108,10 +149,13 @@ jobs:
   # Runs after the token preflight, gates both deploys. Skips gracefully when there's no DB secret (mirror).
   migrate:
     name: migrate (apply + record)
-    needs: fly-auth
+    needs: [gate, fly-auth]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -121,7 +165,7 @@ jobs:
       - name: Apply pending migrations and record them
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_SHA: ${{ needs.gate.outputs.sha }}   # the commit CI approved, not the branch tip
         run: |
           if [ -z "$DATABASE_URL" ]; then
             echo "No DATABASE_URL secret (non-prod mirror) — skipping migrate."; exit 0
@@ -152,10 +196,13 @@ jobs:
   # rollout on it would turn a stale checksum into an outage.
   migrations-ledger:
     name: migrations-ledger (post-migrate)
-    needs: migrate
+    needs: [gate, migrate]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -173,8 +220,9 @@ jobs:
 
   deploy:
     name: deploy ${{ matrix.app }}
-    needs: migrate
+    needs: [gate, migrate]
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false          # one app failing must not abort the other mid-rollout
       matrix:
@@ -187,13 +235,16 @@ jobs:
             health: ""          # pure WebSocket server; Fly's TCP check gates the rollout
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: superfly/flyctl-actions/setup-flyctl@master
         with:
           version: ${{ env.FLYCTL_VERSION }}
       - name: fly deploy (${{ matrix.app }})
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --config ${{ matrix.config }} --remote-only --image-label "git-${GITHUB_SHA}" --build-arg GIT_SHA="${GITHUB_SHA}" --wait-timeout 5m
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: flyctl deploy --config ${{ matrix.config }} --remote-only --image-label "git-${SHA}" --build-arg GIT_SHA="${SHA}" --wait-timeout 5m
       - name: Explain a failed deploy
         if: failure()
         run: |
@@ -203,12 +254,13 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           APP: ${{ matrix.app }}
           HEALTH: ${{ matrix.health }}
+          SHA: ${{ needs.gate.outputs.sha }}
         run: |
           img=$(flyctl releases -a "$APP" --image --json | jq -r '.[0].ImageRef // ""')
           echo "latest release image: $img"
           case "$img" in
-            *"git-${GITHUB_SHA}"*) ;;
-            *) echo "::error title=$APP not on this commit::latest release image is '$img', expected label git-${GITHUB_SHA}"; exit 1 ;;
+            *"git-${SHA}"*) ;;
+            *) echo "::error title=$APP not on this commit::latest release image is '$img', expected label git-${SHA}"; exit 1 ;;
           esac
           if [ -n "$HEALTH" ]; then
             for i in $(seq 1 12); do
@@ -218,4 +270,4 @@ jobs:
             done
             [ "$code" = "200" ] || { echo "::error title=$APP unhealthy::$HEALTH returned $code after deploy"; exit 1; }
           fi
-          echo "$APP live on ${GITHUB_SHA::7} ($img)" >> "$GITHUB_STEP_SUMMARY"
+          echo "$APP live on ${SHA::7} ($img)" >> "$GITHUB_STEP_SUMMARY"

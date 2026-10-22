@@ -5,6 +5,107 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #155 — A hung deploy job with no timeout ran for six hours and left the API five days behind main — FIXED (CI)
+- **What it looked like from the product:** the platform console's "Reset someone's security answers"
+  answered **"Could not reset / not found"** for every target. The route was missing from the deployed
+  API (`http.ts:386`'s unmatched-route 404), because the API had been running `bb76bf3` since 15 Oct
+  while `main` carried the 0210 work. `/api/v1/health` named the stale commit.
+- **Root cause:** the `deploy invest254-api` job of the 16 Oct run stalled at `#17 exporting to image`
+  on Fly's remote builder and was still sitting there **six hours and twelve minutes** later
+  (`run_duration_ms: 22418000`), when GitHub's own 6-hour ceiling cancelled it. No job in any of the
+  ten workflows had a `timeout-minutes`, so GitHub's ceiling was the only limit in play.
+- **Why one stuck job mattered so much:** `deploy.yml` holds `concurrency: { group: fly-deploy,
+  cancel-in-progress: false }` — correct, since cancelling a deploy mid-flight is worse than waiting.
+  But a job that never ends holds that group for as long as it lives, so the hang did not just lose
+  its own deploy; it blocked the queue. The engine deployed (separate matrix leg, succeeded in 63s)
+  and the migration applied, so the DB and the engine moved while the API did not: a split release
+  nobody was told about. The deploy's own verification step, which checks the live release carries
+  this commit, was skipped along with the job that would have failed it.
+- **Fix:** a `timeout-minutes` on every job in all ten workflows, sized to observed runtimes (CI's
+  four jobs finish inside 8m16s wall; the deploy's own `--wait-timeout` is 5m). A build that stalls
+  now fails in minutes with a red job, releasing the concurrency group, instead of occupying a runner
+  for a working day and reporting nothing.
+- **Also:** `ci.yml` gained `concurrency` with `cancel-in-progress` for every ref EXCEPT `main` — a
+  superseded PR run is work nobody will read, while on main each commit's result is the record of
+  whether that commit was green.
+- **NOT the cause of the billing block that surfaced alongside this** (see the note below): this
+  repository is PUBLIC, so GitHub-hosted standard runners are free. The usage API confirms it —
+  `billable.UBUNTU.total_ms: 0` for every job of both the CI and deploy runs, the six-hour one
+  included. Whatever exhausted the account's Actions budget was spent somewhere other than here.
+
+## #154 — The PayHero ledger sweep wrote ~10 Postgres ERRORs a minute, forever — FIXED (engine)
+- **Reported as:** a wall of red `P0001 TX_NOT_FOUND` rows in the Supabase Postgres log.
+- **Measured, from a 96-minute export (1,000 rows, 2026-10-21 13:01–14:37 UTC):** 954 `TX_NOT_FOUND`
+  errors — **every single error line in the database log**. Exactly 10 per minute, in all 96 minutes
+  covered, in bursts ~0.39s apart separated by ~53s gaps. That cadence is a 60-second timer, not a
+  user: `PAYHERO_LEDGER_RECONCILE_INTERVAL_MS` defaults to 60s (`server.ts:1303`). The other 46 rows
+  were checkpoints and health probes. ~14,400 error rows a day.
+- **Root cause, and it was deliberate:** `reconcilePayHeroLedger` discovers whether a ledger row
+  belongs to us by calling `fn_complete_deposit` and catching the `TX_NOT_FOUND` it raises
+  (`paymentservice.ts:632`). PayHero's ledger is ONE SHARED ACCOUNT, so most rows carry references
+  written by something else; each one raised a plpgsql exception, which Postgres records as an ERROR.
+  The sweep re-reads page 1 every minute and the page barely changes, so the SAME ~10 misses were
+  re-raised every minute indefinitely. The money path was never wrong — the exception is caught and
+  the payment falls through to claimable-by-code, which is what it should do.
+- **Why it is worth fixing rather than filtering:** `TX_NOT_FOUND` is also raised by
+  `fn_complete_withdrawal`, `fn_reject_withdrawal` and `fn_admin_mark_withdrawal_paid`, where it means
+  an operator acted on a transaction that is not there — a real failure. One noisy caller at 10/min
+  made that signal unfindable, in the same log and under the same code. A log nobody can read is a log
+  nobody reads.
+- **Fix:** `PaymentRepository.ownedDepositRefs(refs)` — one indexed lookup per sweep (idx_tx_checkout,
+  0005) answering which references belong to a deposit of ours, using the SAME predicate
+  fn_complete_deposit uses (`checkout_request_id` + `kind='deposit'`). The loop then calls the RPC only
+  for references we own. N exceptions become one query, and the round trip per foreign row goes away.
+- **The money RPC was NOT touched.** `fn_complete_deposit` is shared by Daraja, Mega Pay, PayHero and
+  Paynicorn, and for those callers the raise is correct. No migration; engine-only change.
+- **Semantics unchanged, deliberately:** a reference we own still goes through the same idempotent RPC;
+  one we do not still becomes claimable-by-code, so a payment is still EITHER credited to its tx OR
+  claimable, never both. The `TX_NOT_FOUND` catch stays as the race fallback (a tx vanishing between
+  the batch lookup and the call), so even that path behaves exactly as before.
+- **Verification:** a new test asserts a foreign reference never reaches the deposit RPC while our own
+  still does — **proven to fail** against the old code (`a foreign reference must not be sent to the
+  deposit RPC at all`). 8/8 PayHero tests, full suite 2370 tests, 0 failures, `tsc -b` clean.
+
+## #153 — "Sign-in failed. Please try again." was the console's answer to five different failures — FIXED (web)
+- **Reported as:** a screenshot of the operator sign-in — phone and password filled, a six-digit
+  authenticator code typed in, and **"Sign-in failed. Please try again."** under it. Nothing in the
+  screenshot said what went wrong, which is the bug reported here.
+- **What:** `AdminSignIn` translated three codes — `MFA_REQUIRED`, `MFA_INVALID`,
+  `INVALID_CREDENTIALS` — and sent everything else to one sentence. "Everything else" is the half
+  that matters at an operator door: `RATE_LIMITED` (429 from the per-IP throttle),
+  `ACCOUNT_SUSPENDED` / `ACCOUNT_BANNED`, any 5xx out of the API, a `fetch` that never reached it
+  (DNS, CORS, a sleeping machine — no `ApiError` at all, so the code read as `''`), and the one that
+  is not a sign-in failure: the `GET /auth/me` that `adminLogin` runs *after* a successful login
+  (`useAuthActions.ts:40`) being refused by the token gate, which `requireAuth` flattens to
+  `AUTH_INVALID` (`http.ts:514`) whether the cause was the force-logout epoch, a non-active profile
+  or the idle gate.
+- **Why that last one matters most:** the token is already in `localStorage` by then. The operator is
+  told their sign-in failed while holding a valid session, and the thing they retry — the code — was
+  never the problem. The same sentence appears when the code was *right* and the server 500'd.
+- **Impact:** no failed console sign-in could be diagnosed from what the operator saw, and no
+  screenshot of one could be diagnosed by anyone else either. Nothing was unauthorised; the console
+  was simply undebuggable from the outside.
+- **Fix:** `lib/auth/signInError.ts` — one pure mapper, unit-tested, returning a sentence that says
+  what happened and what to do, plus `code · HTTP status` for the failures whose real answer is in
+  the API log. A player must never be shown an error code, so this is deliberately *not* shared with
+  `lib/auth/errors.ts`; an operator debugging their own console is exactly who needs one.
+- **Second gap, closed with it:** the form offered no recovery-code field, though
+  `/auth/admin/login` has always accepted `recovery_code` and `#135` closed with "if that
+  authenticator is gone, a recovery code is needed". There was nowhere to type one — and a recovery
+  code typed into the 6-digit box went up as `totp` and could only ever come back `MFA_INVALID`.
+  `adminLogin` now takes the same `{ totp | recoveryCode }` second argument `login` takes, and the
+  code field toggles between the two. TOTP input is digits-only (a pasted code carrying a space was
+  refused as a wrong code).
+- **NOT fixed by this, and worth saying plainly:** this does not make the reported sign-in succeed.
+  It makes the next attempt name its own cause. The candidates for that screenshot, in order:
+  migration `0196`'s `user_mfa.last_totp_step` missing on the deployed database (the replay guard
+  `update` is what runs on a CORRECT code — `identity.ts:576` — so a correct code is exactly what
+  would 500); the `/auth/me` refusal above, with clock skew between the API host (`iat`) and
+  Postgres (`stampForceLogout` uses the database's `now()`) as the mechanism; the 429; or the API
+  not being reached at all.
+- **Verification:** 9 new unit tests pin each branch (including "a correct code that meets a server
+  error does not read as a bad code"). 2368 tests pass, `tsc -b` and the web typecheck clean.
+
 ## #152 — Admin payout decisions deadlocked behind an unreachable security prompt — FIXED
 - **Reported as:** *"I can't accept or reject."* The Reject dialog sat on **"Rejecting…"** forever,
   with the "Confirm it's you" step-up prompt visible but greyed out BEHIND it.
