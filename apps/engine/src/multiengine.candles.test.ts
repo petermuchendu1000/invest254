@@ -275,9 +275,27 @@ test("WS candles: naming a symbol returns THAT instrument's bars, not the defaul
     assert.ok(euro.data.bars.every((b: any) => b.close > 0.5 && b.close < 2), "EURUSD bars should sit near 1");
     assert.ok(gold.data.bars.every((b: any) => b.close > 1000), "XAUUSD bars should sit near 2650");
     // Same buckets, and a genuinely different shape rather than one series on two axes.
-    assert.deepEqual(euro.data.bars.map((b: any) => b.time), gold.data.bars.map((b: any) => b.time));
-    const shape = (bars: any[]) => bars.map((b) => (b.close - bars[0].open) / bars[0].open);
-    const a = shape(euro.data.bars), b = shape(gold.data.bars);
+    //
+    // Compared on the buckets the two replies SHARE, not on the two windows as a whole. Each reply
+    // is the most recent `count` H1 buckets as of the moment IT was served, and warming a second
+    // symbol on an already-ticking brand costs most of `WARM_MS` (25s), so an H1 boundary falling
+    // between these two asks slides one window forward by exactly one bar. That is not the two
+    // symbols disagreeing about bucketing — which is the only thing this assertion is for — so the
+    // old `deepEqual` of the whole windows turned CI red whenever a run straddled the hour
+    // (BUGLOG #158: observed on 2026-10-22, gold ending 09:00 UTC and EURUSD ending 10:00).
+    const at = (bars: any[]) => new Map<number, any>(bars.map((b) => [b.time, b]));
+    const euroAt = at(euro.data.bars), goldAt = at(gold.data.bars);
+    const hourly = (bars: any[]) => bars.every((b, i) => i === 0 || b.time - bars[i - 1]!.time === 3600);
+    assert.ok(hourly(euro.data.bars) && hourly(gold.data.bars), "both series must be a contiguous H1 grid");
+    const shared: number[] = euro.data.bars.map((b: any) => b.time).filter((t: number) => goldAt.has(t));
+    // One bar of slack for the boundary above; anything less means the grids genuinely differ.
+    assert.ok(shared.length >= euro.data.bars.length - 1,
+      `the two symbols must bucket alike: ${shared.length} shared of ${euro.data.bars.length}`);
+    const shape = (byTime: Map<number, any>) => {
+      const first = byTime.get(shared[0]!)!;
+      return shared.map((t) => (byTime.get(t)!.close - first.open) / first.open);
+    };
+    const a = shape(euroAt), b = shape(goldAt);
     assert.ok(a.some((v, i) => Math.sign(v) !== 0 && Math.sign(v) === -Math.sign(b[i]!)),
       "the two symbols never disagree on direction, so they are the same series rescaled");
     // The anchor comes from the named symbol's own day, or a live tick would land off its axis.

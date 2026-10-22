@@ -5,6 +5,108 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #158 — A candle test compared two windows fetched up to 25 seconds apart, so CI went red whenever a run straddled the hour — FIXED (test)
+- **Caught by:** the CI `build` job of PR #178 failing on `WS candles: naming a symbol returns THAT
+  instrument's bars, not the default's rescaled`, on a branch whose diff touched only workflows,
+  docs and a workflow guard test. Nothing in the change could reach the engine, which is what made
+  it worth reading rather than re-running.
+- **What the failure said** (`multiengine.candles.test.ts:278`, `assert.deepEqual`): the two bar
+  windows were identical except that the actual one was shifted **one bar — exactly 3600s —**
+  later at both ends. Decoded, the expected window ended **2026-10-22T09:00:00Z** and the actual
+  ended **10:00:00Z**.
+- **Root cause.** The test makes **two sequential requests**:
+```
+  const gold = await c.ask("candles", { tf: "H1", count: 24 }, "candles");
+  const euro = await c.ask("candles", { tf: "H1", count: 24, symbol: "EURUSD" }, "candles");
+```
+  Each reply is the most recent 24 H1 buckets **as of the moment that request was served**, and this
+  file's own header says warming a second symbol on an already-ticking brand costs up to 24s — the
+  client's ceiling is `WARM_MS = 25_000`. So the gap between the two asks is seconds to tens of
+  seconds, and an H1 boundary falling inside it slides the second window forward by one bar. The
+  assertion then compared a 10:00-ending window against a 09:00-ending one and failed. It is a
+  **clock-boundary race with a deterministic trigger**, not a random flake: roughly 25s of every
+  3600 is a losing window, which at ~380 CI runs a month is a handful of red builds — invisible
+  individually, and each one an invitation to re-run rather than read.
+- **A second instance of the same assumption, three lines down.** `shape()` indexed the two series
+  **positionally** (`b[i]`), so a shifted window also compared bar *i* of one symbol against a
+  different hour of the other. That one did not fail loudly; it silently compared the wrong bars.
+- **Fix.** Compare the buckets the two replies **share**, and align the shape comparison **by time**
+  instead of by index. The assertion's purpose is to prove the two symbols bucket alike and are not
+  one series on two axes; it was never about them being sampled at the same instant. The new form is
+  also stricter in a way the old one was not: each series must be a **contiguous** 3600s grid, and
+  the two must overlap by at least `count - 1` bars, so one bar of boundary slack is allowed and a
+  genuine grid disagreement still fails.
+- **Proven, not assumed** (`scratchpad` harness, three synthetic cases):
+  | case | old assertion | new assertion |
+  |---|---|---|
+  | one H1 boundary crossed between the asks (the CI failure, gold→09:00 / euro→10:00) | **FAIL** | **PASS** |
+  | the grids genuinely differ (M30 against H1) | — | **FAIL**, as it must |
+  | the same series rescaled (both rising, never opposite directions) | — | **FAIL**, as it must |
+  So the fix accepts the boundary and still rejects both faults the assertion exists to catch.
+  `multiengine.candles.test.ts` 18/18; full suite 2366/2376.
+- **Worth generalising:** this file has five other cross-request comparisons (lines 172, 176, 206,
+  319, 320) and all of them are keyed by **trade DATE** rather than by hour, so their losing window
+  is a day boundary rather than an hour — the same bug with a ~24x smaller target. They are left
+  alone deliberately; the pattern to watch for is any assertion that two separately-served replies
+  describe the same slice of a moving window.
+
+---
+
+## #157 — The deploy hangs were never a slow builder: the two matrix legs race each other on one Fly builder — FIXED (`max-parallel: 1`)
+- **What #155 and #156 saw:** one `deploy` leg occupying a runner until something killed it (six
+  hours under GitHub's default, 25 minutes under #155's cap), while the other leg shipped in about a
+  minute. #155 capped it; #156 widened the cap to 45 because one healthy deploy had taken 22
+  minutes. Both were right about the symptom. Neither had the mechanism, and **#156 wrote the wrong
+  one down** — it blamed "a cold Fly remote builder", which is corrected here.
+- **The mechanism, from the logs of all four incidents.** Both matrix legs build the **same root
+  Dockerfile** (`fly.api.toml` and `fly.engine.toml` share it — HOSTING.md), so Fly hands them to
+  **one remote builder**, and buildkit deduplicates their identical layers against each other:
+```
+  #12 Deduplicating step ID [ 8/12] RUN npm ci --include=dev, another build is calculating it done
+  #23 Deduplicating step ID [ 9/12] COPY packages/shared ./packages/shared, another build is calculating it done
+```
+  In the **successful** 22-minute run (`38137608432`) all nine dedup lines resolve inside **12
+  seconds** and `exporting to image` starts at **+26s** — so dedup is fast and normal, and those 22
+  minutes were spent in the **export** phase. In the hangs the same leg never leaves it. #155's
+  six-hour stall is recorded as sitting at `#17 exporting to image`; the 2026-10-22 hang
+  (`39754693431`, 25.3 min, killed by #155's cap) ends on
+  `#17 [ 1/12] FROM docker.io/library/node:20-alpine@sha256:…` after deduplicating nine steps
+  against a sibling build that had already finished.
+- **Why "race" and not "bad image":** it has happened **four times in sixty runs, and never to both
+  legs**. The sibling succeeded in ~1 minute every single time, building the same Dockerfile from
+  the same commit. A defect in the build would not pick one leg.
+- **Impact, which is the part that matters.** The matrix is `fail-fast: false` — correctly, so one
+  app failing cannot abort the other mid-rollout — so every occurrence shipped one app, left the
+  other behind, and **reported the run as containing a success**. That is how the API sat five days
+  behind `main` (#155) and how, on 2026-10-22, `invest254-engine-pm` was found running
+  `git-936a0ed` — a commit that was never on `main` — while the API ran `git-85ac550`, `main`'s tip. #156 fixed the *reporting* half of this (the annotation step was
+  `if: failure()`, and all of these concluded `cancelled`, so it was skipped exactly when it was
+  needed). This entry fixes the cause.
+- **Fix: `max-parallel: 1` on the deploy matrix.** The legs build one after the other, so the second
+  meets a warm cache instead of a half-built sibling. `timeout-minutes: 45` stays as the backstop —
+  it is for a build that is never going to finish, not for this.
+- **The cost, stated plainly:** a **1-2 minute window** where one app is newer than the other, where
+  before there was none. Against it: a failure mode that has twice left an app behind `main`
+  indefinitely and silently. A bounded skew beats an unbounded split release. The ordering is
+  unchanged (`invest254-api`, then `invest254-engine-pm`), and `migrate` has already run before
+  either, so both apps are on the new schema throughout the window regardless.
+- **`fail-fast: false` is kept and now matters more, not less:** with serial legs it is the only
+  thing that makes the second app still get attempted when the first one fails.
+- **Regression guard:** a sixth test in `scripts/workflows.guard.test.mts` asserts the matrix keeps
+  both `max-parallel: 1` and `fail-fast: false`, and that it still has at least two apps so a
+  rewrite cannot quietly satisfy the first two. **Mutation-checked four ways** — removing
+  `max-parallel`, setting it to 2, flipping `fail-fast` to true, and cutting the matrix to one app
+  each turn it red; adding an inline comment to the value leaves it green.
+  - For the third time in this file, the first version of a guard was defeated by this repository's
+    habit of annotating values inline: `/^\s*fail-fast:\s*false\s*$/m` cannot match
+    `fail-fast: false          # one app failing must not abort the other`. Every value regex here
+    now ends `(?:#.*)?$`. (#152's z-index scanner, #156's `timeout-minutes` reader, this.)
+- **Not changed:** the shared Dockerfile. Giving each app its own would also end the contention, but
+  it duplicates the build definition for the two services that must stay in lockstep, and one
+  `max-parallel` line buys the same thing for two minutes of wall time.
+
+---
+
 ## #156 — The Actions "consumption" these two repositories bill is zero; what they do waste is a mirror's worth of runners and one permanently red gate — FIXED (branch `claude/busy-pascal-x44fkv`)
 - **Reported as:** *"we need to fix the issue with the CI actions high consumption rate"*, after an
   Actions payment had to be made.

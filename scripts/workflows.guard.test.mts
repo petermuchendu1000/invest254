@@ -18,6 +18,12 @@
  *     (docs/30), so a cron added without a guard silently runs twice as often as it reads, in a
  *     repository that usually cannot do the work.
  *
+ *  4. The deploy matrix stays SERIAL. Both legs build the same root Dockerfile, so Fly gives them
+ *     one remote builder and buildkit deduplicates their layers; run them together and one leg can
+ *     sit in `exporting to image` forever while the other succeeds in a minute. That happened four
+ *     times in sixty runs and, because the matrix is `fail-fast: false`, each time left a split
+ *     release that reported success (#155, #157).
+ *
  * It reads the workflow text rather than importing a YAML parser: the only one on disk is a
  * transitive hoist that no package.json declares, and a guard that disappears with a lockfile bump
  * is not a guard. The parser is therefore deliberately strict and the test asserts how much it
@@ -139,4 +145,32 @@ test("CI cancels superseded PR runs but never a run on main", () => {
   assert.notEqual(cancel, "true", "an unconditional cancel also kills main's run — which is the record that the deployed commit was green, and the input deploy.yml's gate reads");
   // Either phrasing is fine, "only pull_request events" or "any ref but main", but it must say one.
   assert.match(cancel as string, /pull_request|refs\/heads\/main/, `cancellation must exclude main, got: ${cancel}`);
+});
+
+test("the deploy matrix stays serial, and one app's failure still does not block the other", () => {
+  const deploy = jobs.find((j) => j.file === "deploy.yml" && j.id === "deploy");
+  assert.ok(deploy, "deploy.yml::deploy not parsed");
+  const body = deploy?.body ?? "";
+
+  // Both legs build the same Dockerfile on one Fly builder (BUGLOG #157). Parallel is the bug.
+  assert.match(
+    body,
+    /^\s*max-parallel:\s*1\s*(?:#.*)?$/m,
+    "deploy.yml::deploy must keep `max-parallel: 1` — both matrix legs build the same root " +
+      "Dockerfile on one shared Fly builder, and running them together is what hung four of sixty " +
+      "deploys in `exporting to image` while the sibling leg shipped (BUGLOG #157)",
+  );
+
+  // Serialising must not become a reason for one app's failure to skip the other's deploy.
+  assert.match(
+    body,
+    /^\s*fail-fast:\s*false\s*(?:#.*)?$/m,
+    "deploy.yml::deploy must keep `fail-fast: false` — serial legs make it MORE important that a " +
+      "failed first app still lets the second be attempted, not less",
+  );
+
+  // If a third app is ever added, the two assertions above still cover it; this just proves the
+  // matrix is the shape they were reasoned about, so a rewrite cannot quietly pass them.
+  const apps = [...body.matchAll(/^\s*- app:\s*(\S+)\s*(?:#.*)?$/gm)].map((m) => m[1]);
+  assert.ok(apps.length >= 2, `expected >= 2 matrix apps, parsed ${apps.length}: ${apps.join(", ")}`);
 });

@@ -222,18 +222,35 @@ jobs:
     name: deploy ${{ matrix.app }}
     needs: [gate, migrate]
     runs-on: ubuntu-latest
-    # Raised from 25 (BUGLOG #156). #155 set a cap to stop the 6-hour hang, which was right; this
-    # widens it because the measured healthy distribution turned out to reach further than the cap.
-    # Over the last 60 Deploy runs every matrix leg finished in 1-2 minutes EXCEPT run 38137608432,
-    # where `deploy invest254-api` took 22 minutes and SUCCEEDED (a cold Fly remote builder), and
-    # the three hangs, which were 275, 361 and 361. Nothing lands between 22 and 275. A 25-minute
-    # cap therefore sat 3 minutes above a known-good run: a builder 15% colder than that one would
-    # have failed a real deploy of the money backend, and because `cancel-in-progress: false` holds
-    # the `fly-deploy` group, recovering would need a human to notice and re-run. 45 is twice the
-    # slowest healthy run and still an order of magnitude under the hang it exists to catch.
+    # Raised from 25 (BUGLOG #156), and kept at 45 now that `max-parallel: 1` below removes the
+    # cause rather than tolerating it (#157). Measured over 60 Deploy runs: every leg finishes in
+    # 1-2 minutes except run 38137608432, where `deploy invest254-api` spent 22 minutes in the image
+    # EXPORT phase and still SUCCEEDED, and four hangs at 25, 275, 361 and 361. Nothing lands
+    # between 22 and 275, so a cap near 25 sits on top of a known-good run. The ceiling stays well
+    # clear of that tail because it is the backstop, not the fix: it exists only for a build that is
+    # never going to finish, and `concurrency: cancel-in-progress: false` means a cap that fires on
+    # a healthy deploy needs a human to notice and re-run.
     timeout-minutes: 45
     strategy:
       fail-fast: false          # one app failing must not abort the other mid-rollout
+      # SERIAL, and this is the fix for the hangs rather than the ceiling above it (BUGLOG #157).
+      # Both legs build the SAME root Dockerfile, so Fly hands them to one remote builder and
+      # buildkit deduplicates their identical layers — the logs say
+      # `Deduplicating step ID [ 8/12] RUN npm ci --include=dev, another build is calculating it`.
+      # When that interleaving goes wrong one leg sits in `exporting to image` indefinitely while
+      # the other finishes in ~1 minute: four times in sixty runs, and never both legs, which is
+      # what a shared-builder race looks like rather than a bad image. Building them one after the
+      # other means the second leg hits a warm cache instead of a half-built sibling.
+      #
+      # The cost is a 1-2 minute window where one app is newer than the other, against a failure
+      # mode that left the API five days behind main (#155) and, on 2026-10-22, left the engine on
+      # a commit that was never on main at all while the API moved to main's tip — silently, both
+      # times, because the matrix is `fail-fast: false` so the sibling shipped and the run reported
+      # a success. A bounded skew beats an unbounded split release.
+      #
+      # `fail-fast: false` still applies: if the first leg fails the second is still attempted, so
+      # serialising does not make one app's failure block the other's deploy.
+      max-parallel: 1
       matrix:
         include:
           - app: invest254-api
