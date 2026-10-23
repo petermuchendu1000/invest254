@@ -285,6 +285,14 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       if (pay.claimedBy === userId) return { status: "already_claimed", amountCents: pay.amount, newBalance: await this.getBalance(userId), txId: pay.claimedTxId };
       throw new Error("CODE_ALREADY_USED");
     }
+    // 0213: this money already reached a wallet through its OWN deposit — refuse rather than credit
+    // it a second time. Mirrors fn_claim_c2b_deposit exactly; see that migration for why the first
+    // branch refuses on ANY status and why both sit after the claimed check.
+    const owner = pay.billRef ? this.txns.get(pay.billRef) : undefined;
+    if (owner && owner.kind === "deposit" && owner.status !== "failed") throw new Error("CODE_ALREADY_CREDITED");
+    for (const t of this.txns.values()) {
+      if (t.kind === "deposit" && t.status === "success" && t.receipt === key) throw new Error("CODE_ALREADY_CREDITED");
+    }
     if (!this.balances.has(userId)) throw new Error("WALLET_NOT_FOUND");
     const txId = randomUUID();
     this.txns.set(txId, { id: txId, userId, kind: "deposit", amount: pay.amount, status: "success", provider: "mpesa_paybill", phone: pay.msisdn ?? "", seq: ++this.txSeq, createdAtMs: this.now(), receipt: key });
