@@ -87,10 +87,13 @@ export function consoleNav(isSystem: boolean): NavGroup[] {
   const pool: NavItem = { href: '/platform/pool', label: 'Withdrawal pool', icon: Icons.pool, hint: 'Daily payout budget per brand' };
   const billing: NavItem = { href: '/platform/billing', label: 'Billing', icon: Icons.billing, hint: 'Invoices, plans and payments' };
   const bonuses: NavItem = { href: '/platform/bonuses', label: 'Bonuses', icon: Icons.bonuses, hint: 'Sign-up bonus on or off, per platform and per brand' };
+  // 0214. Under Brands, not Money: it sets no rate and moves no cash — a session target is a count
+  // an admin reads before paying through the queues that do.
+  const marketers: NavItem = { href: '/platform/marketers', label: 'Marketer agreements', icon: Icons.agreements, hint: 'Session targets and what each marketer sees' };
   if (!isSystem) {
     return [
       { id: 'home', items: [overview, tickets] },
-      { id: 'brands', label: 'Brands', items: [onboard, registrar,
+      { id: 'brands', label: 'Brands', items: [onboard, registrar, marketers,
         { href: '/platform/addons', label: 'Add-ons', icon: Icons.addons, hint: 'Charts, trade screens and gateways for your brands' }] },
       { id: 'money', label: 'Money', items: [accounts, pool, bonuses] },
       { id: 'oversight', label: 'Oversight', items: [
@@ -105,6 +108,7 @@ export function consoleNav(isSystem: boolean): NavGroup[] {
       { href: '/platform/platforms', label: 'Platforms', icon: Icons.platforms, hint: 'Platforms and their admins' },
       onboard,
       registrar,
+      marketers,
       { href: '/admin', label: 'Brand back office', icon: Icons.backoffice, hint: 'Open a brand as its admin' },
     ] },
     { id: 'money', label: 'Money', items: [

@@ -21,6 +21,7 @@ import { makePgStakeNativeStore } from "./stakelimits.js";
 import { makePgLiveChatStore } from "./livechat.pg.js";
 import { makePgBrandActivity } from "./activity.pg.js";
 import { makePgLiveSessions } from "./livesessions.pg.js";
+import { makePgMarketerAgreement } from "./marketeragreement.pg.js";
 import { makePgCommunity } from "./community.pg.js";
 import { makePgKycStore } from "./kyc.pg.js";
 import { createApp, type ApiDeps, type WalletBalance, type BonusStatus, type Brand } from "./app.js";
@@ -1237,6 +1238,9 @@ async function buildDeps(): Promise<ApiDeps> {
     // Marketer live sessions (0191): the marketer marks the window, the platform admin sets the
     // rules, and the earnings figure is a REPORT over commissions already attributed.
     liveSessions: makePgLiveSessions(q),
+    // The terms agreed with one marketer (0214): their session target and what their dashboard
+    // shows. Reporting and presentation only — nothing here can move a balance.
+    marketerAgreement: makePgMarketerAgreement(q),
     // The brand's community channel (0192): operators post, players read and vote.
     community: makePgCommunity(q),
     platformOnboard,

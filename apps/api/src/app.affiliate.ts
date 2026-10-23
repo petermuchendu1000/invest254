@@ -3,6 +3,7 @@ import { assertUserTarget, assertSiteTarget } from "./scope.js";
 import type { PageQuery } from "@invest254/engine";
 import type { ApiDeps } from "./app.js";
 import type { LiveSession } from "./livesessions.pg.js";
+import { PREFS_DEFAULT } from "./marketeragreement.pg.js";
 import type { MarketerMoneyRepo, MoneyRangeBounds } from "./referral.pg.js";
 import { parseB2cResult } from "./app.payments.js";
 import { requireApprovalPassword } from "./approvalgate.js";
@@ -351,6 +352,22 @@ export function registerAffiliateRoutes(router: Router, deps: ApiDeps): void {
     const extended = await liveStore().extend(liveSiteId(ctx), ctx.claims!.userId);
     if (!extended) throw new ApiError("NOT_LIVE", "no session to extend", 409);
     return extended;
+  });
+
+  /**
+   * ── THE AGREEMENT (0214): this marketer's session target, and what their dashboard shows. ──────
+   *
+   * Same gate and the same id as the live routes above, because it is keyed to the same entity: a
+   * `profiles` row with role='marketer'.
+   *
+   * Unconfigured is the common case and must stay the cheap one — 28 marketer profiles exist in
+   * production and none has a target or a prefs row — so a missing store answers "no target, all
+   * blocks visible" instead of refusing. A dashboard must never fail to render because an optional
+   * feature is not wired: the marketer would lose their money figures over a target they never had.
+   */
+  router.get(`${BASE}/affiliate/agreement`, auth, site, marketer, async (ctx: Ctx) => {
+    if (!deps.marketerAgreement) return { target: null, prefs: { ...PREFS_DEFAULT } };
+    return deps.marketerAgreement.forMarketer(liveSiteId(ctx), ctx.claims!.userId);
   });
 
   // ── Payouts (I4): marketer request → admin approve/reject → M-Pesa B2C result ──

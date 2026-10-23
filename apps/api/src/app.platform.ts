@@ -610,6 +610,82 @@ export function registerPlatformRoutes(router: Router, deps: ApiDeps): void {
     return next;
   });
 
+  /**
+   * ── MARKETER AGREEMENTS (0214): the session target and dashboard visibility agreed per marketer.
+   *
+   * The brand's marketer-ROLE profiles. This is the first admin listing of them: the console's
+   * "Marketer wallets" panel lists `public.marketers`, a different identity space that shares no ids
+   * with `profiles`, so these 28 accounts have never appeared in an operator screen at all.
+   *
+   * Every route is `scopeSiteParam`-fenced on the brand, and each then re-checks that the marketer
+   * actually belongs to THAT brand (`marketerOfSite`). Trusting the path alone would let a correctly
+   * scoped admin write terms onto a marketer in another brand just by pasting their id — which is
+   * F-44 exactly, and why `assertUserTarget` exists.
+   */
+  const agreementStore = () => {
+    if (!deps.marketerAgreement) throw new ApiError("NOT_AVAILABLE", "marketer agreements are not available", 501);
+    return deps.marketerAgreement;
+  };
+  /** Resolve :uid as a marketer-role profile ON the :id brand, or 404. Never trusts the path pair. */
+  const marketerOfSite = async (siteId: string, marketerId: string): Promise<void> => {
+    const rows = await agreementStore().listMarketers(siteId);
+    if (!rows.some((m) => m.marketerId === marketerId)) {
+      throw new ApiError("NOT_FOUND", "no such marketer on this brand", 404);
+    }
+  };
+
+  router.get(`${BASE}/platform/sites/:id/marketers`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) =>
+    ({ items: await agreementStore().listMarketers(ctx.params.id!) }));
+
+  router.post(`${BASE}/platform/sites/:id/marketers/:uid/target`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    const siteId = ctx.params.id!, uid = ctx.params.uid!;
+    await marketerOfSite(siteId, uid);
+    const b = asObject(ctx.body);
+    /** Each bound matches the CHECK constraint in 0214, so the operator reads a sentence, not a 500. */
+    const num = (key: string, lo: number, hi: number): number => {
+      const n = Number(b[key]);
+      if (!Number.isInteger(n) || n < lo || n > hi) {
+        throw new ApiError("VALIDATION", `${key} must be a whole number between ${lo} and ${hi}`, 400);
+      }
+      return n;
+    };
+    const next = await agreementStore().startTarget(siteId, uid, {
+      targetSessions: num("targetSessions", 1, 100),
+      amountCents: num("amountCents", 0, 100_000_000),
+      qualifyMinutes: num("qualifyMinutes", 1, 1440),
+    }, ctx.claims!.userId);
+    await deps.admin.recordAction(ctx.claims!.userId, ctx.claims!.role ?? "platform_admin",
+      "platform.marketer.target.start", "user", uid, { siteId, target: next });
+    return next;
+  });
+
+  router.post(`${BASE}/platform/sites/:id/marketers/:uid/target/close`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    const siteId = ctx.params.id!, uid = ctx.params.uid!;
+    await marketerOfSite(siteId, uid);
+    const closed = await agreementStore().closeTarget(siteId, uid);
+    if (!closed) throw new ApiError("NO_OPEN_TARGET", "this marketer has no target running", 409);
+    await deps.admin.recordAction(ctx.claims!.userId, ctx.claims!.role ?? "platform_admin",
+      "platform.marketer.target.close", "user", uid, { siteId, target: closed });
+    return closed;
+  });
+
+  router.put(`${BASE}/platform/sites/:id/marketers/:uid/dashboard`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
+    const siteId = ctx.params.id!, uid = ctx.params.uid!;
+    await marketerOfSite(siteId, uid);
+    const b = asObject(ctx.body);
+    // Only keys actually present are changed, so a client sending one switch cannot silently reset
+    // the other four to their defaults.
+    const flag = (key: string) => (key in b ? { [key]: b[key] === true } : {});
+    const patch = {
+      ...flag("showEarnings"), ...flag("showLive"), ...flag("showAudience"),
+      ...flag("showAdvance"), ...flag("showActivity"),
+    };
+    const next = await agreementStore().savePrefs(siteId, uid, patch, ctx.claims!.userId);
+    await deps.admin.recordAction(ctx.claims!.userId, ctx.claims!.role ?? "platform_admin",
+      "platform.marketer.dashboard", "user", uid, { siteId, patch });
+    return next;
+  });
+
   router.get(`${BASE}/platform/sites/:id/stake-limits`, auth, platformAdmin, scopeSiteParam, async (ctx: Ctx) => {
     if (!deps.stakeNative) throw new ApiError("NOT_AVAILABLE", "stake limits are not available", 501);
     return stakeLimitsView(ctx.params.id!);

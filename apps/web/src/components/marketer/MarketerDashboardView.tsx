@@ -17,8 +17,10 @@ import {
   useMyAdvances,
   useRequestAdvance,
   useCancelAdvance,
+  useMarketerAgreement,
 } from '@/lib/affiliate/hooks';
 import { LiveSessionPanel } from '@/components/marketer/LiveSessionPanel';
+import { SessionTargetCard } from '@/components/marketer/SessionTargetCard';
 import { MarketerMoneyTable } from '@/components/marketer/MarketerMoneyTable';
 
 /**
@@ -79,6 +81,33 @@ export function MarketerDashboardView() {
   const [tab, setTab] = useState<ActivityTab>('earnings');
   const [page, setPage] = useState(1);
   const selectTab = (next: ActivityTab) => { setTab(next); setPage(1); };
+
+  /**
+   * The terms a platform admin agreed with THIS marketer (0214): a session target to show, and
+   * which blocks they see. `useMarketerAgreement` serves the unconfigured state (no target, all
+   * visible) as placeholder data, so what follows is exactly today's dashboard for every marketer
+   * nobody has configured — which, in production, is all of them.
+   *
+   * PRESENTATION ONLY. Hiding a block does not close the endpoint behind it; the data is still the
+   * marketer's own and still reachable. Anything that must be unreachable needs a server-side gate.
+   */
+  const agreement = useMarketerAgreement(true);
+  const target = agreement.data?.target ?? null;
+  const show = agreement.data?.prefs
+    ?? { showEarnings: true, showLive: true, showAudience: true, showAdvance: true, showActivity: true };
+
+  /**
+   * Which Activity tabs exist at all. Earnings is the per-deposit commission ledger, so it belongs
+   * to the EARNINGS switch; the other three are the ledger the ACTIVITY switch governs. With both
+   * off the whole section goes, rather than leaving an empty tab strip.
+   */
+  const tabs: ActivityTab[] = [
+    ...(show.showEarnings ? (['earnings'] as const) : []),
+    ...(show.showActivity ? (['expenses', 'referrals', 'advances'] as const) : []),
+  ];
+  // Never leave the ledger on a tab that is now hidden: it would render an empty panel under a strip
+  // that does not contain it. Falling back to the first visible tab keeps the section coherent.
+  const activeTab: ActivityTab | null = tabs.includes(tab) ? tab : (tabs[0] ?? null);
 
   const s = q.data;
   const isNotAffiliate = q.error instanceof ApiError && q.error.code === 'NOT_AFFILIATE';
@@ -175,9 +204,9 @@ export function MarketerDashboardView() {
   // Count backing the active tab drives its pager. Referrals shows the authoritative platform total
   // (some rows may still be unfetched behind the cursor) so the badge never under-reports a team.
   const activeCount =
-    tab === 'earnings' ? commRows.length
-    : tab === 'expenses' ? expRows.length
-    : tab === 'referrals' ? refRows.length
+    activeTab === 'earnings' ? commRows.length
+    : activeTab === 'expenses' ? expRows.length
+    : activeTab === 'referrals' ? refRows.length
     : advRows.length;
   const info = pageInfo(activeCount, page, LEDGER_PAGE_SIZE);
   const referralsTotal = ref.data?.totalReferrals ?? s?.totalReferrals ?? refRows.length;
@@ -205,7 +234,7 @@ export function MarketerDashboardView() {
 
       {/* Going live, and what the session has earned (docs/55). Renders nothing on a brand that
           has not enabled live sessions, so a marketer never sees a control that would refuse. */}
-      <LiveSessionPanel />
+      {show.showLive ? <LiveSessionPanel showEarnings={show.showEarnings} /> : null}
 
       {q.isLoading && !s ? (
         <div className="h-64 animate-pulse rounded-2xl bg-surface-2" />
@@ -233,7 +262,13 @@ export function MarketerDashboardView() {
             </section>
           ) : null}
 
+          {/* The agreed target (0214). Shown whenever one is running, INCLUDING when earnings are
+              hidden — that is the case it exists for: a marketer paid a fixed fee per session sees
+              their progress toward that fee instead of commission they are not on. */}
+          {target ? <SessionTargetCard target={target} /> : null}
+
           {/* Hero: available to withdraw + payout request (deposit-commission balance) */}
+          {show.showEarnings ? (
           <section className="rounded-2xl border border-up/30 bg-gradient-to-br from-up/10 to-transparent p-4">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Available to withdraw</p>
             <FitText className="mt-1 text-3xl font-black tabular-nums text-up">{formatKes(availableCents)}</FitText>
@@ -250,14 +285,16 @@ export function MarketerDashboardView() {
               <p className="mt-2 text-[11px] text-muted">M-Pesa · min {formatKes(minPayoutCents)}.</p>
             )}
           </section>
+          ) : null}
 
           {/* The money: a range-filtered period table + the lifetime balance ladder (trust anchor).
               Every money figure the KPI tiles used to show — Available, Earned all-time, Paid out —
               is a labelled row in here, so nothing was dropped, only given a column to line up in. */}
-          <MarketerMoneyTable enabled lifetime={lifetime} />
+          {show.showEarnings ? <MarketerMoneyTable enabled lifetime={lifetime} /> : null}
 
           {/* Audience counts. The money moved to the tables above; what is left is 1-5 digits, so
               these tiles can no longer blow the grid out. `min-w-0` + truncate on each cell anyway. */}
+          {show.showAudience ? (
           <section>
             <SectionTitle>Audience</SectionTitle>
             <div className="grid grid-cols-2 gap-2.5 xs:grid-cols-3 sm:grid-cols-5">
@@ -268,8 +305,10 @@ export function MarketerDashboardView() {
               <Kpi label="Clicks" value={String(s.clicks)} />
             </div>
           </section>
+          ) : null}
 
           {/* Request an advance — the action lives with the money; its history is in Activity ▸ Advances */}
+          {show.showAdvance ? (
           <section>
             <SectionTitle>Advance</SectionTitle>
             <div className="rounded-2xl border border-border bg-surface-2 p-3">
@@ -304,20 +343,22 @@ export function MarketerDashboardView() {
               {advMsg ? <p className={`mt-2 text-[11px] ${advMsg.tone === 'up' ? 'text-up' : 'text-down'}`}>{advMsg.text}</p> : null}
             </div>
           </section>
+          ) : null}
 
           {/* Activity — one tabbed, paged ledger replaces four unbounded lists (bank-standard). */}
+          {activeTab ? (
           <section>
             <SectionTitle>Activity</SectionTitle>
             <div role="tablist" aria-label="Activity" className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-surface-2 p-1">
-              <TabButton active={tab === 'earnings'} onClick={() => selectTab('earnings')} label="Earnings" count={commRows.length} />
-              <TabButton active={tab === 'expenses'} onClick={() => selectTab('expenses')} label="Expenses" count={expRows.length} />
-              <TabButton active={tab === 'referrals'} onClick={() => selectTab('referrals')} label="Referrals" count={referralsTotal} />
-              <TabButton active={tab === 'advances'} onClick={() => selectTab('advances')} label="Advances" count={advRows.length} />
+              {tabs.includes('earnings') ? <TabButton active={activeTab === 'earnings'} onClick={() => selectTab('earnings')} label="Earnings" count={commRows.length} /> : null}
+              {tabs.includes('expenses') ? <TabButton active={activeTab === 'expenses'} onClick={() => selectTab('expenses')} label="Expenses" count={expRows.length} /> : null}
+              {tabs.includes('referrals') ? <TabButton active={activeTab === 'referrals'} onClick={() => selectTab('referrals')} label="Referrals" count={referralsTotal} /> : null}
+              {tabs.includes('advances') ? <TabButton active={activeTab === 'advances'} onClick={() => selectTab('advances')} label="Advances" count={advRows.length} /> : null}
             </div>
 
             <div className="mt-2.5" role="tabpanel">
               {/* EARNINGS */}
-              {tab === 'earnings' ? (
+              {activeTab === 'earnings' ? (
                 commissions.isLoading && commRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : commRows.length === 0 ? (
@@ -341,7 +382,7 @@ export function MarketerDashboardView() {
               ) : null}
 
               {/* EXPENSES & ADVANCES (recovered) */}
-              {tab === 'expenses' ? (
+              {activeTab === 'expenses' ? (
                 expenses.isLoading && expRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : expRows.length === 0 ? (
@@ -369,7 +410,7 @@ export function MarketerDashboardView() {
               ) : null}
 
               {/* REFERRALS (cursor-paged pool + client windowing) */}
-              {tab === 'referrals' ? (
+              {activeTab === 'referrals' ? (
                 referrals.isLoading && refRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : refRows.length === 0 ? (
@@ -409,7 +450,7 @@ export function MarketerDashboardView() {
               ) : null}
 
               {/* ADVANCE REQUESTS */}
-              {tab === 'advances' ? (
+              {activeTab === 'advances' ? (
                 advances.isLoading && advRows.length === 0 ? (
                   <LedgerSkeleton />
                 ) : advRows.length === 0 ? (
@@ -448,6 +489,7 @@ export function MarketerDashboardView() {
               ) : null}
             </div>
           </section>
+          ) : null}
 
           <p className="pb-1 text-center text-[11px] text-muted">Live · 5s</p>
         </div>

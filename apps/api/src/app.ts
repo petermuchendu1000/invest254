@@ -307,6 +307,13 @@ export interface ApiDeps {
    * rather than pretending, and no other route changes. REPORTING ONLY — see livesessions.pg.ts.
    */
   liveSessions?: import("./livesessions.pg.js").LiveSessionStore | undefined;
+  /**
+   * Per-marketer session targets and dashboard visibility (0214). Optional: without it the admin
+   * routes answer 501 and the marketer's own `/affiliate/agreement` answers "no target, everything
+   * visible" — the unconfigured state, which is what all 28 production marketers are in today.
+   * REPORTING ONLY, and presentation only — see marketeragreement.pg.ts.
+   */
+  marketerAgreement?: import("./marketeragreement.pg.js").MarketerAgreementStore | undefined;
   /** The per-brand community channel (0192). Absent -> the /community routes answer 501. */
   community?: import("./community.pg.js").CommunityStore | undefined;
   /**

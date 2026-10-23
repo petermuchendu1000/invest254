@@ -237,6 +237,32 @@ export function useMarketerLive(enabled: boolean) {
   });
 }
 
+/**
+ * The terms a platform admin agreed with this marketer (0214): their session target, and which
+ * blocks of the dashboard they see.
+ *
+ * `placeholderData` is the unconfigured state — no target, everything visible — so the dashboard
+ * renders what it renders today while this is in flight and if it ever fails. Defaulting to hidden
+ * would blank a marketer's own money behind a loading spinner or a bad minute on one endpoint.
+ */
+export function useMarketerAgreement(enabled: boolean) {
+  const token = useSession((s) => s.token);
+  return useQuery({
+    queryKey: ['marketer', 'agreement'],
+    queryFn: () => api.marketerAgreement(token as string),
+    enabled: !!token && enabled,
+    retry: false,
+    placeholderData: {
+      target: null,
+      prefs: { showEarnings: true, showLive: true, showAudience: true, showAdvance: true, showActivity: true },
+    },
+    // A target advances only when a live session ENDS, so it does not need the 5s lane; this keeps
+    // step with the live panel it sits beside.
+    refetchInterval: enabled ? 30_000 : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
 /** Start / end / extend. Each settles by refetching the one query above, so the UI has one truth. */
 export function useLiveSessionActions() {
   const token = useSession((s) => s.token);

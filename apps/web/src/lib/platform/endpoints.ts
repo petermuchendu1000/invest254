@@ -1,6 +1,7 @@
 import { apiFetch } from '@/lib/api/client';
 import type { CohortEconomy, PaymentsEconomy } from '@invest254/shared/globaleconomy';
 import type { AdminUserDetail, UserOverrideRow, UserOverridePatch } from '@/lib/admin/types';
+import type { AdminMarketerRowDto, MarketerDashboardPrefsDto, SessionTargetDto } from '@/lib/api/types';
 
 /** A brand's economy (mirrors site_game_config; cents for money fields). */
 export interface SiteConfig {
@@ -247,6 +248,18 @@ export const platformApi = {
   // brand's display currency (null clears the override back to the global default). Returns the page.
   setBrandBonusAmount: (t: string, siteId: string, amountNative: number | null, wageringX: number | null) =>
     apiFetch<BonusesDto>(`/platform/sites/${siteId}/bonus-amount`, { method: 'PUT', token: t, body: { amountNative, wageringX } }),
+  // ── Marketer agreements, per marketer (migration 0214) ──
+  // The brand's marketer-ROLE profiles. NOT `public.marketers` (the till app's own identity space,
+  // listed by the admin "Marketer wallets" panel) — the two share no ids.
+  siteMarketers: (t: string, siteId: string) =>
+    apiFetch<{ items: AdminMarketerRowDto[] }>(`/platform/sites/${siteId}/marketers`, { token: t }),
+  // Starting a target CLOSES the one running: that is the reset, and progress restarts at 0.
+  startMarketerTarget: (t: string, siteId: string, uid: string, body: { targetSessions: number; amountCents: number; qualifyMinutes: number }) =>
+    apiFetch<SessionTargetDto>(`/platform/sites/${siteId}/marketers/${uid}/target`, { method: 'POST', token: t, body }),
+  closeMarketerTarget: (t: string, siteId: string, uid: string) =>
+    apiFetch<SessionTargetDto>(`/platform/sites/${siteId}/marketers/${uid}/target/close`, { method: 'POST', token: t }),
+  setMarketerDashboard: (t: string, siteId: string, uid: string, patch: Partial<MarketerDashboardPrefsDto>) =>
+    apiFetch<MarketerDashboardPrefsDto>(`/platform/sites/${siteId}/marketers/${uid}/dashboard`, { method: 'PUT', token: t, body: patch }),
   // ── Payment-gateway provider switches (migration 0116) ──
   paymentProviders: (t: string) => apiFetch<PaymentProvidersDto>('/platform/payment-providers', { token: t }),
   setProviderGlobal: (t: string, code: string, enabled: boolean) =>

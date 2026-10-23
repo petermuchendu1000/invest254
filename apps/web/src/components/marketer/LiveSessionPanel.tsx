@@ -16,8 +16,14 @@ import { useMarketerLive, useLiveSessionActions } from '@/lib/affiliate/hooks';
  *
  * Hidden entirely when the brand has not enabled live sessions — a marketer on a brand that does
  * not run them should not see a control that would refuse.
+ *
+ * `showEarnings` is the per-marketer agreement switch (0214). With it off, Start Live, End Live and
+ * the timer all stay — going live is the marketer's JOB, and taking the button away would stop the
+ * work — but the commission figures go, because a marketer paid a fixed fee per session is not on
+ * commission and showing them a number they are not paid against only invites an argument about it.
+ * Their session target card carries what they ARE paid for.
  */
-export function LiveSessionPanel() {
+export function LiveSessionPanel({ showEarnings = true }: { showEarnings?: boolean } = {}) {
   const { data, isPending } = useMarketerLive(true);
   const { start, end, extend } = useLiveSessionActions();
   const { fmt } = useDisplayMoney();
@@ -51,16 +57,20 @@ export function LiveSessionPanel() {
           {/* One figure per row on a phone. Halved, a 320px card leaves each card ~110px of inner
               width, and a formatted figure ("KES 1,234,567") plus its uppercase label needs more
               than that — the number would be clipped or the cards pushed out of the panel. */}
-          <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Figure label="Earned this session" value={fmt(cur.earnedCents)} tone="up" />
-            <Figure label="Deposits counted" value={String(cur.deposits)} />
-          </div>
-          {/* The one sentence that stops this number being misread as a different kind of pay. */}
-          <p className="mb-3 text-[11px] leading-relaxed text-muted">
-            Your commission is earned the same way whether or not you are live. This is what you have
-            earned so far from deposits made during this session, including {cur.marginMinutes} minutes
-            either side.
-          </p>
+          {showEarnings ? (
+            <>
+              <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Figure label="Earned this session" value={fmt(cur.earnedCents)} tone="up" />
+                <Figure label="Deposits counted" value={String(cur.deposits)} />
+              </div>
+              {/* The one sentence that stops this number being misread as a different kind of pay. */}
+              <p className="mb-3 text-[11px] leading-relaxed text-muted">
+                Your commission is earned the same way whether or not you are live. This is what you have
+                earned so far from deposits made during this session, including {cur.marginMinutes} minutes
+                either side.
+              </p>
+            </>
+          ) : null}
           {/* "+90m" is wider than "+30m", so the extend button keeps its natural width and End Live
               takes whatever is left instead of the pair overflowing the card. */}
           <div className="flex items-stretch gap-2">
@@ -108,7 +118,7 @@ export function LiveSessionPanel() {
 
       {err ? <p className="mt-2 break-words text-xs text-down">{err}</p> : null}
 
-      {data.history.length > 0 ? (
+      {showEarnings && data.history.length > 0 ? (
         <div className="mt-4 border-t border-border pt-3">
           <div className="mb-2 text-xs font-semibold text-muted">Recent sessions</div>
           {/* The amount is each row's point, so it keeps its full width and the date truncates. */}

@@ -35,6 +35,10 @@ export const Icons = {
   billing: <I><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" /><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" /><path d="M12 17.5v-11" /></I>,
   // Bonuses — a wrapped gift: the sign-up bonus is a gift the operator can switch on or off.
   bonuses: <I><rect width="18" height="12" x="3" y="10" rx="1" /><path d="M12 10v12" /><path d="M3 14h18" /><path d="M7.5 10a2.5 2.5 0 0 1 0-5C10 5 12 8 12 10c0-2 2-5 4.5-5a2.5 2.5 0 0 1 0 5" /></I>,
+  // Marketer agreements — a person with a checklist: terms set per marketer, counted and read.
+  // Distinct from `marketers` (the megaphone, line 21), which is the till-app wallets panel: these
+  // are two different populations and the nav must not suggest they are the same screen.
+  agreements: <I><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="m16 11 2 2 4-4" /></I>,
   controls: <I><path d="M21 4h-7" /><path d="M10 4H3" /><path d="M21 12h-9" /><path d="M8 12H3" /><path d="M21 20h-5" /><path d="M12 20H3" /><path d="M14 2v4" /><path d="M8 10v4" /><path d="M16 18v4" /></I>,
   audit: <I><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" /></I>,
   logs: <I><path d="m4 17 6-6-6-6" /><path d="M12 19h8" /></I>,

@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { platformApi, type CreateSiteBody, type OnboardBody, type RegistrarConfigBody } from '@/lib/platform/endpoints';
 import { useSession } from '@/lib/auth/session';
 import type { SiteTheme } from '@/lib/brand/siteThemes';
+import type { MarketerDashboardPrefsDto } from '@/lib/api/types';
 import { faviconDataUri } from '@/lib/brand/mark';
 
 function useTok() {
@@ -106,6 +107,39 @@ export function useBonuses(platformId?: string) {
   const t = useTok();
   return useQuery({ queryKey: ['platform', 'bonuses', platformId ?? 'own'], queryFn: () => platformApi.bonuses(t, platformId), enabled: !!t });
 }
+// ── Marketer agreements (0214): one brand's marketer-role profiles and the terms set for each ──
+export function useSiteMarketers(siteId: string | null) {
+  const t = useTok();
+  return useQuery({
+    queryKey: ['platform', 'marketers', siteId ?? ''],
+    queryFn: () => platformApi.siteMarketers(t, siteId as string),
+    enabled: !!t && !!siteId,
+  });
+}
+export function useStartMarketerTarget(siteId: string | null) {
+  const t = useTok(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { uid: string; targetSessions: number; amountCents: number; qualifyMinutes: number }) =>
+      platformApi.startMarketerTarget(t, siteId as string, v.uid, v),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'marketers', siteId ?? ''] }); },
+  });
+}
+export function useCloseMarketerTarget(siteId: string | null) {
+  const t = useTok(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (uid: string) => platformApi.closeMarketerTarget(t, siteId as string, uid),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'marketers', siteId ?? ''] }); },
+  });
+}
+export function useSetMarketerDashboard(siteId: string | null) {
+  const t = useTok(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { uid: string; patch: Partial<MarketerDashboardPrefsDto> }) =>
+      platformApi.setMarketerDashboard(t, siteId as string, v.uid, v.patch),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'marketers', siteId ?? ''] }); },
+  });
+}
+
 export function useSetPlatformBonuses(platformId?: string) {
   const t = useTok(); const qc = useQueryClient();
   return useMutation({

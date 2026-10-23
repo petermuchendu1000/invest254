@@ -2,6 +2,7 @@ import { apiFetch } from '@/lib/api/client';
 import type {
   BrandActivityDto,
   CommunityPostDto,
+  MarketerAgreementDto,
   MarketerLiveDto,
   LiveSessionDto,
   LeaderboardRowDto,
@@ -229,6 +230,8 @@ export const api = {
   marketerMe: (token: string) => apiFetch<MarketerProfileDto>('/marketers/me', { token }),
   // ── Live sessions (docs/55). Reporting only: starting one changes no attribution. ──
   marketerLive: (token: string) => apiFetch<MarketerLiveDto>('/affiliate/live', { token }),
+  // The terms a platform admin agreed with THIS marketer (0214): session target + what they see.
+  marketerAgreement: (token: string) => apiFetch<MarketerAgreementDto>('/affiliate/agreement', { token }),
   marketerLiveStart: (token: string, streamUrl?: string) =>
     apiFetch<LiveSessionDto>('/affiliate/live/start', { method: 'POST', token, body: streamUrl ? { streamUrl } : {} }),
   marketerLiveEnd: (token: string) => apiFetch<LiveSessionDto>('/affiliate/live/end', { method: 'POST', token }),

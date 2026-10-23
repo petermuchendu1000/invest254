@@ -584,6 +584,42 @@ export interface MarketerLiveDto {
   history: LiveSessionDto[];
 }
 
+// ── The agreement a platform admin set for THIS marketer (migration 0214) ───────────────────────
+/**
+ * An agreed "N live sessions for KES X" target. REPORTING ONLY: `done` says the count is met, not
+ * that anything was paid — payment goes through the payout/advance path, with its approval step.
+ */
+export interface SessionTargetDto {
+  id: string;
+  targetSessions: number;
+  amountCents: Cents;
+  /** A session shorter than this does not count toward the target. */
+  qualifyMinutes: number;
+  startedAt: string;
+  closedAt: string | null;
+  completed: number;
+  done: boolean;
+}
+/** Which blocks of /dashboard this marketer sees. PRESENTATION ONLY — never an access control. */
+export interface MarketerDashboardPrefsDto {
+  showEarnings: boolean;
+  showLive: boolean;
+  showAudience: boolean;
+  showAdvance: boolean;
+  showActivity: boolean;
+}
+export interface MarketerAgreementDto {
+  target: SessionTargetDto | null;
+  prefs: MarketerDashboardPrefsDto;
+}
+/** One marketer-role profile on a brand, as the platform console lists them. */
+export interface AdminMarketerRowDto extends MarketerAgreementDto {
+  marketerId: string;
+  username: string | null;
+  phone: string | null;
+  status: string | null;
+}
+
 /** One choice on a community poll, with how many PEOPLE picked it (one vote per player). */
 export interface CommunityPollOptionDto { id: string; label: string; votes: number }
 
