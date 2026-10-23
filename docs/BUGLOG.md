@@ -5,6 +5,74 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #160 — The withdrawal-pool starvation monitor ran six times a day instead of forty-eight — FIXED (in-process)
+- **What:** `pool-health.yml` asked GitHub for `*/30`. Measured over the 24 hours to 2026-10-22 it
+  fired **6 times out of 48**, at gaps of **3h14m, 5h15m, 5h04m, 4h16m and 3h14m**:
+```
+  00:07  05:13  10:28  15:32  19:48  23:02
+```
+  The daily crons in the same repository fired **1-for-1** over the same window, so this is not the
+  Actions billing interruption (#156) and not a repository problem — GitHub de-prioritises
+  high-frequency `schedule` events, and it will not improve by being asked again.
+- **Why that is worse than it sounds.** This monitor is the defense-in-depth net from #12/#12b, and
+  it exists *specifically* to cover the other monitor's blind spot: `winrate_monitor` only alerts on
+  windows with ≥50 samples, and starvation **suppresses volume** — players hit 100% losses and
+  leave — so a starved brand often never reaches 50 trades and the drift alert stays silent. The net
+  written to catch what the other one cannot see was itself running at one-eighth rate, on real
+  money, with an alert that is supposed to fire *early*.
+- **Fix:** the sweep now runs in the API process beside the ticket-escalation and deposit sweeps
+  (`apps/api/src/server.ts`, `POOL_HEALTH_INTERVAL_MS`, 30 min, first run 45s after boot). Same
+  shape, same reasoning and the same place as the ticket-escalation move that preceded it. The
+  workflow stays, schedule commented out, as the manual lever for when the API is down or
+  mid-rollback.
+- **And there is now ONE implementation instead of two.** `scripts/pool_health_monitor.py` was
+  deleted, not kept alongside. It was a second copy of these thresholds and had **already drifted**:
+  it restated `PLAYER_SHARE = 0.15` as a literal beside the real `DEFAULT_POOL_KNOBS.playerShare` in
+  `pool.ts`, with nothing to notice if the knob were ever retuned. The new module imports the knob,
+  and both the in-process sweep and the CLI (`scripts/pool_health_check.mts`) call it.
+- **Verification — differential, not asserted.** Built a throwaway Postgres 16 locally, applied the
+  Supabase shim plus **all 211 migrations** (109 tables, 326 functions — matching production's
+  PostgREST surface), seeded eight scenarios, and ran the Python original and the TypeScript port
+  against the same database:
+  - `--json` output **byte-identical** on all eight, and identical exit codes (1 on hard alert).
+  - Human output **byte-identical** between the old script and the new CLI.
+  - The scenarios covered healthy, `POOL_STARVED`, `ALL_LOSS`, `BELOW_VIABLE`, a quiet brand, a
+    brand hitting two alerts at once, `min_stake = 0`, and the trap below.
+- **THE TRAP, which is the single most dangerous way to get this port wrong.** Every cents column
+  here is `bigint` and `max_multiplier` is `numeric`, and node-postgres returns both as **strings**.
+  This module compares them with `<`. Left as strings, `"9000" < "25000"` is **lexicographically
+  false and numerically true**, so a brand with 9,000 cents available against a 25,000-cent minimum
+  stake — starved, every trade a guaranteed loss — would have been reported healthy and nobody paged.
+  The row values are coerced at the boundary (the repo's existing `toCents` convention), a fixture
+  pins exactly that case against the real schema, and a unit test pins it with string inputs.
+- **One deliberate divergence from the original, recorded so nobody "fixes" it.** The Python wrote
+  its ceiling as `-(-x // PLAYER_SHARE)`, and CPython's float floor-division is fmod-corrected: it
+  sees the TRUE quotient of the doubles rather than the rounded one. `0.15` as a double is a shade
+  under 0.15, so `15/0.15` is `100.0` rounded but `100.0000000000000037` exactly, and the original
+  returned **101** where `Math.ceil` returns **100**. Python's own `math.ceil(x/0.15)` also returns
+  100 — the original disagreed with itself. `Math.ceil` is kept, because the intent is the decimal
+  0.15 and not its binary neighbour. The gap is **one cent**, only when the division comes out
+  exact, and only on `BELOW_VIABLE`, which is a warning that never pages. A scan of the feasible
+  parameter space (`site_cfg_feasible` requires `max_multiplier > 1`) shows the disagreement needs
+  `min_stake ≤ 15` **cents**; production runs 25,000. Both values are pinned in the unit test.
+- **Duplicate pages are accepted, deliberately.** `auto_start_machines` (fly.api.toml) can bring a
+  second API machine up under load and both will sweep, so a starvation event can page twice.
+  Suppressing that would need a distributed lock held across the interval; for an alert that means
+  "players are losing everything right now", twice is better than never.
+- **Tests:** `poolhealth.test.ts` — 9 unit tests (the ceiling and its divergence, the knob is
+  imported not copied, the string-comparison trap, each alert's preconditions, precedence of
+  `POOL_STARVED` over `BELOW_VIABLE`, `available` never negative, warnings not raising the alert
+  flag, the page wording). `poolhealth.pg.test.ts` — the real query against the real schema
+  (`E2E_PG_DSN`, rolled back): five brands, one per verdict, plus ageing every decision past the
+  rolling window and asserting the alerts clear, which is what stops a re-funded brand being paged
+  for pre-remediation losses. Verified green against the local 211-migration database and verified
+  to SKIP without a DSN, which is how CI will see it.
+- **Caught while writing this, worth its own line:** the first draft of `poolhealth.ts` would not
+  compile, because the doc comment contained the cron spec `*` `/30` and `*/` **terminates a block
+  comment**. Same family as #152's Tailwind-in-a-comment: a comment is not inert.
+
+---
+
 ## #159 — An EXPIRED MIRROR_PAT is worse than no MIRROR_PAT: the mirror failed on its FIRST step for 23 days — PARTIALLY FIXED (needs the owner to replace the token)
 - **What:** `mirror-sync` in the template has failed every run since 2026-09-29 — 23 days, ~180 runs on
   a 3-hourly cron, each one appending to the same blocker issue (template #32). The template sits at
