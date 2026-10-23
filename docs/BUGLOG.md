@@ -5,7 +5,7 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
-## #163 — Every PayHero deposit left a claimable shadow of itself: KES 152,306 was double-claimable — PART 1 FIXED (migration 0213)
+## #163 — Every PayHero deposit left a claimable shadow of itself: KES 152,306 was double-claimable — FIXED in 3 parts (migration 0213 + `resolveDepositRefs` + claim copy)
 
 - **What.** `fn_claim_c2b_deposit` guarded only against claiming the SAME `c2b_payments` row twice
   (`claimed_tx_id is not null`). It never asked whether the money that row represents had already
@@ -77,10 +77,45 @@ entry: what, evidence, root cause, impact, and resolution.
     masking a broken id match. Splitting the assertions into two queries — ids only, then provider
     references only — isolates each branch. Final: all six mutants killed, including removing the
     id match (the original bug). Full suite 2446, 0 failures.
-- **Still open (part 3).** The 452 existing shadow rows are inert but not removed. Also unfixed: the
-  ledger sweep reads only page 1 with no cursor or backfill, so a payment that scrolls off during
-  downtime is never seen; and the 11 PayHero deposits stuck in `processing` have no ledger payment
-  at all, so part 2 does not resolve them.
+- **Part 3 — the 452 existing rows, and the message part 1 made players read — FIXED (copy only).**
+  Part 3 began as "clean up the shadow rows" and ended somewhere else, because reading the claim
+  screen showed part 1's guard had a user-visible edge the SQL review never surfaced.
+  - **The rows are deliberately NOT deleted.** They are inert after part 1 (every claim path now
+    refuses them) and no surface lists them: no admin screen reads unclaimed `c2b_payments`, and the
+    only reader is `fn_claim_c2b_deposit`. Deleting 452 production rows is irreversible, buys nothing
+    the guard does not already give, and would destroy the only record tying each PayHero payment to
+    the deposit it settled — the evidence a future reconciliation dispute needs. Left in place.
+  - **The actual bug found instead.** `CODE_ALREADY_CREDITED` was not mapped anywhere on the client.
+    `PayBillDeposit.tsx` hand-rolled its own `msg.includes('CODE_ALREADY_USED')` check — it
+    recognised exactly one code — so part 1's refusal fell to its generic branch and the player was
+    told **"We couldn't verify that code. Check it and try again."** That is false twice over: the
+    code IS valid, and the money it names IS already in a wallet. The player's rational next move is
+    to pay again, or open a ticket. The same generic branch also swallowed a dropped connection and
+    every other refusal the route can raise (`PAYBILL_NOT_AVAILABLE`, `PROVIDER_DISABLED`,
+    `RATE_LIMITED`) into "your code is wrong".
+  - **The fix.** Route the claim form through `paymentErrorMessage` like the other three wallet forms
+    already do, and map the two missing codes centrally. `CODE_ALREADY_CREDITED` now reads *"That
+    payment has already been credited. Check your wallet balance — if you don't see it, contact
+    support."*
+  - **Why it does not say "added to YOUR wallet".** The same words appear 17 lines up in the success
+    state, and reusing them here would be a lie in the one case that matters: part 1's guard also
+    fires when the payment credited the account that MADE it, which is not necessarily the account
+    asking (a mistyped or borrowed code). The copy asserts the credit happened, not whose it is, and
+    names support as the escape hatch. This is the same reason `already_claimed` keeps the success
+    state and `CODE_ALREADY_CREDITED` does not: that one is proven to be the claimant's own payment.
+  - **It is rendered green, not red.** A red alert next to a player's money reads as "your deposit
+    failed" — the most alarming thing this screen can say, and the state most likely to produce a
+    duplicate payment. The notice now carries its own tone (`claimErrorNotice`) and this one case is
+    the positive tone with `role="status"`; everything else stays `role="alert"` and red.
+  - **Verification.** 8 unit tests, all 8 mutants killed — including removing the new mapping (the
+    bug itself), rewording it to claim a credit on the asking account, inverting the tone, greening
+    the wrong code, and letting the notice fork its own wording away from the shared map. Typecheck
+    and the production `next build` clean. Full suite 2450, 0 failures.
+- **Still open, tracked separately.** The ledger sweep reads only page 1 with no cursor or backfill,
+  so a payment that scrolls off during downtime is never seen; and the 11 PayHero deposits stuck in
+  `processing` have no ledger payment at all, so part 2 does not resolve them (BUG B). Part 2's fix
+  is also not yet proven in production: no PayHero deposit has arrived since it deployed, so "zero
+  new shadow rows" is consistent with the fix working AND with nothing having been tested.
 
 ---
 
