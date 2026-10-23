@@ -5,6 +5,60 @@ entry: what, evidence, root cause, impact, and resolution.
 
 ---
 
+## #163 — Every PayHero deposit left a claimable shadow of itself: KES 152,306 was double-claimable — PART 1 FIXED (migration 0213)
+
+- **What.** `fn_claim_c2b_deposit` guarded only against claiming the SAME `c2b_payments` row twice
+  (`claimed_tx_id is not null`). It never asked whether the money that row represents had already
+  been credited through the deposit it belongs to, and it never compared the claimant to the payer.
+- **Why that was reachable.** A separate defect (part 2, not yet fixed) makes the PayHero ledger
+  sweep ingest EVERY PayHero payment as claimable. We send our own `transactions.id` as PayHero's
+  `external_reference` (`paymentservice.ts:380`, and `:391` documents depending on it), but
+  `ownedDepositRefs` (`payments.ts:509`) and `fn_complete_deposit` both resolve a payment by
+  `transactions.checkout_request_id`. The two never match, so `reconcilePayHeroLedger`'s auto-credit
+  branch has never once fired and every payment falls through to `ingestC2b`.
+- **Evidence (production).** Of 455 unclaimed PayHero ledger rows: **452 carry a `bill_ref` equal to
+  a real `transactions.id`; 0 match any `checkout_request_id`.** For all 452 the row's `trans_id` is
+  the exact `mpesa_receipt` on the player's own successful deposit — the code they read off their
+  M-Pesa SMS and their in-app history. 451 sit on brands whose live payment scope is `global` and
+  which have PayHero enabled, i.e. where the claim route does not refuse. **KES 152,306
+  double-claimable. Claimed so far: 0.**
+- **A correction worth recording.** This was first reported as "KES 152,616 received and never
+  credited". That was wrong: every one of those deposits is `success` — the players WERE credited,
+  by the callback path, which uses the right key. The bug is a duplicate claimable record, not lost
+  money. The error came from concluding before joining to the deposits' status.
+- **The invariant restored.** A C2B payment may be credited AT MOST ONCE, by exactly one of (i) the
+  deposit it was initiated for (`fn_complete_deposit`) or (ii) a manual claim
+  (`fn_claim_c2b_deposit`) — never both.
+- **The guard.** Refuse when the payment's `bill_ref` identifies one of our deposits, or when its
+  code is already an `mpesa_receipt` on a credited deposit. Compared as `id::text = bill_ref`, never
+  `bill_ref::uuid`, which would throw on the ordinary Pay Bill case where `bill_ref` is a typed
+  account reference. It sits AFTER the `claimed_tx_id` check so an impatient second tap still gets
+  the idempotent `already_claimed`, and BEFORE any write so a refusal does no partial work.
+- **`failed` is deliberately excluded, and mutation testing is why.** The first version refused for
+  ANY status. But `fn_complete_deposit` early-returns on a transaction already `success` or `failed`,
+  so a failed deposit can never be credited through its own rail — if the money nonetheless arrived
+  (the provider reports failure but M-Pesa moved it, which is precisely why the ledger sweep exists),
+  the manual claim is the ONLY way the player ever sees it. Refusing there would have traded a
+  double-credit bug for a lost-money one. Zero such rows exist in production today; the case is
+  guarded anyway.
+- **Verification.** The RPC was exercised against a local PostgreSQL 16 whose tables were generated
+  from **production's own catalog** (`format_type` + `pg_get_expr` over `pg_attribute`), so the test
+  schema cannot drift from reality. Seven scenarios: the shadow row of a credited deposit (refused),
+  a `processing` deposit (refused), a code already a receipt (refused), a FAILED deposit (credited —
+  recovery), the genuine Pay Bill claim (credited), same-user re-claim (`already_claimed`), another
+  user's code (`CODE_ALREADY_USED`). Final balances exactly as predicted, no double credit.
+  Mutants: removing the `bill_ref` branch lets the `processing` case through; removing the receipt
+  branch lets the unrelated-`bill_ref` case through — so neither branch is redundant, and the real
+  production case is refused by both. Dropping `status = 'success'` from the receipt branch is an
+  EQUIVALENT mutant: a failed deposit never records a receipt (`payments.ts:240`, and the same in
+  SQL), so its distinguishing case is unreachable; the qualifier is kept as intent.
+  In-memory mirror covered by 7 tests. Full suite 2436, 0 failures.
+- **Still open (part 2).** The reference mismatch itself — until it is fixed the ledger sweep keeps
+  minting shadow rows (now inert) and cannot auto-credit a PayHero deposit whose callback never
+  arrived. The 452 existing rows are also not yet neutralised.
+
+---
+
 ## #162 — Eleven background sweeps, none of which could tell you it was still running — FIXED (migration 0212 + a liveness registry)
 
 - **What.** Every background sweep in `apps/api/src/server.ts` reports only when it has something
