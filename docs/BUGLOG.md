@@ -53,9 +53,34 @@ entry: what, evidence, root cause, impact, and resolution.
   EQUIVALENT mutant: a failed deposit never records a receipt (`payments.ts:240`, and the same in
   SQL), so its distinguishing case is unreachable; the qualifier is kept as intent.
   In-memory mirror covered by 7 tests. Full suite 2436, 0 failures.
-- **Still open (part 2).** The reference mismatch itself — until it is fixed the ledger sweep keeps
-  minting shadow rows (now inert) and cannot auto-credit a PayHero deposit whose callback never
-  arrived. The 452 existing rows are also not yet neutralised.
+- **Part 2 — the reference mismatch itself — FIXED.** `ownedDepositRefs` answered only "is this a
+  `checkout_request_id` we own?", which is the key `fn_complete_deposit` looks up. Right for Lipwa
+  and Daraja, whose reference IS that stored value; wrong for PayHero **STK**, which sends our
+  `transactions.id` while storing PayHero's own reference in `checkout_request_id`. Replaced by
+  `resolveDepositRefs`, which matches EITHER key and returns the `checkout_request_id` to complete
+  by — so the money RPC, used by every rail, is untouched. Its only caller is the PayHero ledger
+  sweep, confirmed by search.
+  - **Lipwa was never affected** and is the control: `initiateLipwaDeposit` stores
+    `checkout_request_id = txId`, so its reference always matched. Only the STK path was broken.
+  - **`id::text = any($1::text[])`, never `any($1::uuid[])`** — the ledger is a shared account whose
+    references include typed account numbers, and casting the INPUT would raise on the first one and
+    abort the sweep for every payment in the page, not just that row. Pinned by its own test.
+  - **A ≤50-cent rounding artefact is left alone, deliberately.** `centsToKes` rounds to whole KES,
+    so the charged amount can differ from the deposit by under KES 1 — measured at 2 of 452 pairs,
+    max 46 cents. `fn_complete_deposit` credits the transaction's amount, which is what the callback
+    path already does, so this changes nothing; an exact-amount guard would have REFUSED those two
+    legitimate payments. Noted, not fixed, per "smallest change that fixes the root cause".
+  - **Mutation testing found the test gap, twice.** First pass: three of four mutants survived
+    because every test exercised the in-memory double and nothing covered the production SQL — so a
+    pg test was added against production-derived DDL. Second pass: the root-cause mutant survived
+    again, because strengthening the test had let the STK row be returned via the CHECKOUT match,
+    masking a broken id match. Splitting the assertions into two queries — ids only, then provider
+    references only — isolates each branch. Final: all six mutants killed, including removing the
+    id match (the original bug). Full suite 2446, 0 failures.
+- **Still open (part 3).** The 452 existing shadow rows are inert but not removed. Also unfixed: the
+  ledger sweep reads only page 1 with no cursor or backfill, so a payment that scrolls off during
+  downtime is never seen; and the 11 PayHero deposits stuck in `processing` have no ledger payment
+  at all, so part 2 does not resolve them.
 
 ---
 
