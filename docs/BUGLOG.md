@@ -107,6 +107,16 @@ entry: what, evidence, root cause, impact, and resolution.
     failed" — the most alarming thing this screen can say, and the state most likely to produce a
     duplicate payment. The notice now carries its own tone (`claimErrorNotice`) and this one case is
     the positive tone with `role="status"`; everything else stays `role="alert"` and red.
+  - **Green border and tint, but the text is `--pp-fg`, and that is measured not assumed.** The
+    obvious `text-up bg-up/10` — the pattern already used for the "Approved" badge — measures 6.75:1
+    in dark and **3.11:1 under `html.light`**, below WCAG AA for 14px body text, on the one line that
+    tells a player where their money is. `text-fg` on the same tint is 13.2:1 / 17.2:1. `--pp-up` is
+    a FIXED semantic hue (`globals.css`), not brand-skinned, so those two numbers are the only two.
+  - **A pre-existing contrast defect found while measuring, deliberately NOT fixed here.** The red
+    error box this screen and the other three wallet forms already ship is `text-down` on `bg-down/10`
+    = **3.97:1 dark / 4.39:1 light**, and the amber `pending` box is 4.39:1 light — both under AA.
+    Fixing that means touching every wallet form's notice, so it is recorded rather than folded into
+    a payments bug. The new tone is the only one in this family that passes, in both themes.
   - **Verification.** 8 unit tests, all 8 mutants killed — including removing the new mapping (the
     bug itself), rewording it to claim a credit on the asking account, inverting the tone, greening
     the wrong code, and letting the notice fork its own wording away from the shared map. Typecheck

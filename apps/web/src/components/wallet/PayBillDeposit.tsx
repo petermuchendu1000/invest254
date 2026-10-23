@@ -126,10 +126,16 @@ export function PayBillDeposit() {
         <p className="text-xs text-muted">Paste it exactly as it appears in the SMS. Deposits are verified against Safaricom records before your account is credited.</p>
       </div>
 
+      {/*
+        The ok tone keeps green for the border and tint but sets the TEXT in --pp-fg, not text-up:
+        `up` is a fixed semantic hue (globals.css), and at 14px on a 10% tint it measures 6.75:1 in
+        dark but only 3.11:1 under html.light — below WCAG AA, on the one line telling a player where
+        their money is. text-fg is 13.2:1 / 17.2:1. Please don't "tidy" this back to text-up.
+      */}
       {notice ? (
         <p
           className={`rounded-xl px-3 py-2 text-sm ${notice.tone === 'ok'
-            ? 'border border-up/40 bg-up/10 text-up'
+            ? 'border border-up/40 bg-up/10 text-fg'
             : 'border border-down/40 bg-down/10 text-down'}`}
           role={notice.tone === 'ok' ? 'status' : 'alert'}
         >
