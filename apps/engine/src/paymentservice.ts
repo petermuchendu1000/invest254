@@ -3,6 +3,7 @@ import type { PaymentRepository, CompleteResult, CreateWithdrawalResult, Withdra
 import type { DarajaClient } from "./daraja.js";
 import type { MegaPayClient } from "./megapay.js";
 import type { PayHeroClient } from "./payhero.js";
+import { FINOQ_NETWORK_LABELS, FINOQ_MPESA, type FinoqClient } from "./finoq.js";
 import { toPaynicornPhone, methodIsDirect, type PaynicornClient, type PaynicornMethod } from "./paynicorn.js";
 import { paynicornCountry, formatPaynicornAmount } from "./paynicorncountries.js";
 import { kesToCurrencyRate } from "@invest254/shared/fx";
@@ -23,7 +24,19 @@ import { parseScope, type GatewayRouter, type OwnerScope, type PaymentScopeRef }
  * fn_complete_deposit does not truncate, so the cap belongs here.
  */
 export function payHeroResultDesc(q: { resultCode: number | null; providerStatus?: string | null; detail?: string | null }): string {
-  const parts = [`reconciled:payhero:${q.resultCode}`];
+  return providerResultDesc("payhero", q);
+}
+
+/**
+ * The same, for any rail. Keeps the historic `reconciled:<provider>:<code>` prefix so existing
+ * reporting and the 0216 trigger's '%saf=%' guard both still behave, and appends whatever the
+ * provider actually said.
+ */
+export function providerResultDesc(
+  provider: string,
+  q: { resultCode: number | null; providerStatus?: string | null; detail?: string | null },
+): string {
+  const parts = [`reconciled:${provider}:${q.resultCode}`];
   if (q.providerStatus) parts.push(q.providerStatus);
   if (q.detail) parts.push(q.detail);
   return parts.join(" ").slice(0, 200);
@@ -155,6 +168,8 @@ export interface PaymentServiceOptions {
   megapay?: MegaPayClient;
   /** PayHero (Lipwa) provider client — the third deposit rail. Absent => PayHero deposits refuse loudly. */
   payhero?: PayHeroClient;
+  /** 0217 — the FinoQ (PayHero Africa) Global rail: M-Pesa, Airtel Money and T-Kash. */
+  finoq?: FinoqClient;
   /**
    * Paynicorn hosted-cashier client — a System-owner (global scope) rail only: a brand on its own payment
    * accounts never routes here (assertRail refuses it). Absent => Paynicorn deposits refuse loudly.
@@ -193,6 +208,7 @@ export class PaymentService {
   private readonly entitledGatewaysForSite?: (siteId: string | undefined) => Promise<string[] | null>;
   private readonly megapay?: MegaPayClient;
   private readonly payhero?: PayHeroClient;
+  private readonly finoq?: FinoqClient;
   private readonly paynicorn?: PaynicornClient;
   private readonly countryForSite?: (siteId: string | undefined) => Promise<string | null>;
   private readonly fxRateFor: (currency: string) => Promise<number>;
@@ -218,6 +234,7 @@ export class PaymentService {
     if (opts.entitledGatewaysForSite) this.entitledGatewaysForSite = opts.entitledGatewaysForSite;
     if (opts.megapay) this.megapay = opts.megapay;
     if (opts.payhero) this.payhero = opts.payhero;
+    if (opts.finoq) this.finoq = opts.finoq;
     if (opts.paynicorn) this.paynicorn = opts.paynicorn;
     if (opts.countryForSite) this.countryForSite = opts.countryForSite;
     this.fxRateFor = opts.fxRateFor ?? ((c) => kesToCurrencyRate(c));
@@ -684,6 +701,89 @@ export class PaymentService {
     return this.paynicorn;
   }
 
+  // ── Deposit (FinoQ / PayHero Africa "Global" rail) ──
+  /**
+   * Initiate a deposit on the Global rail. This is the ONLY rail that reaches Airtel Money and
+   * T-Kash: Kenya V1 offers M-PESA through one registered channel, and probing it for Airtel
+   * returned 404 — as did the same probe for M-PESA, which is what proves the limitation is the
+   * rail, not the network.
+   *
+   * Identical validation and limits to every other rail, so no path can bypass the platform floors.
+   * The row is tagged provider='finoq' and settles through the SAME idempotent fn_complete_deposit,
+   * keyed on the MERCHANT reference — the only identifier FinoQ's transaction-status accepts.
+   */
+  async initiateFinoqDeposit(
+    userId: string, amountCents: number, phoneRaw: string, siteId?: string,
+    opts: { networkCode?: string } = {},
+  ): Promise<{ txId: string; reference: string; checkoutRequestId: string }> {
+    const owner = await this.ownerOf(siteId);
+    const client = this.finoq;
+    if (!client) throw new Error("FINOQ_NOT_CONFIGURED");
+    if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("INVALID_AMOUNT");
+    const minDep = await this.currentMinDeposit(siteId);
+    if (amountCents < minDep) throw new Error("BELOW_MIN");
+    const maxDep = await this.currentMaxDeposit();
+    if (maxDep !== null && amountCents > maxDep) throw new Error("ABOVE_MAX");
+    const msisdn = normalizeMsisdn(phoneRaw);
+    await this.assertRail(owner, "payhero");   // the Global rail is the same gateway entitlement
+    await this.guardInitiate(userId, "finoq", owner.scope, msisdn);
+    const txId = await this.repo.createDepositProvider(userId, amountCents, msisdn, "finoq", siteId);
+    await this.stamp(txId, owner.scope);
+    const res = await this.withAbandonOnReject(txId, userId, "finoq", () => client.initiate({
+      amountCents: amountCents as Cents, msisdn, externalReference: txId,
+      ...(opts.networkCode ? { networkCode: opts.networkCode } : {}),
+    }));
+    // attachStk(txId, merchant_request_id, checkout_request_id): the MERCHANT reference goes in the
+    // checkout slot because that is the key the status query and the reconcile sweep both use.
+    await this.repo.attachStk(txId, res.checkoutRequestId, res.reference);
+    return { txId, reference: res.reference, checkoutRequestId: res.checkoutRequestId };
+  }
+
+  /** The networks this account can actually charge, for the deposit sheet. Empty when unconfigured. */
+  async listFinoqNetworks(): Promise<Array<{ code: string; label: string; minKes: number; maxKes: number }>> {
+    if (!this.finoq) return [];
+    try {
+      const nets = await this.finoq.discoverNetworks("KE");
+      return nets
+        .filter((n) => n.accountType === "momo")
+        .map((n) => ({
+          code: n.networkCode,
+          label: FINOQ_NETWORK_LABELS[n.networkCode] ?? n.networkName,
+          minKes: n.minAmountKes, maxKes: n.maxAmountKes,
+        }));
+    } catch { return []; }
+  }
+
+  /**
+   * Reconciliation sweep for the Global rail. Mirrors the PayHero sweep, scoped to provider 'finoq'.
+   * It is load-bearing here, not a backstop: FinoQ's create response reports success:false on
+   * payments that go on to settle, so the authoritative status query is the ONLY thing that may
+   * decide a credit.
+   */
+  async reconcileFinoqDeposits(opts: { olderThanMs?: number; limit?: number } = {}): Promise<{ scanned: number; settled: number; stillPending: number; errors: number }> {
+    if (!this.finoq) return { scanned: 0, settled: 0, stillPending: 0, errors: 0 };
+    const olderThanMs = opts.olderThanMs ?? 120_000;
+    const limit = opts.limit ?? 25;
+    const rows = await this.repo.listUnsettledDeposits(olderThanMs, limit, "finoq");
+    let settled = 0, stillPending = 0, errors = 0;
+    for (const d of rows) {
+      try {
+        const q = await this.finoq.queryStatus(d.checkoutRequestId);
+        if (q.processing || q.resultCode == null) { stillPending += 1; continue; }
+        const res = await this.repo.completeDeposit(
+          d.checkoutRequestId, q.resultCode, providerResultDesc("finoq", q), q.receipt,
+          { reconciled: true, provider: "finoq", at: new Date().toISOString(),
+            ...(q.providerStatus ? { providerStatus: q.providerStatus } : {}),
+            ...(q.detail ? { detail: q.detail } : {}) });
+        if (res.applied) settled += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(`[payments] FinoQ reconcile failed for ${d.checkoutRequestId}: ${(err as Error).message}`);
+      }
+    }
+    return { scanned: rows.length, settled, stillPending, errors };
+  }
+
   /**
    * Reconciliation sweep for the PayHero rail — mirrors the Mega Pay sweep, scoped to provider 'payhero'
    * and using PayHero's authoritative transaction-status query. Settles deposits whose callback never
@@ -866,6 +966,18 @@ export class PaymentService {
           fields: m.inputs.map((i) => ({ name: i.name, type: i.type, ...(i.pattern ? { pattern: i.pattern } : {}) })),
           ...(m.iconUrl ? { iconUrl: m.iconUrl } : {}),
         });
+      }
+    }
+
+    // The Global (FinoQ) rail, one tab per network it actually offers. This is where Airtel Money
+    // and T-Kash live: the Kenya V1 rail serves M-PESA only, through a single registered channel.
+    // The list comes from live discovery, so a network the account loses simply stops being offered
+    // rather than failing at payment time. M-Pesa is skipped here because the STK tab above already
+    // covers it — showing it twice would just ask the player to choose between identical options.
+    if (enabled.has("payhero")) {
+      for (const n of await this.listFinoqNetworks()) {
+        if (n.code === FINOQ_MPESA) continue;
+        methods.push({ id: `finoq-${n.code}`, provider: "finoq", channel: "stk", label: n.label, methodCode: n.code });
       }
     }
 
