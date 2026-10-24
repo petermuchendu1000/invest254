@@ -16,6 +16,38 @@ import { parseScope, type GatewayRouter, type OwnerScope, type PaymentScopeRef }
  * (credit/hold/reversal/idempotency) lives in the repository RPCs; this layer adds input
  * validation, MSISDN normalization, provider calls, and post-settlement event hooks.
  */
+/**
+ * The human-readable reason a PayHero deposit ended, for `transactions.result_desc` (0215).
+ * Falls back to the old `reconciled:payhero:<code>` shape when the provider told us nothing, so a
+ * row is never less informative than it used to be. Capped: the column is unbounded `text` and
+ * fn_complete_deposit does not truncate, so the cap belongs here.
+ */
+export function payHeroResultDesc(q: { resultCode: number | null; providerStatus?: string | null; detail?: string | null }): string {
+  const parts = [`reconciled:payhero:${q.resultCode}`];
+  if (q.providerStatus) parts.push(q.providerStatus);
+  if (q.detail) parts.push(q.detail);
+  return parts.join(" ").slice(0, 200);
+}
+
+/**
+ * Find the reference a PayHero callback is about. PayHero echoes it under several names depending on
+ * the rail, and our own rail splits them across two columns: attachStk stores PayHero's `reference`
+ * in checkout_request_id and the Safaricom ws_CO id in merchant_request_id, while the STK callback
+ * carries that ws_CO id as "CheckoutRequestID". fn_record_provider_callback matches either column,
+ * so any one of these resolves the row. Returns null when the body names nothing we could match.
+ */
+export function payHeroCallbackRef(raw: unknown): string | null {
+  const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const inner = (b.response && typeof b.response === "object" ? b.response : {}) as Record<string, unknown>;
+  for (const v of [b.external_reference, b.ExternalReference, b.reference, b.Reference,
+                   b.CheckoutRequestID, b.checkout_request_id, b.merchant_reference,
+                   inner.ExternalReference, inner.CheckoutRequestID, inner.MerchantRequestID,
+                   b.MerchantRequestID]) {
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+  }
+  return null;
+}
+
 export interface PaymentEvents {
   /** Fired once when a withdrawal is confirmed paid (for the real activity feed). */
   onWithdrawalSuccess?(e: { userId: string; amountCents: Cents }): void;
@@ -480,9 +512,22 @@ export class PaymentService {
    * credit. We run the authoritative sweep, which re-queries PayHero server-to-server for each recent
    * unsettled PayHero deposit — by the `reference` WE stored — and settles only the verified-paid ones
    * via fn_complete_deposit. So a forged callback can't mint balance.
+   *
+   * We do, however, now KEEP the body (0215). Storing it is not trusting it: it lands in
+   * `provider_callback`, a column nothing reads to decide a credit, and the sweep below still makes
+   * the money decision on its own. It is the only place Safaricom's real reason appears — the
+   * ResultCode 2028 that explained Friday's outage existed nowhere in our database before this.
    */
-  async handlePayHeroCallback(_raw: unknown): Promise<{ settled: number }> {
+  async handlePayHeroCallback(raw: unknown): Promise<{ settled: number }> {
     if (!this.payhero && !this.gateways) throw new Error("PAYHERO_NOT_CONFIGURED");
+    // Diagnostic capture first, so a body still gets recorded even if the sweep below throws.
+    // Never let it fail the callback: an un-stored diagnostic must not cost us a settlement.
+    try {
+      const ref = payHeroCallbackRef(raw);
+      if (ref) await this.repo.recordProviderCallback(ref, raw);
+    } catch (err) {
+      console.warn(`[payments] PayHero callback not recorded: ${(err as Error).message}`);
+    }
     // Run BOTH authoritative sweeps: the status sweep settles STK deposits by reference, and the ledger
     // sweep settles Lipwa (card/bank) + ingests manual paybill payments. The body is never trusted.
     const [status, ledger] = await Promise.all([
@@ -654,7 +699,15 @@ export class PaymentService {
       try {
         const q = await (await this.payheroForScope(d.paymentScope)).queryStatus(d.checkoutRequestId);
         if (q.processing || q.resultCode == null) { stillPending += 1; continue; }
-        const res = await this.repo.completeDeposit(d.checkoutRequestId, q.resultCode, `reconciled:payhero:${q.resultCode}`, q.receipt, { reconciled: true, provider: "payhero", at: new Date().toISOString() });
+        // Record WHY, not just that it ended. `reconciled:payhero:1` on every failure made all 180
+        // production failures in the week to 2026-10-24 identical, which left the failure RATE
+        // PayHero limits us on impossible to attribute. The credit decision is still q.resultCode
+        // alone; everything added here is descriptive.
+        const res = await this.repo.completeDeposit(
+          d.checkoutRequestId, q.resultCode, payHeroResultDesc(q), q.receipt,
+          { reconciled: true, provider: "payhero", at: new Date().toISOString(),
+            ...(q.providerStatus ? { providerStatus: q.providerStatus } : {}),
+            ...(q.detail ? { detail: q.detail } : {}) });
         if (res.applied) settled += 1;
       } catch (err) {
         errors += 1;

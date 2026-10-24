@@ -114,6 +114,13 @@ export interface PaymentRepository {
   depositGateWithPhone(args: DepositGateArgs): Promise<DepositGateVerdict>;
   /** 0175 — record a gateway rejection so this player's next attempt is held off. */
   depositGateReject(userKey: string, holdMs: number): Promise<void>;
+  /**
+   * 0215 — store a provider callback body verbatim on the deposit it names, for DIAGNOSIS ONLY.
+   * It writes one jsonb column and can change no status, no amount, no wallet and no ledger row, so
+   * storing a body is not trusting it: the credit decision still comes from the authoritative
+   * server-to-server re-query. Returns whether a row was annotated.
+   */
+  recordProviderCallback(ref: string, raw: unknown): Promise<boolean>;
   completeDeposit(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult>;
   /**
    * Map each provider reference that belongs to a DEPOSIT of ours to the key `completeDeposit`
@@ -175,7 +182,7 @@ export interface PaymentRepository {
   getPaybillConfig(): Promise<PaybillConfig>;
 }
 
-interface MemTx { id: string; userId: string; kind: "deposit" | "withdrawal"; amount: Cents; status: string; phone: string; checkoutId?: string; seq: number; createdAtMs: number; receipt: string | null; siteId?: string | null; provider?: string; marketerId?: string; paymentScope?: string; resultDesc?: string; }
+interface MemTx { id: string; userId: string; kind: "deposit" | "withdrawal"; amount: Cents; status: string; phone: string; checkoutId?: string; seq: number; createdAtMs: number; receipt: string | null; siteId?: string | null; provider?: string; marketerId?: string; paymentScope?: string; resultDesc?: string; providerCallback?: unknown; }
 interface MemLedger { userId: string; type: string; amount: Cents; ref: string; }
 
 /** 0175 — the gate's three answers. 'ok' is the only one that consumed a slot. */
@@ -272,6 +279,14 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     const f = this.gates.get(merchKey);
     if (!f || now - f.windowStart >= MERCHANT_FAIL_WINDOW_MS) this.gates.set(merchKey, { windowStart: now, count: 1, updatedAt: now });
     else { f.count += 1; f.updatedAt = now; }
+  }
+  /** Mirrors fn_record_provider_callback: annotate only, by either reference column or the tx id. */
+  async recordProviderCallback(ref: string, raw: unknown): Promise<boolean> {
+    if (!ref || ref.trim() === "") return false;
+    for (const t of this.txns.values()) {
+      if (t.kind === "deposit" && (t.checkoutId === ref || t.id === ref)) { t.providerCallback = raw; return true; }
+    }
+    return false;
   }
   async depositGateReject(userKey: string, holdMs: number): Promise<void> {
     const until = this.now() + Math.max(holdMs, 0);
@@ -588,6 +603,10 @@ export class PgPaymentRepository implements PaymentRepository {
   }
   async depositGateReject(userKey: string, holdMs: number): Promise<void> {
     await this.q.query("select fn_deposit_gate_reject($1,$2)", [userKey, holdMs]);
+  }
+  async recordProviderCallback(ref: string, raw: unknown): Promise<boolean> {
+    const r = await this.q.query("select fn_record_provider_callback($1,$2) as ok", [ref, JSON.stringify(raw ?? {})]);
+    return Boolean(r.rows[0]?.ok);
   }
   async completeDeposit(checkoutRequestId: string, resultCode: number, resultDesc: string, receipt: string | null, raw: unknown): Promise<CompleteResult> {
     const r = await this.q.query("select applied, status, new_balance from fn_complete_deposit($1,$2,$3,$4,$5)", [checkoutRequestId, resultCode, resultDesc, receipt, JSON.stringify(raw ?? {})]);
