@@ -43,6 +43,10 @@ const DOMAIN_STATUS: Readonly<Record<string, number>> = {
   // 0174 / docs/52 — the initiate guard. Client-safe by design: these say "slow down", never "failed".
   DEPOSIT_TOO_SOON: 429,
   PROVIDER_BUSY: 429,
+  // 0214 — this number's last few STK pushes all failed. Client-safe and deliberately actionable:
+  // the player can check the number/their balance or switch method, which "try again" would not tell
+  // them. Held back well short of the 10 successive failures that get the number blocked by PayHero.
+  DEPOSIT_PHONE_BLOCKED: 429,
   MEGAPAY_NOT_CONFIGURED: 503,
   MEGAPAY_INITIATE_REJECTED: 502,
   MEGAPAY_VERIFY_PENDING: 409,   // callback arrived but status not yet final -> caller/retry + reconcile settles it
